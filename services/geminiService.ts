@@ -1,7 +1,84 @@
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getCuratedSentence } from './fallbackSentences';
 
-// Primary endpoint with fallback to direct Netlify function path
+// Desktop Electron IPC interface exposed securely via contextBridge preload
+export interface DesktopStatus {
+  isDesktop: boolean;
+  isOnline: boolean;
+  hasKey: boolean;
+  isEncrypted: boolean;
+  maskedKey?: string;
+}
+
+interface ElectronDesktopAPI {
+  isDesktop: boolean;
+  gemini: {
+    generateSentence: (payload: any) => Promise<any>;
+    getHint: (payload: any) => Promise<{ hint: string }>;
+    verifyCorrection: (payload: any) => Promise<{ isCorrect: boolean; feedback: string }>;
+    verifyOpenClozeBatch: (payload: any) => Promise<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>;
+    simplifyExplanation: (payload: any) => Promise<{ simplified: string }>;
+    generateSpeech: (payload: any) => Promise<{ base64Audio: string }>;
+  };
+  settings: {
+    getStatus: () => Promise<DesktopStatus>;
+    setApiKey: (key: string) => Promise<{ success: boolean; hasKey: boolean; error?: string }>;
+    clearApiKey: () => Promise<{ success: boolean; hasKey: boolean; error?: string }>;
+    testApiKey: (key?: string) => Promise<{ valid: boolean; text?: string; error?: string }>;
+  };
+  system: {
+    openExternal: (url: string) => Promise<void>;
+  };
+}
+
+declare global {
+  interface Window {
+    electronDesktop?: ElectronDesktopAPI;
+  }
+}
+
+export const isDesktopApp = (): boolean => {
+  return typeof window !== 'undefined' && Boolean(window.electronDesktop?.isDesktop);
+};
+
+export const getDesktopStatus = async (): Promise<DesktopStatus> => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.settings) {
+    try {
+      return await window.electronDesktop.settings.getStatus();
+    } catch (e) {
+      console.warn('Failed to get desktop status:', e);
+    }
+  }
+  return {
+    isDesktop: false,
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    hasKey: false,
+    isEncrypted: false,
+  };
+};
+
+export const saveDesktopApiKey = async (key: string) => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.settings) {
+    return await window.electronDesktop.settings.setApiKey(key);
+  }
+  return { success: false, hasKey: false, error: 'Desktop storage not available.' };
+};
+
+export const removeDesktopApiKey = async () => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.settings) {
+    return await window.electronDesktop.settings.clearApiKey();
+  }
+  return { success: false, hasKey: false, error: 'Desktop storage not available.' };
+};
+
+export const testDesktopApiKey = async (key?: string) => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.settings) {
+    return await window.electronDesktop.settings.testApiKey(key);
+  }
+  return { valid: false, error: 'Desktop storage not available.' };
+};
+
+// Primary endpoint with fallback to direct Netlify function path for web deployment
 const API_ENDPOINTS = ['/api/gemini', '/.netlify/functions/gemini'];
 
 async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
@@ -40,6 +117,32 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
   throw lastError || new Error("Failed to communicate with the casino dealer service.");
 }
 
+async function requestDealerAction<T>(action: string, payload: Record<string, any>): Promise<T> {
+  // If running inside Electron desktop, execute strictly via IPC in the main process
+  if (typeof window !== 'undefined' && window.electronDesktop?.gemini) {
+    const desktopApi = window.electronDesktop.gemini;
+    switch (action) {
+      case 'generateSentence':
+        return (await desktopApi.generateSentence(payload)) as T;
+      case 'getHint':
+        return (await desktopApi.getHint(payload)) as T;
+      case 'verifyCorrection':
+        return (await desktopApi.verifyCorrection(payload)) as T;
+      case 'verifyOpenClozeBatch':
+        return (await desktopApi.verifyOpenClozeBatch(payload)) as T;
+      case 'simplifyExplanation':
+        return (await desktopApi.simplifyExplanation(payload)) as T;
+      case 'generateSpeech':
+        return (await desktopApi.generateSpeech(payload)) as T;
+      default:
+        throw new Error(`Unsupported desktop action: ${action}`);
+    }
+  }
+
+  // Otherwise, use existing web / Netlify function endpoints
+  return postToGeminiApi<T>(action, payload);
+}
+
 export const generateSentence = async (
   settings: Settings,
   pastSentences: string[] = [],
@@ -49,7 +152,7 @@ export const generateSentence = async (
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
   try {
-    const data = await postToGeminiApi<GeneratedSentence>('generateSentence', {
+    const data = await requestDealerAction<GeneratedSentence>('generateSentence', {
       settings,
       pastSentences,
       forceCorrect,
@@ -81,7 +184,7 @@ export const getHint = async (
   questionType?: QuestionType
 ): Promise<string> => {
   try {
-    const data = await postToGeminiApi<{ hint: string }>('getHint', {
+    const data = await requestDealerAction<{ hint: string }>('getHint', {
       sentence,
       topic,
       level,
@@ -138,7 +241,7 @@ export const verifyCorrection = async (
   intendedCorrection: string
 ): Promise<{ isCorrect: boolean; feedback: string }> => {
   try {
-    const data = await postToGeminiApi<{ isCorrect: boolean; feedback: string }>('verifyCorrection', {
+    const data = await requestDealerAction<{ isCorrect: boolean; feedback: string }>('verifyCorrection', {
       originalSentence,
       userCorrection,
       intendedCorrection,
@@ -179,7 +282,7 @@ export const verifyOpenClozeBatch = async (
   if (uniqueWords.length === 0) return {};
 
   try {
-    const data = await postToGeminiApi<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>(
+    const data = await requestDealerAction<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>(
       'verifyOpenClozeBatch',
       {
         sentenceWithBlank,
@@ -226,7 +329,7 @@ export const verifyOpenClozeBatch = async (
 
 export const simplifyExplanation = async (originalExplanation: string, topic: string): Promise<string> => {
   try {
-    const data = await postToGeminiApi<{ simplified: string }>('simplifyExplanation', {
+    const data = await requestDealerAction<{ simplified: string }>('simplifyExplanation', {
       originalExplanation,
       topic,
     });
@@ -240,7 +343,7 @@ export const simplifyExplanation = async (originalExplanation: string, topic: st
 };
 
 export const generateSpeech = async (text: string): Promise<string> => {
-  const data = await postToGeminiApi<{ base64Audio: string }>('generateSpeech', { text });
+  const data = await requestDealerAction<{ base64Audio: string }>('generateSpeech', { text });
   if (!data?.base64Audio) {
     throw new Error("No speech audio returned by dealer service.");
   }

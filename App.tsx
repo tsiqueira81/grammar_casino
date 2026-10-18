@@ -284,6 +284,30 @@ export function App() {
   const turnDurationMs = turnTimerSeconds * 1000;
   const isTurnTimerEnabled = turnTimerSeconds > 0;
 
+  // Desktop AI Engine and DPAPI Encryption status
+  const [desktopStatus, setDesktopStatus] = useState<GeminiService.DesktopStatus>({
+    isDesktop: false,
+    isOnline: true,
+    hasKey: false,
+    isEncrypted: false,
+  });
+
+  const refreshDesktopStatus = useCallback(() => {
+    GeminiService.getDesktopStatus().then(setDesktopStatus);
+  }, []);
+
+  useEffect(() => {
+    refreshDesktopStatus();
+    const handleOnline = () => refreshDesktopStatus();
+    const handleOffline = () => refreshDesktopStatus();
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [refreshDesktopStatus]);
+
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const savedTheme = localStorage.getItem('grammar_casino_theme');
@@ -3584,6 +3608,11 @@ export function App() {
                                         <span>⏱️</span>
                                         <span>{turnTimerSeconds === 0 ? 'Off' : `${turnTimerSeconds}s`}</span>
                                       </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1 font-mono-casino text-[10px] font-bold text-amber-800 dark:text-[#fef08a]">
+                                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
+                                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? 'AI' : 'Offline Bank'}</span>
+                                      </span>
                                     </span>
                                     <span className="text-[10px] font-mono-casino font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
                                       <span>{isSettingsDeckExpanded ? '▲ Hide Charter' : '▼ Table Charter'}</span>
@@ -3676,7 +3705,21 @@ export function App() {
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
                                       </button>
 
-                                      {/* Turn Clock Quick Selector Pill */}
+                                                                            {/* AI & Offline Pill */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSettingsModal('ai')}
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        title="Click to view AI & Offline Settings"
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
+                                          <span className="font-bold">{desktopStatus.hasKey && desktopStatus.isOnline ? 'Gemini AI' : 'Offline Bank'}</span>
+                                        </span>
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">⚙️</span>
+                                      </button>
+
+{/* Turn Clock Quick Selector Pill */}
                                       <div className="px-3 py-1 felt-well rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
                                         <span>⏱️ Turn Clock:</span>
                                         {TURN_TIMER_OPTIONS.map(secs => (
@@ -3866,6 +3909,15 @@ export function App() {
                         title="Automatically start the next player's timer when the current player's timer finishes or locks"
                       >
                         Auto-Next: {autoStartNextTimer ? 'ON' : 'OFF'}
+                      </button>
+                                          <button
+                        type="button"
+                        onClick={() => handleOpenSettingsModal('ai')}
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        title="Click to view AI & Offline Settings"
+                      >
+                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡ Gemini AI' : '💾 Offline Bank'}</span>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">⚙️</span>
                       </button>
                     </div>
                   </div>
@@ -4672,7 +4724,7 @@ export function App() {
       {showSettingsModal && (
         <RoundSettingsModal
           isOpen={showSettingsModal}
-          onClose={() => setShowSettingsModal(false)}
+          onClose={() => { setShowSettingsModal(false); refreshDesktopStatus(); }}
           initialTab={settingsModalTab}
           currentSettings={settings}
           nextSettings={nextRoundSettings || settings}

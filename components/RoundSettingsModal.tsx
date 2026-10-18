@@ -3,8 +3,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Settings, CEFRLevel, SoundEffect, ChallengeFormat } from '../types';
 import { GRAMMAR_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS } from '../constants';
 import ActionButton from './ActionButton';
+import {
+  isDesktopApp,
+  getDesktopStatus,
+  saveDesktopApiKey,
+  removeDesktopApiKey,
+  testDesktopApiKey,
+  DesktopStatus,
+} from '../services/geminiService';
 
-export type SettingsModalTab = 'topic' | 'level' | 'theme' | 'format';
+export type SettingsModalTab = 'topic' | 'level' | 'theme' | 'format' | 'ai';
 
 interface RoundSettingsModalProps {
   isOpen: boolean;
@@ -67,6 +75,18 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
     !THEMES.includes(nextSettings.theme as any)
   );
 
+  // Desktop AI & Offline states
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus>({
+    isDesktop: false,
+    isOnline: true,
+    hasKey: false,
+    isEncrypted: false,
+  });
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showKeyText, setShowKeyText] = useState(false);
+  const [keyNotice, setKeyNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
@@ -84,6 +104,13 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       if (isThemeCustom) {
         setCustomThemeInput(nextSettings.theme.replace('Custom ✍️', '').trim());
       }
+
+      // Fetch desktop status
+      getDesktopStatus().then((status) => {
+        setDesktopStatus(status);
+      });
+      setKeyNotice(null);
+      setApiKeyInput('');
     }
   }, [isOpen, initialTab, currentSettings, nextSettings]);
 
@@ -111,6 +138,59 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
         theme: resolvedTheme,
         challengeFormat: selectedFormat,
       });
+    }
+  };
+
+  const handleSaveKey = async () => {
+    const trimmed = apiKeyInput.trim();
+    if (!trimmed) {
+      setKeyNotice({ type: 'error', text: 'Please enter a valid Gemini API key.' });
+      return;
+    }
+    playSound('click');
+    const res = await saveDesktopApiKey(trimmed);
+    if (res.success) {
+      playSound('success');
+      setKeyNotice({
+        type: 'success',
+        text: 'API key encrypted and safely stored using OS-backed Windows DPAPI encryption!',
+      });
+      setApiKeyInput('');
+      const updated = await getDesktopStatus();
+      setDesktopStatus(updated);
+    } else {
+      setKeyNotice({ type: 'error', text: res.error || 'Failed to save key.' });
+    }
+  };
+
+  const handleRemoveKey = async () => {
+    playSound('click');
+    const res = await removeDesktopApiKey();
+    if (res.success) {
+      playSound('click');
+      setKeyNotice({
+        type: 'info',
+        text: 'Stored API key removed. Casino is running 100% in Curated Offline Bank mode.',
+      });
+      setApiKeyInput('');
+      const updated = await getDesktopStatus();
+      setDesktopStatus(updated);
+    } else {
+      setKeyNotice({ type: 'error', text: res.error || 'Failed to remove key.' });
+    }
+  };
+
+  const handleTestConnection = async () => {
+    playSound('click');
+    setIsTesting(true);
+    setKeyNotice({ type: 'info', text: 'Contacting Gemini API...' });
+    const res = await testDesktopApiKey(apiKeyInput.trim() || undefined);
+    setIsTesting(false);
+    if (res.valid) {
+      playSound('success');
+      setKeyNotice({ type: 'success', text: 'Connection successful! Gemini API is active and responding.' });
+    } else {
+      setKeyNotice({ type: 'error', text: res.error || 'API connection failed. Check your key and internet connection.' });
     }
   };
 
@@ -152,10 +232,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex border-b border-amber-200/60 dark:border-amber-900/40 bg-amber-100/30 dark:bg-black/20 p-2 gap-2 select-none">
+          <div className="flex border-b border-amber-200/60 dark:border-amber-900/40 bg-amber-100/30 dark:bg-black/20 p-2 gap-2 select-none overflow-x-auto">
             <button
               onClick={() => { playSound('click'); setActiveTab('topic'); }}
-              className={`flex-1 py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'topic'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -170,14 +250,14 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('level'); }}
-              className={`flex-1 py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'level'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
               }`}
             >
               <span>📊</span>
-              <span>CEFR Level</span>
+              <span>Level</span>
               {selectedLevel !== currentSettings.level && (
                 <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
               )}
@@ -185,7 +265,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('theme'); }}
-              className={`flex-1 py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'theme'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -200,7 +280,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('format'); }}
-              className={`flex-1 py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'format'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -212,88 +292,98 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                 <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
               )}
             </button>
+
+            {/* AI & Offline Tab */}
+            <button
+              onClick={() => { playSound('click'); setActiveTab('ai'); }}
+              className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'ai'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
+              }`}
+            >
+              <span>🤖</span>
+              <span>AI & Offline</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  desktopStatus.hasKey && desktopStatus.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                }`}
+                title={desktopStatus.hasKey && desktopStatus.isOnline ? 'Live AI Active' : 'Curated Bank Active'}
+              />
+            </button>
           </div>
 
           {/* Modal Body / Tab Content */}
           <div className="flex-1 overflow-y-auto p-5 text-slate-800 dark:text-slate-100 modal-content-scroll">
             {/* TOPIC TAB */}
             {activeTab === 'topic' && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="text-xs uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider">
-                    Select Target Grammar Concept
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    Current: <strong className="text-slate-700 dark:text-slate-200">{currentSettings.topic}</strong>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                  Select a grammar focus for subsequent rounds, or enter your own custom rule:
+                </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {EXTENDED_GRAMMAR_TOPICS.map(item => {
-                    const isSelected = !isCustomTopicMode && selectedTopic === item.name;
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1">
+                  {EXTENDED_GRAMMAR_TOPICS.map((top) => {
+                    const isSelected = !isCustomTopicMode && selectedTopic === top.name;
                     return (
                       <button
-                        key={item.name}
+                        key={top.name}
+                        type="button"
                         onClick={() => {
                           playSound('click');
                           setIsCustomTopicMode(false);
-                          setSelectedTopic(item.name);
+                          setSelectedTopic(top.name);
                         }}
-                        className={`p-3 rounded-xl border text-left flex items-start gap-3 transition-all cursor-pointer ${
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
                           isSelected
-                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-sm'
+                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
                             : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
                         }`}
                       >
-                        <span className="text-2xl mt-0.5 select-none">{item.icon}</span>
+                        <span className="text-xl mt-0.5 select-none">{top.icon}</span>
                         <div className="flex-1 min-w-0">
-                          <div className={`font-serif font-bold text-sm truncate ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-800 dark:text-slate-200'}`}>
-                            {item.name}
+                          <div className="font-serif font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
+                            <span className="truncate">{top.name}</span>
+                            {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
                           </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 leading-snug">
-                            {item.desc}
-                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5 line-clamp-1">
+                            {top.desc}
+                          </p>
                         </div>
-                        {isSelected && (
-                          <span className="text-amber-500 font-bold text-xs select-none">✓</span>
-                        )}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Custom Topic Box */}
-                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                {/* Custom Topic Input */}
+                <div className="mt-4 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
                   <div
                     onClick={() => {
                       playSound('click');
                       setIsCustomTopicMode(true);
                     }}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
                       isCustomTopicMode
-                        ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50'
-                        : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60'
+                        ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-400/50'
+                        : 'bg-white dark:bg-black/20 border-dashed border-amber-300 dark:border-amber-800/60 hover:border-amber-400'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2 font-serif font-bold text-sm text-slate-900 dark:text-slate-100">
-                        <span>✍️</span>
-                        <span>My Own Custom Topic</span>
-                      </div>
-                      {isCustomTopicMode && (
-                        <span className="text-xs bg-amber-500 text-black px-2 py-0.5 rounded-full font-bold">Selected</span>
-                      )}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-base">✍️</span>
+                      <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
+                        Custom Grammar Target:
+                      </span>
                     </div>
                     <input
                       type="text"
                       value={customTopicInput}
                       onChange={(e) => {
-                        setIsCustomTopicMode(true);
                         setCustomTopicInput(e.target.value);
+                        if (!isCustomTopicMode) setIsCustomTopicMode(true);
                       }}
                       onFocus={() => setIsCustomTopicMode(true)}
-                      placeholder="e.g. Mixed Conditionals in Business, Phrasal verbs with 'get'..."
-                      className="w-full px-3.5 py-2 text-sm bg-white dark:bg-[#0a1f14] border border-amber-300 dark:border-amber-500/50 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="e.g. Inversion with Seldom / Hardly, Subjunctive Mood, Cleft Sentences..."
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
                 </div>
@@ -302,56 +392,42 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             {/* LEVEL TAB */}
             {activeTab === 'level' && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="text-xs uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider">
-                    Select Target CEFR Language Proficiency
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    Current: <strong className="text-slate-700 dark:text-slate-200">{currentSettings.level}</strong>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                  Select CEFR linguistic complexity profile:
+                </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {CEFR_LEVELS.map(levelKey => {
-                    const lvl = CEFR_DIFFICULTY_PROFILES[levelKey];
-                    const isSelected = selectedLevel === lvl.level;
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {CEFR_LEVELS.map((lvl) => {
+                    const isSelected = selectedLevel === lvl;
+                    const profile = CEFR_DIFFICULTY_PROFILES[lvl];
                     return (
                       <button
-                        key={lvl.level}
+                        key={lvl}
+                        type="button"
                         onClick={() => {
                           playSound('click');
-                          setSelectedLevel(lvl.level);
+                          setSelectedLevel(lvl);
                         }}
-                        className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
                           isSelected
                             ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
                             : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
                         }`}
                       >
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded font-mono font-black text-xs border ${lvl.badgeColor}`}>
-                              {lvl.level}
+                        <span className="text-xl font-mono font-black text-amber-600 dark:text-amber-400 select-none">
+                          {lvl}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="font-serif font-bold text-xs text-slate-900 dark:text-white">
+                              {profile?.title || lvl}
                             </span>
-                            <span className="font-serif font-bold text-sm text-slate-900 dark:text-white">
-                              {lvl.title}
-                            </span>
+                            {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
                           </div>
-                          {isSelected && (
-                            <span className="text-amber-500 font-bold text-base select-none">✓</span>
-                          )}
-                        </div>
-                        <div className="space-y-1.5 text-[11px] leading-snug">
-                          <div className="text-slate-600 dark:text-slate-300">
-                            <strong className="text-slate-800 dark:text-slate-100">Syntax:</strong> {lvl.syntax}
-                          </div>
-                          <div className="text-slate-600 dark:text-slate-300">
-                            <strong className="text-slate-800 dark:text-slate-100">Lexis:</strong> {lvl.lexis}
-                          </div>
-                          <div className="text-amber-700 dark:text-amber-400 font-medium">
-                            <strong className="text-amber-800 dark:text-amber-300">Mistake Spotting:</strong> {lvl.mistakeIdentification}
-                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
+                            {profile?.syntax || ''}
+                          </p>
                         </div>
                       </button>
                     );
@@ -362,97 +438,81 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             {/* THEME TAB */}
             {activeTab === 'theme' && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="text-xs uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider">
-                    Select Sentence Narrative Theme
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    Current: <strong className="text-slate-700 dark:text-slate-200">{currentSettings.theme}</strong>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                  Choose a contextual scenario or real-world theme:
+                </p>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {THEMES.filter(t => t !== 'Custom ✍️').map(thm => {
-                    const isSelected = !isCustomThemeMode && selectedTheme === thm;
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                  {THEMES.map((th) => {
+                    const isSelected = !isCustomThemeMode && selectedTheme === th;
                     return (
                       <button
-                        key={thm}
+                        key={th}
+                        type="button"
                         onClick={() => {
                           playSound('click');
                           setIsCustomThemeMode(false);
-                          setSelectedTheme(thm);
+                          setSelectedTheme(th);
                         }}
-                        className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
                           isSelected
-                            ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-sm'
+                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
                             : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
                         }`}
                       >
-                        <span className="text-xl select-none">{thm.split(' ').slice(-1)[0]}</span>
-                        <span className={`text-xs font-serif font-bold truncate max-w-full ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {thm.replace(/\s[^\s]+$/, '')}
+                        <span className="font-serif font-bold text-xs text-slate-900 dark:text-white">
+                          {th}
                         </span>
-                        {isSelected && (
-                          <span className="text-[10px] text-amber-500 font-bold">Selected</span>
-                        )}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Custom Theme Box */}
-                <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                {/* Custom Theme Input */}
+                <div className="mt-4 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
                   <div
                     onClick={() => {
                       playSound('click');
                       setIsCustomThemeMode(true);
                     }}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
                       isCustomThemeMode
-                        ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50'
-                        : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60'
+                        ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-400/50'
+                        : 'bg-white dark:bg-black/20 border-dashed border-amber-300 dark:border-amber-800/60 hover:border-amber-400'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2 font-serif font-bold text-sm text-slate-900 dark:text-slate-100">
-                        <span>✍️</span>
-                        <span>Custom Theme / Topic Universe</span>
-                      </div>
-                      {isCustomThemeMode && (
-                        <span className="text-xs bg-amber-500 text-black px-2 py-0.5 rounded-full font-bold">Selected</span>
-                      )}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-base">✍️</span>
+                      <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
+                        Custom Scenario Theme:
+                      </span>
                     </div>
                     <input
                       type="text"
                       value={customThemeInput}
                       onChange={(e) => {
-                        setIsCustomThemeMode(true);
                         setCustomThemeInput(e.target.value);
+                        if (!isCustomThemeMode) setIsCustomThemeMode(true);
                       }}
                       onFocus={() => setIsCustomThemeMode(true)}
-                      placeholder="e.g. Culinary Kitchen, Space Station, Victorian London..."
-                      className="w-full px-3.5 py-2 text-sm bg-white dark:bg-[#0a1f14] border border-amber-300 dark:border-amber-500/50 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      placeholder="e.g. Victorian London Mystery, Space Station Operations, Film Noir..."
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                   </div>
                 </div>
               </div>
             )}
 
-            {/* CHALLENGE FORMAT TAB */}
+            {/* FORMAT TAB */}
             {activeTab === 'format' && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="text-xs uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider">
-                    Select Challenge Format
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    Current: <strong className="text-slate-700 dark:text-slate-200">{CHALLENGE_FORMATS.find(f => f.id === (currentSettings.challengeFormat || 'binary'))?.shortLabel || 'Valid / Flawed'}</strong>
-                  </div>
-                </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                  Choose challenge structure:
+                </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {CHALLENGE_FORMATS.map(fmt => {
+                <div className="grid grid-cols-1 gap-2.5">
+                  {CHALLENGE_FORMATS.map((fmt) => {
                     const isSelected = selectedFormat === fmt.id;
                     return (
                       <button
@@ -485,6 +545,214 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* AI & OFFLINE TAB */}
+            {activeTab === 'ai' && (
+              <div className="space-y-4">
+                {/* Status Hero Card */}
+                <div className="p-4 rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-amber-50/50 dark:bg-black/30">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">⚡</span>
+                      <div>
+                        <h3 className="font-serif font-bold text-sm text-slate-900 dark:text-amber-100">
+                          Casino Intelligence Engine
+                        </h3>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                          {desktopStatus.isDesktop
+                            ? 'Windows Desktop Edition (Self-Contained)'
+                            : 'Web Edition (Serverless Backend)'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                          desktopStatus.isOnline
+                            ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                            : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40'
+                        }`}
+                      >
+                        {desktopStatus.isOnline ? '● Online' : '○ Offline Mode'}
+                      </span>
+                      {desktopStatus.isDesktop && (
+                        <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400">
+                          {desktopStatus.isEncrypted ? '🛡️ Windows DPAPI Ready' : 'Key Protection'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Active Generator Badge */}
+                  <div className="p-2.5 rounded-lg bg-amber-100/60 dark:bg-amber-950/40 border border-amber-300/40 dark:border-amber-800/40 flex items-center justify-between text-xs">
+                    <span className="font-serif font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                      <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '🚀' : '💾'}</span>
+                      <span>Active Engine:</span>
+                    </span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      {desktopStatus.hasKey && desktopStatus.isOnline
+                        ? 'Gemini Live Generative AI'
+                        : 'Curated Sentence Bank (Offline)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Feature Availability Matrix */}
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-black/20">
+                  <h4 className="font-serif font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200/90 mb-2.5">
+                    Feature Availability (Offline vs Live AI)
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className="p-2 rounded bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
+                      <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                        <span>✅</span>
+                        <span>Curated Challenge Bank (A1-C2)</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        Hand-crafted grammar challenges across all CEFR levels & formats. Fully offline.
+                      </p>
+                    </div>
+
+                    <div className="p-2 rounded bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
+                      <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                        <span>✅</span>
+                        <span>Pedagogical Heuristics & Hints</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        Deterministic grammar clues, sentence verification, & offline audio synthesis.
+                      </p>
+                    </div>
+
+                    <div className={`p-2 rounded border ${
+                      desktopStatus.hasKey && desktopStatus.isOnline
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                        : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300/50 dark:border-amber-800/40'
+                    }`}>
+                      <div className={`font-bold flex items-center gap-1 ${
+                        desktopStatus.hasKey && desktopStatus.isOnline
+                          ? 'text-emerald-800 dark:text-emerald-300'
+                          : 'text-amber-800 dark:text-amber-300'
+                      }`}>
+                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '✅' : '⚠️'}</span>
+                        <span>Dynamic Sentence Synthesis</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        {desktopStatus.hasKey && desktopStatus.isOnline
+                          ? 'Generates fresh, never-before-seen sentences matching custom rules.'
+                          : 'Unavailable offline or without key (curated bank used instead).'}
+                      </p>
+                    </div>
+
+                    <div className={`p-2 rounded border ${
+                      desktopStatus.hasKey && desktopStatus.isOnline
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                        : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300/50 dark:border-amber-800/40'
+                    }`}>
+                      <div className={`font-bold flex items-center gap-1 ${
+                        desktopStatus.hasKey && desktopStatus.isOnline
+                          ? 'text-emerald-800 dark:text-emerald-300'
+                          : 'text-amber-800 dark:text-amber-300'
+                      }`}>
+                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '✅' : '⚠️'}</span>
+                        <span>Neural Voice (Gemini TTS)</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
+                        {desktopStatus.hasKey && desktopStatus.isOnline
+                          ? 'Studio-grade natural neural speech model.'
+                          : 'Falls back to Windows system text-to-speech engine.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Optional API Key Configuration */}
+                <div className="p-4 rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-white dark:bg-black/20">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h4 className="font-serif font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200">
+                      Custom Gemini API Key (Optional)
+                    </h4>
+                    {desktopStatus.hasKey && (
+                      <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-bold border border-emerald-500/40">
+                        Configured: {desktopStatus.maskedKey || 'Saved'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                    Grammar Casino is 100% playable offline out of the box. An API key is entirely optional. If you want to enable live generative AI features, enter your own Google Gemini API key below.
+                  </p>
+
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <input
+                        type={showKeyText ? 'text' : 'password'}
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder={desktopStatus.hasKey ? 'Enter new key to replace existing...' : 'AIzaSy...'}
+                        className="w-full px-3 py-2 pr-16 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-black/50 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKeyText(!showKeyText)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-amber-700 dark:text-amber-300 hover:underline px-1 cursor-pointer"
+                      >
+                        {showKeyText ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+
+                    {keyNotice && (
+                      <div
+                        className={`text-xs p-2 rounded-lg border flex items-center gap-1.5 ${
+                          keyNotice.type === 'success'
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 text-emerald-800 dark:text-emerald-200'
+                            : keyNotice.type === 'error'
+                            ? 'bg-red-50 dark:bg-red-950/40 border-red-300 text-red-800 dark:text-red-200'
+                            : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 text-amber-800 dark:text-amber-200'
+                        }`}
+                      >
+                        <span>{keyNotice.type === 'success' ? '✓' : keyNotice.type === 'error' ? '⚠️' : 'ℹ️'}</span>
+                        <span>{keyNotice.text}</span>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleSaveKey}
+                        className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold bg-amber-500 hover:bg-amber-600 text-black shadow transition-all cursor-pointer flex items-center gap-1"
+                      >
+                        <span>💾</span>
+                        <span>Save Encrypted Key (DPAPI)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleTestConnection}
+                        disabled={isTesting || (!apiKeyInput.trim() && !desktopStatus.hasKey)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold border border-amber-400 dark:border-amber-700 hover:bg-amber-100/50 dark:hover:bg-amber-950/30 text-amber-900 dark:text-amber-200 transition-all cursor-pointer disabled:opacity-40"
+                      >
+                        <span>{isTesting ? '⏳ Testing...' : '🔍 Test Connection'}</span>
+                      </button>
+
+                      {desktopStatus.hasKey && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveKey}
+                          className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-300/60 dark:border-red-900/40 transition-all cursor-pointer"
+                        >
+                          <span>🗑️ Remove Key</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 italic pt-1">
+                      🛡️ Security Guarantee: Your key is stored in your personal Windows app data folder using OS-backed Windows DPAPI encryption. It is never included in installers or shared with anyone.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -532,7 +800,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                 onClick={() => { playSound('click'); onClose(); }}
                 className="px-4 py-2 rounded-lg text-xs font-serif font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
               >
-                Cancel
+                Close
               </button>
               <ActionButton
                 onClick={handleSaveForNext}

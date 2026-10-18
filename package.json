@@ -1,13 +1,56 @@
 {
   "name": "grammar-casino",
+  "productName": "Grammar Casino",
+  "description": "Grammar Casino - High-Stakes English Grammar Challenge",
+  "author": "Thiago Siqueira",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:start": "npm run build && electron electron/main.cjs",
+    "electron:build": "npm run build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.grammarcasino.desktop",
+    "productName": "Grammar Casino",
+    "copyright": "Copyright © Thiago Siqueira",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.ico",
+      "build/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Grammar Casino",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "${productName}"
+    }
   },
   "dependencies": {
     "@google/genai": "^1.12.0",
@@ -22,6 +65,8 @@
     "@netlify/functions": "^6.0.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
