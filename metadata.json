@@ -1,0 +1,1 @@
+{"name":"Grammar Casino","description":"A multiplayer game where players bet on the grammatical correctness of AI-generated sentences. Use hints and power-ups to outsmart your opponents and be the last one standing with money!","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"],"prompt":""}

@@ -1,0 +1,4164 @@
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { 
+  Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, 
+  PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload,
+  Step, GameMode, SoundEffect, GrammarTopic, CEFRLevel, Theme, PlayerHistory, PlayerEffect, UsedPowerUp,
+  WheelItem, RoundHistoryRecord, RoundPlayerResult, PlayerTurnTimer
+} from './types';
+import { 
+  POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
+  INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
+  JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS
+} from './constants';
+import ActionButton from './components/ActionButton';
+import TextInput from './components/TextInput';
+import Modal from './components/Modal';
+import PlayerBettingCard from './components/PlayerBettingCard';
+import { getTimerRemainingMs } from './components/TurnTimer';
+import WheelModal from './components/WheelModal';
+import PowerUpTooltip from './components/PowerUpTooltip';
+import GrammarReportCard from './components/GrammarReportCard';
+import { ChipRack, PokerChip } from './components/ChipStacks';
+import RoundSettingsModal, { SettingsModalTab } from './components/RoundSettingsModal';
+import DeckConfigModal from './components/DeckConfigModal';
+import * as GeminiService from './services/geminiService';
+
+// --- Tone.js Sound Manager ---
+declare global {
+  interface Window {
+    Tone: any; // Or a more specific type if you have Tone.js typings
+  }
+}
+
+let soundManagerInstance: { play: (sound: SoundEffect, ...args: any[]) => void } | null = null;
+
+const initializeSounds = (): typeof soundManagerInstance => {
+    if (typeof window.Tone === 'undefined') {
+        return null;
+    }
+    if (soundManagerInstance) return soundManagerInstance;
+
+    try {
+      const sounds = {
+          click: new window.Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination(),
+          addPlayer: new window.Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.2 } }).toDestination(),
+          startGame: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
+          win: new window.Tone.Synth({ volume: -6, oscillator: { type: 'pulse', width: 0.2 }, envelope: { attack: 0.01, decay: 0.4, sustain: 0, release: 0.2 } }).toDestination(),
+          lose: new window.Tone.Synth({ volume: -6, oscillator: { type: 'fmsquare', modulationIndex: 10 }, envelope: { attack: 0.05, decay: 0.3, sustain: 0, release: 0.1 } }).toDestination(),
+          hint: new window.Tone.PluckSynth().toDestination(),
+          powerUp: new window.Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 5, envelope: { attack: 0.001, decay: 0.2, sustain: 0.01, release: 0.1}}).toDestination(),
+          gameOver: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
+          bet: new window.Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination(),
+          flip: new window.Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.05 } }).toDestination(),
+          error: new window.Tone.DuoSynth({ harmonicity: 1.5, voice0: { oscillator: { type: 'sine' } }, voice1: { oscillator: { type: 'sine' } } }).toDestination(),
+          success: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
+          tick: new window.Tone.Synth({ volume: -8, oscillator: { type: 'triangle' }, envelope: { attack: 0.002, decay: 0.06, sustain: 0, release: 0.03 } }).toDestination(),
+          timeUp: new window.Tone.PolySynth(window.Tone.Synth, { volume: -4 }).toDestination(),
+      };
+
+      const play = (sound: SoundEffect, ...args: any[]) => {
+          if (!window.Tone) return;
+          const now = window.Tone.now();
+          switch (sound) {
+              case 'click': sounds.click.triggerAttackRelease('C4', '16n', now); break; // Raised pitch slightly
+              case 'addPlayer': sounds.addPlayer.triggerAttackRelease('E4', '8n', now); break;
+              case 'startGame': sounds.startGame.triggerAttackRelease(['C4', 'E4', 'G4'], '8n', now); break;
+              case 'win': sounds.win.triggerAttackRelease('G5', '16n', now + (args[0] || 0) * 0.15); break; // Faster sequence
+              case 'lose': sounds.lose.triggerAttackRelease('C2', '8n', now + (args[0] || 0) * 0.15); break;
+              case 'hint': sounds.hint.triggerAttackRelease('A5', now); break; // Higher pitch for hint
+              case 'powerUp': sounds.powerUp.triggerAttackRelease('C3', '8n', now); break;
+              case 'gameOver': sounds.gameOver.triggerAttackRelease(['C5', 'E5', 'G5', 'C6'], '4n', now); break;
+              case 'bet': sounds.bet.triggerAttackRelease('G3', '16n', now); break;
+              case 'flip': sounds.flip.triggerAttackRelease('16n', now); break;
+              case 'error': sounds.error.triggerAttackRelease('G2', '8n', now); break;
+              case 'success': sounds.success.triggerAttackRelease(['C5', 'E5', 'G5'], '8n', now); break;
+              case 'tick': sounds.tick.triggerAttackRelease('A5', '32n', now); break;
+              case 'timeUp': sounds.timeUp.triggerAttackRelease(['G4', 'Eb4', 'C4'], '8n', now); break;
+              default: break;
+          }
+      };
+      soundManagerInstance = { play };
+    } catch (e) {
+      console.error("Failed to initialize Tone.js sounds:", e);
+      soundManagerInstance = null;
+    }
+    return soundManagerInstance;
+};
+
+// --- Audio Decoding Helpers for Gemini TTS ---
+function base64ToBytes(base64: string) {
+  const binaryString = atob(base64);
+  const length = binaryString.length;
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function pcmToAudioBuffer(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number = 24000,
+  numChannels: number = 1
+): AudioBuffer {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      // Convert int16 to float32 [-1.0, 1.0]
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
+
+const loadInitialState = () => { 
+  try { 
+    const s = localStorage.getItem(LOCAL_STORAGE_KEY); 
+    if (s) {
+      const parsed = JSON.parse(s);
+      // Migration: Add avatar, streak, effects to players if missing
+      if (parsed.players) {
+        parsed.players = parsed.players.map((p: any) => ({
+            ...p,
+            avatar: p.avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+            winStreak: p.winStreak || 0,
+            effects: p.effects || []
+        }));
+      }
+      // Migration: powerUpsUsedThisRound to UsedPowerUp[]
+      if (parsed.powerUpsUsedThisRound) {
+        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
+        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
+            const key = Number(k);
+            const val = parsed.powerUpsUsedThisRound[key];
+            if (Array.isArray(val)) {
+                 if (val.length > 0 && typeof val[0] === 'string') {
+                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
+                 } else {
+                     fixedPowerUps[key] = val; 
+                 }
+            } else if (typeof val === 'number') {
+                fixedPowerUps[key] = []; 
+            } else {
+                 fixedPowerUps[key] = [];
+            }
+        });
+        parsed.powerUpsUsedThisRound = fixedPowerUps;
+      }
+      if (parsed && typeof parsed.step === 'string') return parsed;
+    }
+    return null;
+  } catch (e) { 
+    console.error("Failed to load or parse game state from localStorage:", e);
+    return null; 
+  }
+};
+
+const initialGameState = loadInitialState();
+
+export function App() {
+  const [step, setStep] = useState<Step>(initialGameState?.step || 'PLAYER_SETUP');
+  const [players, setPlayers] = useState<Player[]>(initialGameState?.players || []);
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const playerNameInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [settings, setSettings] = useState<Settings>(initialGameState?.settings || { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+  const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || '');
+  const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
+  
+  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'lastPlayer');
+  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || 10);
+  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || DEFAULT_TARGET_AMOUNT);
+  const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
+  
+  const [currentSentence, setCurrentSentence] = useState<GeneratedSentence | null>(initialGameState?.currentSentence || null);
+  const [pastSentences, setPastSentences] = useState<string[]>(initialGameState?.pastSentences || []);
+  const [pastMistakes, setPastMistakes] = useState<string[]>(initialGameState?.pastMistakes || []);
+  const [sentenceBatch, setSentenceBatch] = useState<boolean[]>(initialGameState?.sentenceBatch || []);
+  const [roundHistory, setRoundHistory] = useState<RoundHistoryRecord[]>(initialGameState?.roundHistory || []);
+  const [showReportCardModal, setShowReportCardModal] = useState(false);
+
+  const newBatch = () => {
+    const batch = [true, true, false, false, false];
+    for (let i = batch.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [batch[i], batch[j]] = [batch[j], batch[i]];
+    }
+    return batch;
+  };
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
+  
+  const [bets, setBets] = useState<Record<number, Bet>>(initialGameState?.bets || {});
+  const [hints, setHints] = useState<Record<number, Hint>>(initialGameState?.hints || {});
+  const [roundResults, setRoundResults] = useState<RoundResultInfo[]>(initialGameState?.roundResults || []);
+  const [winner, setWinner] = useState<Player | null>(initialGameState?.winner || null);
+  const [error, setError] = useState<GameError | null>(null);
+  
+  const [isMuted, setIsMuted] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [ttsAudioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 }));
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isSentenceRevealed, setIsSentenceRevealed] = useState(false);
+  
+  const [historyPlayer, setHistoryPlayer] = useState<Player | null>(null);
+  // powerUpsUsedThisRound tracks usage history for current round per player.
+  const [powerUpsUsedThisRound, setPowerUpsUsedThisRound] = useState<Record<number, UsedPowerUp[]>>(initialGameState?.powerUpsUsedThisRound || {});
+  const [activePowerUps, setActivePowerUps] = useState<Record<number, ActivePowerUp[]>>(initialGameState?.activePowerUps || {}); // PlayerId -> PowerUps[]
+  const [showPowerUpModal, setShowPowerUpModal] = useState<ShowPowerUpModalPayload | null>(null);
+  const [showTargetModal, setShowTargetModal] = useState<ShowTargetModalPayload | null>(null);
+  const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(initialGameState?.highlightedPhrase || null);
+  const [availablePowerUps, setAvailablePowerUps] = useState<PowerUpKey[]>(() => {
+    const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+    if (initialGameState?.availablePowerUps) {
+      const saved = initialGameState.availablePowerUps as PowerUpKey[];
+      const missing = allKeys.filter(k => !saved.includes(k));
+      return [...saved, ...missing];
+    }
+    return allKeys;
+  });
+  const [selectedPowerUps, setSelectedPowerUps] = useState<PowerUpKey[]>(() => {
+    const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+    if (initialGameState?.selectedPowerUps) {
+      const saved = initialGameState.selectedPowerUps as PowerUpKey[];
+      const missing = allKeys.filter(k => !saved.includes(k));
+      return [...saved, ...missing];
+    }
+    return allKeys;
+  });
+  const [roundSpending, setRoundSpending] = useState<Record<number, number>>(initialGameState?.roundSpending || {}); // PlayerId -> amount spent
+
+  const [isSentenceHeaderStuck, setIsSentenceHeaderStuck] = useState(false);
+  const sentenceHeaderRef = useRef<HTMLDivElement>(null);
+
+  const [simplifiedExplanation, setSimplifiedExplanation] = useState<{ text: string | null; loading: boolean }>({ text: null, loading: false });
+  const [showAvatarModal, setShowAvatarModal] = useState<{ playerId: number } | null>(null);
+  const [editingPlayerIdInSetup, setEditingPlayerIdInSetup] = useState<number | null>(null);
+  const [editingPlayerNameInSetup, setEditingPlayerNameInSetup] = useState('');
+  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY);
+  const [isEditingStartingCash, setIsEditingStartingCash] = useState(false);
+  const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY));
+  const [showWheelModal, setShowWheelModal] = useState<{ playerId: number } | null>(null);
+  const [usedSubtypes, setUsedSubtypes] = useState<string[]>([]);
+  const [pendingLoadGame, setPendingLoadGame] = useState<any | null>(null);
+
+  const [showDeckConfigModal, setShowDeckConfigModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsModalTab, setSettingsModalTab] = useState<SettingsModalTab>('topic');
+  const [nextRoundSettings, setNextRoundSettings] = useState<Settings | null>(initialGameState?.nextRoundSettings || null);
+  const [isSettingsDeckExpanded, setIsSettingsDeckExpanded] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
+    }
+    return false;
+  });
+
+  // --- Betting Turn Timer State ---
+  const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(() => {
+    const saved = initialGameState?.turnTimerSeconds;
+    if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
+    return 0;
+  });
+  const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
+  const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
+  const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
+  const turnDurationMs = turnTimerSeconds * 1000;
+  const isTurnTimerEnabled = turnTimerSeconds > 0;
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const savedTheme = localStorage.getItem('grammar_casino_theme');
+      if (savedTheme) {
+        return savedTheme === 'dark';
+      }
+      return true;
+    }
+    return true;
+  });
+
+  const toggleTheme = () => {
+    setIsDarkMode(prev => {
+      const next = !prev;
+      if (next) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('grammar_casino_theme', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('grammar_casino_theme', 'light');
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('grammar_casino_theme');
+    if (savedTheme === 'light') {
+      document.documentElement.classList.remove('dark');
+      setIsDarkMode(false);
+    } else {
+      document.documentElement.classList.add('dark');
+      setIsDarkMode(true);
+    }
+  }, []);
+
+  const activePlayers = players.filter(p => p.money > 0);
+
+  // Sound and TTS setup
+  useEffect(() => { 
+    const script = document.createElement('script'); 
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"; 
+    script.async = true; 
+    script.onload = () => { 
+      initializeSounds(); 
+      setAudioReady(true); 
+    }; 
+    document.body.appendChild(script); 
+    return () => { 
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    }; 
+  }, []);
+
+  useEffect(() => { 
+    const loadVoices = () => { 
+      if ('speechSynthesis' in window) { 
+        setTtsVoices(window.speechSynthesis.getVoices().filter(v => v.name && v.lang)); 
+      } 
+    }; 
+    if ('speechSynthesis' in window) { 
+      loadVoices(); 
+      window.speechSynthesis.onvoiceschanged = loadVoices; 
+    } 
+    return () => { 
+      if ('speechSynthesis' in window) { 
+        window.speechSynthesis.cancel(); 
+        window.speechSynthesis.onvoiceschanged = null; 
+      } 
+    }; 
+  }, []);
+  
+  useEffect(() => { 
+    return () => { 
+      if ('speechSynthesis' in window && window.speechSynthesis.speaking) { 
+        window.speechSynthesis.cancel(); 
+      } 
+    } 
+  }, [step]);
+
+  const playSound = useCallback(async (sound: SoundEffect, ...args: any[]) => { 
+    if (isMuted || !audioReady || !soundManagerInstance) return; 
+    if (window.Tone && window.Tone.context.state !== 'running') { 
+      try {
+        await window.Tone.start(); 
+      } catch (e) {
+        console.error("Error starting Tone.js audio context:", e);
+        return;
+      }
+    } 
+    soundManagerInstance.play(sound, ...args); 
+  }, [isMuted, audioReady]);
+
+  const handleToggleSettingsDeckExpanded = useCallback(() => {
+    playSound('click');
+    setIsSettingsDeckExpanded(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('grammar_casino_expand_settings_deck', String(next));
+      } catch (e) {}
+      return next;
+    });
+  }, [playSound]);
+
+  useEffect(() => {
+    if (error) {
+      playSound('error');
+    }
+  }, [error, playSound]);
+
+  const speakText = useCallback(async (text: string | null) => { 
+    if (isMuted || !text || isSpeaking) return; 
+    
+    playSound('click');
+    setIsSpeaking(true);
+
+    // Fallback using Browser TTS
+    const fallbackSpeak = () => {
+        if (!('speechSynthesis' in window)) {
+            setIsSpeaking(false);
+            return;
+        }
+        try {
+            window.speechSynthesis.cancel(); 
+            const utterance = new SpeechSynthesisUtterance(text); 
+            if (ttsVoices.length > 0) { 
+              let preferredVoice = ttsVoices.find(v => v.lang === 'en-US' && !v.localService && v.name.includes('Google')) || 
+                                   ttsVoices.find(v => v.lang === 'en-US' && !v.localService) || 
+                                   ttsVoices.find(v => v.lang === 'en-US') || 
+                                   ttsVoices.find(v => v.lang.startsWith('en-') && !v.localService) || 
+                                   ttsVoices.find(v => v.lang.startsWith('en-')); 
+              if (preferredVoice) utterance.voice = preferredVoice; 
+            } 
+            utterance.onend = () => setIsSpeaking(false);
+            utterance.onerror = () => setIsSpeaking(false);
+            window.speechSynthesis.speak(utterance); 
+        } catch (e) {
+            console.error("Browser TTS error:", e);
+            setIsSpeaking(false);
+        }
+    };
+
+    try {
+        // Try Gemini TTS
+        const base64Audio = await GeminiService.generateSpeech(text);
+        
+        if (ttsAudioContext.state === 'suspended') {
+            await ttsAudioContext.resume();
+        }
+
+        const audioBytes = base64ToBytes(base64Audio);
+        const audioBuffer = pcmToAudioBuffer(audioBytes, ttsAudioContext);
+        
+        const source = ttsAudioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ttsAudioContext.destination);
+        source.onended = () => setIsSpeaking(false);
+        source.start();
+
+    } catch (e) { 
+      console.warn("Gemini TTS failed, falling back to browser TTS:", e); 
+      fallbackSpeak();
+    } 
+  }, [isMuted, ttsVoices, isSpeaking, ttsAudioContext]);
+
+  // --- Betting Turn Timer Helpers, Effects & Controls ---
+  const isPlayerFrozen = useCallback((playerId: number): boolean => {
+    const player = players.find(p => p.id === playerId);
+    if (!player) return false;
+    const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+    return allPowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === playerId) ||
+           player.effects.some(e => e.type === 'SUB_ZERO');
+  }, [players, activePowerUps]);
+
+  const hasPlayerPlacedBet = useCallback((playerId: number): boolean => {
+    const playerBet = bets[playerId];
+    if (!playerBet) return false;
+    const hasValidBetAmount = typeof playerBet.bet === 'number' && !isNaN(playerBet.bet) && Number(playerBet.bet) > 0;
+    if (!hasValidBetAmount) return false;
+    const hasSplitBet = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
+    if (hasSplitBet) return true;
+    return playerBet.opinion === 'correct' || playerBet.opinion === 'incorrect';
+  }, [bets, activePowerUps]);
+
+  // System hold: pause any running timer while a popup/modal is open or a hint is loading
+  const isTimerSystemHeld = useMemo(() => {
+    const anyModalOpen = Boolean(
+      error ||
+      historyPlayer ||
+      showPowerUpModal ||
+      showTargetModal ||
+      showAvatarModal ||
+      showWheelModal ||
+      pendingLoadGame ||
+      showReportCardModal ||
+      showSettingsModal ||
+      showDeckConfigModal ||
+      isLoading ||
+      isProcessing
+    );
+    const anyHintLoading = (Object.values(hints) as Hint[]).some(h => Boolean(h?.isLoading));
+    return anyModalOpen || anyHintLoading;
+  }, [
+    error, historyPlayer, showPowerUpModal, showTargetModal, showAvatarModal,
+    showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
+    showDeckConfigModal, isLoading, isProcessing, hints
+  ]);
+
+  // Handler-level enforcement: returns true only when the player is allowed to make bet/hint/power-up changes
+  const canPlayerAct = useCallback((playerId: number): boolean => {
+    const player = players.find(p => p.id === playerId);
+    if (!player || player.money <= 0) return false;
+    if (isPlayerFrozen(playerId)) return false;
+    if (!isTurnTimerEnabled) return true;
+    const t = turnTimers[playerId];
+    if (!t || t.status !== 'running') return false;
+    if (!t.held && t.endsAt !== undefined && Date.now() >= t.endsAt) return false;
+    return true;
+  }, [players, isPlayerFrozen, isTurnTimerEnabled, turnTimers]);
+
+  // Helper to lock a player and optionally auto-advance to the next unfrozen idle player in sequence
+  const lockPlayerAndMaybeAdvance = useCallback((
+    prev: Record<number, PlayerTurnTimer>,
+    lockedPlayerId: number,
+    shouldAdvance: boolean
+  ): Record<number, PlayerTurnTimer> => {
+    const now = Date.now();
+    const next: Record<number, PlayerTurnTimer> = {
+      ...prev,
+      [lockedPlayerId]: {
+        status: 'locked',
+        remainingMs: 0,
+        held: false,
+        endsAt: undefined,
+        skipped: prev[lockedPlayerId]?.skipped || isPlayerFrozen(lockedPlayerId),
+      },
+    };
+
+    // Ensure all frozen active players are marked skipped & locked
+    activePlayers.forEach(p => {
+      if (isPlayerFrozen(p.id) && next[p.id]?.status !== 'locked') {
+        next[p.id] = { status: 'locked', remainingMs: 0, skipped: true };
+      }
+    });
+
+    if (shouldAdvance) {
+      const anyOtherActiveTurn = activePlayers.some(p => {
+        if (p.id === lockedPlayerId) return false;
+        const st = next[p.id]?.status;
+        return st === 'running' || st === 'paused';
+      });
+      if (!anyOtherActiveTurn) {
+        const startIdx = activePlayers.findIndex(p => p.id === lockedPlayerId);
+        const ordered = startIdx >= 0
+          ? [...activePlayers.slice(startIdx + 1), ...activePlayers.slice(0, startIdx)]
+          : activePlayers;
+        const nextCandidate = ordered.find(p => {
+          if (isPlayerFrozen(p.id)) return false;
+          const st = next[p.id]?.status ?? 'idle';
+          return st === 'idle';
+        });
+        if (nextCandidate) {
+          next[nextCandidate.id] = isTimerSystemHeld
+            ? { status: 'running', held: true, remainingMs: turnDurationMs }
+            : { status: 'running', held: false, endsAt: now + turnDurationMs, remainingMs: turnDurationMs };
+        }
+      }
+    }
+    return next;
+  }, [activePlayers, isPlayerFrozen, isTimerSystemHeld, turnDurationMs]);
+
+  // Automatically skip & lock frozen players (Deep Freeze / Sub-Zero), and chain if they were mid-turn
+  useEffect(() => {
+    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    setTurnTimers(prev => {
+      let changed = false;
+      let next = { ...prev };
+      activePlayers.forEach(p => {
+        if (isPlayerFrozen(p.id)) {
+          const cur = next[p.id];
+          if (!cur || cur.status !== 'locked' || !cur.skipped) {
+            const wasRunning = cur?.status === 'running';
+            next[p.id] = { status: 'locked', remainingMs: 0, skipped: true };
+            if (wasRunning && autoStartNextTimer) {
+              next = lockPlayerAndMaybeAdvance(next, p.id, true);
+            }
+            changed = true;
+          }
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [isTurnTimerEnabled, step, activePlayers, isPlayerFrozen, autoStartNextTimer, lockPlayerAndMaybeAdvance]);
+
+  // Auto-hold running timers while any modal/popup is open or a hint is loading, and resume afterwards
+  useEffect(() => {
+    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    const now = Date.now();
+    setTurnTimers(prev => {
+      let changed = false;
+      const next = { ...prev };
+      Object.keys(next).forEach(k => {
+        const id = Number(k);
+        const t = next[id];
+        if (!t || t.status !== 'running') return;
+        if (isTimerSystemHeld && !t.held) {
+          const rem = t.endsAt !== undefined ? Math.max(0, t.endsAt - now) : (t.remainingMs ?? turnDurationMs);
+          next[id] = { ...t, held: true, remainingMs: rem, endsAt: undefined };
+          changed = true;
+        } else if (!isTimerSystemHeld && t.held) {
+          const rem = Math.max(0, t.remainingMs ?? turnDurationMs);
+          next[id] = { ...t, held: false, endsAt: now + rem, remainingMs: rem };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [isTimerSystemHeld, isTurnTimerEnabled, step, turnDurationMs]);
+
+  // Watch the active running timer's absolute `endsAt` deadline and lock when time runs out
+  useEffect(() => {
+    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    const runningEntry = (Object.entries(turnTimers) as [string, PlayerTurnTimer][]).find(
+      ([, t]) => t?.status === 'running' && !t.held && t.endsAt !== undefined
+    );
+    if (!runningEntry) return;
+    const [idStr, timer] = runningEntry;
+    const runningId = Number(idStr);
+    const endsAt = timer.endsAt!;
+
+    const checkExpiry = () => {
+      if (Date.now() >= endsAt) {
+        playSound('timeUp');
+        setTurnTimers(prev => {
+          const cur = prev[runningId];
+          if (!cur || cur.status !== 'running' || cur.held) return prev;
+          return lockPlayerAndMaybeAdvance(prev, runningId, autoStartNextTimer);
+        });
+      }
+    };
+
+    const delay = Math.max(0, endsAt - Date.now());
+    const timeoutId = window.setTimeout(checkExpiry, delay + 15);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') checkExpiry();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [isTurnTimerEnabled, step, turnTimers, autoStartNextTimer, lockPlayerAndMaybeAdvance, playSound]);
+
+  const handleTimerStart = useCallback((playerId: number) => {
+    if (!isTurnTimerEnabled) return;
+    if (isPlayerFrozen(playerId)) {
+      setTurnTimers(prev => ({ ...prev, [playerId]: { status: 'locked', remainingMs: 0, skipped: true } }));
+      return;
+    }
+    playSound('click');
+    const now = Date.now();
+    setTurnTimers(prev => {
+      // Enforce one timer at a time per player
+      const otherActive = activePlayers.find(p => {
+        if (p.id === playerId) return false;
+        const st = prev[p.id]?.status;
+        return st === 'running' || st === 'paused';
+      });
+      if (otherActive) return prev;
+
+      const cur = prev[playerId];
+      const rem = cur?.status === 'paused' && cur.remainingMs && cur.remainingMs > 0
+        ? cur.remainingMs
+        : turnDurationMs;
+      return {
+        ...prev,
+        [playerId]: isTimerSystemHeld
+          ? { status: 'running', held: true, remainingMs: rem }
+          : { status: 'running', held: false, endsAt: now + rem, remainingMs: rem },
+      };
+    });
+  }, [isTurnTimerEnabled, isPlayerFrozen, playSound, activePlayers, turnDurationMs, isTimerSystemHeld]);
+
+  const handleTimerPause = useCallback((playerId: number) => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setTurnTimers(prev => {
+      const cur = prev[playerId];
+      if (!cur || cur.status !== 'running') return prev;
+      const rem = getTimerRemainingMs(cur, turnDurationMs, now);
+      return {
+        ...prev,
+        [playerId]: { status: 'paused', remainingMs: rem, held: false, endsAt: undefined },
+      };
+    });
+  }, [isTurnTimerEnabled, playSound, turnDurationMs]);
+
+  const handleTimerAddTime = useCallback((playerId: number) => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setTurnTimers(prev => {
+      const cur = prev[playerId];
+      if (!cur || (cur.status !== 'running' && cur.status !== 'paused')) return prev;
+      const rem = getTimerRemainingMs(cur, turnDurationMs, now) + TURN_TIMER_BONUS_MS;
+      if (cur.status === 'running' && !cur.held) {
+        return {
+          ...prev,
+          [playerId]: { ...cur, endsAt: now + rem, remainingMs: rem },
+        };
+      }
+      return {
+        ...prev,
+        [playerId]: { ...cur, remainingMs: rem },
+      };
+    });
+  }, [isTurnTimerEnabled, playSound, turnDurationMs]);
+
+  const handleTimerLockNow = useCallback((playerId: number) => {
+    if (!isTurnTimerEnabled) return;
+    playSound('timeUp');
+    setTurnTimers(prev => lockPlayerAndMaybeAdvance(prev, playerId, autoStartNextTimer));
+  }, [isTurnTimerEnabled, playSound, lockPlayerAndMaybeAdvance, autoStartNextTimer]);
+
+  const handleTimerUnlock = useCallback((playerId: number) => {
+    if (!isTurnTimerEnabled || isPlayerFrozen(playerId)) return;
+    playSound('click');
+    const now = Date.now();
+    setTurnTimers(prev => {
+      const next = { ...prev };
+      // Pause any currently running player so only one timer runs at a time
+      Object.keys(next).forEach(k => {
+        const id = Number(k);
+        if (id !== playerId && next[id]?.status === 'running') {
+          const rem = getTimerRemainingMs(next[id], turnDurationMs, now);
+          next[id] = { status: 'paused', remainingMs: rem, held: false, endsAt: undefined };
+        }
+      });
+      const prevRem = next[playerId]?.remainingMs ?? 0;
+      const grantMs = prevRem >= 15_000 ? prevRem : Math.min(turnDurationMs, Math.max(30_000, TURN_TIMER_BONUS_MS * 2));
+      next[playerId] = isTimerSystemHeld
+        ? { status: 'running', held: true, remainingMs: grantMs }
+        : { status: 'running', held: false, endsAt: now + grantMs, remainingMs: grantMs };
+      return next;
+    });
+  }, [isTurnTimerEnabled, isPlayerFrozen, playSound, turnDurationMs, isTimerSystemHeld]);
+
+  // Save game state
+  useEffect(() => { 
+    try { 
+      const gameState = { 
+        step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+        currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+        powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+        sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+      }; 
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState)); 
+    } catch (e) { 
+      console.error("Failed to save game state:", e); 
+    } 
+  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer]);
+
+  // Sticky header logic
+  useEffect(() => {
+    const header = sentenceHeaderRef.current;
+    if (!header) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsSentenceHeaderStuck(!entry.isIntersecting);
+      },
+      { rootMargin: "-17px 0px 0px 0px", threshold: [1] } 
+    );
+
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [step]); 
+
+  // Scroll to top when betting screen loads
+  useEffect(() => {
+    if (step === 'IN_GAME' || step === 'RESULTS') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [step]);
+
+  // ... (handlers remain largely the same, logic is preserved)
+  const handleSaveStartingCash = useCallback(() => {
+    setIsEditingStartingCash(false);
+    const parsed = parseInt(tempStartingCash, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      setStartingCash(parsed);
+      setPlayers(prev => prev.map(p => ({ ...p, money: parsed })));
+      playSound('click');
+    } else {
+      setTempStartingCash(String(startingCash));
+    }
+  }, [tempStartingCash, startingCash, playSound]);
+
+  const handleAddPlayer = () => { 
+    if (newPlayerName.trim()) { 
+      playSound('addPlayer'); 
+      const randomAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+      setPlayers(prev => [...prev, { 
+        id: Date.now(), 
+        name: newPlayerName.trim(), 
+        money: startingCash, 
+        history: [], 
+        avatar: randomAvatar, 
+        winStreak: 0,
+        effects: []
+      }]); 
+      setNewPlayerName(''); 
+      playerNameInputRef.current?.focus(); 
+    } 
+  };
+  const handleDeletePlayer = (idToDelete: number) => { 
+    playSound('lose', 0); 
+    setPlayers(prev => prev.filter(p => p.id !== idToDelete)); 
+  };
+  const handleUpdateAvatar = (playerId: number, newAvatar: string) => {
+    setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, avatar: newAvatar } : p));
+    setShowAvatarModal(null);
+    playSound('click');
+  };
+  const handleOpenAvatarModal = useCallback((playerId: number) => {
+    playSound('click');
+    setShowAvatarModal({ playerId });
+  }, [playSound]);
+  const handleUpdatePlayerName = useCallback((playerId: number, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    setPlayers(prev => {
+      const oldPlayer = prev.find(p => p.id === playerId);
+      const oldName = oldPlayer?.name;
+      const updated = prev.map(p => p.id === playerId ? { ...p, name: trimmed } : p);
+      if (oldName && oldName !== trimmed) {
+        setRoundResults(curr => curr.map(r => r.name === oldName ? { ...r, name: trimmed } : r));
+      }
+      return updated;
+    });
+    playSound('click');
+  }, [playSound]);
+  const handlePlayerNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (newPlayerName.trim()) {
+        handleAddPlayer();
+      } else if (players.length > 0) {
+        handleStartGame();
+      }
+    }
+  };
+  const handleStartGame = () => { 
+    if (players.length > 0) { 
+      playSound('startGame'); 
+      setStep('SETTINGS'); 
+    } else { 
+      setError({ title: "No Players!", message: "Please add at least one player to start the game." }); 
+    } 
+  };
+  
+  const fetchNewSentence = useCallback(async (currentSettings: Settings, history: string[], forcedBatch?: boolean[], mistakeHistory?: string[]) => {
+    setIsLoading(true);
+    setCurrentSentence(null);
+    setHighlightedPhrase(null);
+    setIsCopied(false);
+    setIsSentenceRevealed(false);
+    try {
+        if (!currentSettings || !currentSettings.theme || !currentSettings.level || !currentSettings.topic) {
+            throw new Error("Invalid settings provided to fetch a new sentence.");
+        }
+        const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
+        const forceCorrect = currentBatch[0];
+        setSentenceBatch(currentBatch.slice(1));
+
+        const topicKey = currentSettings.topic;
+        const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
+        const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
+        const pool = available.length > 0 ? available : allSubtypes;
+        const subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+
+        const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
+        const generated = await GeminiService.generateSentence(
+          currentSettings, 
+          history, 
+          forceCorrect, 
+          forceCorrect ? null : subtype,
+          effectiveMistakes
+        );
+        
+        if (!forceCorrect && subtype) {
+          setUsedSubtypes(prev => {
+            const next = [...prev, subtype];
+            return next.length >= allSubtypes.length ? [] : next;
+          });
+        }
+
+        // Never repeat mistakes: track mistake phrase and type
+        if (!generated.isCorrect) {
+          const mistakePhrase = (generated.errorPhrase || generated.grammarPhrase || '').trim();
+          if (mistakePhrase) {
+            const descriptor = generated.mistakeType ? `${mistakePhrase} (${generated.mistakeType.trim()})` : mistakePhrase;
+            setPastMistakes(prev => {
+              const lower = descriptor.toLowerCase();
+              return prev.some(p => p.toLowerCase() === lower) ? prev : [...prev, descriptor];
+            });
+          }
+        }
+
+        setCurrentSentence(generated);
+        setPastSentences(prev => [...prev, generated.text]);
+        // Small delay to allow initial card render before flip
+        setTimeout(() => {
+            setIsSentenceRevealed(true);
+            playSound('flip');
+        }, 300);
+    } catch (err: any) {
+      console.error(err);
+      setError({ title: "Sentence Generation Error", message: err.message || "Oops! We couldn't generate a sentence. Please check console or try again." });
+      setStep(prev => (prev === 'IN_GAME' ? 'IN_GAME' : 'SETTINGS'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sentenceBatch, usedSubtypes, pastMistakes, playSound]);
+
+  const handleFinalizeSettings = useCallback(() => {
+    const finalTopic = settings.topic === "My own choice" ? customTopic.trim() : settings.topic;
+    let finalTheme = settings.theme;
+
+    if (!finalTopic || !settings.level || !finalTheme) {
+        setError({ title: "Incomplete Setup", message: "Please choose a topic, level, and theme." });
+        return;
+    }
+    if (settings.topic === "My own choice" && !finalTopic) {
+        setError({ title: "Incomplete Setup", message: "Please enter your custom topic." });
+        return;
+    }
+    if (settings.theme === "Custom ✍️") {
+        if (!customTheme.trim()){
+            setError({ title: "Incomplete Setup", message: "Please enter your custom theme." });
+            return;
+        }
+        finalTheme = customTheme.trim();
+    }
+    const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+    if (gameMode === 'rounds' && (isNaN(numTotalRounds) || numTotalRounds <= 0)) {
+        setError({ title: "Invalid Rounds", message: "Please enter a positive number of rounds." });
+        return;
+    }
+    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+    if (gameMode === 'targetAmount' && (isNaN(numTargetAmount) || numTargetAmount < MIN_TARGET_AMOUNT)) {
+        setError({ title: "Invalid Target Amount", message: `Target amount must be at least $${MIN_TARGET_AMOUNT.toLocaleString()}.` });
+        return;
+    }
+    
+    const newSettings = { topic: finalTopic, level: settings.level, theme: finalTheme };
+    setSettings(newSettings);
+    setCurrentRound(1);
+    setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
+    setStep('IN_GAME');
+    setRoundHistory([]);
+    setBets({});
+    setHints({});
+    setRoundResults([]);
+    setPowerUpsUsedThisRound({});
+    setActivePowerUps({});
+    setAvailablePowerUps(selectedPowerUps); 
+    setRoundSpending({});
+    setUsedSubtypes([]);
+    setTurnTimers({});
+    setTeacherRevealOverride(false);
+    
+    const initialBatch = newBatch();
+    // Pass current pastSentences (which will be empty if new game started via restart, or contains history if resumed)
+    // If starting a fresh game, we might want to respect the 'never show up twice' for the session.
+    fetchNewSentence(newSettings, pastSentences, initialBatch, pastMistakes);
+    playSound('success');
+  }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
+  
+  const handleGetHint = useCallback(async (playerId: number) => {
+      if (!canPlayerAct(playerId)) return;
+      const player = players.find(p => p.id === playerId);
+      if (!player || player.money < HINT_COST || !currentSentence || hints[playerId]?.text) return;
+      
+      playSound('hint');
+      setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: p.money - HINT_COST} : p));
+      setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + HINT_COST }));
+      setHints(h => ({...h, [playerId]: { text: '', isLoading: true }}));
+      
+      try {
+        const hintText = await GeminiService.getHint(currentSentence.text, settings.topic, settings.level as any);
+        setHints(h => ({...h, [playerId]: { text: hintText, isLoading: false }}));
+      } catch (err: any) {
+        setHints(h => ({...h, [playerId]: { text: 'Hint error. Please try again.', isLoading: false }}));
+        setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: player.money } : p)); 
+        setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) - HINT_COST }));
+        setError({title: "Hint Error", message: "Could not fetch hint from AI."})
+      }
+  }, [canPlayerAct, players, currentSentence, settings.topic, settings.level, playSound, hints]); 
+  
+  const handleBetChange = useCallback((playerId: number, field: keyof Bet, value: any) => {
+    if (!canPlayerAct(playerId)) return;
+    const player = players.find(p => p.id === playerId);
+    if (!player) return;
+
+    let finalValue = value;
+    if (field === 'bet') {
+      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
+      const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
+      const capLimit = playerCaps.length > 0 
+        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+        : (isCapped ? 50 : BET_CAP_AMOUNT);
+      const maxBetAmount = isCapped ? Math.min(player.money, capLimit) : player.money;
+
+      if (value === '') {
+        finalValue = '';
+      } else {
+        const num = parseInt(String(value), 10);
+        if (isNaN(num)) {
+            finalValue = ''; 
+        } else {
+            finalValue = Math.max(0, Math.min(num, maxBetAmount));
+        }
+      }
+    }
+    setBets(prev => {
+      const newBets = {
+        ...prev,
+        [playerId]: {
+          ...(prev[playerId] || {}),
+          [field]: finalValue
+        }
+      };
+      if (field === 'opinion' || field === 'bet') {
+          playSound('bet');
+      }
+      return newBets;
+    });
+  }, [canPlayerAct, players, activePowerUps, playSound]);
+
+  const handleUpdatePlayerMoney = useCallback((playerId: number, newAmount: number) => {
+    const validAmount = Math.max(0, newAmount);
+    setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, money: validAmount } : p));
+    setBets(prevBets => {
+      const playerBet = prevBets[playerId];
+      if (!playerBet || playerBet.bet === undefined || playerBet.bet === '') {
+        return prevBets;
+      }
+      const currentBetNum = Number(playerBet.bet);
+      if (isNaN(currentBetNum)) return prevBets;
+
+      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
+      const isCapped = playerCaps.length > 0 || (players.find(p => p.id === playerId)?.effects.some(e => e.type === 'BET_CAP') ?? false);
+      const capLimit = playerCaps.length > 0 
+        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+        : (isCapped ? 50 : BET_CAP_AMOUNT);
+      const maxAllowed = isCapped ? Math.min(validAmount, capLimit) : validAmount;
+
+      if (validAmount <= 0) {
+        if (playerBet.bet !== 0 && playerBet.bet !== '') {
+          return {
+            ...prevBets,
+            [playerId]: { ...playerBet, bet: 0 }
+          };
+        }
+      } else if (currentBetNum > maxAllowed) {
+        return {
+          ...prevBets,
+          [playerId]: {
+            ...playerBet,
+            bet: maxAllowed
+          }
+        };
+      }
+      return prevBets;
+    });
+    playSound('click');
+  }, [activePowerUps, playSound]);
+
+  // Whenever there's a change in any player's current funds, check if their bet amount isn't over their funds limit and adjust it
+  useEffect(() => {
+    setBets(prevBets => {
+      let changed = false;
+      const updatedBets = { ...prevBets };
+
+      players.forEach(player => {
+        const playerBet = updatedBets[player.id];
+        if (!playerBet || playerBet.bet === undefined || playerBet.bet === '') {
+          return;
+        }
+
+        const currentBetNum = Number(playerBet.bet);
+        if (isNaN(currentBetNum)) return;
+
+        const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+        const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : (activePowerUps[player.id] || []).includes(pu)));
+        const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
+        const capLimit = playerCaps.length > 0 
+          ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+          : (isCapped ? 50 : BET_CAP_AMOUNT);
+        const maxLimit = isCapped ? Math.min(Math.max(0, player.money), capLimit) : Math.max(0, player.money);
+
+        if (player.money <= 0) {
+          if (playerBet.bet !== 0 && playerBet.bet !== '') {
+            updatedBets[player.id] = {
+              ...playerBet,
+              bet: 0
+            };
+            changed = true;
+          }
+        } else if (currentBetNum > maxLimit) {
+          updatedBets[player.id] = {
+            ...playerBet,
+            bet: maxLimit
+          };
+          changed = true;
+        }
+      });
+
+      return changed ? updatedBets : prevBets;
+    });
+  }, [players, activePowerUps]);
+
+  const handleBuyPowerUp = useCallback((playerId: number, powerUpKey: PowerUpKey) => {
+    if (!canPlayerAct(playerId)) return;
+    const player = players.find(p => p.id === playerId);
+    if (!player || player.money < POWERUP_COST) return;
+    
+    const usage = (powerUpsUsedThisRound[playerId] || []).length;
+    const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
+    const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
+    const limit = hasPowerSurge ? 3 : 1;
+    if (usage >= limit) return;
+
+    if (!availablePowerUps.includes(powerUpKey)) return;
+
+    const powerUp = POWER_UPS[powerUpKey];
+    if (powerUp.requiresTarget) {
+      const eligibleTargets = players.filter(p => p.id !== playerId && p.money > 0);
+      const unshieldedTargets = eligibleTargets.filter(p => {
+        const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
+        return !pActivePowerUps.some(pu => pu.type === 'SHIELD');
+      });
+      if (eligibleTargets.length === 0 || unshieldedTargets.length === 0) {
+        playSound('error');
+        setShowPowerUpModal({
+          title: "No Available Targets",
+          message: eligibleTargets.length === 0
+            ? `There are no other active players at the table to target with ${powerUp.name}! Your $50 was not spent.`
+            : `All other active players have an active Shield! Cannot target anyone with ${powerUp.name}. Your $50 was not spent.`,
+          icon: "⚠️"
+        });
+        return;
+      }
+    }
+
+    playSound('powerUp');
+    const newMoney = player.money - POWERUP_COST;
+
+    setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: newMoney} : p));
+    setPowerUpsUsedThisRound(prev => ({...prev, [playerId]: [...(prev[playerId] || []), { key: powerUpKey }]}));
+    setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + POWERUP_COST }));
+
+    if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newMoney) {
+        setBets(b => ({...b, [playerId]: {...b[playerId], bet: newMoney }}));
+    }
+    
+    setAvailablePowerUps(avail => avail.filter(p => p !== powerUpKey));
+
+    if (powerUp.requiresTarget) {
+        setShowTargetModal({ powerUp: powerUpKey, playerId });
+    } else {
+        // ... (Immediate effect logic)
+        let modalMessage = `${powerUp.icon} ${powerUp.description}`;
+        
+        if (powerUpKey === 'GRAMMAR_GOGGLES' && currentSentence) {
+            setHighlightedPhrase(currentSentence.grammarPhrase || 'the key part of the sentence');
+            setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
+        } else if (powerUpKey === 'TAXMAN') {
+            let taxCollected = 0;
+            const updatedTaxedPlayers = players.map(p => {
+                const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
+                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
+                    const tax = Math.min(TAXMAN_AMOUNT, p.money);
+                    taxCollected += tax;
+                    return {...p, money: p.money - tax};
+                }
+                return p;
+            });
+            setPlayers(updatedTaxedPlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p)); 
+            modalMessage = `${powerUp.icon} You collected $${taxCollected} from other players!`;
+        } else if (powerUpKey === 'THE_TITHE') {
+             let taxCollected = 0;
+             const updatedTithePlayers = players.map(p => {
+                const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
+                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
+                    const tax = Math.floor(p.money * 0.10);
+                    taxCollected += tax;
+                    return {...p, money: p.money - tax};
+                }
+                return p;
+             });
+             setPlayers(updatedTithePlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p));
+             modalMessage = `${powerUp.icon} You tithed $${taxCollected} (10%) from others!`;
+        } else if (powerUpKey === 'GENEROUS') {
+            const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
+            const totalGiftCost = activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT;
+            const playerMoneyAfterGift = Math.max(0, newMoney - totalGiftCost);
+            setPlayers(ps => ps.map(p => {
+                if (p.id === playerId) return {...p, money: playerMoneyAfterGift };
+                if (activePlayers.find(ap => ap.id === p.id)) return {...p, money: p.money + GENEROUS_GIFT_AMOUNT}; 
+                return p;
+            }));
+             modalMessage = `${powerUp.icon} You gave $${GENEROUS_GIFT_AMOUNT} to ${activeOtherPlayersCount} other player(s).`;
+        } else if (powerUpKey === 'GUARDIAN_ANGEL') {
+            const newActivePowerUps = { ...activePowerUps };
+            Object.keys(newActivePowerUps).forEach(sourceId => {
+                const sId = Number(sourceId);
+                newActivePowerUps[sId] = (newActivePowerUps[sId] as ActivePowerUp[]).filter((pu: ActivePowerUp) => {
+                    if (pu.target === playerId && ['HALF_BAKED', 'SUB_ZERO', 'CRUCIO', 'THE_PUNISHER', 'BET_CAP', 'SILENCED'].includes(pu.type)) {
+                        return false; 
+                    }
+                    return true;
+                });
+            });
+            newActivePowerUps[playerId] = [...(newActivePowerUps[playerId] || []), {type: powerUpKey}];
+            setActivePowerUps(newActivePowerUps);
+            setPlayers(ps => ps.map(p => {
+                if (p.id === playerId) {
+                    return { ...p, effects: p.effects.filter(e => e.type !== 'CRUCIO' && e.type !== 'SILENCED') };
+                }
+                return p;
+            }));
+            modalMessage = `${powerUp.icon} You are cleansed and protected!`;
+        } else if (powerUpKey === 'BLESSING') {
+             setPlayers(ps => ps.map(p => {
+                 if (p.id === playerId) {
+                     return { ...p, effects: [...p.effects, { type: 'BLESSING', roundsLeft: 3 }] };
+                 }
+                 return p;
+             }));
+             modalMessage = `${powerUp.icon} You are Blessed for 3 rounds! (30% of your losses will be forgiven)`;
+        } else if (powerUpKey === 'SECOND_CHANCE') {
+             setPlayers(ps => ps.map(p => {
+                 if (p.id === playerId) {
+                     return { ...p, effects: [...p.effects, { type: 'SECOND_CHANCE', roundsLeft: -1 }] };
+                 }
+                 return p;
+             }));
+             modalMessage = `${powerUp.icon} You have a Second Chance! (Auto-revive at $0)`;
+        } else if (powerUpKey === 'ROBIN_HOOD') {
+             const richestAmount = Math.max(...activePlayers.map(p => p.money));
+             const richestPlayers = activePlayers.filter(p => p.money === richestAmount);
+             
+             let totalStolen = 0;
+             const stolenLog: string[] = [];
+             
+             // Phase 1: Steal from Richest
+             const newPlayerState = players.map(p => {
+                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
+                 const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                 
+                 if (richestPlayers.find(rp => rp.id === p.id) && !isShielded) {
+                     const stolen = Math.floor(p.money * 0.20);
+                     totalStolen += stolen;
+                     stolenLog.push(`${p.name} (-$${stolen})`);
+                     return { ...p, money: p.money - stolen };
+                 }
+                 return p;
+             });
+             
+             // Phase 2: Distribute to others (beneficiaries)
+             const beneficiaries = newPlayerState.filter(p => !richestPlayers.find(rp => rp.id === p.id) && p.money > 0);
+             
+             if (beneficiaries.length > 0 && totalStolen > 0) {
+                 const share = Math.floor(totalStolen / beneficiaries.length);
+                 const receivedLog: string[] = [];
+                 
+                 setPlayers(newPlayerState.map(p => {
+                     if (beneficiaries.find(b => b.id === p.id)) {
+                         receivedLog.push(`${p.name} (+$${share})`);
+                         return { ...p, money: p.money + share };
+                     }
+                     return p;
+                 }));
+                 
+                 modalMessage = `${powerUp.icon} Robin Hood Redistribution!\n\n` + 
+                                `📉 Taken from:\n${stolenLog.join('\n')}\n\n` +
+                                `📈 Given to:\n${receivedLog.join('\n')}`;
+             } else {
+                 setPlayers(newPlayerState); 
+                 if (totalStolen > 0) {
+                     modalMessage = `${powerUp.icon} Robin Hood stole from ${stolenLog.join(', ')} but found no one else to give to! (Money lost)`;
+                 } else {
+                     modalMessage = `${powerUp.icon} Robin Hood found the rich too heavily guarded! No money stolen.`;
+                 }
+             }
+
+        } else if (powerUpKey === 'THE_WHEEL') {
+            setShowWheelModal({ playerId });
+            return;
+        } else if (powerUpKey === 'TEACHERS_PET') {
+            if (player.winStreak >= 3) {
+                const grant = Math.floor(newMoney * 0.5);
+                setPlayers(ps => ps.map(p => {
+                    if (p.id === playerId) {
+                        const remainingEffects = p.effects.filter(e => e.type !== 'TEACHERS_PET');
+                        return { ...p, money: newMoney + grant, effects: remainingEffects };
+                    }
+                    return p;
+                }));
+                modalMessage = `${powerUp.icon} Teacher's Pet Honor Roll! You already have a ${player.winStreak}-round win streak! The House grants you an additional 50% of your funds (+$${grant.toLocaleString()})!`;
+            } else {
+                setPlayers(ps => ps.map(p => {
+                    if (p.id === playerId) {
+                        const existingWithout = p.effects.filter(e => e.type !== 'TEACHERS_PET');
+                        return { ...p, effects: [...existingWithout, { type: 'TEACHERS_PET', roundsLeft: -1 }] };
+                    }
+                    return p;
+                }));
+                setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
+                modalMessage = `${powerUp.icon} Teacher's Pet Active! Whenever you reach a 3-win streak, the House will grant you +50% of your funds! (Current streak: ${player.winStreak}/3)`;
+            }
+        } else if (powerUpKey === 'CORRECTION_BOUNTY') {
+            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
+            modalMessage = `${powerUp.icon} Correction Bounty Active! If the sentence is Incorrect, you bet on "Incorrect", and properly correct it, you will earn an extra bonus of 100% of your bet!`;
+        } else if (powerUpKey === 'LONE_WOLF') {
+            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
+            modalMessage = `${powerUp.icon} Lone Wolf Active! If you are the only player at the table who bets on the correct outcome while all other players pick the wrong side, you win a 3× payout!`;
+        } else {
+            setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
+        }
+        setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon});
+    }
+  }, [canPlayerAct, players, activePlayers, currentSentence, availablePowerUps, bets, powerUpsUsedThisRound, playSound, activePowerUps]); 
+
+  const handleApplyWheelResult = useCallback((playerId: number, item: WheelItem) => {
+    switch (item.id) {
+      case 'jackpot': {
+        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + 500 } : p));
+        break;
+      }
+      case 'house_tax': {
+        setPlayers(ps => ps.map(p => {
+          if (p.id === playerId) {
+            const newM = Math.max(0, p.money - 100);
+            if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
+              setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
+            }
+            return { ...p, money: newM };
+          }
+          return p;
+        }));
+        break;
+      }
+      case 'shield': {
+        setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SHIELD' }] }));
+        break;
+      }
+      case 'freeze': {
+        setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SUB_ZERO', target: playerId }] }));
+        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, effects: [...p.effects, { type: 'SUB_ZERO', roundsLeft: 1 }] } : p));
+        setBets(b => ({ ...b, [playerId]: { bet: 0, opinion: undefined } }));
+        break;
+      }
+      case 'safety_net': {
+        setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SAFETY_NET' }] }));
+        break;
+      }
+      case 'silenced': {
+        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, effects: [...p.effects, { type: 'SILENCED', roundsLeft: 2 }] } : p));
+        break;
+      }
+      case 'bounty': {
+        let stolen = 0;
+        setPlayers(ps => {
+          const updated = ps.map(p => {
+            if (p.id !== playerId && p.money > 0) {
+              const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              if (!isShielded) {
+                const take = Math.min(100, p.money);
+                stolen += take;
+                return { ...p, money: p.money - take };
+              }
+            }
+            return p;
+          });
+          return updated.map(p => p.id === playerId ? { ...p, money: p.money + stolen } : p);
+        });
+        setBets(prevBets => {
+          let nextBets = { ...prevBets };
+          let changed = false;
+          players.forEach(p => {
+            if (p.id !== playerId && nextBets[p.id]?.bet) {
+              const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              if (!isShielded) {
+                const remainingMoney = Math.max(0, p.money - 100);
+                if (Number(nextBets[p.id].bet) > remainingMoney) {
+                  nextBets[p.id] = { ...nextBets[p.id], bet: remainingMoney };
+                  changed = true;
+                }
+              }
+            }
+          });
+          return changed ? nextBets : prevBets;
+        });
+        break;
+      }
+      case 'bet_cap': {
+        setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'BET_CAP', target: playerId, amount: 50 }] }));
+        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, effects: [...p.effects, { type: 'BET_CAP', roundsLeft: 1 }] } : p));
+        setBets(prevBets => {
+          const currentBet = prevBets[playerId]?.bet;
+          if (currentBet !== undefined && currentBet !== '' && Number(currentBet) > 50) {
+            return {
+              ...prevBets,
+              [playerId]: { ...prevBets[playerId], bet: 50 }
+            };
+          }
+          return prevBets;
+        });
+        break;
+      }
+      case 'lucky_refund': {
+        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + 300 } : p));
+        break;
+      }
+      case 'forced_charity': {
+        setPlayers(ps => {
+          const otherActive = ps.filter(p => p.id !== playerId && p.money > 0);
+          const totalCost = otherActive.length * 25;
+          return ps.map(p => {
+            if (p.id === playerId) {
+              const newM = Math.max(0, p.money - totalCost);
+              if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
+                setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
+              }
+              return { ...p, money: newM };
+            }
+            if (otherActive.some(oa => oa.id === p.id)) {
+              return { ...p, money: p.money + 25 };
+            }
+            return p;
+          });
+        });
+        break;
+      }
+      default:
+        break;
+    }
+
+    setShowPowerUpModal({
+      title: item.type === 'positive' ? '🎡 Fortune Smiled!' : '🎡 Misfortune Struck!',
+      message: `${item.icon} ${item.name} (${item.shortDesc}): ${item.description}`,
+      icon: item.icon,
+    });
+  }, [bets, activePowerUps, players]); 
+  
+  const handleBuyRandomPowerUp = useCallback((playerId: number) => {
+    if (!canPlayerAct(playerId)) return;
+    const player = players.find(p => p.id === playerId);
+    if (!player || player.money < POWERUP_COST) return; 
+    const usage = (powerUpsUsedThisRound[playerId] || []).length;
+    const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
+    const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
+    const limit = hasPowerSurge ? 3 : 1;
+    if (usage >= limit) return;
+    if (availablePowerUps.length === 0) {
+         setError({ title: "Empty Deck", message: "No more power-ups available in the deck for this round!" });
+         return;
+    }
+    const randomIndex = Math.floor(Math.random() * availablePowerUps.length);
+    const selectedPowerUp = availablePowerUps[randomIndex];
+    handleBuyPowerUp(playerId, selectedPowerUp);
+  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, handleBuyPowerUp]);
+
+  const handleTogglePowerUpInDeck = useCallback((key: PowerUpKey) => {
+    const isCurrentlyActive = selectedPowerUps.includes(key);
+    if (isCurrentlyActive) {
+      // Deactivate from deck
+      setSelectedPowerUps(prev => prev.filter(k => k !== key));
+      setAvailablePowerUps(prev => prev.filter(k => k !== key));
+      playSound('click');
+    } else {
+      // Activate in deck
+      setSelectedPowerUps(prev => [...prev, key]);
+      setAvailablePowerUps(prev => prev.includes(key) ? prev : [...prev, key]);
+      playSound('powerUp');
+    }
+  }, [selectedPowerUps, playSound]);
+
+  const handleToggleAllPowerUps = useCallback((activateAll: boolean) => {
+    const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+    if (activateAll) {
+      setSelectedPowerUps(allKeys);
+      setAvailablePowerUps(allKeys);
+      playSound('powerUp');
+    } else {
+      setSelectedPowerUps([]);
+      setAvailablePowerUps([]);
+      playSound('click');
+    }
+  }, [playSound]);
+
+  const handleOpenSettingsModal = useCallback((tab: SettingsModalTab = 'topic') => {
+    playSound('click');
+    setSettingsModalTab(tab);
+    setShowSettingsModal(true);
+  }, [playSound]);
+
+  const handleSaveNextRoundSettings = useCallback((newSettings: Settings) => {
+    setNextRoundSettings(newSettings);
+    setShowSettingsModal(false);
+  }, []);
+
+  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
+    setSettings(newSettings);
+    setNextRoundSettings(null);
+    setShowSettingsModal(false);
+    setBets({});
+    setHints({});
+    setPowerUpsUsedThisRound({});
+    setActivePowerUps({});
+    setHighlightedPhrase(null);
+    setIsCopied(false);
+    setIsSentenceRevealed(false);
+    setAvailablePowerUps(selectedPowerUps);
+    setRoundSpending({});
+    setSimplifiedExplanation({ text: null, loading: false });
+    setTurnTimers({});
+    setTeacherRevealOverride(false);
+    fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
+  }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
+
+  const handleTargetedPowerUp = useCallback((targetId: number) => {
+    if (!showTargetModal) return;
+    const { powerUp: powerUpKey, playerId } = showTargetModal;
+    const powerUpInfo = POWER_UPS[powerUpKey];
+    const targetPlayer = players.find(p => p.id === targetId);
+    
+    const targetActivePowerUps = (activePowerUps[targetId] || []) as ActivePowerUp[];
+    const isTargetShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD');
+    if (isTargetShielded) {
+        setShowTargetModal(null);
+        setShowPowerUpModal({ title: "Blocked!", message: `🛡️ ${targetPlayer?.name} has a Shield active! Power-up failed.`, icon: "🛡️" });
+        return;
+    }
+    if (!targetPlayer) return;
+
+    setPowerUpsUsedThisRound(prev => {
+        const playerUsage = [...(prev[playerId] || [])];
+        let index = -1;
+        for(let i = playerUsage.length - 1; i >= 0; i--) {
+            if (playerUsage[i].key === powerUpKey && !playerUsage[i].targetId) {
+                index = i;
+                break;
+            }
+        }
+        if (index === -1) {
+            for(let i = playerUsage.length - 1; i >= 0; i--) {
+                if (playerUsage[i].key === powerUpKey) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        if (index !== -1) {
+            playerUsage[index] = { ...playerUsage[index], targetId: targetId };
+        }
+        return { ...prev, [playerId]: playerUsage };
+    });
+
+    let customModalMessage: string | null = null;
+
+    if (powerUpKey === 'THE_PUNISHER') {
+        const newMoney = Math.floor(targetPlayer.money * 0.75);
+        setPlayers(ps => ps.map(p => p.id === targetId ? {...p, money: newMoney} : p));
+    } else if (powerUpKey === 'SWAP') {
+        const sourcePlayer = players.find(p => p.id === playerId);
+        const sourceFunds = sourcePlayer ? sourcePlayer.money : 0;
+        const targetFunds = targetPlayer.money;
+        setPlayers(ps => ps.map(p => {
+            if (p.id === playerId) return { ...p, money: targetFunds };
+            if (p.id === targetId) return { ...p, money: sourceFunds };
+            return p;
+        }));
+        setBets(prevBets => {
+            let nextBets = { ...prevBets };
+            let changed = false;
+            if (nextBets[playerId]?.bet && Number(nextBets[playerId].bet) > targetFunds) {
+                nextBets[playerId] = { ...nextBets[playerId], bet: targetFunds };
+                changed = true;
+            }
+            if (nextBets[targetId]?.bet && Number(nextBets[targetId].bet) > sourceFunds) {
+                nextBets[targetId] = { ...nextBets[targetId], bet: sourceFunds };
+                changed = true;
+            }
+            return changed ? nextBets : prevBets;
+        });
+        customModalMessage = `${powerUpInfo.icon} Vault Swap! You swapped your $${sourceFunds.toLocaleString()} with ${targetPlayer.name}'s $${targetFunds.toLocaleString()}!`;
+    } else if (powerUpKey === 'CRUCIO') {
+        setPlayers(ps => ps.map(p => {
+            if (p.id === targetId) {
+                return { ...p, effects: [...p.effects, { type: 'CRUCIO', roundsLeft: 3 }] };
+            }
+            return p;
+        }));
+    } else if (powerUpKey === 'SILENCER') {
+        const targetUsage = powerUpsUsedThisRound[targetId] || [];
+        const hasUsedPowerUp = targetUsage.length > 0;
+        // If they used one, silence carries to next round (2 ticks). If not, just this round (1 tick).
+        const duration = hasUsedPowerUp ? 2 : 1;
+
+        setPlayers(ps => ps.map(p => {
+            if (p.id === targetId) {
+                return { ...p, effects: [...p.effects, { type: 'SILENCED', roundsLeft: duration }] };
+            }
+            return p;
+        }));
+    } else {
+        setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey, target: targetId, ...(powerUpKey === 'BET_CAP' ? { amount: BET_CAP_AMOUNT } : {})}]}));
+    }
+    
+    // Automatically clamp target's bet even if their bet is already locked
+    if (powerUpKey === 'BET_CAP') {
+      setBets(prev => {
+        const targetBet = prev[targetId]?.bet;
+        if (targetBet !== undefined && targetBet !== '' && Number(targetBet) > BET_CAP_AMOUNT) {
+          return { ...prev, [targetId]: { ...(prev[targetId] || {}), bet: BET_CAP_AMOUNT } };
+        }
+        return prev;
+      });
+    }
+
+    playSound('powerUp');
+    setShowTargetModal(null);
+    setShowPowerUpModal({ title: powerUpInfo.name, message: customModalMessage || `${powerUpInfo.icon} You used ${powerUpInfo.name} on ${targetPlayer.name}. ${powerUpInfo.description}`, icon: powerUpInfo.icon});
+  }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound]); 
+
+  const handleCancelTargetModal = useCallback(() => {
+    if (!showTargetModal) return;
+    if (showTargetModal.powerUp === 'SWAP') return; // The Swap power-up cannot be refunded
+    const { playerId, powerUp: powerUpKey } = showTargetModal;
+    setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
+    setPowerUpsUsedThisRound(prev => {
+      const list = prev[playerId] || [];
+      const idx = list.map(u => u.key).lastIndexOf(powerUpKey);
+      if (idx !== -1) {
+        const next = [...list];
+        next.splice(idx, 1);
+        return { ...prev, [playerId]: next };
+      }
+      return prev;
+    });
+    setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - POWERUP_COST) }));
+    setAvailablePowerUps(avail => avail.includes(powerUpKey) ? avail : [...avail, powerUpKey]);
+    setShowTargetModal(null);
+    playSound('click');
+  }, [showTargetModal, playSound]); 
+
+  const verifyPlayerCorrections = useCallback(async () => {
+    if (!currentSentence || currentSentence.isCorrect) return {}; 
+    const playersToVerify = activePlayers.filter(p => {
+        if (isPlayerFrozen(p.id)) return false;
+        if (isTurnTimerEnabled && !hasPlayerPlacedBet(p.id)) return false;
+        const b = bets[p.id];
+        if (!b) return false;
+        
+        const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+        const isIncorrectVote = hasSplitBet 
+            ? (b.splitCorrectPercent ?? 50) < 100 
+            : b.opinion === 'incorrect';
+            
+        return isIncorrectVote && b.userCorrection?.trim();
+    });
+
+    const verifications: Record<number, {isCorrect: boolean; feedback: string}> = {};
+    for (const player of playersToVerify) {
+      setProcessingStatus(`Verifying ${player.name}'s correction...`);
+      const userCorrection = bets[player.id]?.userCorrection || "";
+      try {
+        verifications[player.id] = await GeminiService.verifyCorrection(currentSentence.text, userCorrection, currentSentence.correction);
+      } catch (err: any) {
+        verifications[player.id] = { isCorrect: false, feedback: "AI Judge could not verify due to an error." };
+      }
+    }
+    setProcessingStatus('');
+    return verifications;
+  }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
+
+  // Logic remains same as previous step, just re-rendered for context if needed
+  const handleRevealResults = useCallback(async () => {
+    const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
+
+    if (isTurnTimerEnabled) {
+      const allLocked = unfrozenPlayers.every(p => turnTimers[p.id]?.status === 'locked');
+      if (!allLocked && !teacherRevealOverride) {
+        setError({ title: "Turns Still Active", message: "Every active player's turn must be locked before revealing results (or use Teacher Override)." });
+        return;
+      }
+    } else {
+      const allValidBetsFinalized = unfrozenPlayers.every(p => {
+        const playerBet = bets[p.id];
+        const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
+        const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+        if (hasSplitBet) return hasValidBetAmount;
+        return playerBet?.opinion && hasValidBetAmount;
+      });
+
+      if (!allValidBetsFinalized && !teacherRevealOverride) { 
+        setError({ title: "Invalid Bets", message: "All active (unfrozen) players must select an opinion and enter a bet."});
+        return;
+      }
+    }
+
+    if (!currentSentence) {
+      setError({ title: "Game Error", message: "No sentence loaded to evaluate."});
+      return;
+    }
+
+    // Lock all active players' timers when results are revealed
+    if (isTurnTimerEnabled) {
+      setTurnTimers(prev => {
+        const next = { ...prev };
+        activePlayers.forEach(p => {
+          next[p.id] = {
+            status: 'locked',
+            remainingMs: 0,
+            held: false,
+            endsAt: undefined,
+            skipped: prev[p.id]?.skipped || isPlayerFrozen(p.id),
+          };
+        });
+        return next;
+      });
+    }
+
+    // Active participating players (excluding frozen players and, when timer is on, players who didn't bet)
+    const validPlayers = unfrozenPlayers.filter(p => isTurnTimerEnabled ? hasPlayerPlacedBet(p.id) : true);
+
+    playSound('flip');
+    setIsProcessing(true);
+    const verifications = await verifyPlayerCorrections();
+    setProcessingStatus('Calculating results...');
+    
+    let winSoundCount = 0;
+    let loseSoundCount = 0;
+    const newRoundResultsData: RoundResultInfo[] = [];
+    const newRoundPlayerResults: RoundPlayerResult[] = [];
+
+    let correctCount = 0;
+    let incorrectCount = 0;
+    validPlayers.forEach(p => {
+        if (bets[p.id]?.opinion === 'correct') correctCount++;
+        if (bets[p.id]?.opinion === 'incorrect') incorrectCount++;
+    });
+    const minorityOpinion = correctCount < incorrectCount ? 'correct' : (incorrectCount < correctCount ? 'incorrect' : null);
+
+    // Calculate count of players who picked the correct outcome (for Lone Wolf)
+    const winningPlayersCount = validPlayers.filter(p => {
+        const b = bets[p.id];
+        if (!b) return false;
+        const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+        const pSplit = pActive.some(pu => pu.type === 'SPLIT_BET');
+        if (pSplit) {
+            const splitPct = b.splitCorrectPercent ?? 50;
+            const winningFrac = currentSentence.isCorrect ? (splitPct / 100) : (1 - splitPct / 100);
+            return winningFrac > 0.5;
+        }
+        return (b.opinion === 'correct' && currentSentence.isCorrect) ||
+               (b.opinion === 'incorrect' && !currentSentence.isCorrect);
+    }).length;
+
+    const updatedPlayers = players.map(player => {
+      if (!activePlayers.find(ap => ap.id === player.id)) return player; 
+      
+      const allActivePowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+      const playerPowerUps = (activePowerUps[player.id] || []) as ActivePowerUp[];
+
+      const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+      if (isFrozen) {
+          newRoundResultsData.push({ name: player.name, bet: 0, opinion: 'correct', outcomeText: 'Frozen ❄️', newTotal: player.money, correctionFeedback:'', amountChanged: 0 });
+          newRoundPlayerResults.push({
+            playerId: player.id,
+            playerName: player.name,
+            playerAvatar: player.avatar,
+            bet: 0,
+            opinion: 'correct',
+            isWin: false,
+            amountChanged: 0,
+            newTotal: player.money,
+          });
+          const updatedEffects = player.effects.map(e => ({...e, roundsLeft: e.roundsLeft - 1})).filter(e => e.roundsLeft > 0 || e.roundsLeft === -1);
+          return { ...player, effects: updatedEffects };
+      }
+
+      // If turn timer is active (or teacher overrode) and player did not place a complete bet, they sit out as if frozen
+      const satOut = isTurnTimerEnabled ? !hasPlayerPlacedBet(player.id) : !hasPlayerPlacedBet(player.id) && teacherRevealOverride;
+      if (satOut) {
+          newRoundResultsData.push({ name: player.name, bet: 0, opinion: 'correct', outcomeText: 'Sat Out ⏱️', newTotal: player.money, correctionFeedback: '', amountChanged: 0 });
+          newRoundPlayerResults.push({
+            playerId: player.id,
+            playerName: player.name,
+            playerAvatar: player.avatar,
+            bet: 0,
+            opinion: 'correct',
+            isWin: false,
+            amountChanged: 0,
+            newTotal: player.money,
+          });
+          const updatedEffects = player.effects.map(e => ({...e, roundsLeft: e.roundsLeft - 1})).filter(e => e.roundsLeft > 0 || e.roundsLeft === -1);
+          return { ...player, effects: updatedEffects };
+      }
+
+      let playerBetData = bets[player.id];
+      const betAmount = (typeof playerBetData?.bet === 'number') ? playerBetData.bet : 0;
+      const hasSplitBet = playerPowerUps.some(pu => pu.type === 'SPLIT_BET');
+      const playerCaps = allActivePowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerPowerUps.includes(pu)));
+      const isPlayerBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
+      const playerCapLimit = playerCaps.length > 0 
+        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+        : (isPlayerBetCapped ? 50 : BET_CAP_AMOUNT);
+      let finalBet = isPlayerBetCapped ? Math.min(betAmount, playerCapLimit) : betAmount;
+      
+      let outcomeAmount = 0;
+      let outcomeText = '';
+      let correctionBonusApplied = false;
+      let isWin = false;
+      let correctionFeedbackText = '';
+
+      if (hasSplitBet) {
+          const splitPercent = playerBetData?.splitCorrectPercent ?? 50;
+          const fractionCorrect = splitPercent / 100;
+          const fractionIncorrect = 1 - fractionCorrect;
+          const wager = finalBet; 
+          let winnings = 0;
+          if (currentSentence.isCorrect) {
+              winnings = (wager * fractionCorrect) * 2;
+          } else {
+              winnings = (wager * fractionIncorrect) * 2;
+          }
+          outcomeAmount = Math.floor(winnings - wager);
+          if (outcomeAmount > 0) {
+              isWin = true;
+              outcomeText = `Split Bet Win (+$${outcomeAmount})`;
+              playSound('win', winSoundCount++);
+          } else if (outcomeAmount < 0) {
+              isWin = false;
+              outcomeText = `Split Bet Loss (-$${Math.abs(outcomeAmount)})`;
+              playSound('lose', loseSoundCount++);
+          } else {
+              outcomeText = 'Split Bet (Even) ⚖️';
+          }
+
+          // Split bet correction bonus
+           if (!currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
+              const bonus = Math.floor(wager * fractionIncorrect); 
+              outcomeAmount += bonus;
+              outcomeText += ' + Correction! 🧠';
+              correctionBonusApplied = true;
+          }
+
+          // Correction Bounty in split bet (requires proper sentence correction)
+          const hasCorrectionBounty = playerPowerUps.some(pu => pu.type === 'CORRECTION_BOUNTY');
+          if (hasCorrectionBounty && !currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
+              const bountyBonus = Math.floor(wager * fractionIncorrect);
+              outcomeAmount += bountyBonus;
+              outcomeText += ` + Correction Bounty (+$${bountyBonus})! 📝`;
+          }
+
+          // Lone Wolf in split bet
+          const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
+          if (hasLoneWolf && isWin && winningPlayersCount === 1) {
+              outcomeAmount = Math.round(outcomeAmount * 3);
+              outcomeText += ' + Lone Wolf (3x Payout)! 🐺';
+          }
+
+      } else {
+          if (!playerBetData || !playerBetData.opinion) return player;
+          const opinionMatchesSentence = (playerBetData.opinion === 'correct' && currentSentence.isCorrect) || 
+                                       (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect);
+
+          if (opinionMatchesSentence) {
+            isWin = true;
+            playSound('win', winSoundCount++);
+            let winnings = finalBet;
+
+            const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
+            const isLoneWolfActive = hasLoneWolf && winningPlayersCount === 1;
+            if (isLoneWolfActive) {
+                winnings = finalBet * 3;
+            }
+
+            const isHalfBaked = allActivePowerUps.some(pu => pu.type === 'HALF_BAKED' && pu.target === player.id);
+            if (isHalfBaked) winnings *= 0.5;
+            outcomeAmount = Math.round(winnings);
+            outcomeText = isLoneWolfActive ? 'Win (Lone Wolf 3x!) 🐺' : 'Win';
+            
+            const hasBountyHunter = playerPowerUps.some(pu => pu.type === 'BOUNTY_HUNTER');
+            if (hasBountyHunter && minorityOpinion === playerBetData.opinion) {
+                outcomeAmount = Math.round(outcomeAmount * 1.5);
+                outcomeText += ' + Bounty! 🎯';
+            }
+            if (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+              outcomeAmount += finalBet; 
+              outcomeText += ' + Correction! 🧠';
+              correctionBonusApplied = true;
+            }
+            const hasCorrectionBounty = playerPowerUps.some(pu => pu.type === 'CORRECTION_BOUNTY');
+            if (hasCorrectionBounty && playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+              outcomeAmount += finalBet;
+              outcomeText += ` + Correction Bounty (+$${finalBet})! 📝`;
+            }
+            const hasJackpot = playerPowerUps.some(pu => pu.type === 'JACKPOT');
+            if (hasJackpot) {
+              outcomeAmount = Math.round(outcomeAmount * JACKPOT_MULTIPLIER);
+              outcomeText += ' + Jackpot! 🎰';
+            }
+            const hasSnowball = playerPowerUps.some(pu => pu.type === 'SNOWBALL');
+            if (hasSnowball && player.winStreak > 0) {
+                const snowballBonus = Math.round(outcomeAmount * (0.10 * player.winStreak));
+                outcomeAmount += snowballBonus;
+                outcomeText += ` + Snowball (${player.winStreak}x)! ⛄`;
+            }
+            const hasCrucio = player.effects.some(e => e.type === 'CRUCIO');
+            if (hasCrucio) {
+                const crucioPenalty = Math.round(outcomeAmount * 0.20);
+                outcomeAmount -= crucioPenalty;
+                outcomeText += ' - Crucio ⛓️';
+            }
+          } else { 
+            isWin = false;
+            playSound('lose', loseSoundCount++);
+            let lossAmount = finalBet;
+            outcomeText = 'Lose';
+            const hasImmunity = playerPowerUps.some(pu => pu.type === 'IMMUNITY_IDOL');
+            if (hasImmunity) {
+                lossAmount = 0;
+                outcomeText = 'Immunity Save! 🗿';
+            } else {
+                const hasSafetyNet = playerPowerUps.some(pu => pu.type === 'SAFETY_NET');
+                if (hasSafetyNet) {
+                    lossAmount *= 0.5;
+                    outcomeText += ' (Safety Net) 🦺';
+                }
+                const hasBlessing = player.effects.some(e => e.type === 'BLESSING');
+                if (hasBlessing) {
+                    const forgiven = Math.round(lossAmount * 0.30);
+                    lossAmount -= forgiven;
+                    outcomeText += ' (Blessed: 30% Saved) 💖';
+                }
+            }
+            outcomeAmount = -Math.round(lossAmount);
+          }
+      }
+
+      const hasSavings = playerPowerUps.some(pu => pu.type === 'SAVINGS_ACCOUNT');
+      if (hasSavings) {
+          const unbetMoney = player.money - finalBet; 
+          if (unbetMoney > 0) {
+              const interest = Math.round(unbetMoney * 0.40);
+              outcomeAmount += interest;
+              outcomeText += ` + Interest (+$${interest.toLocaleString()}) 🏦`;
+          }
+      }
+
+      // Teacher's Pet bonus (awarded if player already has a 3-win streak or whenever they reach a 3-win streak)
+      const hasTeachersPet = player.effects.some(e => e.type === 'TEACHERS_PET') || playerPowerUps.some(pu => pu.type === 'TEACHERS_PET');
+      let teachersPetAwarded = false;
+      if (hasTeachersPet && isWin && (player.winStreak + 1) >= 3) {
+          const petGrant = Math.floor(player.money * 0.5);
+          outcomeAmount += petGrant;
+          outcomeText += ` + Teacher's Pet (+$${petGrant.toLocaleString()})! 🍎`;
+          teachersPetAwarded = true;
+      }
+      
+      let newMoney = Math.max(0, player.money + outcomeAmount);
+
+      // Check for Second Chance
+      const secondChanceEffect = player.effects.find(e => e.type === 'SECOND_CHANCE');
+      if (newMoney <= 0 && secondChanceEffect) {
+          newMoney = 100;
+          outcomeText += " (Second Chance!) 👼";
+          // Mark to remove later in updatedEffects
+      }
+
+      // Updated Correction Feedback Logic to support Split Bet
+      const attemptedCorrection = hasSplitBet 
+          ? (!currentSentence.isCorrect && (playerBetData?.splitCorrectPercent ?? 50) < 100 && playerBetData?.userCorrection?.trim())
+          : (playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && playerBetData?.userCorrection?.trim());
+
+      if (attemptedCorrection) {
+          correctionFeedbackText = verifications[player.id]?.feedback || "Correction not evaluated.";
+          if (correctionBonusApplied) correctionFeedbackText = `Accepted! ${correctionFeedbackText}`;
+          else if((hasSplitBet && !currentSentence.isCorrect) || (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect)) { 
+            // If they tried to correct it but weren't verified correct
+             correctionFeedbackText = `Rejected for bonus. ${correctionFeedbackText}`;
+          } else correctionFeedbackText = `N/A (Sentence was correct).`;
+      } else if (hasSplitBet && (playerBetData?.splitCorrectPercent ?? 50) < 100 && !currentSentence.isCorrect) {
+          // Voted incorrect but didn't provide correction
+          // correctionFeedbackText = ""; 
+      }
+      
+      const newHistoryEntry = {
+        round: currentRound,
+        amount: outcomeAmount,
+        spent: roundSpending[player.id] || 0,
+        endTotal: newMoney,
+        sentence: currentSentence.text,
+      };
+
+      newRoundResultsData.push({ 
+        name: player.name, 
+        bet: finalBet, 
+        opinion: hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'),
+        outcomeText, 
+        newTotal: newMoney, 
+        correctionFeedback: correctionFeedbackText, 
+        amountChanged: outcomeAmount 
+      });
+
+      newRoundPlayerResults.push({
+        playerId: player.id,
+        playerName: player.name,
+        playerAvatar: player.avatar,
+        bet: finalBet,
+        opinion: hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'),
+        isWin,
+        amountChanged: outcomeAmount,
+        newTotal: newMoney,
+        userCorrection: playerBetData?.userCorrection,
+        correctionFeedback: correctionFeedbackText,
+        splitPercent: hasSplitBet ? (playerBetData?.splitCorrectPercent ?? 50) : undefined,
+      });
+      
+      // Update effects: Decrement positive rounds, keep -1 (unless consumed Second Chance or Teacher's Pet)
+      let updatedEffects = player.effects.map(e => {
+        if (e.type === 'SECOND_CHANCE' && newMoney === 100 && player.money + outcomeAmount <= 0) {
+             return null; // Consumed
+        }
+        if (e.type === 'TEACHERS_PET' && teachersPetAwarded) {
+             return null; // Consumed
+        }
+        if (e.roundsLeft > 0) return {...e, roundsLeft: e.roundsLeft - 1};
+        if (e.roundsLeft === -1) return e; // Persist indefinitely
+        return null;
+      }).filter((e): e is PlayerEffect => e !== null && (e.roundsLeft > 0 || e.roundsLeft === -1));
+
+      const newStreak = isWin ? player.winStreak + 1 : 0;
+
+      return { 
+          ...player, 
+          money: newMoney, 
+          history: [...(player.history || []), newHistoryEntry],
+          winStreak: newStreak,
+          effects: updatedEffects
+      };
+    });
+
+    setPlayers(updatedPlayers);
+    setRoundResults(newRoundResultsData);
+    if (currentSentence) {
+      const historyRecord: RoundHistoryRecord = {
+        round: currentRound,
+        sentence: currentSentence,
+        topic: settings.topic === 'Custom' ? customTopic : settings.topic,
+        level: settings.level,
+        theme: settings.theme === 'Custom' ? customTheme : settings.theme,
+        playerResults: newRoundPlayerResults,
+        timestamp: Date.now(),
+      };
+      setRoundHistory(prev => [...prev, historyRecord]);
+    }
+    setIsProcessing(false);
+    setProcessingStatus('');
+    setStep('RESULTS');
+  }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  
+  const handleNextRound = useCallback(() => {
+    const stillActivePlayers = players.filter(p => p.money > 0);
+    const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
+    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+    
+    // Logic: Game ends if round limit reached OR target amount reached OR only 1 player remains in multiplayer OR 0 players remain.
+    const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
+    const hasTargetWinner = gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount);
+    const isMultiplayerWinner = players.length > 1 && stillActivePlayers.length <= 1;
+    const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || stillActivePlayers.length === 0;
+
+    if (isGameOver) {
+        playSound('gameOver');
+        let finalWinnerPlayer: Player | null = null;
+        if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
+            const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
+            finalWinnerPlayer = qualifiers[0];
+            if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) {
+                finalWinnerPlayer = null; // Tied
+            }
+        } else if (stillActivePlayers.length === 1) {
+            finalWinnerPlayer = stillActivePlayers[0];
+        } else if (stillActivePlayers.length > 1 && isRoundLimitReached) {
+             const sortedPlayers = [...stillActivePlayers].sort((a,b) => b.money - a.money);
+             finalWinnerPlayer = sortedPlayers[0]; 
+             if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
+        } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
+        setWinner(finalWinnerPlayer);
+        setStep('GAME_OVER');
+    } else {
+        playSound('success');
+        setCurrentRound(prev => prev + 1);
+        const eliminatedPlayers = players.filter(p => p.money <= 0);
+        const playerQueue = [...stillActivePlayers.slice(1), stillActivePlayers[0]]; 
+        setPlayers([...playerQueue, ...eliminatedPlayers]);
+        setBets({});
+        setHints({});
+        setPowerUpsUsedThisRound({});
+        setActivePowerUps({});
+        setHighlightedPhrase(null);
+        setIsCopied(false);
+        setIsSentenceRevealed(false);
+        setAvailablePowerUps(selectedPowerUps); 
+        setRoundSpending({});
+        setSimplifiedExplanation({ text: null, loading: false });
+        setTurnTimers({});
+        setTeacherRevealOverride(false);
+        
+        // Pass current pastSentences history, using queued nextRoundSettings if set
+        const activeSettings = nextRoundSettings || settings;
+        if (nextRoundSettings) {
+          setSettings(nextRoundSettings);
+          setNextRoundSettings(null);
+        }
+        fetchNewSentence(activeSettings, pastSentences, undefined, pastMistakes);
+        setStep('IN_GAME');
+    }
+  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes]);
+
+  const handleEndGameEarly = useCallback(() => {
+    playSound('gameOver');
+    const stillActivePlayers = players.filter(p => p.money > 0);
+    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+    let finalWinnerPlayer: Player | null = null;
+    if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
+      const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
+      finalWinnerPlayer = qualifiers[0];
+      if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null;
+    } else if (stillActivePlayers.length === 1) {
+        finalWinnerPlayer = stillActivePlayers[0];
+    } else if (stillActivePlayers.length > 1) {
+         const sortedPlayers = [...stillActivePlayers].sort((a,b) => b.money - a.money);
+         finalWinnerPlayer = sortedPlayers[0]; 
+         if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
+    }
+    setWinner(finalWinnerPlayer);
+    setStep('GAME_OVER');
+  }, [players, gameMode, targetAmount, playSound]);
+
+  const handleRestartGame = useCallback(() => {
+    localStorage.removeItem(LOCAL_STORAGE_KEY); 
+    setStep('PLAYER_SETUP');
+    setPlayers([]);
+    setNewPlayerName('');
+    setSentenceBatch([]);
+    setSettings({ topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+    setCustomTopic('');
+    setCustomTheme('');
+    setGameMode('lastPlayer');
+    setTotalRounds(10);
+    setTargetAmount(DEFAULT_TARGET_AMOUNT);
+    setCurrentRound(1);
+    setCurrentSentence(null);
+    setPastSentences([]); // Clear history on restart
+    setPastMistakes([]);
+    setRoundHistory([]);
+    setUsedSubtypes([]);
+    setBets({});
+    setHints({});
+    setRoundResults([]);
+    setWinner(null);
+    setError(null);
+    setIsProcessing(false);
+    setProcessingStatus('');
+    setPowerUpsUsedThisRound({});
+    setActivePowerUps({});
+    setHighlightedPhrase(null);
+    setIsCopied(false);
+    setIsSentenceRevealed(false);
+    setAvailablePowerUps(Object.keys(POWER_UPS) as PowerUpKey[]);
+    setSelectedPowerUps(Object.keys(POWER_UPS) as PowerUpKey[]); 
+    setNextRoundSettings(null);
+    setRoundSpending({});
+    setSimplifiedExplanation({ text: null, loading: false });
+    setStartingCash(INITIAL_PLAYER_MONEY);
+    setIsEditingStartingCash(false);
+    setTempStartingCash(String(INITIAL_PLAYER_MONEY));
+    setTurnTimerSeconds(0);
+    setTurnTimers({});
+    setTeacherRevealOverride(false);
+    setAutoStartNextTimer(true);
+    if (playerNameInputRef.current) playerNameInputRef.current.focus();
+  }, [playSound]);
+
+  const handleLoadGameClick = useCallback(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.step === 'string') {
+        setPendingLoadGame(parsed);
+      } else {
+        throw new Error("Invalid save file format.");
+      }
+    } catch (err: any) {
+      console.error("Failed to load game:", err);
+      setError({ title: "Load Failed", message: "Could not load the game file. It might be corrupted or invalid." });
+    }
+    
+    // Reset input
+    e.target.value = '';
+  }, []);
+
+  const handleConfirmLoadGame = useCallback(() => {
+    if (!pendingLoadGame) return;
+    try {
+      const parsed = pendingLoadGame;
+      if (parsed.players) {
+        parsed.players = parsed.players.map((p: any) => ({
+            ...p,
+            avatar: p.avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+            winStreak: p.winStreak || 0,
+            effects: p.effects || []
+        }));
+      }
+      if (parsed.powerUpsUsedThisRound) {
+        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
+        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
+            const key = Number(k);
+            const val = parsed.powerUpsUsedThisRound[key];
+            if (Array.isArray(val)) {
+                 if (val.length > 0 && typeof val[0] === 'string') {
+                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
+                 } else {
+                     fixedPowerUps[key] = val; 
+                 }
+            } else {
+                 fixedPowerUps[key] = [];
+            }
+        });
+        parsed.powerUpsUsedThisRound = fixedPowerUps;
+      }
+      
+      setStep(parsed.step || 'PLAYER_SETUP');
+      setPlayers(parsed.players || []);
+      setSettings(parsed.settings || { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+      setCustomTopic(parsed.customTopic || '');
+      setCustomTheme(parsed.customTheme || '');
+      setGameMode(parsed.gameMode || 'lastPlayer');
+      setTotalRounds(parsed.totalRounds || 10);
+      setTargetAmount(parsed.targetAmount || DEFAULT_TARGET_AMOUNT);
+      setCurrentRound(parsed.currentRound || 1);
+      setCurrentSentence(parsed.currentSentence || null);
+      setPastSentences(parsed.pastSentences || []);
+      setPastMistakes(parsed.pastMistakes || []);
+      setSentenceBatch(parsed.sentenceBatch || []);
+      setBets(parsed.bets || {});
+      setHints(parsed.hints || {});
+      setRoundResults(parsed.roundResults || []);
+      setWinner(parsed.winner || null);
+      setPowerUpsUsedThisRound(parsed.powerUpsUsedThisRound || {});
+      setActivePowerUps(parsed.activePowerUps || {});
+      setHighlightedPhrase(parsed.highlightedPhrase || null);
+      setAvailablePowerUps(parsed.availablePowerUps || Object.keys(POWER_UPS) as PowerUpKey[]);
+      setSelectedPowerUps(parsed.selectedPowerUps || Object.keys(POWER_UPS) as PowerUpKey[]);
+      setNextRoundSettings(parsed.nextRoundSettings || null);
+      setRoundSpending(parsed.roundSpending || {});
+      setStartingCash(parsed.startingCash ?? INITIAL_PLAYER_MONEY);
+      setTempStartingCash(String(parsed.startingCash ?? INITIAL_PLAYER_MONEY));
+      setTurnTimerSeconds(
+        typeof parsed.turnTimerSeconds === 'number' && TURN_TIMER_OPTIONS.includes(parsed.turnTimerSeconds)
+          ? parsed.turnTimerSeconds
+          : 0
+      );
+      setTurnTimers(parsed.turnTimers || {});
+      setTeacherRevealOverride(parsed.teacherRevealOverride || false);
+      setAutoStartNextTimer(parsed.autoStartNextTimer ?? true);
+      
+      setPendingLoadGame(null);
+      playSound('success');
+    } catch (e) {
+      console.error("Failed to apply loaded game state:", e);
+      setError({ title: "Load Failed", message: "Could not apply the loaded game state." });
+      setPendingLoadGame(null);
+    }
+  }, [pendingLoadGame, playSound]);
+
+  const handleSaveGameClick = useCallback(async () => {
+    try {
+      const gameState = { 
+        step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+        currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+        powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+        sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+      }; 
+      const jsonStr = JSON.stringify(gameState, null, 2);
+      const dateStr = new Date().toISOString().split('T')[0];
+      const defaultFilename = `grammar-casino-save-${dateStr}.json`;
+
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: defaultFilename,
+            types: [{
+              description: 'JSON File',
+              accept: { 'application/json': ['.json'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(jsonStr);
+          await writable.close();
+          playSound('success');
+          return;
+        } catch (err: any) {
+          if (err.name === 'AbortError') {
+            return; // User cancelled
+          }
+          // If it's a SecurityError (e.g., cross-origin iframe), we catch it and proceed to the fallback below
+          if (err.name !== 'SecurityError' && !err.message?.includes('Cross origin')) {
+            console.error('Error saving file:', err);
+            setError({ title: "Save Failed", message: "Could not save the game file." });
+            return;
+          }
+          console.warn('showSaveFilePicker blocked by iframe, falling back to standard download.');
+        }
+      }
+
+      // Fallback for browsers that don't support showSaveFilePicker or block it in iframes
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = defaultFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      playSound('success');
+    } catch (e: any) {
+      console.error("Failed to save game:", e);
+      setError({ title: "Save Failed", message: "Could not save the game." });
+    }
+  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer, playSound]);
+
+  const handleSimplifyExplanation = useCallback(async () => {
+    if (!currentSentence || simplifiedExplanation.loading || simplifiedExplanation.text) return;
+    playSound('click');
+    setSimplifiedExplanation({ text: null, loading: true });
+    setError(null);
+    try {
+        const simplified = await GeminiService.simplifyExplanation(currentSentence.explanation, settings.topic);
+        setSimplifiedExplanation({ text: simplified, loading: false });
+        playSound('hint');
+    } catch (err: any) {
+        setError({ title: "AI Error", message: err.message || "Couldn't simplify the explanation. Please try again." });
+        setSimplifiedExplanation({ text: null, loading: false });
+    }
+  }, [currentSentence, settings.topic, simplifiedExplanation.loading, simplifiedExplanation.text, playSound]);
+
+  const handleCopySentence = useCallback(() => {
+    if (!currentSentence) return;
+    navigator.clipboard.writeText(currentSentence.text).then(() => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        playSound('click');
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+    });
+  }, [currentSentence, playSound]);
+
+  const getOrdinal = (n: number): string => { 
+    const s = ["th", "st", "nd", "rd"], v = n % 100; 
+    return n + (s[(v - 20) % 10] || s[v] || s[0]); 
+  };
+    
+  const renderStepContent = () => {
+    switch(step) {
+        case 'PLAYER_SETUP': return ( 
+          <div className="w-full max-w-4xl text-center p-4 animate-fade-in"> 
+            {/* Ornate Monte Carlo Casino Crest & Header */}
+            <div className="flex flex-col items-center mb-8">
+              <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/40 mb-4 shadow-sm">
+                <span className="text-[#d4af37] text-xs tracking-widest">♠ ♥</span>
+                <span className="text-[11px] font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#fef08a] font-bold">
+                  Salon Privé · Est. Monte Carlo
+                </span>
+                <span className="text-[#d4af37] text-xs tracking-widest">♦ ♣</span>
+              </div>
+
+              <h1 className="text-5xl sm:text-6xl md:text-7xl font-black text-gold mb-3 title-glow tracking-wider font-display">
+                GRAMMAR CASINO
+              </h1> 
+
+              <div className="flex items-center justify-center gap-3 w-full max-w-lg my-1">
+                <div className="h-[1px] bg-gradient-to-r from-transparent via-[#d4af37] to-[#d4af37] flex-1 opacity-70"></div>
+                <span className="text-[#d4af37] text-sm select-none">❖</span>
+                <div className="h-[1px] bg-gradient-to-l from-transparent via-[#d4af37] to-[#d4af37] flex-1 opacity-70"></div>
+              </div>
+
+              <p className="text-xs sm:text-sm md:text-base text-amber-900/80 dark:text-amber-200/85 mt-2 font-serif uppercase tracking-[0.25em] font-semibold">
+                Bet Your Knowledge &middot; Risk Your Stack &middot; Master English
+              </p>
+            </div>
+            
+            {/* VIP Table Guest Registry */}
+            <div className="glass-panel rounded-2xl p-6 sm:p-8 relative mb-8 text-left overflow-hidden">
+              {/* Decorative Corner Brass Brackets */}
+              <div className="pointer-events-none absolute top-2.5 left-2.5 w-4 h-4 border-t-2 border-l-2 border-[#d4af37]/50 rounded-tl-sm" />
+              <div className="pointer-events-none absolute top-2.5 right-2.5 w-4 h-4 border-t-2 border-r-2 border-[#d4af37]/50 rounded-tr-sm" />
+              <div className="pointer-events-none absolute bottom-2.5 left-2.5 w-4 h-4 border-b-2 border-l-2 border-[#d4af37]/50 rounded-bl-sm" />
+              <div className="pointer-events-none absolute bottom-2.5 right-2.5 w-4 h-4 border-b-2 border-r-2 border-[#d4af37]/50 rounded-br-sm" />
+
+              {/* Registry Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-6 border-b border-[#d4af37]/30">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-lg bg-[#d4af37]/15 border border-[#d4af37]/40 flex items-center justify-center text-amber-700 dark:text-[#fef08a] text-sm font-serif font-bold">
+                    ♠
+                  </span>
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
+                      VIP Table Registry
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-amber-200/60">
+                      Register solo or gather challenger seats around the baize
+                    </p>
+                  </div>
+                </div>
+
+                {isEditingStartingCash ? (
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well border-[#d4af37]">
+                    <PokerChip denomination={100} size="xs" />
+                    <div className="text-left">
+                      <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60">Starting Stack</div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">$</span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={100}
+                          value={tempStartingCash}
+                          onChange={(e) => setTempStartingCash(e.target.value)}
+                          onBlur={handleSaveStartingCash}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveStartingCash();
+                            else if (e.key === 'Escape') {
+                              setIsEditingStartingCash(false);
+                              setTempStartingCash(String(startingCash));
+                            }
+                          }}
+                          autoFocus
+                          className="w-20 text-xs font-mono-casino font-extrabold text-amber-900 dark:text-[#fef08a] bg-transparent border-b border-[#d4af37] focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSaveStartingCash();
+                          }}
+                          className="w-5 h-5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] flex items-center justify-center cursor-pointer font-bold"
+                          title="Save starting cash"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setTempStartingCash(String(startingCash));
+                      setIsEditingStartingCash(true);
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well hover:border-[#d4af37] transition-all cursor-pointer group/stack"
+                    title="Click to edit starting cash"
+                  >
+                    <PokerChip denomination={100} size="xs" />
+                    <div className="text-left">
+                      <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60 flex items-center gap-1">
+                        <span>Starting Stack</span>
+                        <span className="opacity-0 group-hover/stack:opacity-100 transition-opacity text-amber-600 dark:text-amber-400">✏️</span>
+                      </div>
+                      <div className="text-xs font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">
+                        ${startingCash.toLocaleString()}
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+
+              {/* Add Player Input Row */}
+              <div className="flex flex-col sm:flex-row gap-3 mb-6"> 
+                <TextInput
+                  ref={playerNameInputRef}
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={handlePlayerNameKeyDown}
+                  placeholder="Enter High-Roller's name..."
+                  className="text-lg h-14 flex-1"
+                /> 
+                <ActionButton
+                  onClick={handleAddPlayer}
+                  playSound={playSound}
+                  variant="outline-green"
+                  className="flex items-center justify-center gap-2 px-8 h-14 text-sm sm:text-base shrink-0"
+                >
+                  <span>+ Seat Player</span>
+                </ActionButton> 
+              </div> 
+              
+              {/* Seated Players Grid */}
+              <div className="min-h-[88px]"> 
+                {players.length === 0 ? (
+                  <div className="felt-well rounded-xl p-6 text-center flex flex-col items-center justify-center gap-2">
+                    <div className="text-2xl opacity-60 select-none">🃏</div>
+                    <div className="text-slate-600 dark:text-amber-100/70 font-editorial italic text-base">
+                      The velvet seats are open. Enter a player name above to claim a seat at the table.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {players.map((player, index) => ( 
+                      <div
+                        key={player.id}
+                        className="felt-well rounded-xl p-3 flex items-center justify-between gap-3 group hover:border-[#d4af37]/70 transition-all"
+                      > 
+                        <div className="flex items-center gap-3 min-w-0">
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenAvatarModal(player.id)} 
+                            className="w-11 h-11 rounded-full border-2 border-[#d4af37] bg-gradient-to-b from-amber-50 to-amber-100 dark:from-[#0d3520] dark:to-[#04150c] flex items-center justify-center text-2xl hover:scale-110 transition-transform cursor-pointer focus:outline-none shadow-md shrink-0 relative"
+                            title="Change Avatar"
+                          >
+                            {player.avatar}
+                          </button> 
+                          <div className="min-w-0">
+                            <div className="text-[9px] font-mono-casino uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80">
+                              Seat #{index + 1} &middot; ${player.money.toLocaleString()}
+                            </div>
+                            {editingPlayerIdInSetup === player.id ? (
+                              <input
+                                type="text"
+                                value={editingPlayerNameInSetup}
+                                onChange={(e) => setEditingPlayerNameInSetup(e.target.value)}
+                                onBlur={() => {
+                                  if (editingPlayerNameInSetup.trim()) {
+                                    handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
+                                  }
+                                  setEditingPlayerIdInSetup(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    if (editingPlayerNameInSetup.trim()) {
+                                      handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
+                                    }
+                                    setEditingPlayerIdInSetup(null);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingPlayerIdInSetup(null);
+                                  }
+                                }}
+                                autoFocus
+                                maxLength={20}
+                                className="text-slate-900 dark:text-white font-serif uppercase tracking-wider text-sm font-bold bg-transparent border-b border-[#d4af37] focus:outline-none w-28"
+                              />
+                            ) : (
+                              <div 
+                                onClick={() => {
+                                  setEditingPlayerIdInSetup(player.id);
+                                  setEditingPlayerNameInSetup(player.name);
+                                }}
+                                className="text-slate-900 dark:text-amber-50 font-serif uppercase tracking-wider text-sm font-extrabold cursor-pointer hover:text-amber-700 dark:hover:text-[#fef08a] flex items-center gap-1.5 group/name truncate"
+                                title="Click to edit name"
+                              >
+                                <span className="truncate">{player.name}</span>
+                                <span className="text-[10px] opacity-0 group-hover/name:opacity-100 text-amber-600 dark:text-amber-400 shrink-0">✏️</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleDeletePlayer(player.id)}
+                          className="w-7 h-7 rounded-full border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center text-base transition-colors cursor-pointer shrink-0"
+                          title="Remove Seat"
+                        >
+                          &times;
+                        </button> 
+                      </div> 
+                    ))}
+                  </div>
+                )} 
+              </div> 
+            </div> 
+
+            <div className="flex flex-wrap justify-center items-center gap-4">
+              <ActionButton
+                onClick={handleStartGame}
+                playSound={playSound}
+                variant="gold"
+                className="text-base sm:text-lg py-4 px-12 tracking-[0.15em]"
+                disabled={players.length === 0}
+              >
+                ENTER SALON &amp; TABLE SETUP &rarr;
+              </ActionButton> 
+              <ActionButton
+                onClick={handleLoadGameClick}
+                playSound={playSound}
+                variant="outline-gold"
+                className="text-sm py-4 px-5 flex items-center gap-2"
+                title="Load Saved Game"
+              >
+                <span>📂</span>
+                <span className="hidden sm:inline">Load Table</span>
+              </ActionButton>
+            </div>
+          </div> 
+        );
+        case 'SETTINGS': return ( 
+          <div className="w-full max-w-4xl text-center animate-fade-in p-4"> 
+            <div className="flex flex-col items-center mb-8">
+              <div className="text-xs font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] mb-1 font-bold">
+                Croupier's Charter
+              </div>
+              <h2 className="text-3xl sm:text-5xl font-black text-gold tracking-widest uppercase title-glow font-display">
+                Table Configuration
+              </h2> 
+              <div className="h-[1px] w-48 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mt-3 opacity-70" />
+            </div>
+
+            <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative">
+              {[
+                { title: "I. Grammatical Domain", subtitle: "Choose the linguistic rulebook for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom grammar topic..." },
+                { title: "II. Stakes & Proficiency (CEFR)", subtitle: "Select syntactic complexity and mistake subtlety", items: CEFR_LEVELS, settingKey: 'level' },
+                { title: "III. Salon Atmosphere & Theme", subtitle: "Flavor the AI-generated narratives", items: THEMES, settingKey: 'theme', customKey: 'customTheme', customValue: customTheme, setCustomValue: setCustomTheme, customPlaceholder: "Enter custom narrative theme..." }
+              ].map(section => (
+                <div key={section.title} className="text-left">
+                  <div className="mb-3.5 border-l-4 border-[#d4af37] pl-3.5">
+                    <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                      {section.title}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
+                  </div>
+
+                  <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
+                    {section.items.map(item => {
+                      const isActive = settings[section.settingKey as keyof Settings] === item;
+                      return (
+                        <button
+                          key={item}
+                          onClick={() => { playSound('click'); setSettings(s => ({...s, [section.settingKey]: item})); }} 
+                          className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-serif border cursor-pointer relative overflow-hidden ${
+                            isActive
+                              ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
+                              : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {section.settingKey === 'level' && CEFR_DIFFICULTY_PROFILES[settings.level] && (
+                    <div className="mt-3.5 p-4 rounded-xl felt-well text-xs space-y-1.5 animate-fade-in">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="font-mono-casino font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
+                          {settings.level} — {CEFR_DIFFICULTY_PROFILES[settings.level]?.title}
+                        </span>
+                        <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-serif uppercase tracking-widest">
+                          Croupier's Briefing
+                        </span>
+                      </div>
+                      <div className="text-slate-700 dark:text-slate-300">
+                        <strong className="text-slate-900 dark:text-amber-100">Syntax &amp; Structure:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.syntax}
+                      </div>
+                      <div className="text-slate-700 dark:text-slate-300">
+                        <strong className="text-slate-900 dark:text-amber-100">Lexis &amp; Register:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.lexis}
+                      </div>
+                      <div className="text-amber-900 dark:text-amber-300 font-medium">
+                        <strong className="text-amber-950 dark:text-[#fef08a]">Mistake Spotting:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.mistakeIdentification}
+                      </div>
+                    </div>
+                  )}
+                  {section.customKey && settings[section.settingKey as keyof Settings] === (section.settingKey === 'topic' ? "My own choice" : "Custom ✍️") && (
+                    <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} className="mt-3.5" />
+                  )}
+                </div>
+              ))}
+              
+              {/* IV. Configure Power-Up Shoe */}
+              <div className="text-left border-t border-[#d4af37]/25 pt-6">
+                <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
+                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                    IV. House Power-Up Shoe
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
+                </div>
+
+                <div className="p-4 sm:p-5 rounded-xl felt-well border-purple-400/40 dark:border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="text-2xl filter drop-shadow select-none">🎴</span>
+                      <span className="font-serif font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
+                        Active Shoe Deck
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-mono-casino font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
+                        {selectedPowerUps.length} / {(Object.keys(POWER_UPS) as PowerUpKey[]).length} Cards
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300/80">
+                      Players can draw random cards from this shoe during betting rounds to gain advantages or sabotage rivals.
+                    </p>
+                    <div className="flex items-center gap-1.5 pt-1 overflow-x-auto max-w-full py-0.5">
+                      {selectedPowerUps.slice(0, 12).map(k => (
+                        <span key={k} className="text-base select-none bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded border border-purple-400/20" title={POWER_UPS[k]?.name}>
+                          {POWER_UPS[k]?.icon}
+                        </span>
+                      ))}
+                      {selectedPowerUps.length > 12 && (
+                        <span className="text-[11px] font-mono-casino text-purple-700 dark:text-purple-300 font-bold ml-1">
+                          +{selectedPowerUps.length - 12} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 w-full sm:w-auto shrink-0">
+                    <ActionButton
+                      onClick={() => {
+                        playSound('click');
+                        setShowDeckConfigModal(true);
+                      }}
+                      variant="purple"
+                      className="w-full sm:w-auto px-6 py-3 text-xs sm:text-sm flex items-center justify-center gap-2"
+                    >
+                      <span>🎴</span>
+                      <span>Customize Shoe</span>
+                    </ActionButton>
+                  </div>
+                </div>
+              </div>
+
+              {/* V. Win Condition */}
+              <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
+                <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
+                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                    V. Table Rules &amp; Victory Condition
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4"> 
+                  {/* Mode 1: Last Survivor */}
+                  <button 
+                    type="button"
+                    onClick={() => { playSound('click'); setGameMode('lastPlayer'); }} 
+                    className={`p-5 rounded-xl border-2 transition-all flex flex-col items-center justify-center text-center cursor-pointer ${
+                      gameMode === 'lastPlayer'
+                        ? 'bg-gradient-to-b from-amber-500/20 to-amber-900/20 border-[#d4af37] shadow-[0_0_25px_rgba(212,175,55,0.25)] scale-[1.01]'
+                        : 'felt-well opacity-75 hover:opacity-100 hover:border-[#d4af37]/60'
+                    }`}
+                  >
+                    <div className="text-3xl mb-2">👑</div>
+                    <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
+                    <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Play until only one solvent player remains.</div>
+                  </button> 
+
+                  {/* Mode 2: Fixed Rounds */}
+                  <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
+                    gameMode === 'rounds'
+                      ? 'bg-gradient-to-b from-sky-500/20 to-blue-950/30 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.25)] scale-[1.01]'
+                      : 'felt-well opacity-75 hover:opacity-100 hover:border-sky-400/50'
+                  }`}> 
+                    <button 
+                      type="button"
+                      onClick={() => { playSound('click'); setGameMode('rounds'); }} 
+                      className="w-full text-center cursor-pointer"
+                    >
+                        <div className="text-3xl mb-2">⏳</div>
+                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
+                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Richest vault after a set number of hands.</div>
+                    </button> 
+                    {gameMode === 'rounds' && (
+                      <div className="flex flex-col items-center gap-2 pt-2 border-t border-sky-400/30 w-full">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
+                          <TextInput 
+                            type="number" 
+                            min={1}
+                            max={100}
+                            value={String(totalRounds)} 
+                            onChange={(e) => { 
+                              const val = e.target.value; 
+                              setTotalRounds(val === '' ? '' : parseInt(val, 10));
+                            }} 
+                            className="w-20 text-center !py-1 font-mono-casino font-bold"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          {[5, 10, 15, 20].map((r) => (
+                            <button
+                              key={r}
+                              type="button"
+                              onClick={() => { playSound('click'); setTotalRounds(r); }}
+                              className={`px-2 py-0.5 rounded border text-xs font-mono-casino transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
+                            >
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )} 
+                  </div> 
+
+                  {/* Mode 3: Target Amount */}
+                  <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
+                    gameMode === 'targetAmount'
+                      ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-950/30 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.25)] scale-[1.01]'
+                      : 'felt-well opacity-75 hover:opacity-100 hover:border-emerald-400/50'
+                  }`}> 
+                    <button 
+                      type="button"
+                      onClick={() => { playSound('click'); setGameMode('targetAmount'); }} 
+                      className="w-full text-center cursor-pointer"
+                    >
+                        <div className="text-3xl mb-2">🎯</div>
+                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
+                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">First high-roller to hit the vault target wins.</div>
+                    </button> 
+                    {gameMode === 'targetAmount' && (
+                      <div className="flex flex-col items-center gap-2 pt-2 border-t border-emerald-400/30 w-full">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
+                          <TextInput 
+                            type="number" 
+                            min={MIN_TARGET_AMOUNT}
+                            step={250}
+                            value={String(targetAmount)} 
+                            onChange={(e) => { 
+                              const val = e.target.value; 
+                              setTargetAmount(val === '' ? '' : parseInt(val, 10));
+                            }} 
+                            className="w-24 text-center !py-1 font-mono-casino font-bold"
+                          />
+                        </div>
+                        <div className="flex flex-wrap justify-center items-center gap-1 text-[11px]">
+                          {[2000, 2500, 3000, 5000].map((amt) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => { playSound('click'); setTargetAmount(amt); }}
+                              className={`px-2 py-0.5 rounded border text-[11px] font-mono-casino transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
+                            >
+                              ${amt >= 1000 ? `${amt / 1000}k` : amt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )} 
+                  </div> 
+                </div> 
+              </div> 
+
+              {/* VI. Betting Turn Clock */}
+              <div className="text-left border-t border-[#d4af37]/25 pt-6">
+                <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                      VI. Betting Turn Clock
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-amber-200/60">
+                      Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups
+                    </p>
+                  </div>
+                  {turnTimerSeconds > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                        autoStartNextTimer
+                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
+                          : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
+                      }`}
+                      title="When enabled, locking or finishing one player's timer automatically starts the next player's timer"
+                    >
+                      {autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 sm:gap-3">
+                  {TURN_TIMER_OPTIONS.map(secs => {
+                    const isSelected = turnTimerSeconds === secs;
+                    return (
+                      <button
+                        key={secs}
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setTurnTimerSeconds(secs);
+                          setTurnTimers({});
+                        }}
+                        className={`p-3.5 rounded-xl transition-all duration-200 font-serif border cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                          isSelected
+                            ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
+                            : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                        }`}
+                      >
+                        <span className="text-xl select-none">{secs === 0 ? '∞' : '⏱️'}</span>
+                        <span className="text-xs sm:text-sm uppercase tracking-wider font-extrabold">
+                          {secs === 0 ? 'Off' : `${secs}s`}
+                        </span>
+                        <span className={`text-[10px] font-sans ${isSelected ? 'text-[#1c0a04]/80 font-semibold' : 'opacity-65'}`}>
+                          {secs === 0 ? 'No time limit' : 'Per player turn'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div> 
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+              <ActionButton
+                onClick={() => { playSound('click'); setStep('PLAYER_SETUP'); }}
+                variant="outline-gold"
+                className="py-3.5 px-6 text-sm"
+              >
+                &larr; Guest Registry
+              </ActionButton>
+              <ActionButton
+                onClick={handleFinalizeSettings}
+                playSound={playSound}
+                variant="gold"
+                className="w-full sm:w-auto text-lg sm:text-xl py-4 px-14 tracking-[0.15em]"
+              >
+                DEAL THE FIRST HAND ♠️
+              </ActionButton>
+            </div> 
+          </div> 
+        );
+        case 'IN_GAME': { 
+            const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
+            const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
+                const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+                if (hasSplitBet) {
+                     const playerBet = bets[p.id];
+                     return typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
+                }
+                const playerBet = bets[p.id];
+                return playerBet?.opinion && typeof playerBet?.bet === 'number' && playerBet.bet >= 0;
+            });
+
+            const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
+            const lockedCount = unfrozenActivePlayers.filter(p => turnTimers[p.id]?.status === 'locked').length;
+            const canRevealResults = isTurnTimerEnabled
+              ? (allActivePlayersLocked || teacherRevealOverride)
+              : (allValidBetsFinalized || teacherRevealOverride);
+
+            // Find the single player whose turn is currently active (running or paused)
+            const activeTurnPlayer = isTurnTimerEnabled
+              ? unfrozenActivePlayers.find(p => {
+                  const st = turnTimers[p.id]?.status;
+                  return st === 'running' || st === 'paused';
+                })
+              : undefined;
+
+            // Next idle unfrozen player in table order
+            const nextIdlePlayer = isTurnTimerEnabled
+              ? unfrozenActivePlayers.find(p => (turnTimers[p.id]?.status ?? 'idle') === 'idle')
+              : undefined;
+
+            const sentenceHtml = highlightedPhrase && currentSentence ? 
+              currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-amber-200/80 dark:bg-amber-500/25 text-amber-950 dark:text-[#fef08a] border-b-2 border-[#d4af37] px-1.5 py-0.5 rounded font-semibold">$1</span>`) 
+              : currentSentence?.text || ''; 
+
+            const sentenceLength = currentSentence?.text?.length || 0;
+            const sentenceTextClass = sentenceLength > 150
+              ? "text-lg sm:text-xl md:text-2xl leading-snug md:leading-normal"
+              : sentenceLength > 90
+                ? "text-xl sm:text-2xl md:text-3xl leading-snug md:leading-relaxed"
+                : "text-2xl sm:text-3xl md:text-4xl leading-relaxed";
+
+            return ( 
+              <div className="w-full max-w-5xl animate-fade-in p-2 md:p-4"> 
+                {/* 3D Bespoke Casino Playing Card Container */}
+                <div ref={sentenceHeaderRef} className="card-reveal-container sticky top-0 z-30 mb-5 sm:mb-6">
+                  <div className={`card-reveal-flipper ${isSentenceRevealed && !isLoading ? 'revealed' : ''}`}>
+                    
+                    {/* Front of Card (Guilloché Crimson & Gold Foil Playing Card Back) */}
+                    <div className="card-reveal-front">
+                       <div className={`casino-back-pattern h-full w-full rounded-2xl flex flex-col items-center justify-center p-8 ${isLoading ? 'animate-pulse' : ''}`}>
+                          <div className="w-16 h-16 rounded-full border-2 border-[#d4af37]/70 bg-black/40 flex items-center justify-center text-3xl text-[#fef08a] mb-3 shadow-[0_0_20px_rgba(212,175,55,0.3)] select-none">
+                            ♠
+                          </div>
+                          <h2 className="text-xl sm:text-2xl font-serif font-extrabold text-[#fef08a] uppercase tracking-[0.35em] select-none drop-shadow">
+                            DEALING FROM THE SHOE
+                          </h2>
+                          {isLoading && (
+                            <div className="mt-2 text-amber-300/80 font-mono-casino text-xs uppercase tracking-[0.25em] animate-bounce">
+                              Croupier is Shuffling...
+                            </div>
+                          )}
+                       </div>
+                    </div>
+
+                    {/* Back of Card (The Revealed Dealer's Sentence Card) */}
+                    <div className="card-reveal-back">
+                      <div className={`sticky-sentence rounded-2xl p-4 sm:p-6 md:p-7 transition-all ${
+                        isSentenceHeaderStuck
+                          ? 'stuck'
+                          : 'bg-gradient-to-b from-[#fffefb] via-[#faf5ea] to-[#f3ead8] dark:from-[#082616] dark:via-[#051a0f] dark:to-[#03120a] border-2 border-[#d4af37] shadow-[0_20px_50px_rgba(0,0,0,0.6),0_0_30px_rgba(212,175,55,0.15)] relative'
+                      }`}> 
+                        {currentSentence && (
+                          <>
+                            {/* Inner Playing Card Gold Hairline Frame */}
+                            {!isSentenceHeaderStuck && (
+                              <div className="pointer-events-none absolute inset-2 border border-[#d4af37]/30 rounded-xl" />
+                            )}
+
+                            {/* Playing Card Top-Left Index */}
+                            <div className="pointer-events-none absolute top-3.5 left-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 select-none">
+                              <span className="font-serif font-black text-xs">R{currentRound}</span>
+                              <span className="text-sm mt-0.5">♠</span>
+                            </div>
+
+                            {/* Playing Card Bottom-Right Index (Inverted) */}
+                            {!isSentenceHeaderStuck && (
+                              <div className="pointer-events-none absolute bottom-3.5 right-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 rotate-180 select-none">
+                                <span className="font-serif font-black text-xs">R{currentRound}</span>
+                                <span className="text-sm mt-0.5">♠</span>
+                              </div>
+                            )}
+
+                            {/* Bullion Plaque Overlapping Top Border */}
+                            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif uppercase tracking-[0.2em] text-[11px] sm:text-xs font-extrabold px-6 py-1 rounded-full border border-[#fef9c3] shadow-[0_4px_15px_rgba(202,138,4,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] z-10 whitespace-nowrap flex items-center gap-2">
+                                <span>♦</span>
+                                <span>Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''}{gameMode === 'targetAmount' ? ` · Target: $${Number(targetAmount).toLocaleString()}` : ''}</span>
+                                <span>♦</span>
+                            </div>
+                            
+                            <div className="relative flex flex-col items-center justify-center py-3 sm:py-4"> 
+                                {/* Top-right utility actions */}
+                                <div className="flex gap-2 mb-2 sm:mb-0 sm:absolute sm:top-0 sm:right-2 z-20">
+                                    <button 
+                                      onClick={handleCopySentence}
+                                      className="text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer"
+                                      title="Copy sentence to clipboard"
+                                    >
+                                      <span>{isCopied ? '✓' : '📋'}</span>
+                                      <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
+                                    </button>
+                                    <button 
+                                      onClick={() => speakText(currentSentence.text)} 
+                                      disabled={isSpeaking}
+                                      className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                      title="Read sentence aloud"
+                                    >
+                                      <span>🔊</span>
+                                      <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
+                                    </button>
+                                </div>
+
+                                <p 
+                                  className={`${sentenceTextClass} text-slate-900 dark:text-amber-50 font-editorial italic text-center px-3 sm:px-12 md:px-16 pt-2 sm:pt-4 drop-shadow-sm`}
+                                  dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
+                                />
+                            </div> 
+                            
+                            {/* Collapsible Topic, Level, Theme & Deck Bar */}
+                            <div className="flex flex-col items-center w-full mt-2 pt-2 border-t border-[#d4af37]/20"> 
+                                {/* Compact Summary Bar & Expansion Toggle */}
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={handleToggleSettingsDeckExpanded}
+                                    className="group px-4 py-1.5 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none"
+                                    title={isSettingsDeckExpanded ? "Click to collapse Round Settings & Deck" : "Click to expand Round Settings & Deck"}
+                                    aria-expanded={isSettingsDeckExpanded}
+                                  >
+                                    <span className="flex items-center gap-2 flex-wrap font-medium text-[11px] sm:text-xs">
+                                      <span className="inline-flex items-center gap-1">
+                                        <span>📚</span>
+                                        <span className="font-bold">{settings.topic}</span>
+                                        {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.topic}</span>
+                                        )}
+                                      </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1">
+                                        <span>📊</span>
+                                        <span className="font-bold">{settings.level}</span>
+                                        {nextRoundSettings && nextRoundSettings.level !== settings.level && (
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.level}</span>
+                                        )}
+                                      </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1">
+                                        <span>🎭</span>
+                                        <span className="font-bold">{settings.theme}</span>
+                                        {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.theme}</span>
+                                        )}
+                                      </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1 text-purple-700 dark:text-purple-300 font-mono-casino font-bold">
+                                        <span>🃏</span>
+                                        <span>{selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}</span>
+                                      </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1 text-amber-800 dark:text-[#fef08a] font-mono-casino font-bold">
+                                        <span>⏱️</span>
+                                        <span>{turnTimerSeconds === 0 ? 'Off' : `${turnTimerSeconds}s`}</span>
+                                      </span>
+                                    </span>
+                                    <span className="text-[10px] font-mono-casino font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
+                                      <span>{isSettingsDeckExpanded ? '▲ Hide Charter' : '▼ Table Charter'}</span>
+                                    </span>
+                                  </button>
+                                </div>
+
+                                {/* Expanded Area: Full interactive Topic/Level/Theme pills + Full Deck bar */}
+                                {isSettingsDeckExpanded && (
+                                  <div className="w-full mt-3 pt-3 border-t border-[#d4af37]/25 flex flex-col items-center gap-2.5 animate-fade-in">
+                                    {/* Interactive Topic, Level, Theme, & Turn Timer Pills */}
+                                    <div className="flex flex-wrap gap-2 justify-center items-center">
+                                      {/* Topic Pill */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSettingsModal('topic')}
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        title="Click to change Topic for next round"
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <span>📚</span>
+                                          <span className="font-bold">{settings.topic}</span>
+                                        </span>
+                                        {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
+                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                            <span>Next:</span>
+                                            <span className="truncate max-w-[100px]">{nextRoundSettings.topic}</span>
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
+                                      </button>
+
+                                      {/* Level Pill */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSettingsModal('level')}
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        title="Click to change CEFR Level for next round"
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <span>📊</span>
+                                          <span className="font-bold">{settings.level}</span>
+                                        </span>
+                                        {nextRoundSettings && nextRoundSettings.level !== settings.level && (
+                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                            <span>Next:</span>
+                                            <span>{nextRoundSettings.level}</span>
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
+                                      </button>
+
+                                      {/* Theme Pill */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSettingsModal('theme')}
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        title="Click to change Theme for next round"
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <span>🎭</span>
+                                          <span className="font-bold">{settings.theme}</span>
+                                        </span>
+                                        {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
+                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                            <span>Next:</span>
+                                            <span className="truncate max-w-[100px]">{nextRoundSettings.theme}</span>
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
+                                      </button>
+
+                                      {/* Turn Clock Quick Selector Pill */}
+                                      <div className="px-3 py-1 felt-well rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
+                                        <span>⏱️ Turn Clock:</span>
+                                        {TURN_TIMER_OPTIONS.map(secs => (
+                                          <button
+                                            key={secs}
+                                            type="button"
+                                            onClick={() => {
+                                              playSound('click');
+                                              setTurnTimerSeconds(secs);
+                                              setTurnTimers({});
+                                            }}
+                                            className={`px-2 py-0.5 rounded-full font-mono-casino text-[10px] font-bold transition-all cursor-pointer ${
+                                              turnTimerSeconds === secs
+                                                ? 'bg-[#d4af37] text-black shadow-sm'
+                                                : 'hover:bg-amber-500/20 text-slate-700 dark:text-amber-200/80'
+                                            }`}
+                                          >
+                                            {secs === 0 ? 'Off' : `${secs}s`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Interactive Deck Power-ups Bar */}
+                                    <div className="px-4 py-1.5 felt-well border-purple-400/40 rounded-full text-xs font-serif text-purple-900 dark:text-purple-200 flex flex-wrap items-center gap-2 max-w-full justify-center">
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          playSound('click');
+                                          setShowDeckConfigModal(true);
+                                        }}
+                                        className="flex items-center gap-1.5 font-bold select-none hover:text-purple-600 dark:hover:text-purple-300 transition-colors cursor-pointer group"
+                                        title="Configure Power-Up Deck"
+                                      >
+                                        <span>🃏 Shoe:</span>
+                                        <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-purple-500/20 font-semibold" title={`${selectedPowerUps.length} of ${(Object.keys(POWER_UPS) as PowerUpKey[]).length} power-ups active`}>
+                                          {selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}
+                                        </span>
+                                        <span className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity">✏️</span>
+                                      </button>
+
+                                      <div className="flex flex-wrap items-center gap-1 justify-center">
+                                        {(Object.keys(POWER_UPS) as PowerUpKey[]).map(key => {
+                                          const isActive = selectedPowerUps.includes(key);
+                                          const powerUp = POWER_UPS[key];
+                                          
+                                          return (
+                                            <PowerUpTooltip 
+                                              key={key} 
+                                              powerUpKey={key} 
+                                              placement="bottom"
+                                              statusBadge={
+                                                <div className={`flex items-center gap-1 font-semibold ${isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                  <span>{isActive ? '🟢 Active in Deck' : '🔴 Deactivated'}</span>
+                                                  <span className="text-slate-400 text-[9px]">• Click to {isActive ? 'deactivate' : 'activate'}</span>
+                                                </div>
+                                              }
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleTogglePowerUpInDeck(key);
+                                                }}
+                                                className={`relative p-0.5 rounded transition-all duration-150 cursor-pointer select-none group focus:outline-none ${
+                                                  isActive 
+                                                    ? 'opacity-100 hover:scale-130 filter drop-shadow-sm' 
+                                                    : 'opacity-30 grayscale hover:opacity-75 hover:scale-110'
+                                                }`}
+                                                title={`${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`}
+                                                aria-label={`${powerUp.name} (${isActive ? 'active' : 'deactivated'})`}
+                                              >
+                                                <span className="text-sm md:text-base inline-block">
+                                                  {powerUp.icon}
+                                                </span>
+                                                {!isActive && (
+                                                  <span className="absolute inset-0 flex items-center justify-center text-rose-500 font-bold text-xs pointer-events-none drop-shadow">
+                                                    ✕
+                                                  </span>
+                                                )}
+                                              </button>
+                                            </PowerUpTooltip>
+                                          );
+                                        })}
+                                      </div>
+
+                                       {/* Deck Quick Mass Actions */}
+                                      <div className="flex items-center gap-1 border-l border-purple-400/30 pl-2 text-[10px] select-none">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleAllPowerUps(true)}
+                                          className="px-1.5 py-0.5 rounded hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 font-bold hover:underline transition-colors cursor-pointer"
+                                          title={`Activate all ${Object.keys(POWER_UPS).length} power-ups in the deck`}
+                                        >
+                                          All
+                                        </button>
+                                        <span className="opacity-40">|</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleAllPowerUps(false)}
+                                          className="px-1.5 py-0.5 rounded hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 font-bold hover:underline transition-colors cursor-pointer"
+                                          title="Deactivate all power-ups in the deck"
+                                        >
+                                          None
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                            </div> 
+                          </>
+                        )}
+                      </div> 
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Croupier's Sequential Turn Bar when Turn Timer is enabled */}
+                {isTurnTimerEnabled && (
+                  <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="text-xs font-serif font-extrabold uppercase tracking-[0.2em] text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
+                        <span>⏱️</span>
+                        <span>Turn Sequence ({turnTimerSeconds}s):</span>
+                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {activePlayers.map((p, idx) => {
+                          const frozen = isPlayerFrozen(p.id);
+                          const st = turnTimers[p.id]?.status ?? 'idle';
+                          const badgeClass = frozen
+                            ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
+                            : st === 'running'
+                              ? 'bg-emerald-500/25 border-emerald-400 text-emerald-950 dark:text-emerald-200 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                              : st === 'paused'
+                                ? 'bg-sky-500/20 border-sky-400 text-sky-900 dark:text-sky-200'
+                                : st === 'locked'
+                                  ? 'bg-slate-500/20 border-slate-400/40 text-slate-600 dark:text-slate-300'
+                                  : 'felt-well text-slate-700 dark:text-amber-100/80';
+                          return (
+                            <React.Fragment key={p.id}>
+                              {idx > 0 && <span className="text-[#d4af37]/50 text-xs select-none">&rarr;</span>}
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-serif border flex items-center gap-1.5 ${badgeClass}`}>
+                                <span>{p.avatar}</span>
+                                <span>{p.name}</span>
+                                <span className="text-[10px]">
+                                  {frozen ? '❄️' : st === 'running' ? '⏱️' : st === 'paused' ? '⏸' : st === 'locked' ? '🔒' : '⏳'}
+                                </span>
+                              </span>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {!activeTurnPlayer && nextIdlePlayer && (
+                        <button
+                          type="button"
+                          onClick={() => handleTimerStart(nextIdlePlayer.id)}
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-extrabold uppercase tracking-wider bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border border-emerald-300/80 shadow-[0_2px_0_#064e3b] hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                        >
+                          ▶ Start {nextIdlePlayer.name}'s Turn
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                          autoStartNextTimer
+                            ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
+                            : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
+                        }`}
+                        title="Automatically start the next player's timer when the current player's timer finishes or locks"
+                      >
+                        Auto-Next: {autoStartNextTimer ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-1 gap-5 sm:gap-6"> 
+                  {players.map(player => { 
+                    const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
+                    const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
+                    const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
+                    const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
+                    const betCapAmount = playerCaps.length > 0 
+                      ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+                      : (isBetCapped ? 50 : BET_CAP_AMOUNT);
+                    const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+                    const myActive = playerActive[0]; 
+                    const playerTimer = turnTimers[player.id];
+                    const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
+                    
+                    return <PlayerBettingCard 
+                              key={player.id} 
+                              player={player} 
+                              bet={bets[player.id]} 
+                              onBetChange={handleBetChange} 
+                              onGetHint={handleGetHint} 
+                              hint={hints[player.id]} 
+                              playSound={playSound} 
+                              onGetPowerUp={handleBuyRandomPowerUp} 
+                              powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
+                              activePowerUp={myActive} 
+                              isBetCapped={isBetCapped} 
+                              betCapAmount={betCapAmount}
+                              isFrozen={isFrozen}
+                              activePowerUps={playerActive} 
+                              usedPowerUps={powerUpsUsedThisRound[player.id] || []}
+                              players={players} 
+                              onUpdateMoney={handleUpdatePlayerMoney}
+                              currentSentenceText={currentSentence?.text}
+                              onChangeAvatar={handleOpenAvatarModal}
+                              onUpdateName={handleUpdatePlayerName}
+                              targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
+                              timerEnabled={isTurnTimerEnabled}
+                              turnTimer={playerTimer}
+                              turnDurationMs={turnDurationMs}
+                              canAct={canPlayerAct(player.id)}
+                              isSatOut={isSatOut}
+                              timerBlockedByName={activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
+                              onTimerStart={handleTimerStart}
+                              onTimerPause={handleTimerPause}
+                              onTimerAddTime={handleTimerAddTime}
+                              onTimerLockNow={handleTimerLockNow}
+                              onTimerUnlock={handleTimerUnlock}
+                            /> 
+                  })} 
+                </div> 
+                <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
+                  <ActionButton 
+                    onClick={handleRevealResults} 
+                    playSound={playSound} 
+                    variant={canRevealResults ? 'gold' : 'outline-gold'}
+                    className="w-full md:w-auto text-lg sm:text-xl py-4 px-16 tracking-[0.18em]" 
+                    disabled={isProcessing || !canRevealResults}
+                  >
+                    {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : 'CALL THE HAND & REVEAL 🎲'}
+                  </ActionButton>
+
+                  {isTurnTimerEnabled && !allActivePlayersLocked && (
+                    <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-serif text-slate-600 dark:text-amber-200/75">
+                      <span>
+                        🔒 Locked Players: <strong className="font-mono-casino">{lockedCount}/{unfrozenActivePlayers.length}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setTeacherRevealOverride(v => !v);
+                        }}
+                        className={`px-3 py-1 rounded-full border font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                          teacherRevealOverride
+                            ? 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
+                            : 'felt-well border-[#d4af37]/50 text-amber-900 dark:text-[#fef08a] hover:border-[#d4af37]'
+                        }`}
+                        title="Teacher Override: unlock Reveal Results before every player's timer has locked"
+                      >
+                        {teacherRevealOverride ? '⚡ Teacher Override Active (Click to Disable)' : '🔓 Teacher Override: Unlock Reveal'}
+                      </button>
+                    </div>
+                  )}
+                </div> 
+              </div> 
+            ); 
+        }
+        case 'RESULTS': {
+            const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
+            const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+            const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
+            const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
+            const isEliminationVictory = players.length > 1 && activePlayers.length <= 1;
+            const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || activePlayers.length === 0;
+
+            return ( 
+            <div className="w-full max-w-5xl animate-fade-in p-4">
+                <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-[#d4af37]/35 pb-4"> 
+                  <div>
+                    <div className="text-xs font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
+                      Croupier's Settlement
+                    </div>
+                    <h2 className="text-3xl sm:text-4xl font-black text-gold uppercase tracking-wider font-display">
+                      Round {currentRound} Payouts
+                    </h2> 
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {gameMode === 'rounds' && (
+                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-serif text-slate-700 dark:text-amber-200 font-bold">
+                        Hand {currentRound} of {totalRounds}
+                      </div>
+                    )} 
+                    {gameMode === 'targetAmount' && (
+                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-serif text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1.5">
+                        <span>🎯 Target:</span>
+                        <span className="font-mono-casino">${numTargetAmount.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <ActionButton onClick={handleSaveGameClick} playSound={playSound} variant="outline-gold" className="text-sm py-2 px-4 flex items-center gap-1.5" title="Save Table State">
+                      <span>💾</span>
+                      <span className="hidden sm:inline text-xs">Save</span>
+                    </ActionButton>
+                  </div>
+                </div>
+
+                {hasTargetWinner && (
+                  <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/20 via-emerald-500/30 to-emerald-500/20 border-2 border-emerald-400 text-emerald-950 dark:text-emerald-100 text-center font-serif text-lg font-extrabold shadow-lg flex items-center justify-center gap-2 animate-bounce">
+                    <span className="text-2xl">🎯</span>
+                    <span>Target Bankroll of ${numTargetAmount.toLocaleString()} Reached! Champion Crowned!</span>
+                  </div>
+                )}
+                
+                {/* House Ruling Card */}
+                <div className="glass-panel p-6 sm:p-8 rounded-2xl mb-8 relative overflow-hidden">
+                    <div className={`absolute top-0 left-0 w-2 h-full ${currentSentence?.isCorrect ? 'bg-gradient-to-b from-emerald-400 to-emerald-700' : 'bg-gradient-to-b from-rose-500 to-red-800'}`}></div>
+                    <div className="pl-3 sm:pl-5">
+                      <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+                          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full border bg-black/5 dark:bg-black/40 border-[#d4af37]/50">
+                            <span className="text-xs font-serif uppercase tracking-[0.2em] text-slate-600 dark:text-amber-200/80 font-bold">
+                              The House Ruling:
+                            </span>
+                            <span className={`text-sm sm:text-base font-serif font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {currentSentence?.isCorrect ? '✓ VALID SENTENCE' : '✕ FLAWED SENTENCE'}
+                            </span>
+                          </div>
+                          <button 
+                              onClick={() => {
+                              if (!currentSentence) return;
+                              const parts = [
+                                  currentSentence.text,
+                                  !currentSentence.isCorrect ? `Correction: ${currentSentence.correction}` : null,
+                                  `Explanation: ${currentSentence.explanation}`
+                              ].filter(Boolean);
+                              speakText(parts.join('. '));
+                              }} 
+                              disabled={isSpeaking}
+                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-serif uppercase tracking-wider font-bold cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              title="Read full analysis"
+                          >
+                              {isSpeaking ? '🔊 Speaking...' : '🔊 Listen to Ruling'}
+                          </button>
+                      </div>
+
+                      <p className="text-2xl sm:text-3xl font-editorial text-slate-900 dark:text-amber-50 italic leading-relaxed mb-6">
+                        &ldquo;{currentSentence?.text}&rdquo;
+                      </p>
+                      
+                      {!currentSentence?.isCorrect && (
+                          <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-[#d4af37] mb-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
+                                  <span>✦ Official House Revision</span>
+                                  {currentSentence?.errorPhrase && (
+                                      <span className="font-mono-casino text-rose-700 dark:text-rose-300 font-semibold normal-case bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/30 text-xs">
+                                          Flaw: &ldquo;{currentSentence.errorPhrase}&rdquo; {currentSentence.mistakeType ? `· ${currentSentence.mistakeType}` : ''}
+                                      </span>
+                                  )}
+                              </div>
+                              <div className="text-lg sm:text-xl text-emerald-900 dark:text-emerald-300 font-editorial font-medium">
+                                &ldquo;{currentSentence?.correction}&rdquo;
+                              </div>
+                          </div>
+                      )}
+                      
+                      <div className="flex flex-col sm:flex-row gap-3.5 items-start felt-well p-4 rounded-xl">
+                          <span className="text-2xl select-none">🎓</span>
+                          <div className="text-slate-700 dark:text-slate-200 text-sm sm:text-base leading-relaxed flex-1">
+                            {currentSentence?.explanation}
+                          </div>
+                          {currentSentence?.explanation && (
+                            <button 
+                                onClick={handleSimplifyExplanation} 
+                                disabled={simplifiedExplanation.loading || !!simplifiedExplanation.text} 
+                                className="shrink-0 text-xs text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider border border-[#d4af37]/50 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                                {simplifiedExplanation.loading ? 'Simplifying...' : simplifiedExplanation.text ? 'Simplified ✓' : 'Plain English'}
+                            </button>
+                          )}
+                      </div>
+                      {simplifiedExplanation.text && (
+                          <div className="mt-2.5 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-xs sm:text-sm text-sky-900 dark:text-sky-200 font-sans">
+                              <strong>In Plain Terms:</strong> {simplifiedExplanation.text}
+                          </div>
+                      )}
+                    </div>
+                </div>
+
+                {/* High-Roller Payout Ledger Table */}
+                <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-amber-100/80 dark:bg-black/50 text-amber-950 dark:text-[#d4af37] uppercase text-xs font-serif tracking-[0.2em] font-bold border-b border-[#d4af37]/30">
+                        <tr>
+                            <th className="p-4 sm:p-5">Rank</th>
+                            <th className="p-4 sm:p-5">High-Roller</th>
+                            <th className="p-4 sm:p-5">Hand Outcome</th>
+                            <th className="p-4 sm:p-5 text-right">Net Delta</th>
+                            <th className="p-4 sm:p-5 text-right">Vault Balance</th>
+                        </tr>
+                        </thead>
+                        <tbody className="text-slate-800 dark:text-slate-200 divide-y divide-[#d4af37]/15">
+                        {[...roundResults].sort((a, b) => b.newTotal - a.newTotal).map((result, index) => {
+                            const player = players.find(p => p.name === result.name);
+                            const isWinner = result.outcomeText.includes('Win');
+                            return (
+                            <tr key={result.name} className={`hover:bg-amber-500/10 transition-colors ${isWinner ? 'bg-emerald-500/10' : ''}`}>
+                              <td className="p-4 sm:p-5 font-mono-casino text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
+                                #{index + 1}
+                              </td>
+                              <td className="p-4 sm:p-5 font-bold flex items-center gap-3">
+                                  {player ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenAvatarModal(player.id)}
+                                      className="w-10 h-10 rounded-full border border-[#d4af37] bg-amber-50 dark:bg-[#082415] flex items-center justify-center text-xl shadow hover:scale-110 transition-transform cursor-pointer"
+                                      title={`Click to change ${player.name}'s avatar`}
+                                    >
+                                      {player.avatar}
+                                    </button>
+                                  ) : (
+                                    <span className="text-2xl filter drop-shadow-md">{player?.avatar || '👤'}</span>
+                                  )}
+                                  <span className="text-base sm:text-lg font-serif uppercase tracking-wider text-slate-900 dark:text-amber-50 font-extrabold">
+                                    {result.name}
+                                  </span>
+                              </td>
+                              <td className="p-4 sm:p-5">
+                                  <div className={`font-serif text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                    {result.outcomeText}
+                                  </div>
+                                  {result.correctionFeedback && (
+                                    <div className="text-xs text-slate-500 dark:text-amber-200/60 mt-1 italic max-w-xs">
+                                      {result.correctionFeedback}
+                                    </div>
+                                  )}
+                              </td>
+                              <td className={`p-4 sm:p-5 text-right font-mono-casino font-extrabold text-base sm:text-lg ${result.amountChanged > 0 ? 'text-emerald-600 dark:text-emerald-400' : result.amountChanged < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                                  {result.amountChanged > 0 ? `+$${result.amountChanged.toLocaleString()}` : result.amountChanged < 0 ? `-$${Math.abs(result.amountChanged).toLocaleString()}` : '$0'}
+                              </td>
+                              <td className="p-4 sm:p-5 text-right font-mono-casino font-extrabold text-lg sm:text-xl text-gold-flat">
+                                  ${result.newTotal.toLocaleString()}
+                              </td>
+                            </tr>
+                        )})}
+                        </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {!isGameOver && (
+                  <div className="mt-6 p-4 felt-well rounded-xl flex flex-wrap items-center justify-between gap-3 select-none">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-serif font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
+                        ✦ Next Hand Charter:
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-amber-200/60">
+                        (Click any badge to adjust before dealing)
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSettingsModal('topic')}
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        title="Click to change Topic for next round"
+                      >
+                        <span>📚 {nextRoundSettings?.topic || settings.topic}</span>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSettingsModal('level')}
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        title="Click to change CEFR Level for next round"
+                      >
+                        <span>📊 {nextRoundSettings?.level || settings.level}</span>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSettingsModal('theme')}
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        title="Click to change Theme for next round"
+                      >
+                        <span>🎭 {nextRoundSettings?.theme || settings.theme}</span>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="mt-8 flex flex-wrap justify-between items-center gap-4 pb-10 relative w-full">
+                  <div className="flex-1 flex justify-start">
+                    {roundHistory.length > 0 && (
+                      <ActionButton
+                        onClick={() => { playSound('click'); setShowReportCardModal(true); }}
+                        variant="outline-gold"
+                        className="text-xs py-2.5 px-4 flex items-center gap-2"
+                        title="View Cumulative Grammar Report Card"
+                      >
+                        <span>📜</span>
+                        <span>Ledger ({roundHistory.length})</span>
+                      </ActionButton>
+                    )}
+                  </div>
+                  <ActionButton onClick={handleNextRound} playSound={playSound} variant="gold" className="text-lg sm:text-xl py-4 px-12 tracking-[0.15em]">
+                      {isGameOver ? 'SETTLE ACCOUNTS & FINISH 🏁' : 'DEAL NEXT HAND ➡️'}
+                  </ActionButton>
+                  <div className="flex-1 flex justify-end">
+                    {!isGameOver && (
+                      <ActionButton 
+                        onClick={handleEndGameEarly} 
+                        variant="outline-red"
+                        className="text-xs py-2.5 px-4"
+                        title="Cash out and end game early"
+                      >
+                        Cash Out Early
+                      </ActionButton>
+                    )}
+                  </div>
+                </div>
+            </div>
+            ); 
+        }
+        case 'GAME_OVER': return (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in p-4 w-full max-w-4xl mx-auto">
+            <div className="text-xs font-serif uppercase tracking-[0.35em] text-amber-800 dark:text-[#d4af37] mb-2 font-bold">
+              Salon Privé · Final Settlement
+            </div>
+            <h1 className="text-5xl sm:text-7xl font-black text-gold mb-3 tracking-wider font-display title-glow">
+              TABLE CLOSED
+            </h1>
+            <div className="h-[1px] w-48 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mb-12"></div>
+            
+            {winner ? (
+              <div className="relative group w-full max-w-lg mb-8">
+                <div className="absolute inset-0 bg-gradient-to-b from-amber-400 to-amber-700 blur-2xl opacity-25 group-hover:opacity-40 transition-opacity duration-1000 rounded-full"></div>
+                <div className="luxury-card rounded-2xl p-8 sm:p-10 text-center relative border-2 border-[#d4af37] shadow-[0_0_50px_rgba(212,175,55,0.3)]">
+                    <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 text-6xl filter drop-shadow-lg animate-bounce">👑</div>
+                    
+                    <div className="mt-6 mb-4">
+                        <div className="w-28 h-28 mx-auto mb-4 rounded-full border-4 border-[#d4af37] bg-gradient-to-b from-amber-50 to-amber-100 dark:from-[#0d3520] dark:to-[#04150c] flex items-center justify-center text-7xl shadow-2xl">
+                          {winner.avatar}
+                        </div>
+                        <h2 className="text-4xl sm:text-5xl font-serif font-extrabold text-slate-900 dark:text-amber-50 mb-2 uppercase tracking-wider">
+                          {winner.name}
+                        </h2>
+                        <div className="text-amber-800 dark:text-[#fef08a] text-xs uppercase tracking-[0.3em] font-bold">
+                          {gameMode === 'targetAmount' ? 'Target Bankroll Champion' : gameMode === 'rounds' ? 'Highest Bankroll Champion' : 'Grand Salon Champion'}
+                        </div>
+                        {gameMode === 'targetAmount' && (
+                          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1.5 font-mono-casino">
+                            🎯 Surpassed the ${Number(targetAmount).toLocaleString()} Vault Goal!
+                          </div>
+                        )}
+                    </div>
+                    
+                    <div className="felt-well rounded-xl p-6 mt-6">
+                        <div className="text-slate-600 dark:text-amber-200/70 text-xs font-serif uppercase tracking-[0.25em] mb-1 font-bold">
+                          Final Vault Balance
+                        </div>
+                        <div className="text-5xl sm:text-6xl font-mono-casino font-black text-gold-flat mb-4">
+                          ${winner.money.toLocaleString()}
+                        </div>
+                        <div className="flex justify-center pt-3 border-t border-[#d4af37]/20">
+                          <ChipRack amount={winner.money} size="sm" />
+                        </div>
+                    </div>
+                </div>
+              </div>
+            ) : (
+               <div className="luxury-card rounded-2xl p-12 text-center border-2 border-[#d4af37]/40 max-w-lg shadow-2xl mb-8">
+                 <div className="text-7xl mb-5 opacity-70">🏛️</div>
+                 <h2 className="text-3xl sm:text-4xl font-serif font-extrabold text-slate-800 dark:text-amber-100 mb-2 uppercase tracking-wider">
+                   The House Prevails
+                 </h2>
+                 <p className="text-slate-600 dark:text-amber-200/60 font-editorial italic text-lg">
+                   Every challenger at the table has gone bust.
+                 </p>
+               </div>
+            )}
+
+            {/* End-of-Game Grammar Report Card */}
+            <div className="w-full mt-4">
+              <GrammarReportCard
+                history={roundHistory}
+                players={players}
+                winner={winner}
+                playSound={playSound}
+                onRestartGame={handleRestartGame}
+                settings={settings}
+                gameMode={gameMode}
+                totalRounds={totalRounds}
+                targetAmount={targetAmount}
+              />
+            </div>
+
+            <div className="mt-10">
+                <ActionButton onClick={handleRestartGame} playSound={playSound} variant="gold" className="text-lg py-4 px-12 tracking-[0.15em]">
+                    🔄 Open New Table
+                </ActionButton>
+            </div>
+          </div>
+        );
+        default: return <div className="p-20 text-center text-gold font-serif text-2xl animate-pulse">Initializing Table...</div>;
+    }
+  };
+
+  return (
+    <>
+      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300">
+        {step !== 'PLAYER_SETUP' && ( 
+          <div className="fixed top-4 left-4 z-50">
+             <ActionButton 
+                onClick={handleRestartGame} 
+                playSound={playSound} 
+                variant="outline-gold"
+                className="text-xs py-2 px-4 flex items-center gap-1.5 backdrop-blur-md"
+                title="Leave Table & Return to Lobby"
+             > 
+                <span>&larr;</span>
+                <span>Lobby</span>
+             </ActionButton> 
+          </div>
+        )}
+        
+        {/* Top Controls: Theme Toggle & Audio */}
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2.5">
+          <button 
+            onClick={toggleTheme}
+            className="text-lg w-11 h-11 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-[#051c10]/90 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer" 
+            aria-label={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
+            title={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
+          > 
+            {isDarkMode ? '☀️' : '🌙'} 
+          </button>
+          
+          {audioReady && (
+            <button 
+              onClick={() => { 
+                const newMutedState = !isMuted; 
+                setIsMuted(newMutedState); 
+                if (newMutedState && 'speechSynthesis' in window) { 
+                  window.speechSynthesis.cancel(); 
+                } 
+                playSound('click'); 
+              }} 
+              className="text-lg w-11 h-11 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-[#051c10]/90 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer" 
+              aria-label={isMuted ? "Unmute" : "Mute"}
+              title={isMuted ? "Unmute Casino Audio" : "Mute Casino Audio"}
+            > 
+              {isMuted ? '🔇' : '🔊'} 
+            </button>
+          )}
+        </div>
+
+        <div className="main-content-wrapper w-full flex flex-col justify-center items-center py-12 md:py-16"> 
+          {renderStepContent()} 
+        </div>
+      </div>
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        style={{ display: 'none' }} 
+        accept=".json,application/json" 
+        onChange={handleFileChange} 
+      />
+      {error && (<Modal title={error.title} onClose={() => setError(null)} playSound={playSound}><p className="text-lg text-slate-700 dark:text-slate-300 leading-relaxed">{error.message}</p></Modal>)}
+      {historyPlayer && ( 
+        <Modal title={`${historyPlayer.name}'s History`} onClose={() => setHistoryPlayer(null)} playSound={playSound}> 
+          <div className="space-y-4 text-left max-h-[60vh] overflow-y-auto pr-2 modal-content-scroll"> 
+            {historyPlayer.history.length > 0 ? ( 
+              historyPlayer.history.map((item, index) => ( 
+                <div key={index} className="bg-amber-50/70 dark:bg-slate-900/50 border border-amber-200 dark:border-slate-700 p-4 rounded-lg shadow-sm"> 
+                  <div className="flex justify-between mb-2">
+                    <span className="font-bold text-amber-700 dark:text-amber-500 text-sm uppercase tracking-wide">Round {item.round}</span> 
+                    <span className={`font-mono font-bold ${item.amount >= 0 ? 'text-emerald-600 dark:text-green-400' : 'text-rose-600 dark:text-red-400'}`}> 
+                        {item.amount >= 0 ? '+' : ''}{item.amount}
+                    </span> 
+                  </div>
+                  <p className="text-sm text-slate-700 dark:text-slate-400 italic mb-3 font-serif">"{item.sentence}"</p> 
+                  <div className="flex justify-between text-xs text-slate-500 border-t border-amber-200/60 dark:border-slate-800 pt-2">
+                    <span>Spent: ${item.spent}</span>
+                    <span className="text-slate-700 dark:text-slate-300 font-bold">Total: ${item.endTotal}</span>
+                  </div>
+                </div> 
+              )) 
+            ) : ( <p className="text-center py-10 text-slate-500 italic">No history recorded yet.</p> )} 
+          </div> 
+        </Modal> 
+      )}
+      {showPowerUpModal && 
+        <Modal 
+            title={showPowerUpModal.title} 
+            onClose={() => setShowPowerUpModal(null)} 
+            playSound={playSound}
+            hideCloseButton
+        > 
+            <div className="text-center py-4"> 
+                <div className="text-7xl mb-6 filter drop-shadow-lg flex justify-center">
+                  <PowerUpTooltip
+                    icon={showPowerUpModal.icon || POWER_UPS[Object.keys(POWER_UPS).find(k => POWER_UPS[k as PowerUpKey].name === showPowerUpModal.title) as PowerUpKey]?.icon}
+                    name={showPowerUpModal.title}
+                    description={showPowerUpModal.message}
+                    placement="bottom"
+                  >
+                    <span className="cursor-help hover:scale-110 transition-transform inline-block">
+                      {showPowerUpModal.icon || POWER_UPS[Object.keys(POWER_UPS).find(k => POWER_UPS[k as PowerUpKey].name === showPowerUpModal.title) as PowerUpKey]?.icon}
+                    </span>
+                  </PowerUpTooltip>
+                </div> 
+                <p className="text-xl text-slate-800 dark:text-slate-200 font-medium leading-relaxed whitespace-pre-line">{showPowerUpModal.message}</p> 
+            </div> 
+        </Modal>
+      }
+      {showTargetModal && (() => {
+        const isSwap = showTargetModal.powerUp === 'SWAP';
+        const buyerPlayer = players.find(p => p.id === showTargetModal.playerId);
+        const powerUpInfo = POWER_UPS[showTargetModal.powerUp];
+
+        return (
+          <Modal 
+              title={`Activate: ${powerUpInfo.name}`} 
+              onClose={() => {}}
+              closable={false}
+              hideCloseButton
+              hideOkButton
+          > 
+              <div className="space-y-4"> 
+                  <div className="flex justify-center mb-2">
+                    <PowerUpTooltip powerUpKey={showTargetModal.powerUp} placement="bottom">
+                      <span className="text-5xl filter drop-shadow-lg cursor-help hover:scale-110 transition-transform inline-block">
+                        {powerUpInfo.icon}
+                      </span>
+                    </PowerUpTooltip>
+                  </div>
+                  <p className="text-center mb-4 text-lg text-slate-600 dark:text-slate-400 font-serif italic border-b border-slate-200 dark:border-slate-700 pb-3">
+                    "{powerUpInfo.description}"
+                  </p> 
+
+                  {isSwap && buyerPlayer && (
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 text-center text-xs font-serif text-amber-900 dark:text-amber-200 shadow-sm">
+                      <div className="flex items-center justify-center gap-1.5 font-sans mb-1">
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">Your Current Vault:</span>
+                        <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                          ${buyerPlayer.money.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Select a player to swap vaults with.
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="text-center text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest text-xs mb-2">
+                    Select Target Player
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                  {players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).length > 0 ?
+                   (players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).map(p => {
+                      const targetActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
+                      const isShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD');
+                      return ( 
+                      <ActionButton 
+                          key={p.id} 
+                          onClick={() => handleTargetedPowerUp(p.id)} 
+                          variant="purple"
+                          className={`w-full py-3 px-4 transition-all ${isShielded ? 'grayscale opacity-50 cursor-not-allowed' : 'hover:scale-[1.01]'}`}
+                          disabled={isShielded}
+                          title={isShielded ? `${p.name} is Shielded!` : `Target ${p.name}`}
+                      > 
+                          <div className="flex items-center justify-between w-full gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="text-2xl select-none">{p.avatar}</span>
+                              <div className="text-left truncate">
+                                <span className="font-bold text-lg tracking-wide block truncate">{p.name}</span>
+                                {isShielded && (
+                                  <span className="text-[10px] text-amber-300 font-bold uppercase tracking-wider block">
+                                    🛡️ Shield Active
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 font-mono font-bold text-emerald-400 dark:text-emerald-300 bg-black/40 px-3 py-1 rounded-lg border border-emerald-500/30 text-base shadow-inner shrink-0">
+                              <span className="text-xs opacity-75">💰</span>
+                              <span>${p.money.toLocaleString()}</span>
+                            </div>
+                          </div>
+                      </ActionButton>
+                  )})) : <p className="text-center text-slate-500 py-4">No available targets.</p>}
+                  </div>
+
+                  {!isSwap && (
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
+                      <ActionButton
+                        onClick={handleCancelTargetModal}
+                        variant="secondary"
+                        className="w-full py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        <span>↩️</span>
+                        <span>Cancel & Refund ($50)</span>
+                      </ActionButton>
+                    </div>
+                  )}
+              </div> 
+          </Modal>
+        );
+      })()}
+      {showAvatarModal && (() => {
+        const modalPlayer = players.find(p => p.id === showAvatarModal.playerId);
+        return (
+          <Modal 
+            title={modalPlayer ? `Pick Avatar for ${modalPlayer.name}` : "Select Avatar"} 
+            onClose={() => setShowAvatarModal(null)} 
+            playSound={playSound}
+          >
+            <div className="space-y-4">
+              {modalPlayer && (
+                <div className="flex items-center justify-between px-3 py-2 bg-amber-50 dark:bg-[#0a1f14] border border-amber-200 dark:border-amber-800/60 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Current:</span>
+                    <span className="text-2xl">{modalPlayer.avatar || '👤'}</span>
+                    <span className="font-serif font-bold text-slate-900 dark:text-white uppercase">{modalPlayer.name}</span>
+                  </div>
+                  <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Choose below:</span>
+                </div>
+              )}
+              <div className="grid grid-cols-5 sm:grid-cols-6 gap-3 max-h-[55vh] overflow-y-auto p-2 modal-content-scroll">
+                {AVATARS.map(avatar => {
+                  const isCurrent = modalPlayer?.avatar === avatar;
+                  return (
+                    <button 
+                      key={avatar}
+                      type="button"
+                      onClick={() => handleUpdateAvatar(showAvatarModal.playerId, avatar)}
+                      className={`text-3xl p-3 rounded-lg transition-all shadow-sm hover:shadow-lg hover:scale-110 transform duration-100 cursor-pointer relative ${
+                        isCurrent
+                          ? 'bg-amber-100 dark:bg-amber-950/80 border-2 border-amber-500 ring-2 ring-amber-400/40'
+                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-amber-500 dark:hover:bg-amber-600 border border-slate-200 dark:border-transparent'
+                      }`}
+                      title={isCurrent ? 'Current avatar' : `Select ${avatar}`}
+                    >
+                      {avatar}
+                      {isCurrent && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-black rounded-full text-[9px] font-bold flex items-center justify-center shadow">
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
+      {showWheelModal && players.find(p => p.id === showWheelModal.playerId) && (
+        <WheelModal
+          player={players.find(p => p.id === showWheelModal.playerId)!}
+          onClose={() => setShowWheelModal(null)}
+          onApplyResult={(item) => handleApplyWheelResult(showWheelModal.playerId, item)}
+          playSound={playSound}
+        />
+      )}
+      {pendingLoadGame && (
+        <Modal title="Load Game" onClose={() => setPendingLoadGame(null)} playSound={playSound} hideOkButton>
+          <div className="space-y-6">
+            <div className="bg-amber-50/70 dark:bg-slate-900/50 p-4 rounded-lg border border-amber-200 dark:border-slate-700">
+              <h3 className="text-amber-800 dark:text-amber-400 font-bold uppercase tracking-widest text-sm mb-4">Game Info</h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="text-slate-500">Mode:</span> <span className="text-slate-800 dark:text-white capitalize font-semibold">{pendingLoadGame.gameMode === 'lastPlayer' ? 'Last Survivor' : pendingLoadGame.gameMode === 'rounds' ? 'Fixed Rounds' : 'Target Bankroll'}</span></div>
+                <div>
+                  <span className="text-slate-500">{pendingLoadGame.gameMode === 'targetAmount' ? 'Goal:' : 'Round:'}</span>{" "}
+                  <span className="text-slate-800 dark:text-white font-semibold">
+                    {pendingLoadGame.gameMode === 'targetAmount' ? `$${(pendingLoadGame.targetAmount || 2000).toLocaleString()}` : `${pendingLoadGame.currentRound} / ${pendingLoadGame.totalRounds}`}
+                  </span>
+                </div>
+                <div><span className="text-slate-500">Topic:</span> <span className="text-slate-800 dark:text-white font-semibold">{pendingLoadGame.settings?.topic}</span></div>
+                <div><span className="text-slate-500">Level:</span> <span className="text-slate-800 dark:text-white font-semibold">{pendingLoadGame.settings?.level}</span></div>
+              </div>
+            </div>
+            <div className="bg-amber-50/70 dark:bg-slate-900/50 p-4 rounded-lg border border-amber-200 dark:border-slate-700">
+              <h3 className="text-amber-800 dark:text-amber-400 font-bold uppercase tracking-widest text-sm mb-4">Players ({pendingLoadGame.players?.length || 0})</h3>
+              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 modal-content-scroll">
+                {pendingLoadGame.players?.map((p: any) => (
+                  <div key={p.id} className="flex justify-between items-center bg-white/80 dark:bg-black/30 p-2 rounded border border-amber-200/50 dark:border-transparent">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{p.avatar || '👤'}</span>
+                      <span className="text-slate-800 dark:text-white font-bold">{p.name}</span>
+                    </div>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">${p.money}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-4 pt-4">
+              <ActionButton onClick={() => setPendingLoadGame(null)} playSound={playSound} variant="outline-gold" className="flex-1 py-3">Cancel</ActionButton>
+              <ActionButton onClick={handleConfirmLoadGame} playSound={playSound} variant="gold" className="flex-1 py-3">Load Game</ActionButton>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showReportCardModal && (
+        <Modal 
+          title="Grammar Casino - Report Card" 
+          onClose={() => setShowReportCardModal(false)} 
+          playSound={playSound}
+        >
+          <div className="max-h-[78vh] overflow-y-auto pr-1 modal-content-scroll">
+            <GrammarReportCard
+              history={roundHistory}
+              players={players}
+              winner={winner}
+              playSound={playSound}
+              onRestartGame={handleRestartGame}
+              settings={settings}
+              gameMode={gameMode}
+              totalRounds={totalRounds}
+              targetAmount={targetAmount}
+            />
+          </div>
+        </Modal>
+      )}
+      {showSettingsModal && (
+        <RoundSettingsModal
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          initialTab={settingsModalTab}
+          currentSettings={settings}
+          nextSettings={nextRoundSettings || settings}
+          currentRound={currentRound}
+          playSound={playSound}
+          onSaveNextRound={handleSaveNextRoundSettings}
+          onApplyCurrentRound={step === 'IN_GAME' ? handleApplySettingsImmediately : undefined}
+        />
+      )}
+      {showDeckConfigModal && (
+        <DeckConfigModal
+          isOpen={showDeckConfigModal}
+          onClose={() => setShowDeckConfigModal(false)}
+          selectedPowerUps={selectedPowerUps}
+          onTogglePowerUp={(key) => {
+            setSelectedPowerUps(prev => {
+              const updated = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+              if (step === 'IN_GAME') {
+                setAvailablePowerUps(updated);
+              }
+              return updated;
+            });
+          }}
+          onSelectAll={() => {
+            const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+            setSelectedPowerUps(allKeys);
+            if (step === 'IN_GAME') {
+              setAvailablePowerUps(allKeys);
+            }
+          }}
+          onClearAll={() => {
+            setSelectedPowerUps([]);
+            if (step === 'IN_GAME') {
+              setAvailablePowerUps([]);
+            }
+          }}
+          playSound={playSound}
+        />
+      )}
+    </>
+  );
+}
