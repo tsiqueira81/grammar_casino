@@ -782,6 +782,7 @@ export function App() {
         sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
       }; 
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState)); 
+      GeminiService.savePortableGame(gameState); 
     } catch (e) { 
       console.error("Failed to save game state:", e); 
     } 
@@ -2532,6 +2533,7 @@ export function App() {
 
   const handleRestartGame = useCallback(() => {
     localStorage.removeItem(LOCAL_STORAGE_KEY); 
+    GeminiService.clearPortableGame();
     setStep('PLAYER_SETUP');
     setPlayers([]);
     setNewPlayerName('');
@@ -3610,8 +3612,10 @@ export function App() {
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
                                       <span className="inline-flex items-center gap-1 font-mono-casino text-[10px] font-bold text-amber-800 dark:text-[#fef08a]">
-                                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
-                                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? 'AI' : 'Offline Bank'}</span>
+                                        <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
+                                        <span>{desktopStatus.decryptionFailed ? 'Re-enter Key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI' : 'Offline Bank'}</span>
+                                        {desktopStatus.isPortable && <span className="opacity-75" title="Portable Edition">🎒</span>}
+                                        {desktopStatus.isReadOnly && <span className="text-red-500" title="Read-Only Media">🔒</span>}
                                       </span>
                                     </span>
                                     <span className="text-[10px] font-mono-casino font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
@@ -3713,8 +3717,10 @@ export function App() {
                                         title="Click to view AI & Offline Settings"
                                       >
                                         <span className="flex items-center gap-1">
-                                          <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
-                                          <span className="font-bold">{desktopStatus.hasKey && desktopStatus.isOnline ? 'Gemini AI' : 'Offline Bank'}</span>
+                                          <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
+                                          <span className="font-bold">{desktopStatus.decryptionFailed ? 'Key Re-entry Needed' : desktopStatus.hasKey && desktopStatus.isOnline ? 'Gemini AI' : 'Offline Bank'}</span>
+                                          {desktopStatus.isPortable && <span className="text-purple-600 dark:text-purple-300 font-mono-casino font-bold text-[10px]">🎒 Portable</span>}
+                                          {desktopStatus.isReadOnly && <span className="text-red-500 font-mono-casino font-bold text-[10px]">🔒 Read-Only</span>}
                                         </span>
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">⚙️</span>
                                       </button>

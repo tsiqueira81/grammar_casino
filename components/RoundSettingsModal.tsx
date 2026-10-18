@@ -599,7 +599,50 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         : 'Curated Sentence Bank (Offline)'}
                     </span>
                   </div>
+
+                  {/* Portable Edition Badge */}
+                  {desktopStatus.isPortable && (
+                    <div className="mt-2.5 p-2 rounded-lg bg-purple-500/10 border border-purple-400/40 dark:border-purple-800/40 flex items-center justify-between text-xs">
+                      <span className="font-serif font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                        <span>🎒</span>
+                        <span>Portable Edition:</span>
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate max-w-[280px]" title={desktopStatus.dataPath}>
+                        📁 {desktopStatus.dataPath ? desktopStatus.dataPath.split(/[\\/]/).slice(-2).join('/') : 'Grammar Casino Data'}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+                {/* Read-Only Media Warning Banner */}
+                {desktopStatus.isReadOnly && (
+                  <div className="p-3.5 rounded-xl border-2 border-red-500/80 bg-red-500/15 text-red-950 dark:text-red-100 flex items-start gap-3 animate-fade-in shadow-md">
+                    <span className="text-2xl mt-0.5 select-none">🔒</span>
+                    <div className="flex-1 min-w-0">
+                      <h5 className="font-serif font-bold text-xs uppercase tracking-wide text-red-700 dark:text-red-300">
+                        Read-Only Location Detected
+                      </h5>
+                      <p className="text-xs mt-1 leading-relaxed">
+                        Grammar Casino Portable is running from a write-protected drive or read-only directory. Settings, progress, and game saves will run in temporary session memory and cannot be saved to the drive.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* DPAPI Machine Transfer Key Re-entry Alert Banner */}
+                {desktopStatus.decryptionFailed && (
+                  <div className="p-3.5 rounded-xl border-2 border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100 flex items-start gap-3 animate-fade-in shadow-md">
+                    <span className="text-2xl mt-0.5 select-none">🔑</span>
+                    <div className="flex-1 min-w-0">
+                      <h5 className="font-serif font-bold text-xs uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                        Key Re-entry Needed (New PC or User Account)
+                      </h5>
+                      <p className="text-xs mt-1 leading-relaxed">
+                        Your previously saved Gemini API key was encrypted with Windows DPAPI on a different computer or Windows account. Because Windows security credentials do not transfer between different user profiles or machines, please re-enter your Gemini API key below to re-encrypt and activate live AI on this computer.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Feature Availability Matrix */}
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-black/20">

@@ -13,7 +13,9 @@
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "electron:start": "npm run build && electron electron/main.cjs",
-    "electron:build": "npm run build && electron-builder --win nsis"
+    "electron:build": "npm run build && electron-builder --win",
+    "electron:build:installer": "npm run build && electron-builder --win nsis",
+    "electron:build:portable": "npm run build && electron-builder --win portable"
   },
   "build": {
     "appId": "com.grammarcasino.desktop",
@@ -37,11 +39,21 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico"
     },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}"
+    },
     "nsis": {
+      "artifactName": "${productName} Setup ${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

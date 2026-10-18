@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld('electronDesktop', {
     testApiKey: (key) => ipcRenderer.invoke('settings:testApiKey', key),
   },
 
+  storage: {
+    saveGame: (gameState) => ipcRenderer.invoke('storage:saveGame', gameState),
+    loadGame: () => ipcRenderer.invoke('storage:loadGame'),
+    clearGame: () => ipcRenderer.invoke('storage:clearGame'),
+  },
+
   system: {
     openExternal: (url) => ipcRenderer.invoke('system:openExternal', url),
   },

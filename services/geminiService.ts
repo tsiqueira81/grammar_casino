@@ -4,9 +4,13 @@ import { getCuratedSentence } from './fallbackSentences';
 // Desktop Electron IPC interface exposed securely via contextBridge preload
 export interface DesktopStatus {
   isDesktop: boolean;
+  isPortable?: boolean;
   isOnline: boolean;
   hasKey: boolean;
   isEncrypted: boolean;
+  decryptionFailed?: boolean;
+  isReadOnly?: boolean;
+  dataPath?: string;
   maskedKey?: string;
 }
 
@@ -25,6 +29,11 @@ interface ElectronDesktopAPI {
     setApiKey: (key: string) => Promise<{ success: boolean; hasKey: boolean; error?: string }>;
     clearApiKey: () => Promise<{ success: boolean; hasKey: boolean; error?: string }>;
     testApiKey: (key?: string) => Promise<{ valid: boolean; text?: string; error?: string }>;
+  };
+  storage?: {
+    saveGame: (gameState: any) => Promise<{ success: boolean; readOnly?: boolean; error?: string }>;
+    loadGame: () => Promise<{ success: boolean; gameState: any | null; error?: string }>;
+    clearGame: () => Promise<{ success: boolean; readOnly?: boolean; error?: string }>;
   };
   system: {
     openExternal: (url: string) => Promise<void>;
@@ -51,6 +60,7 @@ export const getDesktopStatus = async (): Promise<DesktopStatus> => {
   }
   return {
     isDesktop: false,
+    isPortable: false,
     isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
     hasKey: false,
     isEncrypted: false,
@@ -76,6 +86,39 @@ export const testDesktopApiKey = async (key?: string) => {
     return await window.electronDesktop.settings.testApiKey(key);
   }
   return { valid: false, error: 'Desktop storage not available.' };
+};
+
+export const savePortableGame = async (gameState: any) => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.storage) {
+    try {
+      return await window.electronDesktop.storage.saveGame(gameState);
+    } catch (e) {
+      console.warn('Failed to save portable game state:', e);
+    }
+  }
+  return { success: false };
+};
+
+export const loadPortableGame = async () => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.storage) {
+    try {
+      return await window.electronDesktop.storage.loadGame();
+    } catch (e) {
+      console.warn('Failed to load portable game state:', e);
+    }
+  }
+  return { success: false, gameState: null };
+};
+
+export const clearPortableGame = async () => {
+  if (typeof window !== 'undefined' && window.electronDesktop?.storage) {
+    try {
+      return await window.electronDesktop.storage.clearGame();
+    } catch (e) {
+      console.warn('Failed to clear portable game state:', e);
+    }
+  }
+  return { success: false };
 };
 
 // Primary endpoint with fallback to direct Netlify function path for web deployment

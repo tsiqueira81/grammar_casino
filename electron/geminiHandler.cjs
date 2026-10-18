@@ -3,6 +3,19 @@ const { app, safeStorage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+let storageInfo = {
+  isPortable: false,
+  isReadOnly: false,
+  dataPath: '',
+};
+
+function setStorageInfo(info) {
+  storageInfo = { ...storageInfo, ...info };
+}
+
+// Track whether stored DPAPI credentials failed to decrypt due to machine/account change
+let decryptionFailedFlag = false;
+
 // --- Key Management with OS-Backed DPAPI Encryption ---
 function getKeyFilePath() {
   const userDataDir = app.getPath('userData');
@@ -13,33 +26,50 @@ function getStoredApiKey() {
   try {
     const keyPath = getKeyFilePath();
     if (!fs.existsSync(keyPath)) {
+      decryptionFailedFlag = false;
       return null;
     }
     const encryptedData = fs.readFileSync(keyPath);
     if (!encryptedData || encryptedData.length === 0) {
+      decryptionFailedFlag = false;
       return null;
     }
     if (safeStorage.isEncryptionAvailable()) {
-      const decrypted = safeStorage.decryptString(encryptedData);
-      return (decrypted || '').trim() || null;
+      try {
+        const decrypted = safeStorage.decryptString(encryptedData);
+        decryptionFailedFlag = false;
+        return (decrypted || '').trim() || null;
+      } catch (decryptErr) {
+        console.warn(
+          '[GeminiHandler] Stored key cannot be decrypted on this Windows account or computer (DPAPI credentials are machine/account-bound):',
+          decryptErr.message
+        );
+        decryptionFailedFlag = true;
+        return null;
+      }
     } else {
+      decryptionFailedFlag = false;
       const plain = encryptedData.toString('utf8');
       return (plain || '').trim() || null;
     }
   } catch (err) {
-    console.error('[GeminiHandler] Failed to read or decrypt stored API key:', err);
+    console.error('[GeminiHandler] Failed to read stored API key:', err);
     return null;
   }
 }
 
 function saveApiKey(apiKey) {
   try {
+    if (storageInfo.isReadOnly) {
+      return { success: false, error: 'Storage location is read-only. Cannot save API key.' };
+    }
     const keyPath = getKeyFilePath();
     const trimmed = (apiKey || '').trim();
     if (!trimmed) {
       if (fs.existsSync(keyPath)) {
         fs.unlinkSync(keyPath);
       }
+      decryptionFailedFlag = false;
       return { success: true, hasKey: false };
     }
 
@@ -49,6 +79,7 @@ function saveApiKey(apiKey) {
     } else {
       fs.writeFileSync(keyPath, Buffer.from(trimmed, 'utf8'));
     }
+    decryptionFailedFlag = false;
     return { success: true, hasKey: true };
   } catch (err) {
     console.error('[GeminiHandler] Failed to encrypt and save API key:', err);
@@ -58,10 +89,14 @@ function saveApiKey(apiKey) {
 
 function clearApiKey() {
   try {
+    if (storageInfo.isReadOnly) {
+      return { success: false, error: 'Storage location is read-only.' };
+    }
     const keyPath = getKeyFilePath();
     if (fs.existsSync(keyPath)) {
       fs.unlinkSync(keyPath);
     }
+    decryptionFailedFlag = false;
     return { success: true, hasKey: false };
   } catch (err) {
     return { success: false, error: err.message };
@@ -81,9 +116,13 @@ function getStatus() {
 
   return {
     isDesktop: true,
+    isPortable: storageInfo.isPortable,
+    isReadOnly: storageInfo.isReadOnly,
+    dataPath: storageInfo.dataPath || app.getPath('userData'),
     isOnline,
     hasKey,
     isEncrypted,
+    decryptionFailed: decryptionFailedFlag,
     maskedKey: hasKey ? `${key.slice(0, 4)}...${key.slice(-4)}` : '',
   };
 }
@@ -670,4 +709,5 @@ module.exports = {
   verifyOpenClozeBatch,
   simplifyExplanation,
   generateSpeech,
+  setStorageInfo,
 };
