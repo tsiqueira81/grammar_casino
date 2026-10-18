@@ -47,10 +47,14 @@ export type GrammarTopic = 'Tenses' | 'Prepositions' | 'Articles' | 'Conditional
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 export type Theme = 'Fantasy 🐉' | 'Sci-Fi 🚀' | 'History 🏛️' | 'Everyday Life ☕' | 'Business 💼' | 'Technology 💻' | 'Pop Culture 🍿' | 'Custom ✍️';
 
+export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze';
+export type ChallengeFormat = QuestionType | 'mixed';
+
 export interface Settings {
   topic: string;
   level: CEFRLevel;
   theme: string;
+  challengeFormat?: ChallengeFormat;
 }
 
 export interface GeneratedSentence {
@@ -61,13 +65,23 @@ export interface GeneratedSentence {
   grammarPhrase: string; // For the 'Grammar Goggles' power-up
   errorPhrase?: string; // Exact mistake/erroneous phrase if incorrect (e.g. "more lesser", "has went")
   mistakeType?: string; // Short descriptor of the specific error mechanism (e.g. "double comparative")
+  questionType?: QuestionType;
+  options?: string[];
+  acceptedAnswers?: string[];
+  correctAnswer?: string;
 }
 
 export interface Bet {
   opinion?: 'correct' | 'incorrect';
   bet?: number | '';
   userCorrection?: string;
-  splitCorrectPercent?: number; // 0-100, used for SPLIT_BET
+  splitCorrectPercent?: number; // 0-100, used for SPLIT_BET in binary mode
+  questionType?: QuestionType;
+  options?: string[];
+  selectedOption?: string;
+  splitOptions?: string[]; // 50/50 Two-Option Pick in Multiple-Choice Cloze
+  clozeAnswer?: string;
+  splitClozeAnswers?: [string, string]; // 2 candidate words in Open Cloze (50% wager on each)
 }
 
 export interface Hint {
@@ -83,6 +97,8 @@ export interface RoundResultInfo {
   newTotal: number;
   correctionFeedback: string;
   amountChanged: number;
+  questionType?: QuestionType;
+  playerAnswerDisplay?: string;
 }
 
 export interface GameError {
@@ -172,6 +188,13 @@ export interface RoundPlayerResult {
   userCorrection?: string;
   correctionFeedback?: string;
   splitPercent?: number;
+  questionType?: QuestionType;
+  options?: string[];
+  playerAnswerDisplay?: string;
+  selectedOption?: string;
+  splitOptions?: string[];
+  clozeAnswer?: string;
+  splitClozeAnswers?: [string, string];
 }
 
 export interface RoundHistoryRecord {

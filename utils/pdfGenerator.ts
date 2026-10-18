@@ -15,30 +15,40 @@ export interface GeneratePDFOptions {
 }
 
 /**
- * Strips emoji characters and non-standard symbols so that standard PDF fonts render cleanly
+ * Strips emoji characters, variation selectors, and non-Latin1 symbols so that standard PDF fonts
+ * never switch into corrupted UTF-16 spacing or render stray glyphs.
  */
 function cleanText(text: string | null | undefined): string {
   if (!text) return '';
   return text
-    // Replace smart quotes and special dashes with ASCII equivalents
-    .replace(/[\u2018\u2019]/g, "'")
+    // Strip variation selectors and zero-width joiners FIRST so emoji replacements don't leave孤立 \uFE0F behind
+    .replace(/[\uFE00-\uFE0F\u200B-\u200D\u2060\uFEFF]/g, '')
+    // Replace smart quotes, bullets, and special dashes with clean ASCII equivalents
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
-    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2013\u2014\u2212]/g, '-')
     .replace(/\u2026/g, '...')
-    // Replace specific common emojis with textual equivalents
+    .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '|')
+    // Replace specific game status emojis cleanly
+    .replace(/Sat Out\s*⏱/gi, 'Sat Out')
+    .replace(/Frozen\s*❄/gi, 'Frozen')
     .replace(/[♠♥♦♣]/g, '*')
     .replace(/🏆/g, '[Champion]')
     .replace(/📜/g, '')
-    .replace(/✅|✔️/g, '[OK]')
-    .replace(/❌|⚠️/g, '[!]')
+    .replace(/✅|✔/g, '[OK]')
+    .replace(/❌|⚠/g, '[!]')
     .replace(/💡/g, '[Rule]')
     .replace(/🎲/g, '[Bet]')
     .replace(/💰/g, '$')
     .replace(/🎯/g, '[Goal]')
-    .replace(/⏱️/g, '[Rounds]')
-    // Remove remaining high-surrogate emojis and symbols
+    .replace(/⏱/g, '')
+    .replace(/❄/g, '')
+    // Remove any remaining surrogate-pair emojis and dingbats
     .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
-    .replace(/[\u2600-\u27BF]/g, '')
+    .replace(/[\u2300-\u27BF]/g, '')
+    // Strip any remaining characters outside printable ASCII + Latin-1 supplement
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -107,6 +117,61 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     return false;
   };
 
+  /**
+   * Sets the exact font & size BEFORE measuring so jsPDF wraps lines accurately within maxWidthMm.
+   */
+  const wrapText = (
+    rawText: string,
+    maxWidthMm: number,
+    fontSize: number,
+    fontStyle: 'normal' | 'bold' | 'italic' | 'bolditalic' = 'normal'
+  ): string[] => {
+    const cleaned = cleanText(rawText);
+    if (!cleaned) return [];
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSize);
+    doc.setCharSpace(0);
+    return doc.splitTextToSize(cleaned, maxWidthMm) as string[];
+  };
+
+  /**
+   * Guarantees a single-line string never exceeds maxWidthMm by truncating with '...' if needed.
+   */
+  const fitSingleLine = (
+    rawText: string,
+    maxWidthMm: number,
+    fontSize: number,
+    fontStyle: 'normal' | 'bold' | 'italic' | 'bolditalic' = 'normal'
+  ): string => {
+    const cleaned = cleanText(rawText);
+    if (!cleaned) return '';
+    doc.setFont('helvetica', fontStyle);
+    doc.setFontSize(fontSize);
+    doc.setCharSpace(0);
+    if (doc.getTextWidth(cleaned) <= maxWidthMm) return cleaned;
+    let truncated = cleaned;
+    while (truncated.length > 1 && doc.getTextWidth(`${truncated}...`) > maxWidthMm) {
+      truncated = truncated.slice(0, -1).trimEnd();
+    }
+    return `${truncated}...`;
+  };
+
+  /**
+   * Draws wrapped lines one by one with deterministic line-height and zero character-space drift.
+   */
+  const drawWrappedLines = (
+    lines: string[],
+    x: number,
+    startY: number,
+    lineHeightMm: number
+  ): number => {
+    doc.setCharSpace(0);
+    lines.forEach((line, idx) => {
+      doc.text(line, x, startY + idx * lineHeightMm);
+    });
+    return startY + lines.length * lineHeightMm;
+  };
+
   // ==========================================
   // 1. HEADER BANNER
   // ==========================================
@@ -163,27 +228,37 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
   if (gameMode === 'rounds') winModeDesc = `Fixed Rounds (${totalRounds})`;
   if (gameMode === 'targetAmount') winModeDesc = `Target Bankroll ($${targetAmount.toLocaleString()})`;
 
+  // Row 1 inside meta bar (bounded to column widths: col1=58mm, col2=66mm, col3=44mm)
+  const metaDate = fitSingleLine(`DATE: ${dateStr}`, 58, 8, 'bold');
+  const metaTopic = fitSingleLine(`TOPIC: ${topicName} (CEFR ${levelName})`, 66, 8, 'bold');
+  const metaTheme = fitSingleLine(`THEME: ${themeName}`, 43, 8, 'bold');
+
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...colors.slateDark);
-  
-  // Row 1 inside meta bar
-  doc.text(`DATE: ${dateStr}`, marginX + 4, currentY + 5.5);
-  doc.text(`TOPIC: ${topicName} (CEFR ${levelName})`, marginX + 65, currentY + 5.5);
-  doc.text(`THEME: ${themeName}`, marginX + 135, currentY + 5.5);
+  doc.text(metaDate, marginX + 4, currentY + 5.5);
+  doc.text(metaTopic, marginX + 65, currentY + 5.5);
+  doc.text(metaTheme, marginX + 135, currentY + 5.5);
 
   // Row 2 inside meta bar
+  const metaMode = fitSingleLine(`MODE: ${winModeDesc}`, 58, 8, 'normal');
   doc.setFont('helvetica', 'normal');
-  doc.text(`MODE: ${winModeDesc}`, marginX + 4, currentY + 11.5);
+  doc.setFontSize(8);
+  doc.setTextColor(...colors.slateDark);
+  doc.text(metaMode, marginX + 4, currentY + 11.5);
   
-  const winnerText = winner ? `CHAMPION: ${cleanText(winner.name)} ($${winner.money.toLocaleString()})` : 'OUTCOME: House Won (No survivors)';
+  const rawWinnerText = winner ? `CHAMPION: ${cleanText(winner.name)} ($${winner.money.toLocaleString()})` : 'OUTCOME: House Won (No survivors)';
+  const metaWinner = fitSingleLine(rawWinnerText, 66, 8, 'bold');
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
   doc.setTextColor(...colors.goldDark);
-  doc.text(winnerText, marginX + 65, currentY + 11.5);
+  doc.text(metaWinner, marginX + 65, currentY + 11.5);
 
+  const metaFilter = fitSingleLine(`FILTER: ${filterName}`, 43, 8, 'normal');
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
   doc.setTextColor(...colors.slateMuted);
-  doc.text(`FILTER: ${filterName}`, marginX + 135, currentY + 11.5);
+  doc.text(metaFilter, marginX + 135, currentY + 11.5);
 
   currentY += 21;
 
@@ -238,7 +313,7 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     },
     {
       label: 'TOP GRAMMARIAN',
-      val: winner ? cleanText(winner.name).substring(0, 10) : 'N/A',
+      val: winner ? cleanText(winner.name) : 'N/A',
       sub: winner ? `$${winner.money.toLocaleString()} final bankroll` : 'All eliminated',
       valColor: [7, 30, 18] as [number, number, number],
     },
@@ -251,22 +326,25 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     doc.roundedRect(kpiX, currentY, kpiWidth, kpiHeight, 1.5, 1.5, 'FD');
 
     // Title
+    const safeLabel = fitSingleLine(kpi.label, kpiWidth - 3, 6.5, 'bold');
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...colors.slateMuted);
-    doc.text(kpi.label, kpiX + kpiWidth / 2, currentY + 4.5, { align: 'center' });
+    doc.text(safeLabel, kpiX + kpiWidth / 2, currentY + 4.5, { align: 'center' });
 
     // Value
+    const safeVal = fitSingleLine(kpi.val, kpiWidth - 3, 12, 'bold');
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...kpi.valColor);
-    doc.text(kpi.val, kpiX + kpiWidth / 2, currentY + 11, { align: 'center' });
+    doc.text(safeVal, kpiX + kpiWidth / 2, currentY + 11, { align: 'center' });
 
     // Subtitle
+    const safeSub = fitSingleLine(kpi.sub, kpiWidth - 3, 6, 'normal');
     doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...colors.slateMuted);
-    doc.text(kpi.sub, kpiX + kpiWidth / 2, currentY + 15.5, { align: 'center' });
+    doc.text(safeSub, kpiX + kpiWidth / 2, currentY + 15.5, { align: 'center' });
   });
 
   currentY += kpiHeight + 6;
@@ -371,43 +449,86 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
   doc.text(`PEDAGOGICAL SENTENCE ANALYSIS (${roundsToRender.length} ROUNDS EVALUATED)`, marginX, currentY);
   currentY += 4;
 
+  const innerPaddingLeft = 6;
+  const innerPaddingRight = 6;
+  const innerWidth = contentWidth - innerPaddingLeft - innerPaddingRight; // 170mm strictly inside card
+
   roundsToRender.forEach((record) => {
-    const isError = !record.sentence.isCorrect;
+    const qType = record.sentence.questionType || 'binary';
+    const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+    const isError = !isCloze && !record.sentence.isCorrect;
     const cleanSentenceText = cleanText(record.sentence.text);
     const cleanCorrectionText = cleanText(record.sentence.correction);
     const cleanExplanationText = cleanText(record.sentence.explanation);
     const cleanTopic = cleanText(record.topic || 'Grammar');
     const cleanErrorPhrase = cleanText(record.sentence.errorPhrase || '');
     const cleanMistakeType = cleanText(record.sentence.mistakeType || '');
+    const cleanOfficialAnswer = cleanText(record.sentence.correctAnswer || '');
 
-    // Calculate accurate dynamic card height based on text wrapping
-    const splitOriginal = doc.splitTextToSize(`"${cleanSentenceText}"`, contentWidth - 14);
-    const splitCorrection = (isError && cleanCorrectionText) ? doc.splitTextToSize(`Corrected: "${cleanCorrectionText}"`, contentWidth - 14) : [];
-    const splitExplanation = doc.splitTextToSize(`Rule: ${cleanExplanationText}`, contentWidth - 14);
+    const optionsLine = (qType === 'multipleChoice' && record.sentence.options)
+      ? `Options: ${record.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${cleanText(opt)}`).join('   ')}`
+      : (qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0)
+        ? `Accepted Answers: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}`
+        : '';
+
+    const mistakeLine = (isError && cleanErrorPhrase)
+      ? `Identified Mistake: "${cleanErrorPhrase}"${cleanMistakeType ? ` (${cleanMistakeType})` : ''}`
+      : '';
+
+    // Measure every block with its exact font & size so wrapped lines never overflow innerWidth
+    const splitOriginal = wrapText(`"${cleanSentenceText}"`, innerWidth, 8, 'italic');
+    const splitOptions = optionsLine ? wrapText(optionsLine, innerWidth, 7.2, 'bold') : [];
+    const splitMistake = mistakeLine ? wrapText(mistakeLine, innerWidth, 7.5, 'bold') : [];
+    const splitCorrection = ((isError || isCloze) && cleanCorrectionText)
+      ? wrapText(`${isCloze ? 'Completed' : 'Corrected'}: "${cleanCorrectionText}"`, innerWidth, 7.5, 'bold')
+      : [];
+    const splitExplanation = wrapText(`Rule: ${cleanExplanationText}`, innerWidth, 7, 'normal');
 
     const studentSummaryParts = record.playerResults.map(pr => {
       const pName = cleanText(pr.playerName);
       const outcome = pr.isWin ? `Won +$${pr.amountChanged}` : `Lost -$${Math.abs(pr.amountChanged)}`;
-      const vote = pr.opinion.toUpperCase();
+      const vote = cleanText(pr.playerAnswerDisplay || pr.opinion.toUpperCase());
       let extra = '';
-      if (pr.userCorrection?.trim()) {
-        extra = ` [Student Correction: "${cleanText(pr.userCorrection)}"${pr.correctionFeedback ? ` -> ${cleanText(pr.correctionFeedback)}` : ''}]`;
+      if (!isCloze && pr.userCorrection?.trim()) {
+        extra = ` [Correction: "${cleanText(pr.userCorrection)}"${pr.correctionFeedback ? ` -> ${cleanText(pr.correctionFeedback)}` : ''}]`;
+      } else if (isCloze && pr.correctionFeedback) {
+        extra = ` [${cleanText(pr.correctionFeedback)}]`;
       }
       return `${pName}: ${vote} -> ${outcome}${extra}`;
     });
 
-    const splitStudents = doc.splitTextToSize(`Student Bets: ${studentSummaryParts.join('  •  ')}`, contentWidth - 14);
+    const splitStudents = wrapText(
+      `Student Bets: ${studentSummaryParts.join('  |  ')}`,
+      innerWidth,
+      6.8,
+      'bold'
+    );
 
-    let calculatedCardHeight = 11; // header & top padding
-    calculatedCardHeight += splitOriginal.length * 3.8 + 2;
-    if (isError) {
-      if (cleanErrorPhrase) calculatedCardHeight += 4.5;
-      if (splitCorrection.length > 0) calculatedCardHeight += splitCorrection.length * 3.8 + 2;
+    const origLineH = 3.8;
+    const optLineH = 3.5;
+    const mistakeLineH = 3.5;
+    const corrLineH = 3.8;
+    const explLineH = 3.4;
+    const studLineH = 3.3;
+
+    // Exact height calculation matching insideY increments
+    let calculatedCardHeight = 9.5; // top to first body line baseline
+    calculatedCardHeight += splitOriginal.length * origLineH + 1.5;
+    if (splitOptions.length > 0) {
+      calculatedCardHeight += splitOptions.length * optLineH + 1.5;
     }
-    calculatedCardHeight += splitExplanation.length * 3.4 + 3;
-    calculatedCardHeight += splitStudents.length * 3.2 + 4;
+    if (isError || isCloze) {
+      if (splitMistake.length > 0) {
+        calculatedCardHeight += splitMistake.length * mistakeLineH + 1.2;
+      }
+      if (splitCorrection.length > 0) {
+        calculatedCardHeight += splitCorrection.length * corrLineH + 1.5;
+      }
+    }
+    calculatedCardHeight += splitExplanation.length * explLineH + 1.8;
+    calculatedCardHeight += splitStudents.length * studLineH + 2.5; // bottom padding
 
-    const actualCardHeight = Math.max(calculatedCardHeight, 28);
+    const actualCardHeight = Math.max(calculatedCardHeight, 26);
     ensureSpace(actualCardHeight);
 
     // Card background
@@ -419,66 +540,78 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     doc.setFillColor(...(isError ? colors.errorRedText : colors.correctGreenText));
     doc.rect(marginX, currentY, 3, actualCardHeight, 'F');
 
-    // Header line inside card
+    // Status Badge on right of card header (measured first so left header never collides)
     const cardHeaderY = currentY + 5;
-    doc.setFontSize(8.5);
+    const rawBadgeText = isCloze
+      ? `[ANSWER: "${cleanOfficialAnswer}"]`
+      : isError
+        ? '[!] GRAMMATICAL ERROR IN SENTENCE'
+        : '[OK] ACCURATE / FLAWLESS SENTENCE';
+    const safeBadgeText = fitSingleLine(rawBadgeText, 68, 7.5, 'bold');
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...colors.slateDark);
-    doc.text(`ROUND ${record.round} • ${cleanTopic.toUpperCase()} (${record.level})`, marginX + 6, cardHeaderY);
-
-    // Status Badge on right of card header
     doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'bold');
+    const badgeWidth = doc.getTextWidth(safeBadgeText);
     if (isError) {
       doc.setTextColor(...colors.errorRedText);
-      doc.text('[!] GRAMMATICAL ERROR IN SENTENCE', marginX + contentWidth - 4, cardHeaderY, { align: 'right' });
     } else {
       doc.setTextColor(...colors.correctGreenText);
-      doc.text('[OK] ACCURATE / FLAWLESS SENTENCE', marginX + contentWidth - 4, cardHeaderY, { align: 'right' });
     }
+    doc.text(safeBadgeText, marginX + contentWidth - innerPaddingRight, cardHeaderY, { align: 'right' });
 
-    let insideY = currentY + 9;
+    // Header line inside card (left side, bounded so it never touches the right badge)
+    const modePrefix = qType === 'multipleChoice' ? ' - MULTIPLE-CHOICE CLOZE' : qType === 'openCloze' ? ' - OPEN CLOZE' : '';
+    const rawLeftHeader = `ROUND ${record.round} - ${cleanTopic.toUpperCase()} (${record.level})${modePrefix}`;
+    const safeLeftHeader = fitSingleLine(rawLeftHeader, Math.max(60, innerWidth - badgeWidth - 4), 8.5, 'bold');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...colors.slateDark);
+    doc.text(safeLeftHeader, marginX + innerPaddingLeft, cardHeaderY);
+
+    let insideY = currentY + 9.5;
+    const textX = marginX + innerPaddingLeft;
 
     // Original Sentence Display
-    doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
     doc.setTextColor(...colors.slateDark);
-    doc.text(splitOriginal, marginX + 6, insideY);
-    insideY += splitOriginal.length * 3.8 + 1.5;
+    insideY = drawWrappedLines(splitOriginal, textX, insideY, origLineH) + 1.5;
 
-    // If Erroneous, show error highlight & correction
-    if (isError) {
-      // Mistake phrase if present
-      if (cleanErrorPhrase) {
-        doc.setFontSize(7.5);
+    // Options / Accepted Answers
+    if (splitOptions.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.2);
+      doc.setTextColor(...colors.slateMuted);
+      insideY = drawWrappedLines(splitOptions, textX, insideY, optLineH) + 1.5;
+    }
+
+    // If Erroneous or Cloze, show error highlight & correction/completed sentence
+    if (isError || isCloze) {
+      if (splitMistake.length > 0) {
         doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
         doc.setTextColor(...colors.errorRedText);
-        doc.text(`Identified Mistake: "${cleanErrorPhrase}" ${cleanMistakeType ? `(${cleanMistakeType})` : ''}`, marginX + 6, insideY);
-        insideY += 4;
+        insideY = drawWrappedLines(splitMistake, textX, insideY, mistakeLineH) + 1.2;
       }
 
-      // Corrected sentence
       if (splitCorrection.length > 0) {
-        doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
         doc.setTextColor(...colors.correctGreenText);
-        doc.text(splitCorrection, marginX + 6, insideY);
-        insideY += splitCorrection.length * 3.8 + 1.5;
+        insideY = drawWrappedLines(splitCorrection, textX, insideY, corrLineH) + 1.5;
       }
     }
 
     // Explanation & Pedagogical Rule
-    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
     doc.setTextColor(...colors.slateMuted);
-    doc.text(splitExplanation, marginX + 6, insideY);
-    insideY += splitExplanation.length * 3.4 + 2;
+    insideY = drawWrappedLines(splitExplanation, textX, insideY, explLineH) + 1.8;
 
     // Student outcomes summary
-    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
     doc.setTextColor(...colors.slateDark);
-    doc.text(splitStudents, marginX + 6, insideY);
+    drawWrappedLines(splitStudents, textX, insideY, studLineH);
 
     currentY += actualCardHeight + 3.5;
   });

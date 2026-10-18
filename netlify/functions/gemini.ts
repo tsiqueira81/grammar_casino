@@ -209,13 +209,27 @@ const CEFR_PROFILES: Record<string, CefrProfile> = {
 const sentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    text: { type: Type.STRING, description: "The generated sentence." },
+    text: { type: Type.STRING, description: "The generated sentence (with '_____' if Cloze mode)." },
     isCorrect: { type: Type.BOOLEAN, description: "Whether the sentence is grammatically correct." },
-    correction: { type: Type.STRING, description: "The corrected version of the sentence." },
+    correction: { type: Type.STRING, description: "The full completed or corrected version of the sentence." },
     explanation: { type: Type.STRING, description: "A brief explanation of the grammar rule." },
     grammarPhrase: { type: Type.STRING, description: "Key part of the sentence (3-5 words) testing the rule." },
     errorPhrase: { type: Type.STRING, description: "If incorrect, the exact erroneous phrase. If correct, empty string." },
     mistakeType: { type: Type.STRING, description: "If incorrect, 2-4 word descriptor of error mechanism." },
+    options: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "For multipleChoice mode: 4 distinct options (1 correct, 3 distractors).",
+    },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "For Cloze modes: the exact primary word or option that fills '_____'.",
+    },
+    acceptedAnswers: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "For openCloze mode: array of all valid single-word answers (primary word + valid single-word synonyms).",
+    },
   },
   required: ["text", "isCorrect", "correction", "explanation", "grammarPhrase"],
 };
@@ -227,6 +241,25 @@ const verificationSchema = {
     feedback: { type: Type.STRING, description: "Brief one-sentence explanation of why it was accepted or rejected." },
   },
   required: ["isCorrect", "feedback"],
+};
+
+const batchClozeVerificationSchema = {
+  type: Type.OBJECT,
+  properties: {
+    evaluations: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          word: { type: Type.STRING, description: "The candidate single word being evaluated." },
+          isCorrect: { type: Type.BOOLEAN, description: "Whether this single word is grammatically and contextually valid in the blank." },
+          feedback: { type: Type.STRING, description: "Brief one-sentence explanation of why the word fits or does not fit." },
+        },
+        required: ["word", "isCorrect", "feedback"],
+      },
+    },
+  },
+  required: ["evaluations"],
 };
 
 // Response helper
@@ -315,7 +348,14 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
     switch (action) {
       // 1. Generate Sentence
       case "generateSentence": {
-        const { settings, pastSentences = [], forceCorrect = null, subtype = null, pastMistakes = [] } = payload;
+        const {
+          settings,
+          pastSentences = [],
+          forceCorrect = null,
+          subtype = null,
+          pastMistakes = [],
+          questionType: requestedQuestionType,
+        } = payload;
         if (!settings || typeof settings.topic !== "string" || typeof settings.level !== "string") {
           return jsonResponse(400, { error: "Invalid settings provided for sentence generation." });
         }
@@ -325,24 +365,85 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
         const theme = String(settings.theme || "Everyday Life").slice(0, 80);
         const profile = CEFR_PROFILES[level] || CEFR_PROFILES.B1;
 
+        const formatSetting = requestedQuestionType || settings.challengeFormat || "binary";
+        const resolvedQuestionType: "binary" | "multipleChoice" | "openCloze" =
+          formatSetting === "multipleChoice" || formatSetting === "openCloze" || formatSetting === "binary"
+            ? formatSetting
+            : (["binary", "multipleChoice", "openCloze"] as const)[Math.floor(Math.random() * 3)];
+
         const recentSentences = Array.isArray(pastSentences) ? pastSentences.slice(-50).map((s) => String(s).slice(0, 300)) : [];
         const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-40).map((m) => String(m).slice(0, 150)) : [];
-
-        const correctnessInstruction =
-          forceCorrect === null
-            ? "Generate an incorrect sentence 60% of the time and a correct one 40% of the time."
-            : forceCorrect
-            ? "The sentence MUST be grammatically correct."
-            : "The sentence MUST contain a grammatical error.";
 
         const subtypeClause = subtype ? `\nThe grammatical focus MUST specifically be: ${String(subtype).slice(0, 100)}.` : "";
         const avoidSentencesClause = recentSentences.length > 0 ? `\nDO NOT repeat any of the following sentences: ${JSON.stringify(recentSentences)}` : "";
         const avoidMistakesClause =
           recentMistakes.length > 0
-            ? `\n=== STRICT RULE: NEVER REPEAT THE SAME MISTAKE ===\nThe following specific mistakes / erroneous constructions have ALREADY been tested in this game:\n${JSON.stringify(recentMistakes)}\n1. If the sentence is incorrect, you MUST NOT repeat any of the above mistakes or identical error phrases!\n2. Choose a completely different grammatical sub-rule or mechanism within "${topic}".\n3. Every single incorrect sentence MUST feature a fresh, distinct error that has never appeared in the game session before.`
+            ? `\n=== STRICT RULE: NEVER REPEAT THE SAME MISTAKE / GAP TARGET ===\nThe following specific mistakes or target phrases have ALREADY been tested in this game:\n${JSON.stringify(recentMistakes)}\nChoose a completely different grammatical sub-rule or mechanism within "${topic}".`
             : "";
 
-        const prompt = `You are a master English teacher and linguistics expert designing a grammar challenge for a Grammar Casino game.
+        let prompt = "";
+
+        if (resolvedQuestionType === "multipleChoice") {
+          prompt = `You are a master English teacher designing a 4-option Multiple-Choice Cloze challenge for a Grammar Casino game.
+Settings:
+- Grammar Topic: "${topic}"
+- CEFR Level: "${level}"
+- Theme: "${theme}"
+${subtypeClause}
+
+=== CEFR LEVEL REQUIREMENTS (${level}) ===
+- SYNTAX (${profile.targetLength}): ${profile.syntax}
+- LEXIS & VOCABULARY: ${profile.lexis}
+${avoidSentencesClause}
+${avoidMistakesClause}
+
+=== MULTIPLE-CHOICE CLOZE RULES ===
+1. Write a grammatically sound sentence and replace the key target word or short grammatical phrase (1-3 words testing "${topic}") with an exact 5-underscore blank: "_____".
+2. Set "text" to the sentence containing "_____".
+3. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
+4. Set "correctAnswer" to the exact correct option string.
+5. Set "options" to an array of 4 distinct strings (1 correct answer + 3 plausible grammatical distractors that test "${topic}" at CEFR ${level}), in randomized order.
+6. Set "isCorrect" to true.
+7. Set "explanation" to a clear explanation of why "${topic}" requires the correct option and why the distractors are incorrect.
+8. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
+
+Respond ONLY with valid JSON matching the schema.`;
+        } else if (resolvedQuestionType === "openCloze") {
+          prompt = `You are a master Cambridge English examiner designing an Open Cloze (Use of English Part 2) challenge for a Grammar Casino game.
+Settings:
+- Grammar Topic: "${topic}"
+- CEFR Level: "${level}"
+- Theme: "${theme}"
+${subtypeClause}
+
+=== CEFR LEVEL REQUIREMENTS (${level}) ===
+- SYNTAX (${profile.targetLength}): ${profile.syntax}
+- LEXIS & VOCABULARY: ${profile.lexis}
+${avoidSentencesClause}
+${avoidMistakesClause}
+
+=== CAMBRIDGE OPEN CLOZE STRICT RULES ===
+1. Constrain the gap to a SINGLE WORD ONLY (Cambridge style). Never require two or more words in the gap.
+2. The missing single word MUST test "${topic}" (e.g., an auxiliary verb, modal, preposition, article, conjunction, relative pronoun, phrasal verb particle, or verb form).
+3. Replace that single word in the sentence with an exact 5-underscore blank: "_____".
+4. Set "text" to the sentence containing "_____".
+5. Set "correction" to the FULL completed sentence with the primary word filled in.
+6. Set "correctAnswer" to the primary single word (lowercase, unless it's at the start of the sentence or "I").
+7. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word synonyms/alternatives that fit the blank (all lowercase, trimmed, single words only).
+8. Set "isCorrect" to true.
+9. Set "explanation" to a clear explanation of the grammatical rule requiring this word.
+10. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
+
+Respond ONLY with valid JSON matching the schema.`;
+        } else {
+          const correctnessInstruction =
+            forceCorrect === null
+              ? "Generate an incorrect sentence 60% of the time and a correct one 40% of the time."
+              : forceCorrect
+              ? "The sentence MUST be grammatically correct."
+              : "The sentence MUST contain a grammatical error.";
+
+          prompt = `You are a master English teacher and linguistics expert designing a grammar challenge for a Grammar Casino game.
 Settings:
 - Grammar Topic: "${topic}"
 - CEFR Level: "${level}"
@@ -364,6 +465,7 @@ mistakeType MUST be a short descriptor (2-4 words) of the error type if incorrec
 
 Respond ONLY with valid JSON matching the schema, no markdown wrappers:
 {"text":"...","isCorrect":true,"correction":"...","explanation":"...","grammarPhrase":"...","errorPhrase":"...","mistakeType":"..."}`;
+        }
 
         const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
           return await ai.models.generateContent({
@@ -379,9 +481,37 @@ Respond ONLY with valid JSON matching the schema, no markdown wrappers:
 
         const jsonText = response.text ? response.text.trim() : "";
         const generatedData = JSON.parse(jsonText);
+        generatedData.questionType = resolvedQuestionType;
 
-        if (!generatedData.isCorrect && !generatedData.errorPhrase) {
-          generatedData.errorPhrase = generatedData.grammarPhrase;
+        if (resolvedQuestionType === "binary") {
+          if (!generatedData.isCorrect && !generatedData.errorPhrase) {
+            generatedData.errorPhrase = generatedData.grammarPhrase;
+          }
+        } else if (resolvedQuestionType === "multipleChoice") {
+          generatedData.isCorrect = true;
+          if (Array.isArray(generatedData.options) && generatedData.correctAnswer) {
+            const hasCorrect = generatedData.options.some(
+              (o: string) => o.trim().toLowerCase() === String(generatedData.correctAnswer).trim().toLowerCase()
+            );
+            if (!hasCorrect) {
+              generatedData.options[0] = generatedData.correctAnswer;
+            }
+          }
+          generatedData.acceptedAnswers = generatedData.correctAnswer ? [String(generatedData.correctAnswer).trim()] : [];
+        } else if (resolvedQuestionType === "openCloze") {
+          generatedData.isCorrect = true;
+          const primary = String(generatedData.correctAnswer || "").trim().split(/\s+/)[0] || "";
+          generatedData.correctAnswer = primary;
+          const rawAccepted = Array.isArray(generatedData.acceptedAnswers) ? generatedData.acceptedAnswers : [];
+          const normalizedSet = new Set<string>();
+          if (primary) normalizedSet.add(primary.toLowerCase());
+          rawAccepted.forEach((ans: any) => {
+            const clean = String(ans || "").trim().toLowerCase();
+            if (clean && !clean.includes(" ")) {
+              normalizedSet.add(clean);
+            }
+          });
+          generatedData.acceptedAnswers = Array.from(normalizedSet);
         }
 
         return jsonResponse(200, generatedData);
@@ -389,7 +519,7 @@ Respond ONLY with valid JSON matching the schema, no markdown wrappers:
 
       // 2. Get Hint
       case "getHint": {
-        const { sentence, topic, level } = payload;
+        const { sentence, topic, level, questionType } = payload;
         if (!sentence || typeof sentence !== "string" || !topic || typeof topic !== "string") {
           return jsonResponse(400, { error: "Missing required 'sentence' or 'topic' parameters." });
         }
@@ -397,8 +527,15 @@ Respond ONLY with valid JSON matching the schema, no markdown wrappers:
         const safeSentence = sentence.slice(0, 500);
         const safeTopic = topic.slice(0, 100);
         const levelContext = level ? `The student's CEFR level is ${String(level).slice(0, 5)}. Adapt the hint subtlety to this level.` : "";
+        const isCloze = questionType === "multipleChoice" || questionType === "openCloze" || safeSentence.includes("_____");
 
-        const prompt = `A player in a grammar game is looking at this sentence: "${safeSentence}".
+        const prompt = isCloze
+          ? `A player in a grammar game is looking at this cloze sentence with a blank: "${safeSentence}".
+The grammar topic being tested is "${safeTopic}".
+${levelContext}
+Give a very short, subtle, one-sentence grammatical clue about what part of speech, tense, or grammatical rule governs the missing word in "_____". NEVER reveal the exact missing word itself.
+Respond ONLY with the hint text.`
+          : `A player in a grammar game is looking at this sentence: "${safeSentence}".
 The grammar topic being tested is "${safeTopic}".
 ${levelContext}
 Give a very short, cryptic, one-sentence hint about what might be wrong. Don't give away the answer.
@@ -456,6 +593,67 @@ Respond ONLY with the JSON object matching the provided schema.`;
         const jsonText = response.text ? response.text.trim() : "";
         const result = JSON.parse(jsonText);
         return jsonResponse(200, result);
+      }
+
+      // 3b. Verify Open Cloze Unmatched Candidate Words in a Single Batched Call
+      case "verifyOpenClozeBatch": {
+        const { sentenceWithBlank, intendedAnswer, acceptedAnswers = [], candidateWords = [] } = payload;
+        if (!sentenceWithBlank || typeof sentenceWithBlank !== "string" || !Array.isArray(candidateWords)) {
+          return jsonResponse(400, { error: "Missing parameters for verifyOpenClozeBatch." });
+        }
+
+        const uniqueWords = Array.from(
+          new Set(
+            candidateWords
+              .map((w: any) => String(w || "").trim())
+              .filter((w: string) => w.length > 0)
+          )
+        ).slice(0, 30);
+
+        if (uniqueWords.length === 0) {
+          return jsonResponse(200, { results: {} });
+        }
+
+        const prompt = `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
+Sentence with blank: "${sentenceWithBlank.slice(0, 500)}"
+Primary intended single word: "${String(intendedAnswer || "").slice(0, 60)}"
+Known accepted single words: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
+
+Evaluate each of the following student-submitted candidate words:
+${JSON.stringify(uniqueWords)}
+
+STRICT RULES:
+1. Open Cloze gaps require a SINGLE WORD only. If a candidate contains multiple words (spaces), mark isCorrect: false.
+2. Mark isCorrect: true ONLY if inserting the single word into "_____" produces a 100% grammatically accurate, natural, and contextually coherent English sentence.
+3. Provide a brief 1-sentence feedback for each word.
+
+Respond ONLY with valid JSON matching the schema.`;
+
+        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
+          return await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: batchClozeVerificationSchema,
+            },
+          });
+        });
+
+        const jsonText = response.text ? response.text.trim() : "";
+        const parsed = JSON.parse(jsonText);
+        const results: Record<string, { isCorrect: boolean; feedback: string }> = {};
+        if (Array.isArray(parsed?.evaluations)) {
+          parsed.evaluations.forEach((ev: any) => {
+            if (ev && typeof ev.word === "string") {
+              results[ev.word.trim().toLowerCase()] = {
+                isCorrect: Boolean(ev.isCorrect),
+                feedback: String(ev.feedback || ""),
+              };
+            }
+          });
+        }
+        return jsonResponse(200, { results });
       }
 
       // 4. Simplify Explanation (Cached)

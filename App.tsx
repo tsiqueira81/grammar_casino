@@ -3,12 +3,13 @@ import {
   Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, 
   PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload,
   Step, GameMode, SoundEffect, GrammarTopic, CEFRLevel, Theme, PlayerHistory, PlayerEffect, UsedPowerUp,
-  WheelItem, RoundHistoryRecord, RoundPlayerResult, PlayerTurnTimer
+  WheelItem, RoundHistoryRecord, RoundPlayerResult, PlayerTurnTimer, QuestionType, ChallengeFormat
 } from './types';
 import { 
   POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
   INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
-  JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS
+  JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
+  CHALLENGE_FORMATS, CLOZE_DISABLED_POWER_UPS
 } from './constants';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -169,9 +170,16 @@ export function App() {
   const playerNameInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [settings, setSettings] = useState<Settings>(initialGameState?.settings || { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+  const [settings, setSettings] = useState<Settings>(() => {
+    const saved = initialGameState?.settings;
+    if (saved) {
+      return { ...saved, challengeFormat: saved.challengeFormat || 'binary' };
+    }
+    return { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' };
+  });
   const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || '');
   const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
+  const mixedFormatIndexRef = useRef(0);
   
   const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'lastPlayer');
   const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || 10);
@@ -390,6 +398,9 @@ export function App() {
   const speakText = useCallback(async (text: string | null) => { 
     if (isMuted || !text || isSpeaking) return; 
     
+    // Sanitize "_____" to "... blank ..." so TTS never reads "underscore underscore underscore"
+    const sanitizedText = text.replace(/_{2,}/g, '... blank ...');
+
     playSound('click');
     setIsSpeaking(true);
 
@@ -401,7 +412,7 @@ export function App() {
         }
         try {
             window.speechSynthesis.cancel(); 
-            const utterance = new SpeechSynthesisUtterance(text); 
+            const utterance = new SpeechSynthesisUtterance(sanitizedText); 
             if (ttsVoices.length > 0) { 
               let preferredVoice = ttsVoices.find(v => v.lang === 'en-US' && !v.localService && v.name.includes('Google')) || 
                                    ttsVoices.find(v => v.lang === 'en-US' && !v.localService) || 
@@ -421,7 +432,7 @@ export function App() {
 
     try {
         // Try Gemini TTS
-        const base64Audio = await GeminiService.generateSpeech(text);
+        const base64Audio = await GeminiService.generateSpeech(sanitizedText);
         
         if (ttsAudioContext.state === 'suspended') {
             await ttsAudioContext.resume();
@@ -457,9 +468,21 @@ export function App() {
     const hasValidBetAmount = typeof playerBet.bet === 'number' && !isNaN(playerBet.bet) && Number(playerBet.bet) > 0;
     if (!hasValidBetAmount) return false;
     const hasSplitBet = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
+    const qType: QuestionType = currentSentence?.questionType || 'binary';
+
+    if (qType === 'multipleChoice') {
+      if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) === 2;
+      return Boolean(playerBet.selectedOption?.trim());
+    }
+    if (qType === 'openCloze') {
+      if (hasSplitBet) {
+        return Boolean(playerBet.splitClozeAnswers?.[0]?.trim() && playerBet.splitClozeAnswers?.[1]?.trim());
+      }
+      return Boolean(playerBet.clozeAnswer?.trim());
+    }
     if (hasSplitBet) return true;
     return playerBet.opinion === 'correct' || playerBet.opinion === 'incorrect';
-  }, [bets, activePowerUps]);
+  }, [bets, activePowerUps, currentSentence]);
 
   // System hold: pause any running timer while a popup/modal is open or a hint is loading
   const isTimerSystemHeld = useMemo(() => {
@@ -849,9 +872,17 @@ export function App() {
         if (!currentSettings || !currentSettings.theme || !currentSettings.level || !currentSettings.topic) {
             throw new Error("Invalid settings provided to fetch a new sentence.");
         }
+        const formatSetting: ChallengeFormat = currentSettings.challengeFormat || 'binary';
+        const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
+        const resolvedQuestionType: QuestionType = formatSetting === 'mixed'
+          ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
+          : formatSetting;
+
         const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
-        const forceCorrect = currentBatch[0];
-        setSentenceBatch(currentBatch.slice(1));
+        const forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
+        if (resolvedQuestionType === 'binary') {
+          setSentenceBatch(currentBatch.slice(1));
+        }
 
         const topicKey = currentSettings.topic;
         const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
@@ -864,11 +895,12 @@ export function App() {
           currentSettings, 
           history, 
           forceCorrect, 
-          forceCorrect ? null : subtype,
-          effectiveMistakes
+          (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
+          effectiveMistakes,
+          resolvedQuestionType
         );
         
-        if (!forceCorrect && subtype) {
+        if ((resolvedQuestionType !== 'binary' || !forceCorrect) && subtype) {
           setUsedSubtypes(prev => {
             const next = [...prev, subtype];
             return next.length >= allSubtypes.length ? [] : next;
@@ -933,7 +965,13 @@ export function App() {
         return;
     }
     
-    const newSettings = { topic: finalTopic, level: settings.level, theme: finalTheme };
+    const newSettings: Settings = {
+      topic: finalTopic,
+      level: settings.level,
+      theme: finalTheme,
+      challengeFormat: settings.challengeFormat || 'binary',
+    };
+    mixedFormatIndexRef.current = 0;
     setSettings(newSettings);
     setCurrentRound(1);
     setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
@@ -968,7 +1006,12 @@ export function App() {
       setHints(h => ({...h, [playerId]: { text: '', isLoading: true }}));
       
       try {
-        const hintText = await GeminiService.getHint(currentSentence.text, settings.topic, settings.level as any);
+        const hintText = await GeminiService.getHint(
+          currentSentence.text,
+          settings.topic,
+          settings.level as any,
+          currentSentence.questionType || 'binary'
+        );
         setHints(h => ({...h, [playerId]: { text: hintText, isLoading: false }}));
       } catch (err: any) {
         setHints(h => ({...h, [playerId]: { text: 'Hint error. Please try again.', isLoading: false }}));
@@ -1012,7 +1055,7 @@ export function App() {
           [field]: finalValue
         }
       };
-      if (field === 'opinion' || field === 'bet') {
+      if (field === 'opinion' || field === 'bet' || field === 'selectedOption' || field === 'splitOptions') {
           playSound('bet');
       }
       return newBets;
@@ -1108,6 +1151,9 @@ export function App() {
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return;
     
+    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze';
+    if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
+
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
     const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
@@ -1451,14 +1497,20 @@ export function App() {
     const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
     const limit = hasPowerSurge ? 3 : 1;
     if (usage >= limit) return;
-    if (availablePowerUps.length === 0) {
-         setError({ title: "Empty Deck", message: "No more power-ups available in the deck for this round!" });
+
+    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze';
+    const drawablePool = isClozeRound
+      ? availablePowerUps.filter(k => !CLOZE_DISABLED_POWER_UPS.includes(k))
+      : availablePowerUps;
+
+    if (drawablePool.length === 0) {
+         setError({ title: "Empty Deck", message: "No more eligible power-ups available in the shoe for this hand!" });
          return;
     }
-    const randomIndex = Math.floor(Math.random() * availablePowerUps.length);
-    const selectedPowerUp = availablePowerUps[randomIndex];
+    const randomIndex = Math.floor(Math.random() * drawablePool.length);
+    const selectedPowerUp = drawablePool[randomIndex];
     handleBuyPowerUp(playerId, selectedPowerUp);
-  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, handleBuyPowerUp]);
+  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp]);
 
   const handleTogglePowerUpInDeck = useCallback((key: PowerUpKey) => {
     const isCurrentlyActive = selectedPowerUps.includes(key);
@@ -1645,7 +1697,8 @@ export function App() {
   }, [showTargetModal, playSound]); 
 
   const verifyPlayerCorrections = useCallback(async () => {
-    if (!currentSentence || currentSentence.isCorrect) return {}; 
+    const qType: QuestionType = currentSentence?.questionType || 'binary';
+    if (!currentSentence || qType !== 'binary' || currentSentence.isCorrect) return {}; 
     const playersToVerify = activePlayers.filter(p => {
         if (isPlayerFrozen(p.id)) return false;
         if (isTurnTimerEnabled && !hasPlayerPlacedBet(p.id)) return false;
@@ -1674,9 +1727,9 @@ export function App() {
     return verifications;
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
-  // Logic remains same as previous step, just re-rendered for context if needed
   const handleRevealResults = useCallback(async () => {
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
+    const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (isTurnTimerEnabled) {
       const allLocked = unfrozenPlayers.every(p => turnTimers[p.id]?.status === 'locked');
@@ -1688,13 +1741,29 @@ export function App() {
       const allValidBetsFinalized = unfrozenPlayers.every(p => {
         const playerBet = bets[p.id];
         const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
+        if (!hasValidBetAmount) return false;
         const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        if (hasSplitBet) return hasValidBetAmount;
-        return playerBet?.opinion && hasValidBetAmount;
+        if (qType === 'multipleChoice') {
+          return hasSplitBet
+            ? (playerBet?.splitOptions?.length ?? 0) === 2
+            : Boolean(playerBet?.selectedOption?.trim());
+        }
+        if (qType === 'openCloze') {
+          return hasSplitBet
+            ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() && playerBet?.splitClozeAnswers?.[1]?.trim())
+            : Boolean(playerBet?.clozeAnswer?.trim());
+        }
+        if (hasSplitBet) return true;
+        return Boolean(playerBet?.opinion);
       });
 
       if (!allValidBetsFinalized && !teacherRevealOverride) { 
-        setError({ title: "Invalid Bets", message: "All active (unfrozen) players must select an opinion and enter a bet."});
+        const promptMsg = qType === 'multipleChoice'
+          ? "All active (unfrozen) players must choose an option and enter a bet."
+          : qType === 'openCloze'
+            ? "All active (unfrozen) players must type their missing word(s) and enter a bet."
+            : "All active (unfrozen) players must select an opinion and enter a bet.";
+        setError({ title: "Invalid Bets", message: promptMsg });
         return;
       }
     }
@@ -1726,7 +1795,84 @@ export function App() {
 
     playSound('flip');
     setIsProcessing(true);
+
+    // 1. Binary mode correction verification
     const verifications = await verifyPlayerCorrections();
+
+    // 2. Open Cloze instant (0ms) + single batched AI verification for unmatched words
+    const acceptedSet = new Set<string>();
+    if (currentSentence.correctAnswer) {
+      acceptedSet.add(currentSentence.correctAnswer.trim().toLowerCase());
+    }
+    (currentSentence.acceptedAnswers || []).forEach(ans => {
+      if (ans && ans.trim()) acceptedSet.add(ans.trim().toLowerCase());
+    });
+
+    const clozeWordVerifications: Record<string, { isCorrect: boolean; feedback: string }> = {};
+    if (qType === 'openCloze') {
+      const unmatchedWordsMap = new Map<string, number>(); // normalizedWord -> representative playerId
+      validPlayers.forEach(p => {
+        const b = bets[p.id];
+        if (!b) return;
+        const pSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+        const candidateWords = pSplit
+          ? [b.splitClozeAnswers?.[0], b.splitClozeAnswers?.[1]]
+          : [b.clozeAnswer];
+
+        candidateWords.forEach(rawWord => {
+          const norm = (rawWord || '').trim().toLowerCase();
+          if (!norm) return;
+          if (acceptedSet.has(norm)) {
+            // Instant 0ms match!
+            clozeWordVerifications[norm] = {
+              isCorrect: true,
+              feedback: `Instant match ("${rawWord?.trim()}")!`,
+            };
+          } else if (!unmatchedWordsMap.has(norm)) {
+            unmatchedWordsMap.set(norm, p.id);
+          }
+        });
+      });
+
+      if (unmatchedWordsMap.size > 0) {
+        setProcessingStatus(`Grading ${unmatchedWordsMap.size} custom Open Cloze answer(s) with AI Judge...`);
+        const unmatchedWordsList = Array.from(unmatchedWordsMap.keys());
+
+        try {
+          const batchResults = await GeminiService.verifyOpenClozeBatch(
+            currentSentence.text,
+            currentSentence.correctAnswer || '',
+            currentSentence.acceptedAnswers || [],
+            unmatchedWordsList
+          );
+          Object.entries(batchResults).forEach(([wordKey, res]) => {
+            clozeWordVerifications[wordKey.trim().toLowerCase()] = res;
+          });
+        } catch (err) {
+          console.error("Failed batched open cloze verification:", err);
+        }
+      }
+    }
+
+    const isMcOptionCorrect = (opt: string | undefined): boolean => {
+      if (!opt || !currentSentence.correctAnswer) return false;
+      return opt.trim().toLowerCase() === currentSentence.correctAnswer.trim().toLowerCase();
+    };
+
+    const isClozeWordCorrect = (word: string | undefined): boolean => {
+      const norm = (word || '').trim().toLowerCase();
+      if (!norm) return false;
+      if (acceptedSet.has(norm)) return true;
+      return Boolean(clozeWordVerifications[norm]?.isCorrect);
+    };
+
+    const formatMcOptionWithLetter = (opt: string | undefined): string => {
+      if (!opt) return '—';
+      const idx = (currentSentence.options || []).findIndex(o => o.trim().toLowerCase() === opt.trim().toLowerCase());
+      const letter = idx >= 0 ? ['A', 'B', 'C', 'D'][idx] || '' : '';
+      return letter ? `${letter}: "${opt}"` : `"${opt}"`;
+    };
+
     setProcessingStatus('Calculating results...');
     
     let winSoundCount = 0;
@@ -1734,20 +1880,60 @@ export function App() {
     const newRoundResultsData: RoundResultInfo[] = [];
     const newRoundPlayerResults: RoundPlayerResult[] = [];
 
+    // Generalized choice frequency counter for BOUNTY_HUNTER (minorityOpinion)
+    const choiceFrequency: Record<string, number> = {};
     let correctCount = 0;
     let incorrectCount = 0;
-    validPlayers.forEach(p => {
-        if (bets[p.id]?.opinion === 'correct') correctCount++;
-        if (bets[p.id]?.opinion === 'incorrect') incorrectCount++;
-    });
-    const minorityOpinion = correctCount < incorrectCount ? 'correct' : (incorrectCount < correctCount ? 'incorrect' : null);
 
-    // Calculate count of players who picked the correct outcome (for Lone Wolf)
+    validPlayers.forEach(p => {
+      const b = bets[p.id];
+      if (!b) return;
+      const pSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+      if (qType === 'binary') {
+        if (b.opinion === 'correct') {
+          correctCount++;
+          choiceFrequency['correct'] = (choiceFrequency['correct'] || 0) + 1;
+        }
+        if (b.opinion === 'incorrect') {
+          incorrectCount++;
+          choiceFrequency['incorrect'] = (choiceFrequency['incorrect'] || 0) + 1;
+        }
+      } else if (qType === 'multipleChoice') {
+        const opts = pSplit ? (b.splitOptions || []) : (b.selectedOption ? [b.selectedOption] : []);
+        opts.forEach(o => {
+          const key = o.trim().toLowerCase();
+          if (key) choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
+        });
+      } else if (qType === 'openCloze') {
+        const words = pSplit ? (b.splitClozeAnswers || []) : (b.clozeAnswer ? [b.clozeAnswer] : []);
+        words.forEach(w => {
+          const key = (w || '').trim().toLowerCase();
+          if (key) choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
+        });
+      }
+    });
+
+    const minorityOpinion = correctCount < incorrectCount ? 'correct' : (incorrectCount < correctCount ? 'incorrect' : null);
+    const maxChoiceCount = Math.max(0, ...Object.values(choiceFrequency));
+
+    // Calculate count of players who picked the correct outcome (for Lone Wolf & Bounty Hunter minority winners)
     const winningPlayersCount = validPlayers.filter(p => {
         const b = bets[p.id];
         if (!b) return false;
         const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
         const pSplit = pActive.some(pu => pu.type === 'SPLIT_BET');
+        if (qType === 'multipleChoice') {
+          if (pSplit) {
+            return (b.splitOptions || []).some(o => isMcOptionCorrect(o));
+          }
+          return isMcOptionCorrect(b.selectedOption);
+        }
+        if (qType === 'openCloze') {
+          if (pSplit) {
+            return (b.splitClozeAnswers || []).some(w => isClozeWordCorrect(w));
+          }
+          return isClozeWordCorrect(b.clozeAnswer);
+        }
         if (pSplit) {
             const splitPct = b.splitCorrectPercent ?? 50;
             const winningFrac = currentSentence.isCorrect ? (splitPct / 100) : (1 - splitPct / 100);
@@ -1757,6 +1943,33 @@ export function App() {
                (b.opinion === 'incorrect' && !currentSentence.isCorrect);
     }).length;
 
+    const isPlayerInMinority = (playerId: number): boolean => {
+      const b = bets[playerId];
+      if (!b) return false;
+      if (qType === 'binary') {
+        return Boolean(minorityOpinion && b.opinion === minorityOpinion);
+      }
+      if (validPlayers.length <= 1) return false;
+      const pSplit = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
+      if (qType === 'multipleChoice') {
+        const chosen = pSplit
+          ? (b.splitOptions || []).find(o => isMcOptionCorrect(o))
+          : b.selectedOption;
+        const key = (chosen || '').trim().toLowerCase();
+        const count = key ? (choiceFrequency[key] || 0) : 0;
+        return (count > 0 && count < maxChoiceCount) || (winningPlayersCount > 0 && winningPlayersCount < validPlayers.length - winningPlayersCount);
+      }
+      if (qType === 'openCloze') {
+        const chosen = pSplit
+          ? (b.splitClozeAnswers || []).find(w => isClozeWordCorrect(w))
+          : b.clozeAnswer;
+        const key = (chosen || '').trim().toLowerCase();
+        const count = key ? (choiceFrequency[key] || 0) : 0;
+        return (count > 0 && count < maxChoiceCount) || (winningPlayersCount > 0 && winningPlayersCount < validPlayers.length - winningPlayersCount);
+      }
+      return false;
+    };
+
     const updatedPlayers = players.map(player => {
       if (!activePlayers.find(ap => ap.id === player.id)) return player; 
       
@@ -1765,13 +1978,25 @@ export function App() {
 
       const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
       if (isFrozen) {
-          newRoundResultsData.push({ name: player.name, bet: 0, opinion: 'correct', outcomeText: 'Frozen ❄️', newTotal: player.money, correctionFeedback:'', amountChanged: 0 });
+          newRoundResultsData.push({
+            name: player.name,
+            bet: 0,
+            opinion: 'correct',
+            questionType: qType,
+            playerAnswerDisplay: 'Frozen ❄️',
+            outcomeText: 'Frozen ❄️',
+            newTotal: player.money,
+            correctionFeedback: '',
+            amountChanged: 0,
+          });
           newRoundPlayerResults.push({
             playerId: player.id,
             playerName: player.name,
             playerAvatar: player.avatar,
             bet: 0,
             opinion: 'correct',
+            questionType: qType,
+            playerAnswerDisplay: 'Frozen ❄️',
             isWin: false,
             amountChanged: 0,
             newTotal: player.money,
@@ -1783,13 +2008,25 @@ export function App() {
       // If turn timer is active (or teacher overrode) and player did not place a complete bet, they sit out as if frozen
       const satOut = isTurnTimerEnabled ? !hasPlayerPlacedBet(player.id) : !hasPlayerPlacedBet(player.id) && teacherRevealOverride;
       if (satOut) {
-          newRoundResultsData.push({ name: player.name, bet: 0, opinion: 'correct', outcomeText: 'Sat Out ⏱️', newTotal: player.money, correctionFeedback: '', amountChanged: 0 });
+          newRoundResultsData.push({
+            name: player.name,
+            bet: 0,
+            opinion: 'correct',
+            questionType: qType,
+            playerAnswerDisplay: 'Sat Out ⏱️',
+            outcomeText: 'Sat Out ⏱️',
+            newTotal: player.money,
+            correctionFeedback: '',
+            amountChanged: 0,
+          });
           newRoundPlayerResults.push({
             playerId: player.id,
             playerName: player.name,
             playerAvatar: player.avatar,
             bet: 0,
             opinion: 'correct',
+            questionType: qType,
+            playerAnswerDisplay: 'Sat Out ⏱️',
             isWin: false,
             amountChanged: 0,
             newTotal: player.money,
@@ -1813,60 +2050,177 @@ export function App() {
       let correctionBonusApplied = false;
       let isWin = false;
       let correctionFeedbackText = '';
+      let playerAnswerDisplay = '';
+
+      // Compute human-readable answer display for Results, Report Card, and PDF
+      if (qType === 'multipleChoice') {
+        if (hasSplitBet) {
+          const picks = (playerBetData?.splitOptions || []).map(o => formatMcOptionWithLetter(o));
+          playerAnswerDisplay = `50/50: ${picks.join(' / ') || '—'}`;
+        } else {
+          playerAnswerDisplay = formatMcOptionWithLetter(playerBetData?.selectedOption);
+        }
+      } else if (qType === 'openCloze') {
+        if (hasSplitBet) {
+          const w1 = playerBetData?.splitClozeAnswers?.[0]?.trim() || '—';
+          const w2 = playerBetData?.splitClozeAnswers?.[1]?.trim() || '—';
+          playerAnswerDisplay = `50/50: "${w1}" / "${w2}"`;
+        } else {
+          playerAnswerDisplay = `"${playerBetData?.clozeAnswer?.trim() || '—'}"`;
+        }
+      } else {
+        if (hasSplitBet) {
+          const pct = playerBetData?.splitCorrectPercent ?? 50;
+          playerAnswerDisplay = `Split (${pct}% Valid / ${100 - pct}% Flawed)`;
+        } else {
+          playerAnswerDisplay = playerBetData?.opinion === 'correct' ? '✓ Valid' : '✕ Flawed';
+        }
+      }
 
       if (hasSplitBet) {
-          const splitPercent = playerBetData?.splitCorrectPercent ?? 50;
-          const fractionCorrect = splitPercent / 100;
-          const fractionIncorrect = 1 - fractionCorrect;
-          const wager = finalBet; 
-          let winnings = 0;
-          if (currentSentence.isCorrect) {
-              winnings = (wager * fractionCorrect) * 2;
+          const wager = finalBet;
+          if (qType === 'multipleChoice') {
+              const splitOpts = playerBetData?.splitOptions || [];
+              const anyHit = splitOpts.some(o => isMcOptionCorrect(o));
+              if (anyHit) {
+                  isWin = true;
+                  outcomeAmount = Math.round(wager * 0.5);
+                  outcomeText = `50/50 Split Win (+$${outcomeAmount})`;
+                  playSound('win', winSoundCount++);
+              } else {
+                  isWin = false;
+                  outcomeAmount = -wager;
+                  outcomeText = `50/50 Split Loss (-$${wager})`;
+                  playSound('lose', loseSoundCount++);
+              }
+          } else if (qType === 'openCloze') {
+              const w1 = playerBetData?.splitClozeAnswers?.[0];
+              const w2 = playerBetData?.splitClozeAnswers?.[1];
+              const hit1 = isClozeWordCorrect(w1);
+              const hit2 = isClozeWordCorrect(w2);
+              const hits = (hit1 ? 1 : 0) + (hit2 ? 1 : 0);
+              if (hits === 2) {
+                  isWin = true;
+                  outcomeAmount = wager;
+                  outcomeText = `Split Cloze Double Hit (+$${wager})!`;
+                  playSound('win', winSoundCount++);
+              } else if (hits === 1) {
+                  isWin = true;
+                  outcomeAmount = Math.round(wager * 0.5);
+                  outcomeText = `50/50 Split Cloze Win (+$${outcomeAmount})`;
+                  playSound('win', winSoundCount++);
+              } else {
+                  isWin = false;
+                  outcomeAmount = -wager;
+                  outcomeText = `Split Cloze Loss (-$${wager})`;
+                  playSound('lose', loseSoundCount++);
+              }
+              const fbParts: string[] = [];
+              [w1, w2].forEach(w => {
+                const norm = (w || '').trim().toLowerCase();
+                if (norm && clozeWordVerifications[norm]?.feedback) {
+                  fbParts.push(clozeWordVerifications[norm].feedback);
+                }
+              });
+              if (fbParts.length > 0) correctionFeedbackText = fbParts.join(' · ');
           } else {
-              winnings = (wager * fractionIncorrect) * 2;
-          }
-          outcomeAmount = Math.floor(winnings - wager);
-          if (outcomeAmount > 0) {
-              isWin = true;
-              outcomeText = `Split Bet Win (+$${outcomeAmount})`;
-              playSound('win', winSoundCount++);
-          } else if (outcomeAmount < 0) {
-              isWin = false;
-              outcomeText = `Split Bet Loss (-$${Math.abs(outcomeAmount)})`;
-              playSound('lose', loseSoundCount++);
-          } else {
-              outcomeText = 'Split Bet (Even) ⚖️';
+              const splitPercent = playerBetData?.splitCorrectPercent ?? 50;
+              const fractionCorrect = splitPercent / 100;
+              const fractionIncorrect = 1 - fractionCorrect;
+              let winnings = 0;
+              if (currentSentence.isCorrect) {
+                  winnings = (wager * fractionCorrect) * 2;
+              } else {
+                  winnings = (wager * fractionIncorrect) * 2;
+              }
+              outcomeAmount = Math.floor(winnings - wager);
+              if (outcomeAmount > 0) {
+                  isWin = true;
+                  outcomeText = `Split Bet Win (+$${outcomeAmount})`;
+                  playSound('win', winSoundCount++);
+              } else if (outcomeAmount < 0) {
+                  isWin = false;
+                  outcomeText = `Split Bet Loss (-$${Math.abs(outcomeAmount)})`;
+                  playSound('lose', loseSoundCount++);
+              } else {
+                  outcomeText = 'Split Bet (Even) ⚖️';
+              }
+
+              // Split bet correction bonus (binary mode only)
+              if (!currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
+                  const bonus = Math.floor(wager * fractionIncorrect); 
+                  outcomeAmount += bonus;
+                  outcomeText += ' + Correction! 🧠';
+                  correctionBonusApplied = true;
+              }
+
+              // Correction Bounty in split bet (binary mode only)
+              const hasCorrectionBounty = playerPowerUps.some(pu => pu.type === 'CORRECTION_BOUNTY');
+              if (hasCorrectionBounty && !currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
+                  const bountyBonus = Math.floor(wager * fractionIncorrect);
+                  outcomeAmount += bountyBonus;
+                  outcomeText += ` + Correction Bounty (+$${bountyBonus})! 📝`;
+              }
           }
 
-          // Split bet correction bonus
-           if (!currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
-              const bonus = Math.floor(wager * fractionIncorrect); 
-              outcomeAmount += bonus;
-              outcomeText += ' + Correction! 🧠';
-              correctionBonusApplied = true;
-          }
-
-          // Correction Bounty in split bet (requires proper sentence correction)
-          const hasCorrectionBounty = playerPowerUps.some(pu => pu.type === 'CORRECTION_BOUNTY');
-          if (hasCorrectionBounty && !currentSentence.isCorrect && fractionIncorrect > 0 && verifications[player.id]?.isCorrect) {
-              const bountyBonus = Math.floor(wager * fractionIncorrect);
-              outcomeAmount += bountyBonus;
-              outcomeText += ` + Correction Bounty (+$${bountyBonus})! 📝`;
-          }
-
-          // Lone Wolf in split bet
-          const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
-          if (hasLoneWolf && isWin && winningPlayersCount === 1) {
-              outcomeAmount = Math.round(outcomeAmount * 3);
-              outcomeText += ' + Lone Wolf (3x Payout)! 🐺';
+          // Shared Split Bet modifiers on Win / Loss
+          if (isWin && outcomeAmount > 0) {
+              const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
+              if (hasLoneWolf && winningPlayersCount === 1) {
+                  outcomeAmount = Math.round(outcomeAmount * 3);
+                  outcomeText += ' + Lone Wolf (3x Payout)! 🐺';
+              }
+              const hasBountyHunter = playerPowerUps.some(pu => pu.type === 'BOUNTY_HUNTER');
+              if (hasBountyHunter && isPlayerInMinority(player.id)) {
+                  outcomeAmount = Math.round(outcomeAmount * 1.5);
+                  outcomeText += ' + Bounty! 🎯';
+              }
+              const hasJackpot = playerPowerUps.some(pu => pu.type === 'JACKPOT');
+              if (hasJackpot) {
+                  outcomeAmount = Math.round(outcomeAmount * JACKPOT_MULTIPLIER);
+                  outcomeText += ' + Jackpot! 🎰';
+              }
+          } else if (!isWin && outcomeAmount < 0 && (qType === 'multipleChoice' || qType === 'openCloze')) {
+              let lossAmount = Math.abs(outcomeAmount);
+              const hasImmunity = playerPowerUps.some(pu => pu.type === 'IMMUNITY_IDOL');
+              if (hasImmunity) {
+                  lossAmount = 0;
+                  outcomeText = 'Immunity Save! 🗿';
+              } else {
+                  const hasSafetyNet = playerPowerUps.some(pu => pu.type === 'SAFETY_NET');
+                  if (hasSafetyNet) {
+                      lossAmount *= 0.5;
+                      outcomeText += ' (Safety Net) 🦺';
+                  }
+                  const hasBlessing = player.effects.some(e => e.type === 'BLESSING');
+                  if (hasBlessing) {
+                      const forgiven = Math.round(lossAmount * 0.30);
+                      lossAmount -= forgiven;
+                      outcomeText += ' (Blessed: 30% Saved) 💖';
+                  }
+              }
+              outcomeAmount = -Math.round(lossAmount);
           }
 
       } else {
-          if (!playerBetData || !playerBetData.opinion) return player;
-          const opinionMatchesSentence = (playerBetData.opinion === 'correct' && currentSentence.isCorrect) || 
+          let playerGuessedCorrectly = false;
+          if (qType === 'multipleChoice') {
+              if (!playerBetData?.selectedOption) return player;
+              playerGuessedCorrectly = isMcOptionCorrect(playerBetData.selectedOption);
+          } else if (qType === 'openCloze') {
+              if (!playerBetData?.clozeAnswer?.trim()) return player;
+              playerGuessedCorrectly = isClozeWordCorrect(playerBetData.clozeAnswer);
+              const norm = playerBetData.clozeAnswer.trim().toLowerCase();
+              if (clozeWordVerifications[norm]?.feedback) {
+                  correctionFeedbackText = clozeWordVerifications[norm].feedback;
+              }
+          } else {
+              if (!playerBetData || !playerBetData.opinion) return player;
+              playerGuessedCorrectly = (playerBetData.opinion === 'correct' && currentSentence.isCorrect) || 
                                        (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect);
+          }
 
-          if (opinionMatchesSentence) {
+          if (playerGuessedCorrectly) {
             isWin = true;
             playSound('win', winSoundCount++);
             let winnings = finalBet;
@@ -1883,17 +2237,17 @@ export function App() {
             outcomeText = isLoneWolfActive ? 'Win (Lone Wolf 3x!) 🐺' : 'Win';
             
             const hasBountyHunter = playerPowerUps.some(pu => pu.type === 'BOUNTY_HUNTER');
-            if (hasBountyHunter && minorityOpinion === playerBetData.opinion) {
+            if (hasBountyHunter && isPlayerInMinority(player.id)) {
                 outcomeAmount = Math.round(outcomeAmount * 1.5);
                 outcomeText += ' + Bounty! 🎯';
             }
-            if (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+            if (qType === 'binary' && playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
               outcomeAmount += finalBet; 
               outcomeText += ' + Correction! 🧠';
               correctionBonusApplied = true;
             }
             const hasCorrectionBounty = playerPowerUps.some(pu => pu.type === 'CORRECTION_BOUNTY');
-            if (hasCorrectionBounty && playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+            if (qType === 'binary' && hasCorrectionBounty && playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
               outcomeAmount += finalBet;
               outcomeText += ` + Correction Bounty (+$${finalBet})! 📝`;
             }
@@ -1970,21 +2324,19 @@ export function App() {
           // Mark to remove later in updatedEffects
       }
 
-      // Updated Correction Feedback Logic to support Split Bet
-      const attemptedCorrection = hasSplitBet 
-          ? (!currentSentence.isCorrect && (playerBetData?.splitCorrectPercent ?? 50) < 100 && playerBetData?.userCorrection?.trim())
-          : (playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && playerBetData?.userCorrection?.trim());
+      // Updated Correction Feedback Logic to support Split Bet (binary mode only)
+      if (qType === 'binary') {
+        const attemptedCorrection = hasSplitBet 
+            ? (!currentSentence.isCorrect && (playerBetData?.splitCorrectPercent ?? 50) < 100 && playerBetData?.userCorrection?.trim())
+            : (playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && playerBetData?.userCorrection?.trim());
 
-      if (attemptedCorrection) {
-          correctionFeedbackText = verifications[player.id]?.feedback || "Correction not evaluated.";
-          if (correctionBonusApplied) correctionFeedbackText = `Accepted! ${correctionFeedbackText}`;
-          else if((hasSplitBet && !currentSentence.isCorrect) || (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect)) { 
-            // If they tried to correct it but weren't verified correct
-             correctionFeedbackText = `Rejected for bonus. ${correctionFeedbackText}`;
-          } else correctionFeedbackText = `N/A (Sentence was correct).`;
-      } else if (hasSplitBet && (playerBetData?.splitCorrectPercent ?? 50) < 100 && !currentSentence.isCorrect) {
-          // Voted incorrect but didn't provide correction
-          // correctionFeedbackText = ""; 
+        if (attemptedCorrection) {
+            correctionFeedbackText = verifications[player.id]?.feedback || "Correction not evaluated.";
+            if (correctionBonusApplied) correctionFeedbackText = `Accepted! ${correctionFeedbackText}`;
+            else if((hasSplitBet && !currentSentence.isCorrect) || (playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect)) { 
+               correctionFeedbackText = `Rejected for bonus. ${correctionFeedbackText}`;
+            } else correctionFeedbackText = `N/A (Sentence was correct).`;
+        }
       }
       
       const newHistoryEntry = {
@@ -1995,10 +2347,16 @@ export function App() {
         sentence: currentSentence.text,
       };
 
+      const syntheticOpinion: 'correct' | 'incorrect' = qType === 'binary'
+        ? (hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'))
+        : (isWin ? 'correct' : 'incorrect');
+
       newRoundResultsData.push({ 
         name: player.name, 
         bet: finalBet, 
-        opinion: hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'),
+        opinion: syntheticOpinion,
+        questionType: qType,
+        playerAnswerDisplay,
         outcomeText, 
         newTotal: newMoney, 
         correctionFeedback: correctionFeedbackText, 
@@ -2010,13 +2368,20 @@ export function App() {
         playerName: player.name,
         playerAvatar: player.avatar,
         bet: finalBet,
-        opinion: hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'),
+        opinion: syntheticOpinion,
+        questionType: qType,
+        options: currentSentence.options,
+        selectedOption: playerBetData?.selectedOption,
+        splitOptions: hasSplitBet ? playerBetData?.splitOptions : undefined,
+        clozeAnswer: playerBetData?.clozeAnswer,
+        splitClozeAnswers: hasSplitBet ? playerBetData?.splitClozeAnswers : undefined,
+        playerAnswerDisplay,
         isWin,
         amountChanged: outcomeAmount,
         newTotal: newMoney,
-        userCorrection: playerBetData?.userCorrection,
+        userCorrection: qType === 'binary' ? playerBetData?.userCorrection : undefined,
         correctionFeedback: correctionFeedbackText,
-        splitPercent: hasSplitBet ? (playerBetData?.splitCorrectPercent ?? 50) : undefined,
+        splitPercent: (qType === 'binary' && hasSplitBet) ? (playerBetData?.splitCorrectPercent ?? 50) : undefined,
       });
       
       // Update effects: Decrement positive rounds, keep -1 (unless consumed Second Chance or Teacher's Pet)
@@ -2147,7 +2512,8 @@ export function App() {
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
-    setSettings({ topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+    setSettings({ topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' });
+    mixedFormatIndexRef.current = 0;
     setCustomTopic('');
     setCustomTheme('');
     setGameMode('lastPlayer');
@@ -2245,7 +2611,11 @@ export function App() {
       
       setStep(parsed.step || 'PLAYER_SETUP');
       setPlayers(parsed.players || []);
-      setSettings(parsed.settings || { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0] });
+      setSettings(
+        parsed.settings
+          ? { ...parsed.settings, challengeFormat: parsed.settings.challengeFormat || 'binary' }
+          : { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' }
+      );
       setCustomTopic(parsed.customTopic || '');
       setCustomTheme(parsed.customTheme || '');
       setGameMode(parsed.gameMode || 'lastPlayer');
@@ -2690,12 +3060,71 @@ export function App() {
                   )}
                 </div>
               ))}
+
+              {/* IV. Challenge Format Selector */}
+              <div className="text-left border-t border-[#d4af37]/25 pt-6">
+                <div className="mb-3.5 border-l-4 border-emerald-400 pl-3.5">
+                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                    IV. Challenge Format
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-amber-200/60">
+                    Choose how players evaluate each sentence (can also be switched mid-game between hands!)
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {CHALLENGE_FORMATS.map(fmt => {
+                    const currentFormat: ChallengeFormat = settings.challengeFormat || 'binary';
+                    const isSelected = currentFormat === fmt.id;
+                    return (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setSettings(s => ({ ...s, challengeFormat: fmt.id }));
+                        }}
+                        className={`p-4 rounded-xl border-2 text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
+                          isSelected
+                            ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] scale-[1.01]'
+                            : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                        }`}
+                      >
+                        <span className="text-2xl sm:text-3xl select-none shrink-0 mt-0.5">{fmt.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-serif font-extrabold text-sm sm:text-base uppercase tracking-wider">
+                              {fmt.label}
+                            </span>
+                            {isSelected && (
+                              <span className="text-[10px] font-mono-casino font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-xs mt-1 leading-relaxed ${isSelected ? 'text-[#1c0a04]/85 font-medium' : 'text-slate-500 dark:text-amber-200/70'}`}>
+                            {fmt.subtitle}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'mixed') && (
+                  <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-serif text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
+                    <span>ℹ️</span>
+                    <span>
+                      <strong>Cloze House Rules:</strong> Clean 1:1 base payouts. <em>Split Bet</em> becomes a 50/50 Two-Option Pick (Multiple-Choice) or 2-Word Entry (Open Cloze). <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
+                    </span>
+                  </div>
+                )}
+              </div>
               
-              {/* IV. Configure Power-Up Shoe */}
+              {/* V. Configure Power-Up Shoe */}
               <div className="text-left border-t border-[#d4af37]/25 pt-6">
                 <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
                   <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                    IV. House Power-Up Shoe
+                    V. House Power-Up Shoe
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
                 </div>
@@ -2744,11 +3173,11 @@ export function App() {
                 </div>
               </div>
 
-              {/* V. Win Condition */}
+              {/* VI. Win Condition */}
               <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
                 <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
                   <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                    V. Table Rules &amp; Victory Condition
+                    VI. Table Rules &amp; Victory Condition
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
                 </div>
@@ -2865,12 +3294,12 @@ export function App() {
                 </div> 
               </div> 
 
-              {/* VI. Betting Turn Clock */}
+              {/* VII. Betting Turn Clock */}
               <div className="text-left border-t border-[#d4af37]/25 pt-6">
                 <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                      VI. Betting Turn Clock
+                      VII. Betting Turn Clock
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-amber-200/60">
                       Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups
@@ -2945,14 +3374,28 @@ export function App() {
         );
         case 'IN_GAME': { 
             const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
+            const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
+            const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze';
+
             const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
-                const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-                if (hasSplitBet) {
-                     const playerBet = bets[p.id];
-                     return typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
-                }
                 const playerBet = bets[p.id];
-                return playerBet?.opinion && typeof playerBet?.bet === 'number' && playerBet.bet >= 0;
+                const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
+                if (!hasValidBetAmount) return false;
+                const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+                if (currentQuestionType === 'multipleChoice') {
+                    return hasSplitBet
+                      ? (playerBet?.splitOptions?.length ?? 0) === 2
+                      : Boolean(playerBet?.selectedOption?.trim());
+                }
+                if (currentQuestionType === 'openCloze') {
+                    return hasSplitBet
+                      ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() && playerBet?.splitClozeAnswers?.[1]?.trim())
+                      : Boolean(playerBet?.clozeAnswer?.trim());
+                }
+                if (hasSplitBet) {
+                     return true;
+                }
+                return Boolean(playerBet?.opinion);
             });
 
             const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
@@ -2974,9 +3417,16 @@ export function App() {
               ? unfrozenActivePlayers.find(p => (turnTimers[p.id]?.status ?? 'idle') === 'idle')
               : undefined;
 
-            const sentenceHtml = highlightedPhrase && currentSentence ? 
+            let sentenceHtml = highlightedPhrase && currentSentence ? 
               currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-amber-200/80 dark:bg-amber-500/25 text-amber-950 dark:text-[#fef08a] border-b-2 border-[#d4af37] px-1.5 py-0.5 rounded font-semibold">$1</span>`) 
-              : currentSentence?.text || ''; 
+              : currentSentence?.text || '';
+
+            if (isClozeRound && sentenceHtml) {
+              sentenceHtml = sentenceHtml.replace(
+                /_{3,}/g,
+                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic tracking-widest text-center select-none">_____</span>`
+              );
+            }
 
             const sentenceLength = currentSentence?.text?.length || 0;
             const sentenceTextClass = sentenceLength > 150
@@ -2984,6 +3434,16 @@ export function App() {
               : sentenceLength > 90
                 ? "text-xl sm:text-2xl md:text-3xl leading-snug md:leading-relaxed"
                 : "text-2xl sm:text-3xl md:text-4xl leading-relaxed";
+
+            const activeFormatConfig = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
+            const nextFormatConfig = nextRoundSettings?.challengeFormat
+              ? CHALLENGE_FORMATS.find(f => f.id === nextRoundSettings.challengeFormat)
+              : undefined;
+            const currentHandFormatBadge = currentQuestionType === 'multipleChoice'
+              ? '🔠 Multiple-Choice Cloze'
+              : currentQuestionType === 'openCloze'
+                ? '✍️ Open Cloze'
+                : '⚖️ Valid or Flawed';
 
             return ( 
               <div className="w-full max-w-5xl animate-fade-in p-2 md:p-4"> 
@@ -3039,7 +3499,7 @@ export function App() {
                             {/* Bullion Plaque Overlapping Top Border */}
                             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif uppercase tracking-[0.2em] text-[11px] sm:text-xs font-extrabold px-6 py-1 rounded-full border border-[#fef9c3] shadow-[0_4px_15px_rgba(202,138,4,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] z-10 whitespace-nowrap flex items-center gap-2">
                                 <span>♦</span>
-                                <span>Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''}{gameMode === 'targetAmount' ? ` · Target: $${Number(targetAmount).toLocaleString()}` : ''}</span>
+                                <span>Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''}{gameMode === 'targetAmount' ? ` · Target: $${Number(targetAmount).toLocaleString()}` : ''} · {currentHandFormatBadge}</span>
                                 <span>♦</span>
                             </div>
                             
@@ -3071,7 +3531,7 @@ export function App() {
                                 />
                             </div> 
                             
-                            {/* Collapsible Topic, Level, Theme & Deck Bar */}
+                            {/* Collapsible Topic, Level, Theme, Format & Deck Bar */}
                             <div className="flex flex-col items-center w-full mt-2 pt-2 border-t border-[#d4af37]/20"> 
                                 {/* Compact Summary Bar & Expansion Toggle */}
                                 <div className="flex items-center justify-center gap-1.5 flex-wrap">
@@ -3107,6 +3567,14 @@ export function App() {
                                         )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
+                                      <span className="inline-flex items-center gap-1 text-emerald-800 dark:text-emerald-300 font-bold">
+                                        <span>{activeFormatConfig.icon}</span>
+                                        <span>{activeFormatConfig.shortLabel}</span>
+                                        {nextFormatConfig && nextFormatConfig.id !== activeFormatConfig.id && (
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextFormatConfig.shortLabel}</span>
+                                        )}
+                                      </span>
+                                      <span className="text-[#d4af37] select-none">•</span>
                                       <span className="inline-flex items-center gap-1 text-purple-700 dark:text-purple-300 font-mono-casino font-bold">
                                         <span>🃏</span>
                                         <span>{selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}</span>
@@ -3123,10 +3591,10 @@ export function App() {
                                   </button>
                                 </div>
 
-                                {/* Expanded Area: Full interactive Topic/Level/Theme pills + Full Deck bar */}
+                                {/* Expanded Area: Full interactive Topic/Level/Theme/Format pills + Full Deck bar */}
                                 {isSettingsDeckExpanded && (
                                   <div className="w-full mt-3 pt-3 border-t border-[#d4af37]/25 flex flex-col items-center gap-2.5 animate-fade-in">
-                                    {/* Interactive Topic, Level, Theme, & Turn Timer Pills */}
+                                    {/* Interactive Topic, Level, Theme, Format, & Turn Timer Pills */}
                                     <div className="flex flex-wrap gap-2 justify-center items-center">
                                       {/* Topic Pill */}
                                       <button
@@ -3188,6 +3656,26 @@ export function App() {
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
                                       </button>
 
+                                      {/* Challenge Format Pill */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenSettingsModal('format')}
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        title="Click to change Challenge Format (Valid/Flawed, Multiple-Choice Cloze, Open Cloze, Mixed Shoe)"
+                                      >
+                                        <span className="flex items-center gap-1">
+                                          <span>{activeFormatConfig.icon}</span>
+                                          <span className="font-bold">{activeFormatConfig.shortLabel}</span>
+                                        </span>
+                                        {nextFormatConfig && nextFormatConfig.id !== activeFormatConfig.id && (
+                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                            <span>Next:</span>
+                                            <span>{nextFormatConfig.shortLabel}</span>
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
+                                      </button>
+
                                       {/* Turn Clock Quick Selector Pill */}
                                       <div className="px-3 py-1 felt-well rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
                                         <span>⏱️ Turn Clock:</span>
@@ -3233,6 +3721,7 @@ export function App() {
                                       <div className="flex flex-wrap items-center gap-1 justify-center">
                                         {(Object.keys(POWER_UPS) as PowerUpKey[]).map(key => {
                                           const isActive = selectedPowerUps.includes(key);
+                                          const isDisabledInCloze = isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(key);
                                           const powerUp = POWER_UPS[key];
                                           
                                           return (
@@ -3241,10 +3730,16 @@ export function App() {
                                               powerUpKey={key} 
                                               placement="bottom"
                                               statusBadge={
-                                                <div className={`flex items-center gap-1 font-semibold ${isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                  <span>{isActive ? '🟢 Active in Deck' : '🔴 Deactivated'}</span>
-                                                  <span className="text-slate-400 text-[9px]">• Click to {isActive ? 'deactivate' : 'activate'}</span>
-                                                </div>
+                                                isDisabledInCloze ? (
+                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
+                                                    <span>🚫 Disabled on Cloze Hands</span>
+                                                  </div>
+                                                ) : (
+                                                  <div className={`flex items-center gap-1 font-semibold ${isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    <span>{isActive ? '🟢 Active in Deck' : '🔴 Deactivated'}</span>
+                                                    <span className="text-slate-400 text-[9px]">• Click to {isActive ? 'deactivate' : 'activate'}</span>
+                                                  </div>
+                                                )
                                               }
                                             >
                                               <button
@@ -3254,17 +3749,23 @@ export function App() {
                                                   handleTogglePowerUpInDeck(key);
                                                 }}
                                                 className={`relative p-0.5 rounded transition-all duration-150 cursor-pointer select-none group focus:outline-none ${
-                                                  isActive 
-                                                    ? 'opacity-100 hover:scale-130 filter drop-shadow-sm' 
-                                                    : 'opacity-30 grayscale hover:opacity-75 hover:scale-110'
+                                                  isDisabledInCloze
+                                                    ? 'opacity-25 grayscale cursor-not-allowed'
+                                                    : isActive 
+                                                      ? 'opacity-100 hover:scale-130 filter drop-shadow-sm' 
+                                                      : 'opacity-30 grayscale hover:opacity-75 hover:scale-110'
                                                 }`}
-                                                title={`${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`}
-                                                aria-label={`${powerUp.name} (${isActive ? 'active' : 'deactivated'})`}
+                                                title={
+                                                  isDisabledInCloze
+                                                    ? `${powerUp.name} - Disabled on Cloze hands`
+                                                    : `${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`
+                                                }
+                                                aria-label={`${powerUp.name} (${isDisabledInCloze ? 'disabled on cloze' : isActive ? 'active' : 'deactivated'})`}
                                               >
                                                 <span className="text-sm md:text-base inline-block">
                                                   {powerUp.icon}
                                                 </span>
-                                                {!isActive && (
+                                                {(!isActive || isDisabledInCloze) && (
                                                   <span className="absolute inset-0 flex items-center justify-center text-rose-500 font-bold text-xs pointer-events-none drop-shadow">
                                                     ✕
                                                   </span>
@@ -3403,6 +3904,8 @@ export function App() {
                               players={players} 
                               onUpdateMoney={handleUpdatePlayerMoney}
                               currentSentenceText={currentSentence?.text}
+                              questionType={currentQuestionType}
+                              options={currentSentence?.options}
                               onChangeAvatar={handleOpenAvatarModal}
                               onUpdateName={handleUpdatePlayerName}
                               targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
@@ -3464,6 +3967,9 @@ export function App() {
             const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
             const isEliminationVictory = players.length > 1 && activePlayers.length <= 1;
             const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || activePlayers.length === 0;
+            const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
+            const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze';
+            const nextFormatObj = CHALLENGE_FORMATS.find(f => f.id === (nextRoundSettings?.challengeFormat || settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
 
             return ( 
             <div className="w-full max-w-5xl animate-fade-in p-4">
@@ -3507,27 +4013,43 @@ export function App() {
                     <div className={`absolute top-0 left-0 w-2 h-full ${currentSentence?.isCorrect ? 'bg-gradient-to-b from-emerald-400 to-emerald-700' : 'bg-gradient-to-b from-rose-500 to-red-800'}`}></div>
                     <div className="pl-3 sm:pl-5">
                       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
-                          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full border bg-black/5 dark:bg-black/40 border-[#d4af37]/50">
+                          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full border bg-black/5 dark:bg-black/40 border-[#d4af37]/50 flex-wrap">
                             <span className="text-xs font-serif uppercase tracking-[0.2em] text-slate-600 dark:text-amber-200/80 font-bold">
                               The House Ruling:
                             </span>
-                            <span className={`text-sm sm:text-base font-serif font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                              {currentSentence?.isCorrect ? '✓ VALID SENTENCE' : '✕ FLAWED SENTENCE'}
-                            </span>
+                            {isResultCloze ? (
+                              <span className="text-sm sm:text-base font-serif font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                                ✓ OFFICIAL ANSWER: &ldquo;{currentSentence?.correctAnswer}&rdquo;
+                              </span>
+                            ) : (
+                              <span className={`text-sm sm:text-base font-serif font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                {currentSentence?.isCorrect ? '✓ VALID SENTENCE' : '✕ FLAWED SENTENCE'}
+                              </span>
+                            )}
                           </div>
                           <button 
                               onClick={() => {
                               if (!currentSentence) return;
-                              const parts = [
-                                  currentSentence.text,
-                                  !currentSentence.isCorrect ? `Correction: ${currentSentence.correction}` : null,
-                                  `Explanation: ${currentSentence.explanation}`
-                              ].filter(Boolean);
-                              speakText(parts.join('. '));
+                              if (isResultCloze) {
+                                // Read the full completed sentence on the Results screen!
+                                const fullCompleted = currentSentence.correction || currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer || '');
+                                const parts = [
+                                    fullCompleted,
+                                    `Explanation: ${currentSentence.explanation}`
+                                ].filter(Boolean);
+                                speakText(parts.join('. '));
+                              } else {
+                                const parts = [
+                                    currentSentence.text,
+                                    !currentSentence.isCorrect ? `Correction: ${currentSentence.correction}` : null,
+                                    `Explanation: ${currentSentence.explanation}`
+                                ].filter(Boolean);
+                                speakText(parts.join('. '));
+                              }
                               }} 
                               disabled={isSpeaking}
                               className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-serif uppercase tracking-wider font-bold cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              title="Read full analysis"
+                              title="Read full completed sentence and analysis"
                           >
                               {isSpeaking ? '🔊 Speaking...' : '🔊 Listen to Ruling'}
                           </button>
@@ -3537,7 +4059,23 @@ export function App() {
                         &ldquo;{currentSentence?.text}&rdquo;
                       </p>
                       
-                      {!currentSentence?.isCorrect && (
+                      {isResultCloze && currentSentence?.correction && (
+                          <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-emerald-500 mb-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
+                                  <span>✦ Completed Sentence</span>
+                                  {resultQuestionType === 'openCloze' && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
+                                      <span className="font-mono-casino text-emerald-800 dark:text-emerald-300 font-semibold normal-case bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-xs">
+                                          Accepted Words: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
+                                      </span>
+                                  )}
+                              </div>
+                              <div className="text-lg sm:text-xl text-emerald-900 dark:text-emerald-300 font-editorial font-medium">
+                                &ldquo;{currentSentence.correction}&rdquo;
+                              </div>
+                          </div>
+                      )}
+
+                      {!isResultCloze && !currentSentence?.isCorrect && (
                           <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-[#d4af37] mb-4">
                               <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
                                   <span>✦ Official House Revision</span>
@@ -3592,7 +4130,7 @@ export function App() {
                         <tbody className="text-slate-800 dark:text-slate-200 divide-y divide-[#d4af37]/15">
                         {[...roundResults].sort((a, b) => b.newTotal - a.newTotal).map((result, index) => {
                             const player = players.find(p => p.name === result.name);
-                            const isWinner = result.outcomeText.includes('Win');
+                            const isWinner = result.outcomeText.includes('Win') || result.outcomeText.includes('Hit');
                             return (
                             <tr key={result.name} className={`hover:bg-amber-500/10 transition-colors ${isWinner ? 'bg-emerald-500/10' : ''}`}>
                               <td className="p-4 sm:p-5 font-mono-casino text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
@@ -3619,6 +4157,11 @@ export function App() {
                                   <div className={`font-serif text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                     {result.outcomeText}
                                   </div>
+                                  {result.playerAnswerDisplay && result.playerAnswerDisplay !== result.outcomeText && (
+                                    <div className="text-xs font-mono-casino text-slate-600 dark:text-amber-100/80 mt-0.5">
+                                      Pick: <strong>{result.playerAnswerDisplay}</strong> {result.bet > 0 ? `(Wager: $${result.bet.toLocaleString()})` : ''}
+                                    </div>
+                                  )}
                                   {result.correctionFeedback && (
                                     <div className="text-xs text-slate-500 dark:text-amber-200/60 mt-1 italic max-w-xs">
                                       {result.correctionFeedback}
@@ -3677,6 +4220,16 @@ export function App() {
                         title="Click to change Theme for next round"
                       >
                         <span>🎭 {nextRoundSettings?.theme || settings.theme}</span>
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSettingsModal('format')}
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        title="Click to switch Challenge Format before dealing next hand"
+                      >
+                        <span>{nextFormatObj.icon} {nextFormatObj.shortLabel}</span>
                         <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
                       </button>
                     </div>

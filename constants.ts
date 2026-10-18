@@ -1,4 +1,4 @@
-import { PowerUp, PowerUpKey, WheelItem, GrammarTopic, CEFRLevel, Theme } from './types';
+import { PowerUp, PowerUpKey, WheelItem, GrammarTopic, CEFRLevel, Theme, ChallengeFormat } from './types';
 
 export const LOCAL_STORAGE_KEY = 'grammarCasinoGameState';
 export const INITIAL_PLAYER_MONEY = 1000;
@@ -239,7 +239,7 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
   },
   SPLIT_BET: {
     name: "Split Bet",
-    description: "Split your bet between Correct and Incorrect. Only the winning side pays out (Safe bet).",
+    description: "Hedge your wager! Classic: split % between Valid & Flawed. MC Cloze: 50/50 Two-Option Pick. Open Cloze: submit 2 candidate words (50% wager each).",
     icon: "⚖️",
     requiresTarget: false,
   },
@@ -375,6 +375,47 @@ export const CEFR_DIFFICULTY_PROFILES: Record<CEFRLevel, CefrDifficultyProfile> 
 
 export const THEMES: Theme[] = [
   'Fantasy 🐉', 'Sci-Fi 🚀', 'History 🏛️', 'Everyday Life ☕', 'Business 💼', 'Technology 💻', 'Pop Culture 🍿', 'Custom ✍️'
+];
+
+export const CLOZE_DISABLED_POWER_UPS: PowerUpKey[] = ['CORRECTION_BOUNTY', 'GRAMMAR_GOGGLES'];
+
+export interface ChallengeFormatOption {
+  id: ChallengeFormat;
+  label: string;
+  shortLabel: string;
+  subtitle: string;
+  icon: string;
+}
+
+export const CHALLENGE_FORMATS: ChallengeFormatOption[] = [
+  {
+    id: 'binary',
+    label: 'Valid or Flawed (Classic)',
+    shortLabel: 'Valid / Flawed',
+    subtitle: 'Judge if the sentence is grammatically sound or flawed (+ correction bonus)',
+    icon: '⚖️',
+  },
+  {
+    id: 'multipleChoice',
+    label: 'Multiple-Choice Cloze',
+    shortLabel: 'MC Cloze (A–D)',
+    subtitle: '4 options (A, B, C, D) — pick the word or phrase that completes the gap',
+    icon: '🔠',
+  },
+  {
+    id: 'openCloze',
+    label: 'Open Cloze',
+    shortLabel: 'Open Cloze',
+    subtitle: 'Cambridge style — type the single missing word that fits the gap',
+    icon: '✍️',
+  },
+  {
+    id: 'mixed',
+    label: 'Mixed Shoe',
+    shortLabel: 'Mixed Shoe',
+    subtitle: 'Rotates between Valid/Flawed, Multiple-Choice Cloze, and Open Cloze each hand',
+    icon: '🔀',
+  },
 ];
 
 export const TOPIC_SUBTYPES: Record<string, string[]> = {

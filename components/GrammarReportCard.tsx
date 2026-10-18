@@ -201,18 +201,38 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     report += `ROUND-BY-ROUND GRAMMAR BREAKDOWN\n`;
     report += `-----------------------------------------\n\n`;
 
-    history.forEach((round, idx) => {
-      report += `[Round ${round.round}] ${round.sentence.isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}\n`;
-      report += `Sentence: "${round.sentence.text}"\n`;
-      if (!round.sentence.isCorrect && round.sentence.correction) {
-        report += `Correction: "${round.sentence.correction}"\n`;
+    history.forEach((round) => {
+      const qType = round.sentence.questionType || 'binary';
+      const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+      if (isCloze) {
+        const modeLabel = qType === 'multipleChoice' ? 'MULTIPLE-CHOICE CLOZE' : 'OPEN CLOZE';
+        report += `[Round ${round.round}] [${modeLabel}] - Official Answer: "${round.sentence.correctAnswer || ''}"\n`;
+        report += `Prompt: "${round.sentence.text}"\n`;
+        if (qType === 'multipleChoice' && round.sentence.options) {
+          report += `Options: ${round.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${opt}`).join(' | ')}\n`;
+        }
+        if (qType === 'openCloze' && round.sentence.acceptedAnswers && round.sentence.acceptedAnswers.length > 0) {
+          report += `Accepted Answers: ${round.sentence.acceptedAnswers.join(', ')}\n`;
+        }
+        if (round.sentence.correction) {
+          report += `Completed Sentence: "${round.sentence.correction}"\n`;
+        }
+      } else {
+        report += `[Round ${round.round}] ${round.sentence.isCorrect ? '✅ CORRECT' : '❌ INCORRECT'}\n`;
+        report += `Sentence: "${round.sentence.text}"\n`;
+        if (!round.sentence.isCorrect && round.sentence.correction) {
+          report += `Correction: "${round.sentence.correction}"\n`;
+        }
       }
       report += `Explanation: ${round.sentence.explanation}\n`;
       report += `Player Results:\n`;
       round.playerResults.forEach(pr => {
-        report += `  - ${pr.playerName}: Bet $${pr.bet} on ${pr.opinion.toUpperCase()} -> ${pr.isWin ? 'WON (+$' + pr.amountChanged + ')' : 'LOST (-$' + Math.abs(pr.amountChanged) + ')'}\n`;
-        if (pr.userCorrection) {
+        const answerLabel = pr.playerAnswerDisplay || pr.opinion.toUpperCase();
+        report += `  - ${pr.playerName}: Bet $${pr.bet} on ${answerLabel} -> ${pr.isWin ? 'WON (+$' + pr.amountChanged + ')' : 'LOST (-$' + Math.abs(pr.amountChanged) + ')'}\n`;
+        if (!isCloze && pr.userCorrection) {
           report += `    Student Correction: "${pr.userCorrection}" [${pr.correctionFeedback || 'Evaluated'}]\n`;
+        } else if (isCloze && pr.correctionFeedback) {
+          report += `    Evaluation: [${pr.correctionFeedback}]\n`;
         }
       });
       report += `\n`;
@@ -529,16 +549,20 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
           ) : (
             filteredHistory.map((record) => {
               const isExpanded = expandedRounds[record.round] ?? true;
-              const hasError = !record.sentence.isCorrect;
+              const qType = record.sentence.questionType || 'binary';
+              const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+              const hasError = !isCloze && !record.sentence.isCorrect;
               const anyPlayerLost = record.playerResults.some(pr => !pr.isWin);
 
               return (
                 <div
                   key={record.round}
                   className={`rounded-xl border transition-all duration-200 overflow-hidden ${
-                    hasError
-                      ? 'border-rose-300/80 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
-                      : 'border-emerald-300/80 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/10'
+                    isCloze
+                      ? 'border-indigo-300/80 dark:border-indigo-900/60 bg-indigo-50/15 dark:bg-indigo-950/10'
+                      : hasError
+                        ? 'border-rose-300/80 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
+                        : 'border-emerald-300/80 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/10'
                   }`}
                 >
                   {/* Round Item Bar / Header */}
@@ -551,15 +575,27 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                         R{record.round}
                       </span>
 
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${
-                          hasError
-                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
-                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
-                        }`}
-                      >
-                        <span>{hasError ? '❌ Error' : '✔️ Flawless'}</span>
-                      </span>
+                      {isCloze ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
+                          <span>{qType === 'multipleChoice' ? '🔤 Multiple-Choice' : '✍️ Open Cloze'}</span>
+                        </span>
+                      ) : (
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${
+                            hasError
+                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                          }`}
+                        >
+                          <span>{hasError ? '❌ Error' : '✔️ Flawless'}</span>
+                        </span>
+                      )}
+
+                      {isCloze && record.sentence.correctAnswer && (
+                        <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                          Ans: "{record.sentence.correctAnswer}"
+                        </span>
+                      )}
 
                       {anyPlayerLost && (
                         <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
@@ -589,12 +625,52 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                       <div className="space-y-3">
                         <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
                           <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-                            Original Sentence
+                            {isCloze ? 'Cloze Challenge Prompt' : 'Original Sentence'}
                           </div>
                           <div className="text-base md:text-lg font-serif text-slate-900 dark:text-slate-100 leading-relaxed">
                             "{record.sentence.text}"
                           </div>
+                          {qType === 'multipleChoice' && record.sentence.options && (
+                            <div className="mt-2.5 flex flex-wrap gap-2">
+                              {record.sentence.options.map((opt, idx) => {
+                                const isOfficial = opt.trim().toLowerCase() === (record.sentence.correctAnswer || '').trim().toLowerCase();
+                                return (
+                                  <span
+                                    key={idx}
+                                    className={`px-2.5 py-1 rounded-md text-xs font-serif font-semibold border ${
+                                      isOfficial
+                                        ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                                        : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    <strong className="mr-1">{['A', 'B', 'C', 'D'][idx]}.</strong> {opt}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
+
+                        {isCloze && (
+                          <div className="p-3.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/50">
+                            <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400 mb-1 flex flex-wrap items-center justify-between gap-2">
+                              <span className="flex items-center gap-1.5">
+                                <span>✅</span>
+                                <span>Official Answer: "{record.sentence.correctAnswer}"</span>
+                              </span>
+                              {qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
+                                <span className="font-mono text-emerald-800 dark:text-emerald-300 font-medium normal-case bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 text-[11px]">
+                                  Accepted Synonyms: {record.sentence.acceptedAnswers.join(', ')}
+                                </span>
+                              )}
+                            </div>
+                            {record.sentence.correction && (
+                              <div className="text-base md:text-lg font-serif font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                                "{record.sentence.correction}"
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {hasError && record.sentence.correction && (
                           <div className="p-3.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/50">
@@ -668,14 +744,19 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                 </span>
                               </div>
 
-                              <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                                <span>Voted: <strong className="uppercase">{pr.opinion}</strong></span>
-                                <span className="font-mono font-bold">
+                              <div className="flex items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
+                                <span className="truncate">
+                                  {isCloze ? 'Answer:' : 'Voted:'}{' '}
+                                  <strong className={isCloze ? 'font-serif text-slate-900 dark:text-slate-100' : 'uppercase'}>
+                                    {pr.playerAnswerDisplay || pr.opinion}
+                                  </strong>
+                                </span>
+                                <span className="font-mono font-bold shrink-0">
                                   {pr.amountChanged >= 0 ? `+$${pr.amountChanged}` : `-$${Math.abs(pr.amountChanged)}`}
                                 </span>
                               </div>
 
-                              {pr.userCorrection && (
+                              {!isCloze && pr.userCorrection && (
                                 <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px]">
                                   <div className="font-semibold text-slate-500 dark:text-slate-400">Correction submitted:</div>
                                   <div className="italic font-serif">"{pr.userCorrection}"</div>
@@ -684,6 +765,11 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                       {pr.correctionFeedback}
                                     </div>
                                   )}
+                                </div>
+                              )}
+                              {isCloze && pr.correctionFeedback && (
+                                <div className="mt-1.5 pt-1.5 border-t border-slate-200 dark:border-slate-800 text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+                                  {pr.correctionFeedback}
                                 </div>
                               )}
                             </div>

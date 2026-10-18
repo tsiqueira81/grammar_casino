@@ -1,4 +1,4 @@
-import { GeneratedSentence, CEFRLevel, Settings } from '../types';
+import { GeneratedSentence, CEFRLevel, Settings, QuestionType } from '../types';
 
 interface CuratedEntry extends GeneratedSentence {
   topic: string;
@@ -430,15 +430,278 @@ export const CURATED_SENTENCE_BANK: CuratedEntry[] = [
   }
 ];
 
+interface CuratedClozeEntry {
+  topic: string;
+  level: CEFRLevel;
+  text: string;
+  correction: string;
+  explanation: string;
+  grammarPhrase: string;
+  correctAnswer: string;
+  acceptedAnswers: string[];
+  options: [string, string, string, string];
+}
+
+const CURATED_CLOZE_BANK: CuratedClozeEntry[] = [
+  {
+    topic: 'Tenses',
+    level: 'A2',
+    text: 'She _____ never visited Paris before her trip last summer.',
+    correction: 'She had never visited Paris before her trip last summer.',
+    explanation: 'Past Perfect ("had" + past participle) is used for an experience or action before a specific past event.',
+    grammarPhrase: 'She had never visited',
+    correctAnswer: 'had',
+    acceptedAnswers: ['had'],
+    options: ['had', 'has', 'was', 'did']
+  },
+  {
+    topic: 'Tenses',
+    level: 'B1',
+    text: 'We _____ been waiting outside the theater for over forty minutes when the doors finally opened.',
+    correction: 'We had been waiting outside the theater for over forty minutes when the doors finally opened.',
+    explanation: 'Past Perfect Continuous ("had been waiting") emphasizes the duration of an action up to a past moment.',
+    grammarPhrase: 'We had been waiting',
+    correctAnswer: 'had',
+    acceptedAnswers: ['had'],
+    options: ['had', 'have', 'were', 'are']
+  },
+  {
+    topic: 'Tenses',
+    level: 'B2',
+    text: 'By the end of this decade, engineers will _____ developed far more efficient battery cells.',
+    correction: 'By the end of this decade, engineers will have developed far more efficient battery cells.',
+    explanation: 'Future Perfect ("will have" + past participle) describes an action completed before a future deadline.',
+    grammarPhrase: 'will have developed',
+    correctAnswer: 'have',
+    acceptedAnswers: ['have'],
+    options: ['have', 'be', 'had', 'has']
+  },
+  {
+    topic: 'Prepositions',
+    level: 'A2',
+    text: 'The final championship match starts _____ 7:30 PM on Saturday.',
+    correction: 'The final championship match starts at 7:30 PM on Saturday.',
+    explanation: 'Use the preposition "at" before specific clock times.',
+    grammarPhrase: 'starts at 7:30 PM',
+    correctAnswer: 'at',
+    acceptedAnswers: ['at', 'around', 'by'],
+    options: ['at', 'on', 'in', 'to']
+  },
+  {
+    topic: 'Prepositions',
+    level: 'B1',
+    text: 'The lead detective was deeply suspicious _____ the alibi provided by the witness.',
+    correction: 'The lead detective was deeply suspicious of the alibi provided by the witness.',
+    explanation: 'The adjective "suspicious" takes the dependent preposition "of" ("suspicious of").',
+    grammarPhrase: 'deeply suspicious of the alibi',
+    correctAnswer: 'of',
+    acceptedAnswers: ['of', 'about'],
+    options: ['of', 'on', 'for', 'with']
+  },
+  {
+    topic: 'Prepositions',
+    level: 'B2',
+    text: 'The new safety regulations will come _____ effect at the beginning of next month.',
+    correction: 'The new safety regulations will come into effect at the beginning of next month.',
+    explanation: 'The fixed prepositional phrase "come into effect" means to become legally active.',
+    grammarPhrase: 'come into effect',
+    correctAnswer: 'into',
+    acceptedAnswers: ['into'],
+    options: ['into', 'in', 'on', 'under']
+  },
+  {
+    topic: 'Articles',
+    level: 'B1',
+    text: 'She plays _____ cello in the national youth orchestra every weekend.',
+    correction: 'She plays the cello in the national youth orchestra every weekend.',
+    explanation: 'In standard English, the definite article "the" is used with musical instruments ("play the cello").',
+    grammarPhrase: 'plays the cello',
+    correctAnswer: 'the',
+    acceptedAnswers: ['the'],
+    options: ['the', 'a', 'an', 'one']
+  },
+  {
+    topic: 'Articles',
+    level: 'B2',
+    text: 'It was _____ honor to represent our university at the international linguistics symposium.',
+    correction: 'It was an honor to represent our university at the international linguistics symposium.',
+    explanation: 'Use "an" before "honor" because the "h" is silent and the word begins with a vowel sound.',
+    grammarPhrase: 'It was an honor',
+    correctAnswer: 'an',
+    acceptedAnswers: ['an'],
+    options: ['an', 'a', 'the', 'some']
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B1',
+    text: 'If I _____ known about the traffic jam earlier, I would have taken the train.',
+    correction: 'If I had known about the traffic jam earlier, I would have taken the train.',
+    explanation: 'Third Conditional requires Past Perfect ("had known") in the if-clause.',
+    grammarPhrase: 'If I had known',
+    correctAnswer: 'had',
+    acceptedAnswers: ['had'],
+    options: ['had', 'have', 'would', 'did']
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B2',
+    text: 'You cannot enter the high-stakes salon _____ you are wearing formal evening attire.',
+    correction: 'You cannot enter the high-stakes salon unless you are wearing formal evening attire.',
+    explanation: '"Unless" means "except if" and introduces a negative condition.',
+    grammarPhrase: 'salon unless you are',
+    correctAnswer: 'unless',
+    acceptedAnswers: ['unless'],
+    options: ['unless', 'despite', 'otherwise', 'without']
+  },
+  {
+    topic: 'Conditionals',
+    level: 'C1',
+    text: '_____ the board of directors approved the budget earlier, the project would already be finished.',
+    correction: 'Had the board of directors approved the budget earlier, the project would already be finished.',
+    explanation: 'In formal third conditionals, "If" can be omitted using subject-auxiliary inversion ("Had the board...").',
+    grammarPhrase: 'Had the board of directors approved',
+    correctAnswer: 'Had',
+    acceptedAnswers: ['had'],
+    options: ['Had', 'Were', 'Should', 'Have']
+  },
+  {
+    topic: 'Modals',
+    level: 'B1',
+    text: 'The lights are completely off in his office; he _____ have gone home for the evening.',
+    correction: 'The lights are completely off in his office; he must have gone home for the evening.',
+    explanation: 'Use "must have + past participle" for a strong logical deduction about the past.',
+    grammarPhrase: 'he must have gone',
+    correctAnswer: 'must',
+    acceptedAnswers: ['must', 'might', 'may', 'could'],
+    options: ['must', 'should', 'can', 'ought']
+  },
+  {
+    topic: 'Modals',
+    level: 'B2',
+    text: 'You really _____ to apologize to your colleague before the misunderstanding gets worse.',
+    correction: 'You really ought to apologize to your colleague before the misunderstanding gets worse.',
+    explanation: '"Ought" is the modal verb followed directly by "to" + bare infinitive ("ought to apologize") to give advice.',
+    grammarPhrase: 'really ought to apologize',
+    correctAnswer: 'ought',
+    acceptedAnswers: ['ought', 'need', 'have'],
+    options: ['ought', 'should', 'must', 'had']
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'B1',
+    text: 'The outdoor concert had to be called _____ at the last minute due to the thunderstorm.',
+    correction: 'The outdoor concert had to be called off at the last minute due to the thunderstorm.',
+    explanation: 'The phrasal verb "call off" means to cancel a planned event.',
+    grammarPhrase: 'be called off at',
+    correctAnswer: 'off',
+    acceptedAnswers: ['off'],
+    options: ['off', 'out', 'up', 'away']
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'B2',
+    text: 'After hours of negotiation, they finally came _____ with a brilliant compromise.',
+    correction: 'After hours of negotiation, they finally came up with a brilliant compromise.',
+    explanation: 'The three-part phrasal verb "come up with" means to think of or produce an idea or plan.',
+    grammarPhrase: 'came up with a',
+    correctAnswer: 'up',
+    acceptedAnswers: ['up'],
+    options: ['up', 'out', 'across', 'over']
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'B1',
+    text: 'The customs officer asked the passenger _____ he was carrying any declared goods.',
+    correction: 'The customs officer asked the passenger whether he was carrying any declared goods.',
+    explanation: 'Reported yes/no questions are introduced by "whether" or "if".',
+    grammarPhrase: 'asked the passenger whether he',
+    correctAnswer: 'whether',
+    acceptedAnswers: ['whether', 'if'],
+    options: ['whether', 'that', 'what', 'which']
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'B2',
+    text: 'The witness denied _____ seen the suspect anywhere near the vault that night.',
+    correction: 'The witness denied having seen the suspect anywhere near the vault that night.',
+    explanation: 'The reporting verb "deny" is followed by a gerund or perfect gerund ("having seen").',
+    grammarPhrase: 'denied having seen',
+    correctAnswer: 'having',
+    acceptedAnswers: ['having', 'ever'],
+    options: ['having', 'have', 'to', 'had']
+  }
+];
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export function getCuratedSentence(
   settings: Settings,
   pastSentences: string[] = [],
   forceCorrect: boolean | null = null,
   subtype: string | null = null,
-  pastMistakes: string[] = []
+  pastMistakes: string[] = [],
+  questionType?: QuestionType
 ): GeneratedSentence {
-  const { topic, level } = settings;
+  const { topic, level, challengeFormat } = settings;
+  const resolvedType: QuestionType =
+    questionType ||
+    (challengeFormat === 'multipleChoice' || challengeFormat === 'openCloze' || challengeFormat === 'binary'
+      ? challengeFormat
+      : (['binary', 'multipleChoice', 'openCloze'] as QuestionType[])[Math.floor(Math.random() * 3)]);
+
   const pastTextSet = new Set(pastSentences.map(s => s.trim().toLowerCase()));
+
+  if (resolvedType === 'multipleChoice' || resolvedType === 'openCloze') {
+    let clozeCandidates = CURATED_CLOZE_BANK.filter(entry => {
+      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+        return false;
+      }
+      if (level && entry.level !== level) {
+        return false;
+      }
+      return !pastTextSet.has(entry.text.trim().toLowerCase());
+    });
+
+    if (clozeCandidates.length === 0) {
+      clozeCandidates = CURATED_CLOZE_BANK.filter(entry => {
+        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+          return false;
+        }
+        return !pastTextSet.has(entry.text.trim().toLowerCase());
+      });
+    }
+
+    if (clozeCandidates.length === 0) {
+      clozeCandidates = CURATED_CLOZE_BANK.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
+    }
+
+    if (clozeCandidates.length === 0) {
+      clozeCandidates = CURATED_CLOZE_BANK;
+    }
+
+    const picked = clozeCandidates[Math.floor(Math.random() * clozeCandidates.length)] || CURATED_CLOZE_BANK[0];
+    return {
+      text: picked.text,
+      isCorrect: true,
+      correction: picked.correction,
+      explanation: picked.explanation,
+      grammarPhrase: picked.grammarPhrase,
+      errorPhrase: '',
+      mistakeType: '',
+      questionType: resolvedType,
+      correctAnswer: picked.correctAnswer,
+      acceptedAnswers: picked.acceptedAnswers,
+      options: resolvedType === 'multipleChoice' ? shuffleArray(picked.options) : undefined,
+    };
+  }
+
   const pastMistakesSet = new Set(pastMistakes.map(m => m.trim().toLowerCase()));
 
   // 1. Try matching both topic and level
@@ -504,6 +767,7 @@ export function getCuratedSentence(
     explanation: selected.explanation,
     grammarPhrase: selected.grammarPhrase,
     errorPhrase: selected.errorPhrase,
-    mistakeType: selected.mistakeType
+    mistakeType: selected.mistakeType,
+    questionType: 'binary',
   };
 }

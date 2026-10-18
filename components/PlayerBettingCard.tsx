@@ -1,5 +1,5 @@
 import React from 'react';
-import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer } from '../types';
+import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
 import ActionButton from './ActionButton';
 import TextInput from './TextInput';
 import PowerUpTooltip from './PowerUpTooltip';
@@ -28,6 +28,8 @@ interface PlayerBettingCardProps {
   onChangeAvatar?: (playerId: number) => void;
   onUpdateName?: (playerId: number, newName: string) => void;
   targetAmount?: number;
+  questionType?: QuestionType;
+  options?: string[];
   // --- Betting turn timer ---
   timerEnabled?: boolean;
   turnTimer?: PlayerTurnTimer;
@@ -63,6 +65,8 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   onChangeAvatar,
   onUpdateName,
   targetAmount,
+  questionType = 'binary',
+  options = [],
   timerEnabled = false,
   turnTimer,
   turnDurationMs = 0,
@@ -95,11 +99,40 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const [isEditingName, setIsEditingName] = React.useState(false);
   const [tempName, setTempName] = React.useState(player.name);
 
+  // Refs & warning state for Lock Now validation when player still has time
+  const firstOptionBtnRef = React.useRef<HTMLButtonElement>(null);
+  const firstOpinionBtnRef = React.useRef<HTMLButtonElement>(null);
+  const clozeWordInputRef = React.useRef<HTMLInputElement>(null);
+  const splitWord1InputRef = React.useRef<HTMLInputElement>(null);
+  const splitWord2InputRef = React.useRef<HTMLInputElement>(null);
+  const wagerInputRef = React.useRef<HTMLInputElement>(null);
+
+  const [lockWarning, setLockWarning] = React.useState<{
+    message: string;
+    missingField: 'answer' | 'wager' | 'both';
+  } | null>(null);
+
   React.useEffect(() => {
     if (!isEditingName) {
       setTempName(player.name);
     }
   }, [player.name, isEditingName]);
+
+  // Clear lockWarning when the player updates their answer/wager or when the timer status changes
+  React.useEffect(() => {
+    if (lockWarning) {
+      setLockWarning(null);
+    }
+  }, [
+    bet?.opinion,
+    bet?.selectedOption,
+    bet?.splitOptions,
+    bet?.clozeAnswer,
+    bet?.splitClozeAnswers,
+    bet?.bet,
+    timerStatus,
+    currentSentenceText,
+  ]);
 
   const handleNameClick = () => {
     if (onUpdateName) {
@@ -251,6 +284,100 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const actualBetAmount = typeof bet?.bet === 'number' ? bet.bet : 0;
   const splitCorrectAmount = Math.floor(actualBetAmount * (splitPercent / 100));
   const splitIncorrectAmount = actualBetAmount - splitCorrectAmount;
+
+  const handleAttemptLockNow = () => {
+    // Only warn & block when the player still has time left on their clock and can place a bet
+    if (!isFrozen && !isEliminated && remainingMs > 0) {
+      const hasValidWager = typeof bet?.bet === 'number' && !isNaN(bet.bet) && bet.bet > 0;
+      let hasValidAnswer = false;
+      if (questionType === 'multipleChoice') {
+        hasValidAnswer = hasSplitBet
+          ? (bet?.splitOptions?.length || 0) === 2
+          : Boolean(bet?.selectedOption?.trim());
+      } else if (questionType === 'openCloze') {
+        hasValidAnswer = hasSplitBet
+          ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() && bet?.splitClozeAnswers?.[1]?.trim())
+          : Boolean(bet?.clozeAnswer?.trim());
+      } else {
+        hasValidAnswer = hasSplitBet
+          ? true
+          : (bet?.opinion === 'correct' || bet?.opinion === 'incorrect');
+      }
+
+      if (!hasValidAnswer || !hasValidWager) {
+        playSound('error');
+
+        let message = '';
+        let missingField: 'answer' | 'wager' | 'both' = 'both';
+        if (!hasValidAnswer && !hasValidWager) {
+          missingField = 'both';
+          if (questionType === 'multipleChoice') {
+            message = hasSplitBet
+              ? 'Hold on! Pick 2 options (A–D) and enter a wager amount before locking your bet.'
+              : 'Hold on! Choose an option (A–D) and enter a wager amount before locking your bet.';
+          } else if (questionType === 'openCloze') {
+            message = hasSplitBet
+              ? 'Hold on! Type both candidate words and enter a wager amount before locking your bet.'
+              : 'Hold on! Type the missing word and enter a wager amount before locking your bet.';
+          } else {
+            message = 'Hold on! Choose Valid or Flawed and enter a wager amount before locking your bet.';
+          }
+        } else if (!hasValidAnswer) {
+          missingField = 'answer';
+          if (questionType === 'multipleChoice') {
+            message = hasSplitBet
+              ? 'Please pick 2 options (A–D) for your 50/50 Split Bet before locking!'
+              : 'Please choose an option (A, B, C, or D) before locking your bet!';
+          } else if (questionType === 'openCloze') {
+            message = hasSplitBet
+              ? 'Please type both candidate words before locking your bet!'
+              : 'Please type the missing word before locking your bet!';
+          } else {
+            message = 'Please choose Valid or Flawed before locking your bet!';
+          }
+        } else {
+          missingField = 'wager';
+          message = 'Please enter a wager amount ($1 or more) before locking your bet!';
+        }
+
+        setLockWarning({ message, missingField });
+
+        // Move focus to the missing item
+        window.requestAnimationFrame(() => {
+          if (!hasValidAnswer) {
+            if (questionType === 'multipleChoice') {
+              firstOptionBtnRef.current?.focus();
+              firstOptionBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else if (questionType === 'openCloze') {
+              if (hasSplitBet) {
+                const targetInput = !bet?.splitClozeAnswers?.[0]?.trim()
+                  ? splitWord1InputRef.current
+                  : splitWord2InputRef.current;
+                targetInput?.focus();
+                targetInput?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              } else {
+                clozeWordInputRef.current?.focus();
+                clozeWordInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
+            } else {
+              firstOpinionBtnRef.current?.focus();
+              firstOpinionBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          } else {
+            wagerInputRef.current?.focus();
+            wagerInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        });
+        return;
+      }
+    }
+
+    setLockWarning(null);
+    onTimerLockNow?.(player.id);
+  };
+
+  const highlightAnswerMissing = lockWarning?.missingField === 'answer' || lockWarning?.missingField === 'both';
+  const highlightWagerMissing = lockWarning?.missingField === 'wager' || lockWarning?.missingField === 'both';
 
   return (
     <div className={`${cardBaseClasses} ${glowClasses} ${bankruptClasses} ${frozenClasses} ${timerClasses}`}>
@@ -568,9 +695,27 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
             onStart={() => onTimerStart?.(player.id)}
             onPause={() => onTimerPause?.(player.id)}
             onAddTime={() => onTimerAddTime?.(player.id)}
-            onLockNow={() => onTimerLockNow?.(player.id)}
+            onLockNow={handleAttemptLockNow}
             onUnlock={() => onTimerUnlock?.(player.id)}
           />
+          {lockWarning && (
+            <div
+              role="alert"
+              className="mb-4 -mt-2 px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/60 border-2 border-rose-500/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-serif font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-fade-in"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base select-none">⚠️</span>
+                <span>{lockWarning.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLockWarning(null)}
+                className="text-xs px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-900 dark:text-rose-100 font-sans font-bold cursor-pointer shrink-0"
+              >
+                OK
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -578,7 +723,282 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         
         {/* Left/Main Column: Betting Felt & Wager Controls (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
-          {hasSplitBet ? (
+          {questionType === 'multipleChoice' ? (
+            <>
+              {/* Multiple-Choice Cloze (4 Options: A, B, C, D) */}
+              {hasSplitBet && (
+                <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 flex items-center justify-between gap-2 text-xs font-serif text-indigo-950 dark:text-indigo-200">
+                  <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+                    <span>⚖️</span>
+                    <span>50/50 Two-Option Pick</span>
+                  </div>
+                  <span className="font-mono-casino text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40">
+                    {(bet?.splitOptions?.length || 0)}/2 Selected (${Math.floor(actualBetAmount / 2).toLocaleString()} each)
+                  </span>
+                </div>
+              )}
+
+              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl transition-all ${highlightAnswerMissing ? 'ring-2 ring-rose-500 p-1.5 bg-rose-500/5' : ''}`}>
+                {(() => {
+                  const optionItems = options.length > 0 ? options : ['Option A', 'Option B', 'Option C', 'Option D'];
+                  const firstUnpickedIdx = Math.max(
+                    0,
+                    optionItems.findIndex(o =>
+                      hasSplitBet
+                        ? !(Array.isArray(bet?.splitOptions) && bet!.splitOptions!.includes(o))
+                        : bet?.selectedOption !== o
+                    )
+                  );
+                  return optionItems.map((opt, idx) => {
+                    const letter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
+                    const splitPicked = hasSplitBet && Array.isArray(bet?.splitOptions) && bet!.splitOptions!.includes(opt);
+                    const singlePicked = !hasSplitBet && bet?.selectedOption === opt;
+                    const isPicked = hasSplitBet ? splitPicked : singlePicked;
+
+                    return (
+                      <button
+                        key={`${letter}-${opt}`}
+                        ref={idx === firstUnpickedIdx ? firstOptionBtnRef : undefined}
+                        type="button"
+                        disabled={isBlocked}
+                        onClick={() => {
+                          if (isBlocked) return;
+                          if (hasSplitBet) {
+                            const currentList = Array.isArray(bet?.splitOptions) ? [...bet!.splitOptions!] : [];
+                            if (currentList.includes(opt)) {
+                              onBetChange(player.id, 'splitOptions', currentList.filter(o => o !== opt));
+                            } else if (currentList.length < 2) {
+                              onBetChange(player.id, 'splitOptions', [...currentList, opt]);
+                            } else {
+                              onBetChange(player.id, 'splitOptions', [currentList[1], opt]);
+                            }
+                          } else {
+                            onBetChange(player.id, 'selectedOption', opt);
+                          }
+                        }}
+                        className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-serif transition-all duration-200 border-2 flex items-center justify-between gap-3 cursor-pointer select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                          isPicked
+                            ? hasSplitBet
+                              ? 'bg-gradient-to-b from-indigo-600/25 via-indigo-800/30 to-indigo-950/60 border-indigo-400 text-indigo-950 dark:text-indigo-100 shadow-[0_0_20px_rgba(99,102,241,0.35)] scale-[1.01]'
+                              : 'bg-gradient-to-b from-amber-500/25 via-amber-700/30 to-amber-950/60 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.35)] scale-[1.01]'
+                            : 'felt-well border-[#d4af37]/30 text-slate-800 dark:text-amber-50/85 hover:border-[#d4af37] hover:bg-amber-500/10'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono-casino font-extrabold text-sm border shrink-0 transition-transform group-hover/opt:scale-105 ${
+                            isPicked
+                              ? hasSplitBet
+                                ? 'bg-indigo-500 text-white border-indigo-200 shadow'
+                                : 'bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black border-white/80 shadow'
+                              : 'bg-black/10 dark:bg-black/40 border-[#d4af37]/40 text-amber-800 dark:text-[#d4af37]'
+                          }`}>
+                            {letter}
+                          </span>
+                          <span className="text-base sm:text-lg font-editorial font-bold truncate">
+                            {opt}
+                          </span>
+                        </div>
+                        {isPicked && (
+                          <span className={`text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
+                            hasSplitBet
+                              ? 'bg-indigo-500/30 text-indigo-900 dark:text-indigo-200 border border-indigo-400/50'
+                              : 'bg-[#d4af37]/25 text-amber-950 dark:text-[#fef08a] border border-[#d4af37]/50'
+                          }`}>
+                            {hasSplitBet ? '50%' : '✓ Pick'}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* Wager Input & All-In Control */}
+              <div className="space-y-2">
+                <div className="flex gap-2.5">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
+                    <TextInput
+                      ref={wagerInputRef}
+                      type="number"
+                      value={String(betAmount)}
+                      onChange={handleBetAmountChange}
+                      placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
+                      disabled={isBlocked || player.money === 0}
+                      min="0"
+                      max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
+                      className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                    />
+                  </div>
+                  <ActionButton
+                    onClick={handleAllIn}
+                    disabled={isBlocked || player.money === 0}
+                    variant="outline-gold"
+                    className="h-12 px-5 text-xs sm:text-sm whitespace-nowrap"
+                  >
+                    {isBetCapped && effectiveBetCap < player.money ? `Max ($${effectiveBetCap})` : 'All In'}
+                  </ActionButton>
+                </div>
+
+                {isBetCapped && (
+                  <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg">
+                    <span>🧢</span>
+                    <span>House Limit active: Wager capped at ${effectiveBetCap}.</span>
+                  </div>
+                )}
+              </div>
+
+              <QuickChipTray
+                currentBet={actualBetAmount}
+                playerMoney={player.money}
+                maxBet={isBetCapped ? effectiveBetCap : undefined}
+                onAddAmount={handleAddQuickChip}
+                onClear={handleClearBet}
+                onAllIn={handleAllIn}
+                disabled={isBlocked}
+                playSound={playSound}
+              />
+
+              {actualBetAmount > 0 && (
+                <WagerChipsDisplay amount={actualBetAmount} label={hasSplitBet ? "50/50 Split Wager on Felt" : "Wager on Felt"} />
+              )}
+            </>
+          ) : questionType === 'openCloze' ? (
+            <>
+              {/* Open Cloze (Cambridge Single-Word Gap) */}
+              {hasSplitBet ? (
+                <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing ? 'ring-2 ring-rose-500' : ''}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                      <span>⚖️</span>
+                      <span>Split Hedge · 2 Candidate Words (50% Wager Each)</span>
+                    </span>
+                    <span className="text-[11px] font-mono-casino font-bold text-indigo-700 dark:text-indigo-300">
+                      ${Math.floor(actualBetAmount / 2).toLocaleString()} / word
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                        Candidate Word #1 (50%)
+                      </label>
+                      <input
+                        ref={splitWord1InputRef}
+                        type="text"
+                        value={bet?.splitClozeAnswers?.[0] || ''}
+                        onChange={(e) => {
+                          if (isBlocked) return;
+                          const singleWord = e.target.value.replace(/\s+/g, '');
+                          const second = bet?.splitClozeAnswers?.[1] || '';
+                          onBetChange(player.id, 'splitClozeAnswers', [singleWord, second]);
+                        }}
+                        disabled={isBlocked}
+                        placeholder="First single word..."
+                        maxLength={32}
+                        className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                        Candidate Word #2 (50%)
+                      </label>
+                      <input
+                        ref={splitWord2InputRef}
+                        type="text"
+                        value={bet?.splitClozeAnswers?.[1] || ''}
+                        onChange={(e) => {
+                          if (isBlocked) return;
+                          const first = bet?.splitClozeAnswers?.[0] || '';
+                          const singleWord = e.target.value.replace(/\s+/g, '');
+                          onBetChange(player.id, 'splitClozeAnswers', [first, singleWord]);
+                        }}
+                        disabled={isBlocked}
+                        placeholder="Second single word..."
+                        maxLength={32}
+                        className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className={`p-4 felt-well rounded-xl border-2 border-[#d4af37]/50 space-y-2 ${highlightAnswerMissing ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
+                      <span>✍️</span>
+                      <span>Type the Missing Word (Single-Word Gap)</span>
+                    </label>
+                    <span className="text-[10px] font-mono-casino uppercase tracking-wider text-slate-500 dark:text-amber-200/60">
+                      1 Word Only
+                    </span>
+                  </div>
+                  <input
+                    ref={clozeWordInputRef}
+                    type="text"
+                    value={bet?.clozeAnswer || ''}
+                    onChange={(e) => {
+                      if (isBlocked) return;
+                      const singleWord = e.target.value.replace(/\s+/g, '');
+                      onBetChange(player.id, 'clozeAnswer', singleWord);
+                    }}
+                    disabled={isBlocked}
+                    placeholder="Type the single missing word for _____..."
+                    maxLength={32}
+                    className="w-full h-12 px-4 rounded-xl bg-amber-50/80 dark:bg-[#03150b]/90 border border-[#d4af37]/60 text-slate-900 dark:text-amber-50 placeholder-slate-400 dark:placeholder-amber-200/35 focus:outline-none focus:border-[#ca8a04] dark:focus:border-[#fef08a] focus:ring-2 focus:ring-[#ca8a04]/25 transition-all text-lg font-editorial font-bold shadow-inner"
+                  />
+                </div>
+              )}
+
+              {/* Wager Input & All-In Control */}
+              <div className="space-y-2">
+                <div className="flex gap-2.5">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
+                    <TextInput
+                      ref={wagerInputRef}
+                      type="number"
+                      value={String(betAmount)}
+                      onChange={handleBetAmountChange}
+                      placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
+                      disabled={isBlocked || player.money === 0}
+                      min="0"
+                      max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
+                      className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                    />
+                  </div>
+                  <ActionButton
+                    onClick={handleAllIn}
+                    disabled={isBlocked || player.money === 0}
+                    variant="outline-gold"
+                    className="h-12 px-5 text-xs sm:text-sm whitespace-nowrap"
+                  >
+                    {isBetCapped && effectiveBetCap < player.money ? `Max ($${effectiveBetCap})` : 'All In'}
+                  </ActionButton>
+                </div>
+
+                {isBetCapped && (
+                  <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg">
+                    <span>🧢</span>
+                    <span>House Limit active: Wager capped at ${effectiveBetCap}.</span>
+                  </div>
+                )}
+              </div>
+
+              <QuickChipTray
+                currentBet={actualBetAmount}
+                playerMoney={player.money}
+                maxBet={isBetCapped ? effectiveBetCap : undefined}
+                onAddAmount={handleAddQuickChip}
+                onClear={handleClearBet}
+                onAllIn={handleAllIn}
+                disabled={isBlocked}
+                playSound={playSound}
+              />
+
+              {actualBetAmount > 0 && (
+                <WagerChipsDisplay amount={actualBetAmount} label={hasSplitBet ? "Split Wager on Felt" : "Wager on Felt"} />
+              )}
+            </>
+          ) : hasSplitBet ? (
             <div className="p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner relative overflow-hidden">
               <div className="absolute top-0 right-0 p-2 opacity-10 text-6xl select-none">⚖️</div>
               <div className="flex justify-between items-center mb-4 relative z-10">
@@ -589,6 +1009,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                  <div className="relative">
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-600 dark:text-indigo-300 font-mono-casino font-bold text-lg">$</span>
                     <TextInput 
+                        ref={wagerInputRef}
                         type="number"
                         value={String(betAmount)}
                         onChange={handleBetAmountChange}
@@ -596,7 +1017,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         disabled={isBlocked || player.money === 0}
                         min="0"
                         max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
-                        className="pl-9 text-center font-mono-casino font-bold bg-white/90 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-500/50 text-xl text-slate-900 dark:text-white h-12"
+                        className={`pl-9 text-center font-mono-casino font-bold bg-white/90 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-500/50 text-xl text-slate-900 dark:text-white h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                     <button
                       type="button"
@@ -676,12 +1097,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           ) : (
             <>
               {/* Authentic Casino Table Baize Betting Zones */}
-              <div className="grid grid-cols-2 gap-3.5">
+              <div className={`grid grid-cols-2 gap-3.5 rounded-xl transition-all ${highlightAnswerMissing ? 'ring-2 ring-rose-500 p-1.5 bg-rose-500/5' : ''}`}>
                 <button
+                  ref={firstOpinionBtnRef}
                   type="button"
                   onClick={() => handleOpinionClick('correct')}
                   disabled={isBlocked}
-                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone ${
+                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
                     bet?.opinion === 'correct'
                       ? 'bg-gradient-to-b from-emerald-600/25 via-emerald-700/30 to-emerald-950/60 border-emerald-400 text-emerald-900 dark:text-emerald-200 shadow-[0_0_25px_rgba(16,185,129,0.35),inset_0_0_15px_rgba(16,185,129,0.25)] scale-[1.01]'
                       : 'felt-well border-emerald-600/35 dark:border-emerald-500/30 text-emerald-900/75 dark:text-emerald-300/65 hover:border-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-900 dark:hover:text-emerald-200'
@@ -704,7 +1126,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   type="button"
                   onClick={() => handleOpinionClick('incorrect')}
                   disabled={isBlocked}
-                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone ${
+                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-rose-400 ${
                     bet?.opinion === 'incorrect'
                       ? 'bg-gradient-to-b from-rose-600/25 via-red-800/30 to-red-950/60 border-rose-400 text-rose-900 dark:text-rose-200 shadow-[0_0_25px_rgba(244,63,94,0.35),inset_0_0_15px_rgba(244,63,94,0.25)] scale-[1.01]'
                       : 'felt-well border-rose-600/35 dark:border-rose-500/30 text-rose-900/75 dark:text-rose-300/65 hover:border-rose-500 hover:bg-rose-500/10 hover:text-rose-900 dark:hover:text-rose-200'
@@ -730,6 +1152,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                    <div className="relative flex-1">
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
                       <TextInput 
+                          ref={wagerInputRef}
                           type="number"
                           value={String(betAmount)}
                           onChange={handleBetAmountChange}
@@ -737,7 +1160,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           disabled={isBlocked || player.money === 0}
                           min="0"
                           max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
-                          className="w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12"
+                          className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                       />
                    </div>
                    <ActionButton
@@ -910,7 +1333,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               </span>
             ) : timerEnabled && timerStatus === 'idle' ? (
               <span className="text-amber-700 dark:text-amber-400/80 italic">Awaiting Turn...</span>
-            ) : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number')) ? (
+            ) : (
+              questionType === 'multipleChoice'
+                ? (typeof bet?.bet === 'number' && (hasSplitBet ? (bet?.splitOptions?.length || 0) >= 1 : Boolean(bet?.selectedOption)))
+                : questionType === 'openCloze'
+                  ? (typeof bet?.bet === 'number' && (hasSplitBet ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim()) : Boolean(bet?.clozeAnswer?.trim())))
+                  : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number'))
+            ) ? (
               <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1">
                 <span>●</span> {timerEnabled ? 'Wager Placed' : 'Wager Locked'}
               </span>

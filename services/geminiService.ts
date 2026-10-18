@@ -1,4 +1,4 @@
-import { Settings, GeneratedSentence, CEFRLevel } from '../types';
+import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getCuratedSentence } from './fallbackSentences';
 
 // Primary endpoint with fallback to direct Netlify function path
@@ -45,7 +45,8 @@ export const generateSentence = async (
   pastSentences: string[] = [],
   forceCorrect: boolean | null = null,
   subtype: string | null = null,
-  pastMistakes: string[] = []
+  pastMistakes: string[] = [],
+  questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
   try {
     const data = await postToGeminiApi<GeneratedSentence>('generateSentence', {
@@ -54,10 +55,14 @@ export const generateSentence = async (
       forceCorrect,
       subtype,
       pastMistakes,
+      questionType,
     });
 
     if (data && data.text) {
-      if (!data.isCorrect && !data.errorPhrase) {
+      if (!data.questionType) {
+        data.questionType = questionType || 'binary';
+      }
+      if (data.questionType === 'binary' && !data.isCorrect && !data.errorPhrase) {
         data.errorPhrase = data.grammarPhrase;
       }
       return data;
@@ -65,24 +70,50 @@ export const generateSentence = async (
     throw new Error("Invalid sentence structure returned from service.");
   } catch (err) {
     console.warn("Using curated fallback challenge due to service notice:", err);
-    return getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes);
+    return getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
   }
 };
 
-export const getHint = async (sentence: string, topic: string, level?: CEFRLevel): Promise<string> => {
+export const getHint = async (
+  sentence: string,
+  topic: string,
+  level?: CEFRLevel,
+  questionType?: QuestionType
+): Promise<string> => {
   try {
     const data = await postToGeminiApi<{ hint: string }>('getHint', {
       sentence,
       topic,
       level,
+      questionType,
     });
     if (data?.hint) return data.hint.trim();
   } catch (err) {
     console.warn("Using pedagogical hint heuristic:", err);
   }
 
-  // Topic-specific pedagogical heuristic hints
+  const isCloze = questionType === 'multipleChoice' || questionType === 'openCloze' || sentence.includes('_____');
   const topicLower = (topic || '').toLowerCase();
+  if (isCloze) {
+    if (topicLower.includes('tense')) {
+      return "Focus on the verb form immediately following the blank and any time markers in the sentence.";
+    } else if (topicLower.includes('prep')) {
+      return "Look at the word right before or after the blank — which dependent preposition forms a fixed collocation here?";
+    } else if (topicLower.includes('cond')) {
+      return "Check the verb form in the main clause to determine whether this is a 1st, 2nd, 3rd, or inverted conditional.";
+    } else if (topicLower.includes('modal')) {
+      return "Consider the speaker's degree of certainty, obligation, or advice, and check if 'to' or 'have' follows the blank.";
+    } else if (topicLower.includes('art')) {
+      return "Listen to the initial sound (not just the letter) of the noun phrase and check if the reference is specific.";
+    } else if (topicLower.includes('phrasal')) {
+      return "Consider which particle combines with the verb before the blank to match the context of the sentence.";
+    } else if (topicLower.includes('reported')) {
+      return "Check whether the reporting verb introduces a yes/no question, a gerund, or a backshifted clause.";
+    }
+    return "Examine the words immediately surrounding the blank to identify the required grammatical connector or auxiliary.";
+  }
+
+  // Topic-specific pedagogical heuristic hints for binary mode
   if (topicLower.includes('tense')) {
     return "Examine the timeline of events: pay special attention to the auxiliary verbs and past/present time markers.";
   } else if (topicLower.includes('prep')) {
@@ -134,6 +165,63 @@ export const verifyCorrection = async (
     return { isCorrect: true, feedback: "Accepted! Your submission effectively fixes the grammatical issue." };
   }
   return { isCorrect: false, feedback: `Expected fix was close to: "${intendedCorrection}"` };
+};
+
+export const verifyOpenClozeBatch = async (
+  sentenceWithBlank: string,
+  intendedAnswer: string,
+  acceptedAnswers: string[],
+  candidateWords: string[]
+): Promise<Record<string, { isCorrect: boolean; feedback: string }>> => {
+  const uniqueWords = Array.from(
+    new Set(candidateWords.map(w => (w || '').trim()).filter(w => w.length > 0))
+  );
+  if (uniqueWords.length === 0) return {};
+
+  try {
+    const data = await postToGeminiApi<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>(
+      'verifyOpenClozeBatch',
+      {
+        sentenceWithBlank,
+        intendedAnswer,
+        acceptedAnswers,
+        candidateWords: uniqueWords,
+      }
+    );
+    if (data?.results && typeof data.results === 'object') {
+      return data.results;
+    }
+  } catch (err) {
+    console.warn("Using offline Open Cloze batch verification fallback:", err);
+  }
+
+  // Offline heuristic fallback for unmatched words
+  const acceptedSet = new Set(
+    [intendedAnswer, ...(acceptedAnswers || [])]
+      .map(a => (a || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const fallbackResults: Record<string, { isCorrect: boolean; feedback: string }> = {};
+  uniqueWords.forEach(word => {
+    const key = word.trim().toLowerCase();
+    if (key.includes(' ')) {
+      fallbackResults[key] = {
+        isCorrect: false,
+        feedback: 'Open Cloze gaps require a single word only.',
+      };
+    } else if (acceptedSet.has(key)) {
+      fallbackResults[key] = {
+        isCorrect: true,
+        feedback: `Accepted! "${word}" fits the grammatical gap.`,
+      };
+    } else {
+      fallbackResults[key] = {
+        isCorrect: false,
+        feedback: `"${word}" does not fit the grammatical context (expected "${intendedAnswer}").`,
+      };
+    }
+  });
+  return fallbackResults;
 };
 
 export const simplifyExplanation = async (originalExplanation: string, topic: string): Promise<string> => {

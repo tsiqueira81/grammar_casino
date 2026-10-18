@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, CEFRLevel, SoundEffect } from '../types';
-import { GRAMMAR_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES } from '../constants';
+import { Settings, CEFRLevel, SoundEffect, ChallengeFormat } from '../types';
+import { GRAMMAR_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS } from '../constants';
 import ActionButton from './ActionButton';
 
-export type SettingsModalTab = 'topic' | 'level' | 'theme';
+export type SettingsModalTab = 'topic' | 'level' | 'theme' | 'format';
 
 interface RoundSettingsModalProps {
   isOpen: boolean;
@@ -57,6 +57,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
   const [selectedLevel, setSelectedLevel] = useState<CEFRLevel>(nextSettings.level || currentSettings.level);
   const [selectedTheme, setSelectedTheme] = useState(nextSettings.theme || currentSettings.theme);
+  const [selectedFormat, setSelectedFormat] = useState<ChallengeFormat>(
+    nextSettings.challengeFormat || currentSettings.challengeFormat || 'binary'
+  );
   const [customThemeInput, setCustomThemeInput] = useState(
     !THEMES.includes(nextSettings.theme as any) ? nextSettings.theme : ''
   );
@@ -70,6 +73,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       setSelectedTopic(nextSettings.topic || currentSettings.topic);
       setSelectedLevel(nextSettings.level || currentSettings.level);
       setSelectedTheme(nextSettings.theme || currentSettings.theme);
+      setSelectedFormat(nextSettings.challengeFormat || currentSettings.challengeFormat || 'binary');
 
       const isTopicCustom = !EXTENDED_GRAMMAR_TOPICS.some(t => t.name === nextSettings.topic) && !GRAMMAR_TOPICS.includes(nextSettings.topic as any);
       setIsCustomTopicMode(isTopicCustom);
@@ -94,6 +98,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       topic: resolvedTopic,
       level: selectedLevel,
       theme: resolvedTheme,
+      challengeFormat: selectedFormat,
     });
   };
 
@@ -104,6 +109,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
         topic: resolvedTopic,
         level: selectedLevel,
         theme: resolvedTheme,
+        challengeFormat: selectedFormat,
       });
     }
   };
@@ -188,6 +194,21 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               <span>🎭</span>
               <span>Theme</span>
               {resolvedTheme !== currentSettings.theme && (
+                <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
+              )}
+            </button>
+
+            <button
+              onClick={() => { playSound('click'); setActiveTab('format'); }}
+              className={`flex-1 py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === 'format'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
+              }`}
+            >
+              <span>🎯</span>
+              <span>Format</span>
+              {selectedFormat !== (currentSettings.challengeFormat || 'binary') && (
                 <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
               )}
             </button>
@@ -417,11 +438,61 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* CHALLENGE FORMAT TAB */}
+            {activeTab === 'format' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="text-xs uppercase font-bold text-amber-700 dark:text-amber-400 tracking-wider">
+                    Select Challenge Format
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    Current: <strong className="text-slate-700 dark:text-slate-200">{CHALLENGE_FORMATS.find(f => f.id === (currentSettings.challengeFormat || 'binary'))?.shortLabel || 'Valid / Flawed'}</strong>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {CHALLENGE_FORMATS.map(fmt => {
+                    const isSelected = selectedFormat === fmt.id;
+                    return (
+                      <button
+                        key={fmt.id}
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setSelectedFormat(fmt.id);
+                        }}
+                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                          isSelected
+                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
+                            : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
+                        }`}
+                      >
+                        <span className="text-2xl mt-0.5 select-none">{fmt.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`font-serif font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
+                              {fmt.label}
+                            </span>
+                            {isSelected && (
+                              <span className="text-amber-500 font-bold text-base select-none">✓</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                            {fmt.subtitle}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Pending Configuration Summary Banner */}
           <div className="px-5 py-3 bg-amber-50/90 dark:bg-black/40 border-t border-amber-300/40 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-serif">
+            <div className="flex items-center gap-2 flex-wrap text-slate-600 dark:text-slate-400 font-serif">
               <span className="font-bold text-amber-800 dark:text-amber-400">Next Deal Summary:</span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 truncate max-w-[140px]" title={resolvedTopic}>
                 📚 {resolvedTopic}
@@ -431,6 +502,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 truncate max-w-[140px]" title={resolvedTheme}>
                 🎭 {resolvedTheme}
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50">
+                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.icon || '🎯'} {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.shortLabel || 'Valid / Flawed'}
               </span>
             </div>
             <div className="text-[11px] text-amber-700 dark:text-amber-400/80 italic">
