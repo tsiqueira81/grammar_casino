@@ -9,6 +9,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "start": "vite",
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",

@@ -7,27 +7,47 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build outputs & distributions
 dist
 dist-electron
 dist-ssr
-*.local
+build-temp
+*.exe
+*.msi
+*.blockmap
+*.zip
+*.tar.gz
+builder-debug.yml
+latest.yml
+
+# Environment & secrets
 .env
 .env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.cert
+*.pfx
+
+# Serverless & Agent tool artifacts
 .netlify
 .antigravity
 
-# Editor directories and files
+# Generated documents & exports
+*.pdf
+
+# Editor & OS files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-
-.env
-.env.*
-!.env.example
