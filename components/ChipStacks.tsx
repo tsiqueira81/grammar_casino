@@ -140,6 +140,7 @@ export interface PokerChipProps {
   disabled?: boolean;
   className?: string;
   showShadow?: boolean;
+  as?: 'button' | 'div';
 }
 
 export const PokerChip: React.FC<PokerChipProps> = ({
@@ -149,6 +150,7 @@ export const PokerChip: React.FC<PokerChipProps> = ({
   disabled = false,
   className = '',
   showShadow = true,
+  as,
 }) => {
   const config = CHIP_CONFIGS[denomination];
 
@@ -176,11 +178,20 @@ export const PokerChip: React.FC<PokerChipProps> = ({
     ${config.spotHex} 342deg 360deg
   )`;
 
+  const isInteractive = Boolean(onClick);
+  const Tag = as || (isInteractive ? 'button' : 'div');
+
+  const interactiveClasses = isInteractive && !disabled
+    ? 'cursor-pointer hover:-translate-y-1 hover:scale-110 active:translate-y-0 active:scale-95 hover:brightness-110'
+    : disabled
+    ? 'opacity-35 cursor-not-allowed grayscale'
+    : 'cursor-default';
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled || !onClick}
+    <Tag
+      {...(Tag === 'button'
+        ? { type: 'button', onClick, disabled: disabled || !onClick }
+        : { role: isInteractive ? 'button' : 'img', onClick, 'aria-disabled': disabled || undefined })}
       title={`${config.label} Casino Chip`}
       style={{
         background: conicPattern,
@@ -188,13 +199,7 @@ export const PokerChip: React.FC<PokerChipProps> = ({
           ? `0 ${dimensions.lip} 0 ${config.darkHex}, 0 6px 12px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.45)`
           : `0 1.5px 0 ${config.darkHex}, inset 0 1px 1px rgba(255, 255, 255, 0.35)`,
       }}
-      className={`relative rounded-full flex items-center justify-center p-0.5 border border-white/25 select-none transition-all duration-150 ${dimensions.outer} ${
-        onClick && !disabled
-          ? 'cursor-pointer hover:-translate-y-1 hover:scale-110 active:translate-y-0 active:scale-95 hover:brightness-110'
-          : disabled
-          ? 'opacity-35 cursor-not-allowed grayscale'
-          : 'cursor-default'
-      } ${className}`}
+      className={`relative rounded-full flex items-center justify-center p-0.5 border border-white/25 select-none transition-all duration-150 ${dimensions.outer} ${interactiveClasses} ${className}`}
     >
       {/* Subtle recessed mold ring */}
       <div
@@ -218,7 +223,7 @@ export const PokerChip: React.FC<PokerChipProps> = ({
           {denomination >= 1000 ? `${denomination / 1000}k` : denomination}
         </span>
       </div>
-    </button>
+    </Tag>
   );
 };
 

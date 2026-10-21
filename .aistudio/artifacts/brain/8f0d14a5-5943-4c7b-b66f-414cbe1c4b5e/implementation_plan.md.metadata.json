@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan to split the Settings screen into a 2-step flow (Step 1: Linguistic Setup, Step 2: Table Rules & Power-Ups), automatically pre-fetch Round 1's sentence when entering Step 2, and prioritize gemini-3.8-flash-lite for ultra-low-latency text generation.",
+  "updatedAt":  "2026-10-20T20:09:10.741526513Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

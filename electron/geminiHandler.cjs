@@ -1,4 +1,4 @@
-const { GoogleGenAI, Type, Modality } = require('@google/genai');
+const { GoogleGenAI, Type, Modality, ThinkingLevel } = require('@google/genai');
 const { app, safeStorage, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -128,8 +128,23 @@ function getStatus() {
 }
 
 // --- Gemini Client & Rotation Setup ---
-const TEXT_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest'];
-const TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
+const TEXT_MODELS = ['gemini-3.8-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite-preview', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
+
+function getFastThinkingConfig(model) {
+  if (model.includes('3.8') || model.includes('3.') || model.includes('gemini-3')) {
+    return { thinkingLevel: ThinkingLevel ? ThinkingLevel.LOW : 'LOW' };
+  }
+  return { thinkingBudget: 0 };
+}
+
+function isModelNotFound(e) {
+  if (!e) return false;
+  const status = e.status || e.statusCode;
+  if (status === 404) return true;
+  const msg = String(e.message || '').toLowerCase();
+  return msg.includes('404') || msg.includes('not found') || msg.includes('is not supported');
+}
 
 function getAIClient(customKey) {
   const apiKey = (customKey || getStoredApiKey() || '').trim();
@@ -185,6 +200,9 @@ async function callWithModelRotation(models, runner, customKey) {
         return await runner(ai, model);
       } catch (e) {
         lastError = e;
+        if (isModelNotFound(e)) {
+          break;
+        }
         if (isHighTrafficOrOverload(e)) {
           attempts--;
           if (attempts > 0) {
@@ -260,33 +278,65 @@ const CEFR_PROFILES = {
   },
 };
 
-const sentenceSchema = {
+const binarySentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    text: { type: Type.STRING, description: "The generated sentence (with '_____' if Cloze mode)." },
+    text: { type: Type.STRING, description: 'The generated sentence.' },
     isCorrect: { type: Type.BOOLEAN, description: 'Whether the sentence is grammatically correct.' },
-    correction: { type: Type.STRING, description: 'The full completed or corrected version of the sentence.' },
-    explanation: { type: Type.STRING, description: 'A brief explanation of the grammar rule.' },
+    correction: { type: Type.STRING, description: 'The full corrected version of the sentence (or original if correct).' },
+    explanation: { type: Type.STRING, description: 'A concise 1-2 sentence explanation of the grammar rule.' },
     grammarPhrase: { type: Type.STRING, description: 'Key part of the sentence (3-5 words) testing the rule.' },
     errorPhrase: { type: Type.STRING, description: 'If incorrect, the exact erroneous phrase. If correct, empty string.' },
-    mistakeType: { type: Type.STRING, description: 'If incorrect, 2-4 word descriptor of error mechanism.' },
+    mistakeType: { type: Type.STRING, description: 'If incorrect, 2-4 word descriptor of error mechanism. If correct, empty string.' },
+  },
+  required: ['text', 'isCorrect', 'correction', 'explanation', 'grammarPhrase', 'errorPhrase', 'mistakeType'],
+};
+
+const multipleChoiceSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    correction: { type: Type.STRING, description: 'The full completed sentence with the correct option inserted.' },
+    explanation: { type: Type.STRING, description: 'A concise 1-2 sentence explanation of why the correct option fits.' },
+    grammarPhrase: { type: Type.STRING, description: 'The 3-5 word phrase from the completed sentence containing the target gap.' },
     options: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: 'For multipleChoice mode: 4 distinct options (1 correct, 3 distractors).',
+      description: '4 distinct options (1 correct, 3 plausible distractors).',
     },
     correctAnswer: {
       type: Type.STRING,
-      description: "For Cloze modes: the exact primary word or option that fills '_____'.",
+      description: "The exact option string that fills '_____'.",
+    },
+  },
+  required: ['text', 'correction', 'explanation', 'grammarPhrase', 'options', 'correctAnswer'],
+};
+
+const openClozeSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    correction: { type: Type.STRING, description: 'The full completed sentence with the primary word filled in.' },
+    explanation: { type: Type.STRING, description: 'A concise 1-2 sentence explanation of the grammar rule requiring this word.' },
+    grammarPhrase: { type: Type.STRING, description: 'The 3-5 word phrase from the completed sentence around the gap.' },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "The primary single word that fills '_____'.",
     },
     acceptedAnswers: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: 'For openCloze mode: array of all valid single-word answers.',
+      description: 'Array of all valid single-word answers (primary word + valid single-word synonyms).',
     },
   },
-  required: ['text', 'isCorrect', 'correction', 'explanation', 'grammarPhrase'],
+  required: ['text', 'correction', 'explanation', 'grammarPhrase', 'correctAnswer', 'acceptedAnswers'],
 };
+
+function getSentenceSchema(questionType) {
+  if (questionType === 'multipleChoice') return multipleChoiceSentenceSchema;
+  if (questionType === 'openCloze') return openClozeSentenceSchema;
+  return binarySentenceSchema;
+}
 
 const verificationSchema = {
   type: Type.OBJECT,
@@ -343,10 +393,10 @@ async function generateSentence(payload) {
       : ['binary', 'multipleChoice', 'openCloze'][Math.floor(Math.random() * 3)];
 
   const recentSentences = Array.isArray(pastSentences)
-    ? pastSentences.slice(-50).map((s) => String(s).slice(0, 300))
+    ? pastSentences.slice(-25).map((s) => String(s).slice(0, 250))
     : [];
   const recentMistakes = Array.isArray(pastMistakes)
-    ? pastMistakes.slice(-40).map((m) => String(m).slice(0, 150))
+    ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 120))
     : [];
 
   const subtypeClause = subtype ? `\nThe grammatical focus MUST specifically be: ${String(subtype).slice(0, 100)}.` : '';
@@ -379,9 +429,8 @@ ${avoidMistakesClause}
 3. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
 4. Set "correctAnswer" to the exact correct option string.
 5. Set "options" to an array of 4 distinct strings (1 correct answer + 3 plausible grammatical distractors that test "${topic}" at CEFR ${level}), in randomized order.
-6. Set "isCorrect" to true.
-7. Set "explanation" to a clear explanation of why "${topic}" requires the correct option and why the distractors are incorrect.
-8. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
+6. Set "explanation" to a concise 1-2 sentence explanation of why "${topic}" requires the correct option.
+7. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
 
 Respond ONLY with valid JSON matching the schema.`;
   } else if (resolvedQuestionType === 'openCloze') {
@@ -406,9 +455,8 @@ ${avoidMistakesClause}
 5. Set "correction" to the FULL completed sentence with the primary word filled in.
 6. Set "correctAnswer" to the primary single word (lowercase, unless it's at the start of the sentence or "I").
 7. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word synonyms/alternatives that fit the blank (all lowercase, trimmed, single words only).
-8. Set "isCorrect" to true.
-9. Set "explanation" to a clear explanation of the grammatical rule requiring this word.
-10. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
+8. Set "explanation" to a concise 1-2 sentence explanation of the grammatical rule requiring this word.
+9. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
 
 Respond ONLY with valid JSON matching the schema.`;
   } else {
@@ -438,19 +486,21 @@ ${avoidMistakesClause}
 grammarPhrase MUST be an exact substring of the generated sentence (3-6 words) representing the core grammatical feature.
 errorPhrase MUST be the exact erroneous snippet if the sentence is incorrect, or empty string if correct.
 mistakeType MUST be a short descriptor (2-4 words) of the error type if incorrect, or empty string if correct.
+explanation MUST be a concise 1-2 sentence explanation of the grammar rule.
 
-Respond ONLY with valid JSON matching the schema:
-{"text":"...","isCorrect":true,"correction":"...","explanation":"...","grammarPhrase":"...","errorPhrase":"...","mistakeType":"..."}`;
+Respond ONLY with valid JSON matching the schema.`;
   }
 
+  const activeSchema = getSentenceSchema(resolvedQuestionType);
   const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
     return await ai.models.generateContent({
       model,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        responseSchema: sentenceSchema,
+        responseSchema: activeSchema,
         temperature: 1,
+        thinkingConfig: getFastThinkingConfig(model),
       },
     });
   });
@@ -522,7 +572,10 @@ Respond ONLY with the hint text.`;
     return await ai.models.generateContent({
       model,
       contents: prompt,
-      config: { temperature: 0.8 },
+      config: {
+        temperature: 0.8,
+        thinkingConfig: getFastThinkingConfig(model),
+      },
     });
   });
 
@@ -553,6 +606,7 @@ Respond ONLY with the JSON object matching the provided schema.`;
       config: {
         responseMimeType: 'application/json',
         responseSchema: verificationSchema,
+        thinkingConfig: getFastThinkingConfig(model),
       },
     });
   });
@@ -601,6 +655,7 @@ Respond ONLY with valid JSON matching the schema.`;
       config: {
         responseMimeType: 'application/json',
         responseSchema: batchClozeVerificationSchema,
+        thinkingConfig: getFastThinkingConfig(model),
       },
     });
   });
@@ -639,7 +694,10 @@ async function simplifyExplanation(payload) {
     return await ai.models.generateContent({
       model,
       contents: prompt,
-      config: { temperature: 0.7 },
+      config: {
+        temperature: 0.7,
+        thinkingConfig: getFastThinkingConfig(model),
+      },
     });
   });
 
@@ -684,12 +742,20 @@ async function testApiKey(testKey) {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: keyToTest });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: 'Respond with the word OK.',
-      config: { maxOutputTokens: 5 },
-    });
+    const response = await callWithModelRotation(
+      TEXT_MODELS,
+      async (ai, model) => {
+        return await ai.models.generateContent({
+          model,
+          contents: 'Respond with the word OK.',
+          config: {
+            maxOutputTokens: 5,
+            thinkingConfig: getFastThinkingConfig(model),
+          },
+        });
+      },
+      keyToTest
+    );
     const text = (response.text || '').trim();
     return { valid: true, text };
   } catch (err) {

@@ -6,80 +6,28 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite",
-    "start": "vite",
+    "dev": "tsx server.ts",
+    "start": "node server.ts",
     "build": "vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview",
-    "electron:start": "npm run build && electron electron/main.cjs",
-    "electron:build": "npm run build && electron-builder --win",
-    "electron:build:installer": "npm run build && electron-builder --win nsis",
-    "electron:build:portable": "npm run build && electron-builder --win portable"
-  },
-  "build": {
-    "appId": "com.grammarcasino.desktop",
-    "productName": "Grammar Casino",
-    "copyright": "Copyright © Thiago Siqueira",
-    "directories": {
-      "output": "dist-electron",
-      "buildResources": "build"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "build/icon.ico",
-      "build/icon.png",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.ico"
-    },
-    "portable": {
-      "artifactName": "${productName} Portable ${version}.${ext}"
-    },
-    "nsis": {
-      "artifactName": "${productName} Setup ${version}.${ext}",
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Grammar Casino",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "uninstallDisplayName": "${productName}"
-    }
+    "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "^1.12.0",
+    "express": "^5.3.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.575.0",
     "motion": "^12.34.3",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
-    "@netlify/functions": "^6.0.2",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^44.9.0",
-    "electron-builder": "^26.15.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

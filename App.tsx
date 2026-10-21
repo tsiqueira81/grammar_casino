@@ -495,12 +495,12 @@ export function App() {
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (qType === 'multipleChoice') {
-      if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) === 2;
+      if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) >= 1;
       return Boolean(playerBet.selectedOption?.trim());
     }
     if (qType === 'openCloze') {
       if (hasSplitBet) {
-        return Boolean(playerBet.splitClozeAnswers?.[0]?.trim() && playerBet.splitClozeAnswers?.[1]?.trim());
+        return Boolean(playerBet.splitClozeAnswers?.[0]?.trim() || playerBet.splitClozeAnswers?.[1]?.trim());
       }
       return Boolean(playerBet.clozeAnswer?.trim());
     }
@@ -878,15 +878,147 @@ export function App() {
       }
     }
   };
+  const [settingsPart, setSettingsPart] = useState<1 | 2>(1);
+
   const handleStartGame = () => { 
     if (players.length > 0) { 
       playSound('startGame'); 
+      setSettingsPart(1);
       setStep('SETTINGS'); 
     } else { 
       setError({ title: "No Players!", message: "Please add at least one player to start the game." }); 
     } 
   };
+
+  const handleAdvanceToSettingsPart2 = useCallback(() => {
+    const finalTopic = settings.topic === "My own choice" ? customTopic.trim() : settings.topic;
+    let finalTheme = settings.theme;
+
+    if (!finalTopic || !settings.level || !finalTheme) {
+      setError({ title: "Incomplete Setup", message: "Please choose a topic, level, and theme." });
+      return;
+    }
+    if (settings.topic === "My own choice" && !finalTopic) {
+      setError({ title: "Incomplete Setup", message: "Please enter your custom topic." });
+      return;
+    }
+    if (settings.theme === "Custom ✍️") {
+      if (!customTheme.trim()) {
+        setError({ title: "Incomplete Setup", message: "Please enter your custom theme." });
+        return;
+      }
+      finalTheme = customTheme.trim();
+    }
+
+    playSound('click');
+    setSettingsPart(2);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [settings, customTopic, customTheme, playSound]);
   
+  const prefetchRef = useRef<{
+    key: string;
+    promise: Promise<{
+      generated: GeneratedSentence;
+      subtype: string | null;
+      allSubtypesLen: number;
+      resolvedQuestionType: QuestionType;
+      forceCorrect: boolean;
+      remainingBatch: boolean[];
+    }>;
+  } | null>(null);
+
+  // Background pre-fetch:
+  // 1) On SETTINGS Part 2 (pre-fetches Round 1 as soon as Topic, Level, Theme & Format are locked in)
+  // 2) In IN_GAME as soon as currentSentence is shown (pre-fetches Round N+1 while players place bets, unless on the final round)
+  // 3) On RESULTS screen (fallback or if teacher changes nextRoundSettings on Results screen, unless on the final round)
+  useEffect(() => {
+    const isSettingsPart2 = step === 'SETTINGS' && settingsPart === 2;
+    const isInGameWithSentence = step === 'IN_GAME' && Boolean(currentSentence) && !isLoading;
+    const isResults = step === 'RESULTS';
+    if (!isSettingsPart2 && !isInGameWithSentence && !isResults) return;
+
+    // Skip pre-fetching if we are in Fixed Rounds mode and already on the final round
+    if (!isSettingsPart2) {
+      const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+      if (gameMode === 'rounds' && !isNaN(numTotalRounds) && currentRound >= numTotalRounds) {
+        return;
+      }
+    }
+
+    let targetSettings: Settings;
+    if (isSettingsPart2) {
+      const resolvedTopic = settings.topic === "My own choice" ? customTopic.trim() : settings.topic;
+      const resolvedTheme = settings.theme === "Custom ✍️" ? customTheme.trim() : settings.theme;
+      if (!resolvedTopic || !settings.level || !resolvedTheme) return;
+      targetSettings = {
+        topic: resolvedTopic,
+        level: settings.level,
+        theme: resolvedTheme,
+        challengeFormat: settings.challengeFormat || 'binary',
+      };
+    } else {
+      const candidate = nextRoundSettings || settings;
+      if (!candidate?.topic || !candidate?.level || !candidate?.theme) return;
+      targetSettings = candidate;
+    }
+
+    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${pastSentences.length}`;
+    if (prefetchRef.current?.key === settingsKey) return;
+
+    const triggerPrefetch = () => {
+      if (prefetchRef.current?.key === settingsKey) return;
+
+      const formatSetting: ChallengeFormat = targetSettings.challengeFormat || 'binary';
+      const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
+      const formatIdx = isSettingsPart2 ? 0 : mixedFormatIndexRef.current;
+      const resolvedQuestionType: QuestionType = formatSetting === 'mixed'
+        ? rotationOrder[formatIdx % rotationOrder.length]
+        : formatSetting;
+
+      const currentBatch = (!isSettingsPart2 && sentenceBatch.length > 0) ? sentenceBatch : newBatch();
+      const forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
+      const remainingBatch = currentBatch.slice(1);
+
+      const topicKey = targetSettings.topic;
+      const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
+      const activeUsedSubtypes = isSettingsPart2 ? [] : usedSubtypes;
+      const available = allSubtypes.filter(s => !activeUsedSubtypes.includes(s));
+      const pool = available.length > 0 ? available : allSubtypes;
+      const subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+
+      const promise = GeminiService.generateSentence(
+        targetSettings,
+        pastSentences,
+        forceCorrect,
+        (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
+        pastMistakes,
+        resolvedQuestionType
+      ).then(generated => ({
+        generated,
+        subtype,
+        allSubtypesLen: allSubtypes.length,
+        resolvedQuestionType,
+        forceCorrect,
+        remainingBatch,
+      }));
+
+      promise.catch(() => {});
+
+      prefetchRef.current = {
+        key: settingsKey,
+        promise,
+      };
+    };
+
+    // In IN_GAME, wait 600ms after sentence appears so the card flip animation and any immediate TTS click get priority
+    if (isInGameWithSentence) {
+      const timer = setTimeout(triggerPrefetch, 600);
+      return () => clearTimeout(timer);
+    }
+
+    triggerPrefetch();
+  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes]);
+
   const fetchNewSentence = useCallback(async (currentSettings: Settings, history: string[], forcedBatch?: boolean[], mistakeHistory?: string[]) => {
     setIsLoading(true);
     setCurrentSentence(null);
@@ -898,37 +1030,69 @@ export function App() {
             throw new Error("Invalid settings provided to fetch a new sentence.");
         }
         const formatSetting: ChallengeFormat = currentSettings.challengeFormat || 'binary';
-        const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
-        const resolvedQuestionType: QuestionType = formatSetting === 'mixed'
-          ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
-          : formatSetting;
+        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${history.length}`;
 
-        const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
-        const forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
-        if (resolvedQuestionType === 'binary') {
-          setSentenceBatch(currentBatch.slice(1));
+        let generated: GeneratedSentence | null = null;
+        let subtype: string | null = null;
+        let allSubtypesLen = 0;
+        let resolvedQuestionType: QuestionType = 'binary';
+        let forceCorrect = true;
+
+        if (!forcedBatch && prefetchRef.current?.key === expectedKey) {
+          const activePrefetch = prefetchRef.current;
+          prefetchRef.current = null;
+          try {
+            const prefetched = await activePrefetch.promise;
+            generated = prefetched.generated;
+            subtype = prefetched.subtype;
+            allSubtypesLen = prefetched.allSubtypesLen;
+            resolvedQuestionType = prefetched.resolvedQuestionType;
+            forceCorrect = prefetched.forceCorrect;
+            if (formatSetting === 'mixed') {
+              mixedFormatIndexRef.current += 1;
+            }
+            if (resolvedQuestionType === 'binary') {
+              setSentenceBatch(prefetched.remainingBatch);
+            }
+          } catch {
+            generated = null;
+          }
         }
 
-        const topicKey = currentSettings.topic;
-        const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
-        const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
-        const pool = available.length > 0 ? available : allSubtypes;
-        const subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+        if (!generated) {
+          const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
+          resolvedQuestionType = formatSetting === 'mixed'
+            ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
+            : formatSetting;
 
-        const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
-        const generated = await GeminiService.generateSentence(
-          currentSettings, 
-          history, 
-          forceCorrect, 
-          (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
-          effectiveMistakes,
-          resolvedQuestionType
-        );
+          const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
+          forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
+          if (resolvedQuestionType === 'binary') {
+            setSentenceBatch(currentBatch.slice(1));
+          }
+
+          const topicKey = currentSettings.topic;
+          const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
+          allSubtypesLen = allSubtypes.length;
+          const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
+          const pool = available.length > 0 ? available : allSubtypes;
+          subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+
+          const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
+          generated = await GeminiService.generateSentence(
+            currentSettings, 
+            history, 
+            forceCorrect, 
+            (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
+            effectiveMistakes,
+            resolvedQuestionType
+          );
+        }
         
         if ((resolvedQuestionType !== 'binary' || !forceCorrect) && subtype) {
           setUsedSubtypes(prev => {
-            const next = [...prev, subtype];
-            return next.length >= allSubtypes.length ? [] : next;
+            const next = [...prev, subtype!];
+            return next.length >= allSubtypesLen ? [] : next;
           });
         }
 
@@ -945,7 +1109,7 @@ export function App() {
         }
 
         setCurrentSentence(generated);
-        setPastSentences(prev => [...prev, generated.text]);
+        setPastSentences(prev => [...prev, generated!.text]);
         // Small delay to allow initial card render before flip
         setTimeout(() => {
             setIsSentenceRevealed(true);
@@ -1013,10 +1177,9 @@ export function App() {
     setTurnTimers({});
     setTeacherRevealOverride(false);
     
-    const initialBatch = newBatch();
-    // Pass current pastSentences (which will be empty if new game started via restart, or contains history if resumed)
-    // If starting a fresh game, we might want to respect the 'never show up twice' for the session.
-    fetchNewSentence(newSettings, pastSentences, initialBatch, pastMistakes);
+    setSentenceBatch([]);
+    // Pass undefined for forcedBatch so fetchNewSentence consumes the Round 1 sentence pre-fetched on Settings Part 2
+    fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
     playSound('success');
   }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
   
@@ -1592,6 +1755,8 @@ export function App() {
     setSimplifiedExplanation({ text: null, loading: false });
     setTurnTimers({});
     setTeacherRevealOverride(false);
+    // Clear any in-flight next-round prefetch so redealing the current hand generates a fresh sentence
+    prefetchRef.current = null;
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
 
@@ -1770,12 +1935,12 @@ export function App() {
         const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
         if (qType === 'multipleChoice') {
           return hasSplitBet
-            ? (playerBet?.splitOptions?.length ?? 0) === 2
+            ? (playerBet?.splitOptions?.length ?? 0) >= 1
             : Boolean(playerBet?.selectedOption?.trim());
         }
         if (qType === 'openCloze') {
           return hasSplitBet
-            ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() && playerBet?.splitClozeAnswers?.[1]?.trim())
+            ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() || playerBet?.splitClozeAnswers?.[1]?.trim())
             : Boolean(playerBet?.clozeAnswer?.trim());
         }
         if (hasSplitBet) return true;
@@ -1924,16 +2089,16 @@ export function App() {
           choiceFrequency['incorrect'] = (choiceFrequency['incorrect'] || 0) + 1;
         }
       } else if (qType === 'multipleChoice') {
-        const opts = pSplit ? (b.splitOptions || []) : (b.selectedOption ? [b.selectedOption] : []);
-        opts.forEach(o => {
-          const key = o.trim().toLowerCase();
-          if (key) choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
+        const opts: string[] = pSplit ? (b.splitOptions || []) : (b.selectedOption ? [b.selectedOption] : []);
+        const uniqueKeys = Array.from(new Set<string>(opts.map(o => (o || '').trim().toLowerCase()).filter(Boolean)));
+        uniqueKeys.forEach(key => {
+          choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
         });
       } else if (qType === 'openCloze') {
-        const words = pSplit ? (b.splitClozeAnswers || []) : (b.clozeAnswer ? [b.clozeAnswer] : []);
-        words.forEach(w => {
-          const key = (w || '').trim().toLowerCase();
-          if (key) choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
+        const words: string[] = pSplit ? (b.splitClozeAnswers || []) : (b.clozeAnswer ? [b.clozeAnswer] : []);
+        const uniqueKeys = Array.from(new Set<string>(words.map(w => (w || '').trim().toLowerCase()).filter(Boolean)));
+        uniqueKeys.forEach(key => {
+          choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
         });
       }
     });
@@ -2080,16 +2245,32 @@ export function App() {
       // Compute human-readable answer display for Results, Report Card, and PDF
       if (qType === 'multipleChoice') {
         if (hasSplitBet) {
-          const picks = (playerBetData?.splitOptions || []).map(o => formatMcOptionWithLetter(o));
-          playerAnswerDisplay = `50/50: ${picks.join(' / ') || '—'}`;
+          const rawOpts = (playerBetData?.splitOptions || []).filter(Boolean);
+          const isSingleStack =
+            rawOpts.length === 1 ||
+            (rawOpts.length === 2 && rawOpts[0].trim().toLowerCase() === rawOpts[1].trim().toLowerCase());
+          if (isSingleStack && rawOpts[0]) {
+            playerAnswerDisplay = `100% (2×): ${formatMcOptionWithLetter(rawOpts[0])}`;
+          } else {
+            const picks = rawOpts.map(o => formatMcOptionWithLetter(o));
+            playerAnswerDisplay = `50/50: ${picks.join(' / ') || '—'}`;
+          }
         } else {
           playerAnswerDisplay = formatMcOptionWithLetter(playerBetData?.selectedOption);
         }
       } else if (qType === 'openCloze') {
         if (hasSplitBet) {
-          const w1 = playerBetData?.splitClozeAnswers?.[0]?.trim() || '—';
-          const w2 = playerBetData?.splitClozeAnswers?.[1]?.trim() || '—';
-          playerAnswerDisplay = `50/50: "${w1}" / "${w2}"`;
+          const w1 = playerBetData?.splitClozeAnswers?.[0]?.trim() || '';
+          const w2 = playerBetData?.splitClozeAnswers?.[1]?.trim() || '';
+          const isSingleOrDuplicateCloze =
+            (Boolean(w1) && !w2) ||
+            (!w1 && Boolean(w2)) ||
+            (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
+          if (isSingleOrDuplicateCloze) {
+            playerAnswerDisplay = `100% Split: "${w1 || w2 || '—'}"`;
+          } else {
+            playerAnswerDisplay = `50/50: "${w1 || '—'}" / "${w2 || '—'}"`;
+          }
         } else {
           playerAnswerDisplay = `"${playerBetData?.clozeAnswer?.trim() || '—'}"`;
         }
@@ -2105,45 +2286,85 @@ export function App() {
       if (hasSplitBet) {
           const wager = finalBet;
           if (qType === 'multipleChoice') {
-              const splitOpts = playerBetData?.splitOptions || [];
-              const anyHit = splitOpts.some(o => isMcOptionCorrect(o));
-              if (anyHit) {
-                  isWin = true;
-                  outcomeAmount = Math.round(wager * 0.5);
-                  outcomeText = `50/50 Split Win (+$${outcomeAmount})`;
-                  playSound('win', winSoundCount++);
+              const splitOpts = (playerBetData?.splitOptions || []).filter(Boolean);
+              const isSingleStack =
+                splitOpts.length === 1 ||
+                (splitOpts.length === 2 && splitOpts[0].trim().toLowerCase() === splitOpts[1].trim().toLowerCase());
+              if (isSingleStack && splitOpts[0]) {
+                  const hit = isMcOptionCorrect(splitOpts[0]);
+                  if (hit) {
+                      isWin = true;
+                      outcomeAmount = wager;
+                      outcomeText = `Split Bet 2× Win (+$${wager})`;
+                      playSound('win', winSoundCount++);
+                  } else {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `Split Bet 2× Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  }
               } else {
-                  isWin = false;
-                  outcomeAmount = -wager;
-                  outcomeText = `50/50 Split Loss (-$${wager})`;
-                  playSound('lose', loseSoundCount++);
+                  const anyHit = splitOpts.some(o => isMcOptionCorrect(o));
+                  if (anyHit) {
+                      isWin = true;
+                      outcomeAmount = Math.round(wager * 0.5);
+                      outcomeText = `50/50 Split Win (+$${outcomeAmount})`;
+                      playSound('win', winSoundCount++);
+                  } else {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `50/50 Split Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  }
               }
           } else if (qType === 'openCloze') {
-              const w1 = playerBetData?.splitClozeAnswers?.[0];
-              const w2 = playerBetData?.splitClozeAnswers?.[1];
-              const hit1 = isClozeWordCorrect(w1);
-              const hit2 = isClozeWordCorrect(w2);
-              const hits = (hit1 ? 1 : 0) + (hit2 ? 1 : 0);
-              if (hits === 2) {
-                  isWin = true;
-                  outcomeAmount = wager;
-                  outcomeText = `Split Cloze Double Hit (+$${wager})!`;
-                  playSound('win', winSoundCount++);
-              } else if (hits === 1) {
-                  isWin = true;
-                  outcomeAmount = Math.round(wager * 0.5);
-                  outcomeText = `50/50 Split Cloze Win (+$${outcomeAmount})`;
-                  playSound('win', winSoundCount++);
+              const w1 = (playerBetData?.splitClozeAnswers?.[0] || '').trim();
+              const w2 = (playerBetData?.splitClozeAnswers?.[1] || '').trim();
+              const isSingleOrDuplicateCloze =
+                (Boolean(w1) && !w2) ||
+                (!w1 && Boolean(w2)) ||
+                (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
+              if (isSingleOrDuplicateCloze) {
+                  const singleWord = w1 || w2;
+                  const hit = isClozeWordCorrect(singleWord);
+                  if (hit) {
+                      isWin = true;
+                      outcomeAmount = wager;
+                      outcomeText = `Split Cloze 100% Win (+$${wager})!`;
+                      playSound('win', winSoundCount++);
+                  } else {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `Split Cloze Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  }
               } else {
-                  isWin = false;
-                  outcomeAmount = -wager;
-                  outcomeText = `Split Cloze Loss (-$${wager})`;
-                  playSound('lose', loseSoundCount++);
+                  const hit1 = isClozeWordCorrect(w1);
+                  const hit2 = isClozeWordCorrect(w2);
+                  const hits = (hit1 ? 1 : 0) + (hit2 ? 1 : 0);
+                  if (hits === 2) {
+                      isWin = true;
+                      outcomeAmount = wager;
+                      outcomeText = `Split Cloze Double Hit (+$${wager})!`;
+                      playSound('win', winSoundCount++);
+                  } else if (hits === 1) {
+                      isWin = true;
+                      outcomeAmount = Math.round(wager * 0.5);
+                      outcomeText = `50/50 Split Cloze Win (+$${outcomeAmount})`;
+                      playSound('win', winSoundCount++);
+                  } else {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `Split Cloze Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  }
               }
               const fbParts: string[] = [];
+              const seenNorms = new Set<string>();
               [w1, w2].forEach(w => {
                 const norm = (w || '').trim().toLowerCase();
-                if (norm && clozeWordVerifications[norm]?.feedback) {
+                if (norm && !seenNorms.has(norm) && clozeWordVerifications[norm]?.feedback) {
+                  seenNorms.add(norm);
                   fbParts.push(clozeWordVerifications[norm].feedback);
                 }
               });
@@ -2535,6 +2756,8 @@ export function App() {
     localStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     setStep('PLAYER_SETUP');
+    setSettingsPart(1);
+    prefetchRef.current = null;
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
@@ -2874,7 +3097,7 @@ export function App() {
                     className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well hover:border-[#d4af37] transition-all cursor-pointer group/stack"
                     title="Click to edit starting cash"
                   >
-                    <PokerChip denomination={100} size="xs" />
+                    <PokerChip denomination={100} size="xs" as="div" />
                     <div className="text-left">
                       <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60 flex items-center gap-1">
                         <span>Starting Stack</span>
@@ -3015,389 +3238,489 @@ export function App() {
             </div>
           </div> 
         );
-        case 'SETTINGS': return ( 
+        case 'SETTINGS': {
+          const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Custom Topic") : settings.topic;
+          const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Custom Theme") : settings.theme;
+          const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
+
+          return ( 
           <div className="w-full max-w-4xl text-center animate-fade-in p-4"> 
-            <div className="flex flex-col items-center mb-8">
+            <div className="flex flex-col items-center mb-6">
               <div className="text-xs font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] mb-1 font-bold">
-                Croupier's Charter
+                Croupier's Charter · Step {settingsPart} of 2
               </div>
               <h2 className="text-3xl sm:text-5xl font-black text-gold tracking-widest uppercase title-glow font-display">
                 Table Configuration
               </h2> 
               <div className="h-[1px] w-48 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mt-3 opacity-70" />
+
+              {/* Two-Part Stepper Bar */}
+              <div className="mt-5 inline-flex items-center p-1.5 rounded-2xl felt-well border border-[#d4af37]/40 gap-2 max-w-full">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (settingsPart !== 1) {
+                      playSound('click');
+                      setSettingsPart(1);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                    settingsPart === 1
+                      ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
+                      : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
+                  }`}
+                >
+                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-mono-casino">1</span>
+                  <span>Linguistic Setup</span>
+                </button>
+                <span className="text-[#d4af37]/60 font-serif text-sm select-none">&rarr;</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (settingsPart !== 2) {
+                      handleAdvanceToSettingsPart2();
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                    settingsPart === 2
+                      ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
+                      : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
+                  }`}
+                >
+                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-mono-casino">2</span>
+                  <span>House Rules &amp; Power-Ups</span>
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative">
-              {[
-                { title: "I. Grammatical Domain", subtitle: "Choose the linguistic rulebook for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom grammar topic..." },
-                { title: "II. Stakes & Proficiency (CEFR)", subtitle: "Select syntactic complexity and mistake subtlety", items: CEFR_LEVELS, settingKey: 'level' },
-                { title: "III. Salon Atmosphere & Theme", subtitle: "Flavor the AI-generated narratives", items: THEMES, settingKey: 'theme', customKey: 'customTheme', customValue: customTheme, setCustomValue: setCustomTheme, customPlaceholder: "Enter custom narrative theme..." }
-              ].map(section => (
-                <div key={section.title} className="text-left">
-                  <div className="mb-3.5 border-l-4 border-[#d4af37] pl-3.5">
-                    <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                      {section.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
-                  </div>
-
-                  <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
-                    {section.items.map(item => {
-                      const isActive = settings[section.settingKey as keyof Settings] === item;
-                      return (
-                        <button
-                          key={item}
-                          onClick={() => { playSound('click'); setSettings(s => ({...s, [section.settingKey]: item})); }} 
-                          className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-serif border cursor-pointer relative overflow-hidden ${
-                            isActive
-                              ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
-                              : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
-                          }`}
-                        >
-                          {item}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {section.settingKey === 'level' && CEFR_DIFFICULTY_PROFILES[settings.level] && (
-                    <div className="mt-3.5 p-4 rounded-xl felt-well text-xs space-y-1.5 animate-fade-in">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="font-mono-casino font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
-                          {settings.level} — {CEFR_DIFFICULTY_PROFILES[settings.level]?.title}
-                        </span>
-                        <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-serif uppercase tracking-widest">
-                          Croupier's Briefing
-                        </span>
+            {settingsPart === 1 ? (
+              <>
+                <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative animate-fade-in">
+                  {[
+                    { title: "I. Grammatical Domain", subtitle: "Choose the linguistic rulebook for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom grammar topic..." },
+                    { title: "II. Stakes & Proficiency (CEFR)", subtitle: "Select syntactic complexity and mistake subtlety", items: CEFR_LEVELS, settingKey: 'level' },
+                    { title: "III. Salon Atmosphere & Theme", subtitle: "Flavor the AI-generated narratives", items: THEMES, settingKey: 'theme', customKey: 'customTheme', customValue: customTheme, setCustomValue: setCustomTheme, customPlaceholder: "Enter custom narrative theme..." }
+                  ].map(section => (
+                    <div key={section.title} className="text-left">
+                      <div className="mb-3.5 border-l-4 border-[#d4af37] pl-3.5">
+                        <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                          {section.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
                       </div>
-                      <div className="text-slate-700 dark:text-slate-300">
-                        <strong className="text-slate-900 dark:text-amber-100">Syntax &amp; Structure:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.syntax}
-                      </div>
-                      <div className="text-slate-700 dark:text-slate-300">
-                        <strong className="text-slate-900 dark:text-amber-100">Lexis &amp; Register:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.lexis}
-                      </div>
-                      <div className="text-amber-900 dark:text-amber-300 font-medium">
-                        <strong className="text-amber-950 dark:text-[#fef08a]">Mistake Spotting:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.mistakeIdentification}
-                      </div>
-                    </div>
-                  )}
-                  {section.customKey && settings[section.settingKey as keyof Settings] === (section.settingKey === 'topic' ? "My own choice" : "Custom ✍️") && (
-                    <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} className="mt-3.5" />
-                  )}
-                </div>
-              ))}
 
-              {/* IV. Challenge Format Selector */}
-              <div className="text-left border-t border-[#d4af37]/25 pt-6">
-                <div className="mb-3.5 border-l-4 border-emerald-400 pl-3.5">
-                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                    IV. Challenge Format
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                    Choose how players evaluate each sentence (can also be switched mid-game between hands!)
-                  </p>
-                </div>
+                      <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
+                        {section.items.map(item => {
+                          const isActive = settings[section.settingKey as keyof Settings] === item;
+                          return (
+                            <button
+                              key={item}
+                              onClick={() => { playSound('click'); setSettings(s => ({...s, [section.settingKey]: item})); }} 
+                              className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-serif border cursor-pointer relative overflow-hidden ${
+                                isActive
+                                  ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
+                                  : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                              }`}
+                            >
+                              {item}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {CHALLENGE_FORMATS.map(fmt => {
-                    const currentFormat: ChallengeFormat = settings.challengeFormat || 'binary';
-                    const isSelected = currentFormat === fmt.id;
-                    return (
-                      <button
-                        key={fmt.id}
-                        type="button"
-                        onClick={() => {
-                          playSound('click');
-                          setSettings(s => ({ ...s, challengeFormat: fmt.id }));
-                        }}
-                        className={`p-4 rounded-xl border-2 text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
-                          isSelected
-                            ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] scale-[1.01]'
-                            : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
-                        }`}
-                      >
-                        <span className="text-2xl sm:text-3xl select-none shrink-0 mt-0.5">{fmt.icon}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-serif font-extrabold text-sm sm:text-base uppercase tracking-wider">
-                              {fmt.label}
+                      {section.settingKey === 'level' && CEFR_DIFFICULTY_PROFILES[settings.level] && (
+                        <div className="mt-3.5 p-4 rounded-xl felt-well text-xs space-y-1.5 animate-fade-in">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-mono-casino font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
+                              {settings.level} — {CEFR_DIFFICULTY_PROFILES[settings.level]?.title}
                             </span>
-                            {isSelected && (
-                              <span className="text-[10px] font-mono-casino font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
-                                Active
-                              </span>
-                            )}
+                            <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-serif uppercase tracking-widest">
+                              Croupier's Briefing
+                            </span>
                           </div>
-                          <p className={`text-xs mt-1 leading-relaxed ${isSelected ? 'text-[#1c0a04]/85 font-medium' : 'text-slate-500 dark:text-amber-200/70'}`}>
-                            {fmt.subtitle}
-                          </p>
+                          <div className="text-slate-700 dark:text-slate-300">
+                            <strong className="text-slate-900 dark:text-amber-100">Syntax &amp; Structure:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.syntax}
+                          </div>
+                          <div className="text-slate-700 dark:text-slate-300">
+                            <strong className="text-slate-900 dark:text-amber-100">Lexis &amp; Register:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.lexis}
+                          </div>
+                          <div className="text-amber-900 dark:text-amber-300 font-medium">
+                            <strong className="text-amber-950 dark:text-[#fef08a]">Mistake Spotting:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.mistakeIdentification}
+                          </div>
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'mixed') && (
-                  <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-serif text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
-                    <span>ℹ️</span>
-                    <span>
-                      <strong>Cloze House Rules:</strong> Clean 1:1 base payouts. <em>Split Bet</em> becomes a 50/50 Two-Option Pick (Multiple-Choice) or 2-Word Entry (Open Cloze). <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
-                    </span>
-                  </div>
-                )}
-              </div>
-              
-              {/* V. Configure Power-Up Shoe */}
-              <div className="text-left border-t border-[#d4af37]/25 pt-6">
-                <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
-                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                    V. House Power-Up Shoe
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
-                </div>
-
-                <div className="p-4 sm:p-5 rounded-xl felt-well border-purple-400/40 dark:border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="text-2xl filter drop-shadow select-none">🎴</span>
-                      <span className="font-serif font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
-                        Active Shoe Deck
-                      </span>
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-mono-casino font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
-                        {selectedPowerUps.length} / {(Object.keys(POWER_UPS) as PowerUpKey[]).length} Cards
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300/80">
-                      Players can draw random cards from this shoe during betting rounds to gain advantages or sabotage rivals.
-                    </p>
-                    <div className="flex items-center gap-1.5 pt-1 overflow-x-auto max-w-full py-0.5">
-                      {selectedPowerUps.slice(0, 12).map(k => (
-                        <span key={k} className="text-base select-none bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded border border-purple-400/20" title={POWER_UPS[k]?.name}>
-                          {POWER_UPS[k]?.icon}
-                        </span>
-                      ))}
-                      {selectedPowerUps.length > 12 && (
-                        <span className="text-[11px] font-mono-casino text-purple-700 dark:text-purple-300 font-bold ml-1">
-                          +{selectedPowerUps.length - 12} more
-                        </span>
+                      )}
+                      {section.customKey && settings[section.settingKey as keyof Settings] === (section.settingKey === 'topic' ? "My own choice" : "Custom ✍️") && (
+                        <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} className="mt-3.5" />
                       )}
                     </div>
-                  </div>
+                  ))}
 
-                  <div className="flex items-center gap-3 w-full sm:w-auto shrink-0">
-                    <ActionButton
-                      onClick={() => {
-                        playSound('click');
-                        setShowDeckConfigModal(true);
-                      }}
-                      variant="purple"
-                      className="w-full sm:w-auto px-6 py-3 text-xs sm:text-sm flex items-center justify-center gap-2"
-                    >
-                      <span>🎴</span>
-                      <span>Customize Shoe</span>
-                    </ActionButton>
+                  {/* IV. Challenge Format Selector */}
+                  <div className="text-left border-t border-[#d4af37]/25 pt-6">
+                    <div className="mb-3.5 border-l-4 border-emerald-400 pl-3.5">
+                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                        IV. Challenge Format
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-amber-200/60">
+                        Choose how players evaluate each sentence (can also be switched mid-game between hands!)
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {CHALLENGE_FORMATS.map(fmt => {
+                        const currentFormat: ChallengeFormat = settings.challengeFormat || 'binary';
+                        const isSelected = currentFormat === fmt.id;
+                        return (
+                          <button
+                            key={fmt.id}
+                            type="button"
+                            onClick={() => {
+                              playSound('click');
+                              setSettings(s => ({ ...s, challengeFormat: fmt.id }));
+                            }}
+                            className={`p-4 rounded-xl border-2 text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
+                              isSelected
+                                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] scale-[1.01]'
+                                : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                            }`}
+                          >
+                            <span className="text-2xl sm:text-3xl select-none shrink-0 mt-0.5">{fmt.icon}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-serif font-extrabold text-sm sm:text-base uppercase tracking-wider">
+                                  {fmt.label}
+                                </span>
+                                {isSelected && (
+                                  <span className="text-[10px] font-mono-casino font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-xs mt-1 leading-relaxed ${isSelected ? 'text-[#1c0a04]/85 font-medium' : 'text-slate-500 dark:text-amber-200/70'}`}>
+                                {fmt.subtitle}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'mixed') && (
+                      <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-serif text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
+                        <span>ℹ️</span>
+                        <span>
+                          <strong>Cloze House Rules:</strong> Clean 1:1 base payouts. <em>Split Bet</em> lets you pick 2 options/words (50% each) or stack 1 option twice (Multiple-Choice) / enter 1 word (Open Cloze) for a full 100% payout. <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* VI. Win Condition */}
-              <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
-                <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
-                  <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                    VI. Table Rules &amp; Victory Condition
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4"> 
-                  {/* Mode 1: Last Survivor */}
-                  <button 
-                    type="button"
-                    onClick={() => { playSound('click'); setGameMode('lastPlayer'); }} 
-                    className={`p-5 rounded-xl border-2 transition-all flex flex-col items-center justify-center text-center cursor-pointer ${
-                      gameMode === 'lastPlayer'
-                        ? 'bg-gradient-to-b from-amber-500/20 to-amber-900/20 border-[#d4af37] shadow-[0_0_25px_rgba(212,175,55,0.25)] scale-[1.01]'
-                        : 'felt-well opacity-75 hover:opacity-100 hover:border-[#d4af37]/60'
-                    }`}
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+                  <ActionButton
+                    onClick={() => { playSound('click'); setStep('PLAYER_SETUP'); }}
+                    variant="outline-gold"
+                    className="py-3.5 px-6 text-sm"
                   >
-                    <div className="text-3xl mb-2">👑</div>
-                    <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
-                    <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Play until only one solvent player remains.</div>
-                  </button> 
-
-                  {/* Mode 2: Fixed Rounds */}
-                  <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
-                    gameMode === 'rounds'
-                      ? 'bg-gradient-to-b from-sky-500/20 to-blue-950/30 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.25)] scale-[1.01]'
-                      : 'felt-well opacity-75 hover:opacity-100 hover:border-sky-400/50'
-                  }`}> 
-                    <button 
-                      type="button"
-                      onClick={() => { playSound('click'); setGameMode('rounds'); }} 
-                      className="w-full text-center cursor-pointer"
-                    >
-                        <div className="text-3xl mb-2">⏳</div>
-                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
-                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Richest vault after a set number of hands.</div>
-                    </button> 
-                    {gameMode === 'rounds' && (
-                      <div className="flex flex-col items-center gap-2 pt-2 border-t border-sky-400/30 w-full">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
-                          <TextInput 
-                            type="number" 
-                            min={1}
-                            max={100}
-                            value={String(totalRounds)} 
-                            onChange={(e) => { 
-                              const val = e.target.value; 
-                              setTotalRounds(val === '' ? '' : parseInt(val, 10));
-                            }} 
-                            className="w-20 text-center !py-1 font-mono-casino font-bold"
-                          />
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          {[5, 10, 15, 20].map((r) => (
-                            <button
-                              key={r}
-                              type="button"
-                              onClick={() => { playSound('click'); setTotalRounds(r); }}
-                              className={`px-2 py-0.5 rounded border text-xs font-mono-casino transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
-                            >
-                              {r}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )} 
-                  </div> 
-
-                  {/* Mode 3: Target Amount */}
-                  <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
-                    gameMode === 'targetAmount'
-                      ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-950/30 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.25)] scale-[1.01]'
-                      : 'felt-well opacity-75 hover:opacity-100 hover:border-emerald-400/50'
-                  }`}> 
-                    <button 
-                      type="button"
-                      onClick={() => { playSound('click'); setGameMode('targetAmount'); }} 
-                      className="w-full text-center cursor-pointer"
-                    >
-                        <div className="text-3xl mb-2">🎯</div>
-                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
-                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">First high-roller to hit the vault target wins.</div>
-                    </button> 
-                    {gameMode === 'targetAmount' && (
-                      <div className="flex flex-col items-center gap-2 pt-2 border-t border-emerald-400/30 w-full">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
-                          <TextInput 
-                            type="number" 
-                            min={MIN_TARGET_AMOUNT}
-                            step={250}
-                            value={String(targetAmount)} 
-                            onChange={(e) => { 
-                              const val = e.target.value; 
-                              setTargetAmount(val === '' ? '' : parseInt(val, 10));
-                            }} 
-                            className="w-24 text-center !py-1 font-mono-casino font-bold"
-                          />
-                        </div>
-                        <div className="flex flex-wrap justify-center items-center gap-1 text-[11px]">
-                          {[2000, 2500, 3000, 5000].map((amt) => (
-                            <button
-                              key={amt}
-                              type="button"
-                              onClick={() => { playSound('click'); setTargetAmount(amt); }}
-                              className={`px-2 py-0.5 rounded border text-[11px] font-mono-casino transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
-                            >
-                              ${amt >= 1000 ? `${amt / 1000}k` : amt}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )} 
-                  </div> 
-                </div> 
-              </div> 
-
-              {/* VII. Betting Turn Clock */}
-              <div className="text-left border-t border-[#d4af37]/25 pt-6">
-                <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                      VII. Betting Turn Clock
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                      Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups
-                    </p>
-                  </div>
-                  {turnTimerSeconds > 0 && (
+                    &larr; Guest Registry
+                  </ActionButton>
+                  <ActionButton
+                    onClick={handleAdvanceToSettingsPart2}
+                    variant="gold"
+                    className="w-full sm:w-auto text-base sm:text-lg py-4 px-12 tracking-[0.12em]"
+                  >
+                    NEXT: HOUSE RULES &amp; POWER-UPS &rarr;
+                  </ActionButton>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative animate-fade-in">
+                  {/* Locked-in Linguistic Setup Summary Bar */}
+                  <div className="p-3.5 sm:p-4 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3 text-left">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-serif uppercase tracking-wider text-amber-800 dark:text-[#d4af37] font-bold mr-1">
+                        Charter Locked:
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-serif font-bold text-slate-900 dark:text-[#fef08a]">
+                        📚 {resolvedTopicPreview}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-mono-casino font-bold text-slate-900 dark:text-[#fef08a]">
+                        🎯 {settings.level}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-serif font-bold text-slate-900 dark:text-[#fef08a]">
+                        🎭 {resolvedThemePreview}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 font-serif font-bold text-emerald-900 dark:text-emerald-200">
+                        {currentFormatObj.icon} {currentFormatObj.label}
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
-                      className={`px-3 py-1.5 rounded-full text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
-                        autoStartNextTimer
-                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
-                          : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
-                      }`}
-                      title="When enabled, locking or finishing one player's timer automatically starts the next player's timer"
+                      onClick={() => {
+                        playSound('click');
+                        setSettingsPart(1);
+                      }}
+                      className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer shrink-0"
                     >
-                      {autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF'}
+                      &larr; Edit Setup
                     </button>
-                  )}
-                </div>
+                  </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 sm:gap-3">
-                  {TURN_TIMER_OPTIONS.map(secs => {
-                    const isSelected = turnTimerSeconds === secs;
-                    return (
-                      <button
-                        key={secs}
+                  {/* V. Configure Power-Up Shoe */}
+                  <div className="text-left">
+                    <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
+                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                        V. House Power-Up Shoe
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
+                    </div>
+
+                    <div className="p-4 sm:p-5 rounded-xl felt-well border-purple-400/40 dark:border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="text-2xl filter drop-shadow select-none">🎴</span>
+                          <span className="font-serif font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
+                            Active Shoe Deck
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-mono-casino font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
+                            {selectedPowerUps.length} / {(Object.keys(POWER_UPS) as PowerUpKey[]).length} Cards
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-300/80">
+                          Players can draw random cards from this shoe during betting rounds to gain advantages or sabotage rivals.
+                        </p>
+                        <div className="flex items-center gap-1.5 pt-1 overflow-x-auto max-w-full py-0.5">
+                          {selectedPowerUps.slice(0, 12).map(k => (
+                            <span key={k} className="text-base select-none bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded border border-purple-400/20" title={POWER_UPS[k]?.name}>
+                              {POWER_UPS[k]?.icon}
+                            </span>
+                          ))}
+                          {selectedPowerUps.length > 12 && (
+                            <span className="text-[11px] font-mono-casino text-purple-700 dark:text-purple-300 font-bold ml-1">
+                              +{selectedPowerUps.length - 12} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 w-full sm:w-auto shrink-0">
+                        <ActionButton
+                          onClick={() => {
+                            playSound('click');
+                            setShowDeckConfigModal(true);
+                          }}
+                          variant="purple"
+                          className="w-full sm:w-auto px-6 py-3 text-xs sm:text-sm flex items-center justify-center gap-2"
+                        >
+                          <span>🎴</span>
+                          <span>Customize Shoe</span>
+                        </ActionButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* VI. Win Condition */}
+                  <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
+                    <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
+                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                        VI. Table Rules &amp; Victory Condition
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4"> 
+                      {/* Mode 1: Last Survivor */}
+                      <button 
                         type="button"
-                        onClick={() => {
-                          playSound('click');
-                          setTurnTimerSeconds(secs);
-                          setTurnTimers({});
-                        }}
-                        className={`p-3.5 rounded-xl transition-all duration-200 font-serif border cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                          isSelected
-                            ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
-                            : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                        onClick={() => { playSound('click'); setGameMode('lastPlayer'); }} 
+                        className={`p-5 rounded-xl border-2 transition-all flex flex-col items-center justify-center text-center cursor-pointer ${
+                          gameMode === 'lastPlayer'
+                            ? 'bg-gradient-to-b from-amber-500/20 to-amber-900/20 border-[#d4af37] shadow-[0_0_25px_rgba(212,175,55,0.25)] scale-[1.01]'
+                            : 'felt-well opacity-75 hover:opacity-100 hover:border-[#d4af37]/60'
                         }`}
                       >
-                        <span className="text-xl select-none">{secs === 0 ? '∞' : '⏱️'}</span>
-                        <span className="text-xs sm:text-sm uppercase tracking-wider font-extrabold">
-                          {secs === 0 ? 'Off' : `${secs}s`}
-                        </span>
-                        <span className={`text-[10px] font-sans ${isSelected ? 'text-[#1c0a04]/80 font-semibold' : 'opacity-65'}`}>
-                          {secs === 0 ? 'No time limit' : 'Per player turn'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div> 
+                        <div className="text-3xl mb-2">👑</div>
+                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
+                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Play until only one solvent player remains.</div>
+                      </button> 
 
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-              <ActionButton
-                onClick={() => { playSound('click'); setStep('PLAYER_SETUP'); }}
-                variant="outline-gold"
-                className="py-3.5 px-6 text-sm"
-              >
-                &larr; Guest Registry
-              </ActionButton>
-              <ActionButton
-                onClick={handleFinalizeSettings}
-                playSound={playSound}
-                variant="gold"
-                className="w-full sm:w-auto text-lg sm:text-xl py-4 px-14 tracking-[0.15em]"
-              >
-                DEAL THE FIRST HAND ♠️
-              </ActionButton>
-            </div> 
+                      {/* Mode 2: Fixed Rounds */}
+                      <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
+                        gameMode === 'rounds'
+                          ? 'bg-gradient-to-b from-sky-500/20 to-blue-950/30 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.25)] scale-[1.01]'
+                          : 'felt-well opacity-75 hover:opacity-100 hover:border-sky-400/50'
+                      }`}> 
+                        <button 
+                          type="button"
+                          onClick={() => { playSound('click'); setGameMode('rounds'); }} 
+                          className="w-full text-center cursor-pointer"
+                        >
+                            <div className="text-3xl mb-2">⏳</div>
+                            <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
+                            <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Richest vault after a set number of hands.</div>
+                        </button> 
+                        {gameMode === 'rounds' && (
+                          <div className="flex flex-col items-center gap-2 pt-2 border-t border-sky-400/30 w-full">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
+                              <TextInput 
+                                type="number" 
+                                min={1}
+                                max={100}
+                                value={String(totalRounds)} 
+                                onChange={(e) => { 
+                                  const val = e.target.value; 
+                                  setTotalRounds(val === '' ? '' : parseInt(val, 10));
+                                }} 
+                                className="w-20 text-center !py-1 font-mono-casino font-bold"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[11px]">
+                              {[5, 10, 15, 20].map((r) => (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  onClick={() => { playSound('click'); setTotalRounds(r); }}
+                                  className={`px-2 py-0.5 rounded border text-xs font-mono-casino transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
+                                >
+                                  {r}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )} 
+                      </div> 
+
+                      {/* Mode 3: Target Amount */}
+                      <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
+                        gameMode === 'targetAmount'
+                          ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-950/30 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.25)] scale-[1.01]'
+                          : 'felt-well opacity-75 hover:opacity-100 hover:border-emerald-400/50'
+                      }`}> 
+                        <button 
+                          type="button"
+                          onClick={() => { playSound('click'); setGameMode('targetAmount'); }} 
+                          className="w-full text-center cursor-pointer"
+                        >
+                            <div className="text-3xl mb-2">🎯</div>
+                            <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
+                            <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">First high-roller to hit the vault target wins.</div>
+                        </button> 
+                        {gameMode === 'targetAmount' && (
+                          <div className="flex flex-col items-center gap-2 pt-2 border-t border-emerald-400/30 w-full">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
+                              <TextInput 
+                                type="number" 
+                                min={MIN_TARGET_AMOUNT}
+                                step={250}
+                                value={String(targetAmount)} 
+                                onChange={(e) => { 
+                                  const val = e.target.value; 
+                                  setTargetAmount(val === '' ? '' : parseInt(val, 10));
+                                }} 
+                                className="w-24 text-center !py-1 font-mono-casino font-bold"
+                              />
+                            </div>
+                            <div className="flex flex-wrap justify-center items-center gap-1 text-[11px]">
+                              {[2000, 2500, 3000, 5000].map((amt) => (
+                                <button
+                                  key={amt}
+                                  type="button"
+                                  onClick={() => { playSound('click'); setTargetAmount(amt); }}
+                                  className={`px-2 py-0.5 rounded border text-[11px] font-mono-casino transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
+                                >
+                                  ${amt >= 1000 ? `${amt / 1000}k` : amt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )} 
+                      </div> 
+                    </div> 
+                  </div> 
+
+                  {/* VII. Betting Turn Clock */}
+                  <div className="text-left border-t border-[#d4af37]/25 pt-6">
+                    <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                          VII. Betting Turn Clock
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-amber-200/60">
+                          Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups
+                        </p>
+                      </div>
+                      {turnTimerSeconds > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
+                          className={`px-3 py-1.5 rounded-full text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                            autoStartNextTimer
+                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
+                              : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
+                          }`}
+                          title="When enabled, locking or finishing one player's timer automatically starts the next player's timer"
+                        >
+                          {autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF'}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 sm:gap-3">
+                      {TURN_TIMER_OPTIONS.map(secs => {
+                        const isSelected = turnTimerSeconds === secs;
+                        return (
+                          <button
+                            key={secs}
+                            type="button"
+                            onClick={() => {
+                              playSound('click');
+                              setTurnTimerSeconds(secs);
+                              setTurnTimers({});
+                            }}
+                            className={`p-3.5 rounded-xl transition-all duration-200 font-serif border cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                              isSelected
+                                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
+                                : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
+                            }`}
+                          >
+                            <span className="text-xl select-none">{secs === 0 ? '∞' : '⏱️'}</span>
+                            <span className="text-xs sm:text-sm uppercase tracking-wider font-extrabold">
+                              {secs === 0 ? 'Off' : `${secs}s`}
+                            </span>
+                            <span className={`text-[10px] font-sans ${isSelected ? 'text-[#1c0a04]/80 font-semibold' : 'opacity-65'}`}>
+                              {secs === 0 ? 'No time limit' : 'Per player turn'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div> 
+
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+                  <ActionButton
+                    onClick={() => { playSound('click'); setSettingsPart(1); }}
+                    variant="outline-gold"
+                    className="py-3.5 px-6 text-sm"
+                  >
+                    &larr; Linguistic Setup
+                  </ActionButton>
+                  <ActionButton
+                    onClick={handleFinalizeSettings}
+                    playSound={playSound}
+                    variant="gold"
+                    className="w-full sm:w-auto text-lg sm:text-xl py-4 px-14 tracking-[0.15em]"
+                  >
+                    DEAL THE FIRST HAND ♠️
+                  </ActionButton>
+                </div>
+              </>
+            )}
           </div> 
-        );
+          );
+        }
         case 'IN_GAME': { 
             const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
@@ -3410,12 +3733,12 @@ export function App() {
                 const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
                 if (currentQuestionType === 'multipleChoice') {
                     return hasSplitBet
-                      ? (playerBet?.splitOptions?.length ?? 0) === 2
+                      ? (playerBet?.splitOptions?.length ?? 0) >= 1
                       : Boolean(playerBet?.selectedOption?.trim());
                 }
                 if (currentQuestionType === 'openCloze') {
                     return hasSplitBet
-                      ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() && playerBet?.splitClozeAnswers?.[1]?.trim())
+                      ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() || playerBet?.splitClozeAnswers?.[1]?.trim())
                       : Boolean(playerBet?.clozeAnswer?.trim());
                 }
                 if (hasSplitBet) {

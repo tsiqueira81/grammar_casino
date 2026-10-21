@@ -239,7 +239,7 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
   },
   SPLIT_BET: {
     name: "Split Bet",
-    description: "Hedge your wager! Classic: split % between Valid & Flawed. MC Cloze: 50/50 Two-Option Pick. Open Cloze: submit 2 candidate words (50% wager each).",
+    description: "Hedge or stack your wager! Classic: split % between Valid & Flawed. MC Cloze: pick 2 options (50% each) or click 1 option twice for 100% (2×). Open Cloze: enter 2 words (50% each) or 1 word for 100%.",
     icon: "⚖️",
     requiresTarget: false,
   },

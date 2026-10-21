@@ -292,11 +292,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
       let hasValidAnswer = false;
       if (questionType === 'multipleChoice') {
         hasValidAnswer = hasSplitBet
-          ? (bet?.splitOptions?.length || 0) === 2
+          ? (bet?.splitOptions?.length || 0) >= 1
           : Boolean(bet?.selectedOption?.trim());
       } else if (questionType === 'openCloze') {
         hasValidAnswer = hasSplitBet
-          ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() && bet?.splitClozeAnswers?.[1]?.trim())
+          ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim())
           : Boolean(bet?.clozeAnswer?.trim());
       } else {
         hasValidAnswer = hasSplitBet
@@ -313,11 +313,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           missingField = 'both';
           if (questionType === 'multipleChoice') {
             message = hasSplitBet
-              ? 'Hold on! Pick 2 options (A–D) and enter a wager amount before locking your bet.'
+              ? 'Hold on! Pick 2 options (50/50) or click 1 option twice for 100% (2×), and enter a wager amount before locking.'
               : 'Hold on! Choose an option (A–D) and enter a wager amount before locking your bet.';
           } else if (questionType === 'openCloze') {
             message = hasSplitBet
-              ? 'Hold on! Type both candidate words and enter a wager amount before locking your bet.'
+              ? 'Hold on! Type 1 word (100% wager) or 2 candidate words (50% each) and enter a wager amount before locking.'
               : 'Hold on! Type the missing word and enter a wager amount before locking your bet.';
           } else {
             message = 'Hold on! Choose Valid or Flawed and enter a wager amount before locking your bet.';
@@ -326,11 +326,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           missingField = 'answer';
           if (questionType === 'multipleChoice') {
             message = hasSplitBet
-              ? 'Please pick 2 options (A–D) for your 50/50 Split Bet before locking!'
+              ? 'Please pick 2 options (50/50) or click the same option twice for 100% (2×) before locking!'
               : 'Please choose an option (A, B, C, or D) before locking your bet!';
           } else if (questionType === 'openCloze') {
             message = hasSplitBet
-              ? 'Please type both candidate words before locking your bet!'
+              ? 'Please type at least 1 candidate word before locking your bet!'
               : 'Please type the missing word before locking your bet!';
           } else {
             message = 'Please choose Valid or Flawed before locking your bet!';
@@ -726,17 +726,31 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           {questionType === 'multipleChoice' ? (
             <>
               {/* Multiple-Choice Cloze (4 Options: A, B, C, D) */}
-              {hasSplitBet && (
-                <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 flex items-center justify-between gap-2 text-xs font-serif text-indigo-950 dark:text-indigo-200">
-                  <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
-                    <span>⚖️</span>
-                    <span>50/50 Two-Option Pick</span>
+              {hasSplitBet && (() => {
+                const splitOpts = Array.isArray(bet?.splitOptions) ? bet!.splitOptions! : [];
+                const isDoubleStacked = splitOpts.length === 2 && splitOpts[0] === splitOpts[1];
+                return (
+                  <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 flex flex-wrap items-center justify-between gap-2 text-xs font-serif text-indigo-950 dark:text-indigo-200">
+                    <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+                      <span>⚖️</span>
+                      <span>
+                        {isDoubleStacked
+                          ? 'Split Bet · 100% Stacked on 1 Option (2×)'
+                          : 'Split Bet · Pick 2 (50/50) or Click 1 Twice (100%)'}
+                      </span>
+                    </div>
+                    <span className={`font-mono-casino text-[11px] font-bold px-2 py-0.5 rounded border ${
+                      isDoubleStacked
+                        ? 'bg-amber-500/25 text-amber-950 dark:text-[#fef08a] border-[#d4af37]/60'
+                        : 'bg-indigo-500/20 border-indigo-400/40'
+                    }`}>
+                      {isDoubleStacked
+                        ? `2/2 Stacked · 100% ($${actualBetAmount.toLocaleString()})`
+                        : `${splitOpts.length}/2 Selected ($${Math.floor(actualBetAmount / 2).toLocaleString()} each)`}
+                    </span>
                   </div>
-                  <span className="font-mono-casino text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40">
-                    {(bet?.splitOptions?.length || 0)}/2 Selected (${Math.floor(actualBetAmount / 2).toLocaleString()} each)
-                  </span>
-                </div>
-              )}
+                );
+              })()}
 
               <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl transition-all ${highlightAnswerMissing ? 'ring-2 ring-rose-500 p-1.5 bg-rose-500/5' : ''}`}>
                 {(() => {
@@ -751,7 +765,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   );
                   return optionItems.map((opt, idx) => {
                     const letter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
-                    const splitPicked = hasSplitBet && Array.isArray(bet?.splitOptions) && bet!.splitOptions!.includes(opt);
+                    const optPickCount = hasSplitBet && Array.isArray(bet?.splitOptions)
+                      ? bet!.splitOptions!.filter(o => o === opt).length
+                      : 0;
+                    const isStacked2x = hasSplitBet && optPickCount === 2;
+                    const splitPicked = hasSplitBet && optPickCount > 0;
                     const singlePicked = !hasSplitBet && bet?.selectedOption === opt;
                     const isPicked = hasSplitBet ? splitPicked : singlePicked;
 
@@ -765,12 +783,22 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           if (isBlocked) return;
                           if (hasSplitBet) {
                             const currentList = Array.isArray(bet?.splitOptions) ? [...bet!.splitOptions!] : [];
-                            if (currentList.includes(opt)) {
+                            const countForOpt = currentList.filter(o => o === opt).length;
+                            if (countForOpt === 2) {
+                              // 3rd click on a 2x stacked option clears it
+                              onBetChange(player.id, 'splitOptions', []);
+                            } else if (countForOpt === 1 && currentList.length === 1) {
+                              // 2nd click on the same single option stacks 100% (2x)
+                              onBetChange(player.id, 'splitOptions', [opt, opt]);
+                            } else if (countForOpt === 1 && currentList.length === 2) {
+                              // Clicking one of two distinct options deselects it
                               onBetChange(player.id, 'splitOptions', currentList.filter(o => o !== opt));
                             } else if (currentList.length < 2) {
+                              // 1st click on an unpicked option
                               onBetChange(player.id, 'splitOptions', [...currentList, opt]);
                             } else {
-                              onBetChange(player.id, 'splitOptions', [currentList[1], opt]);
+                              // Replacing second slot when 2 picks already exist
+                              onBetChange(player.id, 'splitOptions', [currentList[0], opt]);
                             }
                           } else {
                             onBetChange(player.id, 'selectedOption', opt);
@@ -779,7 +807,9 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-serif transition-all duration-200 border-2 flex items-center justify-between gap-3 cursor-pointer select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
                           isPicked
                             ? hasSplitBet
-                              ? 'bg-gradient-to-b from-indigo-600/25 via-indigo-800/30 to-indigo-950/60 border-indigo-400 text-indigo-950 dark:text-indigo-100 shadow-[0_0_20px_rgba(99,102,241,0.35)] scale-[1.01]'
+                              ? isStacked2x
+                                ? 'bg-gradient-to-b from-amber-500/25 via-indigo-800/35 to-indigo-950/70 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.4)] scale-[1.01]'
+                                : 'bg-gradient-to-b from-indigo-600/25 via-indigo-800/30 to-indigo-950/60 border-indigo-400 text-indigo-950 dark:text-indigo-100 shadow-[0_0_20px_rgba(99,102,241,0.35)] scale-[1.01]'
                               : 'bg-gradient-to-b from-amber-500/25 via-amber-700/30 to-amber-950/60 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.35)] scale-[1.01]'
                             : 'felt-well border-[#d4af37]/30 text-slate-800 dark:text-amber-50/85 hover:border-[#d4af37] hover:bg-amber-500/10'
                         }`}
@@ -788,7 +818,9 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono-casino font-extrabold text-sm border shrink-0 transition-transform group-hover/opt:scale-105 ${
                             isPicked
                               ? hasSplitBet
-                                ? 'bg-indigo-500 text-white border-indigo-200 shadow'
+                                ? isStacked2x
+                                  ? 'bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black border-white/80 shadow'
+                                  : 'bg-indigo-500 text-white border-indigo-200 shadow'
                                 : 'bg-gradient-to-b from-[#fef08a] to-[#ca8a04] text-black border-white/80 shadow'
                               : 'bg-black/10 dark:bg-black/40 border-[#d4af37]/40 text-amber-800 dark:text-[#d4af37]'
                           }`}>
@@ -801,10 +833,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         {isPicked && (
                           <span className={`text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
                             hasSplitBet
-                              ? 'bg-indigo-500/30 text-indigo-900 dark:text-indigo-200 border border-indigo-400/50'
+                              ? isStacked2x
+                                ? 'bg-[#d4af37]/30 text-amber-950 dark:text-[#fef08a] border border-[#d4af37]/60'
+                                : 'bg-indigo-500/30 text-indigo-900 dark:text-indigo-200 border border-indigo-400/50'
                               : 'bg-[#d4af37]/25 text-amber-950 dark:text-[#fef08a] border border-[#d4af37]/50'
                           }`}>
-                            {hasSplitBet ? '50%' : '✓ Pick'}
+                            {hasSplitBet ? (isStacked2x ? '100% (2×)' : '50%') : '✓ Pick'}
                           </span>
                         )}
                       </button>
@@ -860,67 +894,96 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               />
 
               {actualBetAmount > 0 && (
-                <WagerChipsDisplay amount={actualBetAmount} label={hasSplitBet ? "50/50 Split Wager on Felt" : "Wager on Felt"} />
+                <WagerChipsDisplay
+                  amount={actualBetAmount}
+                  label={
+                    hasSplitBet
+                      ? Array.isArray(bet?.splitOptions) && bet!.splitOptions!.length === 2 && bet!.splitOptions![0] === bet!.splitOptions![1]
+                        ? "100% (2×) Split Wager on Felt"
+                        : "50/50 Split Wager on Felt"
+                      : "Wager on Felt"
+                  }
+                />
               )}
             </>
           ) : questionType === 'openCloze' ? (
             <>
               {/* Open Cloze (Cambridge Single-Word Gap) */}
-              {hasSplitBet ? (
-                <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing ? 'ring-2 ring-rose-500' : ''}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                      <span>⚖️</span>
-                      <span>Split Hedge · 2 Candidate Words (50% Wager Each)</span>
-                    </span>
-                    <span className="text-[11px] font-mono-casino font-bold text-indigo-700 dark:text-indigo-300">
-                      ${Math.floor(actualBetAmount / 2).toLocaleString()} / word
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
-                        Candidate Word #1 (50%)
-                      </label>
-                      <input
-                        ref={splitWord1InputRef}
-                        type="text"
-                        value={bet?.splitClozeAnswers?.[0] || ''}
-                        onChange={(e) => {
-                          if (isBlocked) return;
-                          const singleWord = e.target.value.replace(/\s+/g, '');
-                          const second = bet?.splitClozeAnswers?.[1] || '';
-                          onBetChange(player.id, 'splitClozeAnswers', [singleWord, second]);
-                        }}
-                        disabled={isBlocked}
-                        placeholder="First single word..."
-                        maxLength={32}
-                        className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
-                      />
+              {hasSplitBet ? (() => {
+                const w1 = (bet?.splitClozeAnswers?.[0] || '').trim();
+                const w2 = (bet?.splitClozeAnswers?.[1] || '').trim();
+                const isSingleOrSameWord =
+                  (Boolean(w1) && !w2) ||
+                  (!w1 && Boolean(w2)) ||
+                  (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
+                return (
+                  <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing ? 'ring-2 ring-rose-500' : ''}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                        <span>⚖️</span>
+                        <span>Split Hedge · 1 Word (100% Payout) or 2 Words (50% Each)</span>
+                      </span>
+                      <span className={`text-[11px] font-mono-casino font-bold px-2 py-0.5 rounded border ${
+                        isSingleOrSameWord
+                          ? 'bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/50'
+                          : 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-400/40'
+                      }`}>
+                        {isSingleOrSameWord
+                          ? `100% Wager ($${actualBetAmount.toLocaleString()})`
+                          : `$${Math.floor(actualBetAmount / 2).toLocaleString()} / word (50% each)`}
+                      </span>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
-                        Candidate Word #2 (50%)
-                      </label>
-                      <input
-                        ref={splitWord2InputRef}
-                        type="text"
-                        value={bet?.splitClozeAnswers?.[1] || ''}
-                        onChange={(e) => {
-                          if (isBlocked) return;
-                          const first = bet?.splitClozeAnswers?.[0] || '';
-                          const singleWord = e.target.value.replace(/\s+/g, '');
-                          onBetChange(player.id, 'splitClozeAnswers', [first, singleWord]);
-                        }}
-                        disabled={isBlocked}
-                        placeholder="Second single word..."
-                        maxLength={32}
-                        className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                          {isSingleOrSameWord && Boolean(w1) && !w2
+                            ? 'Candidate Word #1 (100% Wager)'
+                            : 'Candidate Word #1 (50%)'}
+                        </label>
+                        <input
+                          ref={splitWord1InputRef}
+                          type="text"
+                          value={bet?.splitClozeAnswers?.[0] || ''}
+                          onChange={(e) => {
+                            if (isBlocked) return;
+                            const singleWord = e.target.value.replace(/\s+/g, '');
+                            const second = bet?.splitClozeAnswers?.[1] || '';
+                            onBetChange(player.id, 'splitClozeAnswers', [singleWord, second]);
+                          }}
+                          disabled={isBlocked}
+                          placeholder="First single word..."
+                          maxLength={32}
+                          className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                          {isSingleOrSameWord && Boolean(w2) && !w1
+                            ? 'Candidate Word #2 (100% Wager)'
+                            : isSingleOrSameWord && Boolean(w1) && Boolean(w2)
+                            ? 'Candidate Word #2 (Same Word · 100%)'
+                            : 'Candidate Word #2 (Optional · 50% Split)'}
+                        </label>
+                        <input
+                          ref={splitWord2InputRef}
+                          type="text"
+                          value={bet?.splitClozeAnswers?.[1] || ''}
+                          onChange={(e) => {
+                            if (isBlocked) return;
+                            const first = bet?.splitClozeAnswers?.[0] || '';
+                            const singleWord = e.target.value.replace(/\s+/g, '');
+                            onBetChange(player.id, 'splitClozeAnswers', [first, singleWord]);
+                          }}
+                          disabled={isBlocked}
+                          placeholder="Optional 2nd word (blank = 100%)..."
+                          maxLength={32}
+                          className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <div className={`p-4 felt-well rounded-xl border-2 border-[#d4af37]/50 space-y-2 ${highlightAnswerMissing ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
@@ -994,9 +1057,26 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 playSound={playSound}
               />
 
-              {actualBetAmount > 0 && (
-                <WagerChipsDisplay amount={actualBetAmount} label={hasSplitBet ? "Split Wager on Felt" : "Wager on Felt"} />
-              )}
+              {actualBetAmount > 0 && (() => {
+                const w1 = (bet?.splitClozeAnswers?.[0] || '').trim();
+                const w2 = (bet?.splitClozeAnswers?.[1] || '').trim();
+                const isSingleOrSame =
+                  (Boolean(w1) && !w2) ||
+                  (!w1 && Boolean(w2)) ||
+                  (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
+                return (
+                  <WagerChipsDisplay
+                    amount={actualBetAmount}
+                    label={
+                      hasSplitBet
+                        ? isSingleOrSame
+                          ? "100% Split Wager on Felt"
+                          : "50/50 Split Wager on Felt"
+                        : "Wager on Felt"
+                    }
+                  />
+                );
+              })()}
             </>
           ) : hasSplitBet ? (
             <div className="p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner relative overflow-hidden">

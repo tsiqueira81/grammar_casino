@@ -1,5 +1,13 @@
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import path from 'path';
+import { fileURLToPath } from 'url';
+import express, { Request, Response } from 'express';
+import { GoogleGenAI, Type, Modality, ThinkingLevel } from '@google/genai';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+app.use(express.json({ limit: '10mb' }));
 
 // --- Rate Limiting & Abuse Protection ---
 interface RateLimitBucket {
@@ -7,16 +15,13 @@ interface RateLimitBucket {
   lastRefill: number;
 }
 
-// 40 requests per minute per IP, with a burst capacity of 10
 const RATE_LIMIT_CAPACITY = 40;
 const REFILL_RATE_PER_MS = RATE_LIMIT_CAPACITY / 60000;
 const ipBuckets = new Map<string, RateLimitBucket>();
 
-// In-flight concurrency guard: prevent thundering herd exhaustion
 let activeRequests = 0;
 const MAX_CONCURRENT_REQUESTS = 10;
 
-// Simple in-memory response cache for idempotent queries (TTL: 15 minutes)
 interface CacheEntry {
   data: any;
   expiresAt: number;
@@ -31,7 +36,6 @@ function cleanupCache() {
       responseCache.delete(key);
     }
   }
-  // Keep cache size bounded
   if (responseCache.size > 200) {
     const oldestKey = responseCache.keys().next().value;
     if (oldestKey) responseCache.delete(oldestKey);
@@ -59,7 +63,6 @@ function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
   return { allowed: false, retryAfter: Math.ceil(waitMs / 1000) };
 }
 
-// Clean up old IP buckets periodically to avoid memory growth
 setInterval(() => {
   const now = Date.now();
   for (const [ip, bucket] of ipBuckets.entries()) {
@@ -69,25 +72,40 @@ setInterval(() => {
   }
 }, 60000);
 
-// --- Gemini Client & Rotation Setup ---
+// --- Gemini Client Setup ---
 let aiClient: GoogleGenAI | null = null;
 
 function getAIClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is not configured in Netlify.");
+    throw new Error("GEMINI_API_KEY environment variable is not configured.");
   }
   if (!aiClient) {
     aiClient = new GoogleGenAI({
       apiKey,
-      httpOptions: { headers: { "User-Agent": "grammar-casino-netlify-function" } },
+      httpOptions: { headers: { "User-Agent": "grammar-casino-express" } },
     });
   }
   return aiClient;
 }
 
-const TEXT_MODELS = ["gemini-2.5-flash", "gemini-flash-latest"];
-const TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"];
+const TEXT_MODELS = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
+const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"];
+
+function getFastThinkingConfig(model: string) {
+  if (model.includes("3.8") || model.includes("3.") || model.includes("gemini-3")) {
+    return { thinkingLevel: ThinkingLevel.LOW };
+  }
+  return { thinkingBudget: 0 };
+}
+
+function isModelNotFound(e: any): boolean {
+  if (!e) return false;
+  const status = e.status || e.statusCode;
+  if (status === 404) return true;
+  const msg = String(e.message || "").toLowerCase();
+  return msg.includes("404") || msg.includes("not found") || msg.includes("is not supported");
+}
 
 function isHighTrafficOrOverload(e: any): boolean {
   if (!e) return false;
@@ -124,6 +142,10 @@ async function callWithModelRotation<T>(
         return await runner(ai, model);
       } catch (e: any) {
         lastError = e;
+        if (isModelNotFound(e)) {
+          // Immediately rotate to next model if model alias is unavailable
+          break;
+        }
         if (isHighTrafficOrOverload(e)) {
           attempts--;
           if (attempts > 0) {
@@ -206,33 +228,65 @@ const CEFR_PROFILES: Record<string, CefrProfile> = {
   },
 };
 
-const sentenceSchema = {
+const binarySentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    text: { type: Type.STRING, description: "The generated sentence (with '_____' if Cloze mode)." },
+    text: { type: Type.STRING, description: "The generated sentence." },
     isCorrect: { type: Type.BOOLEAN, description: "Whether the sentence is grammatically correct." },
-    correction: { type: Type.STRING, description: "The full completed or corrected version of the sentence." },
-    explanation: { type: Type.STRING, description: "A brief explanation of the grammar rule." },
+    correction: { type: Type.STRING, description: "The full corrected version of the sentence (or original if correct)." },
+    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of the grammar rule." },
     grammarPhrase: { type: Type.STRING, description: "Key part of the sentence (3-5 words) testing the rule." },
     errorPhrase: { type: Type.STRING, description: "If incorrect, the exact erroneous phrase. If correct, empty string." },
-    mistakeType: { type: Type.STRING, description: "If incorrect, 2-4 word descriptor of error mechanism." },
+    mistakeType: { type: Type.STRING, description: "If incorrect, 2-4 word descriptor of error mechanism. If correct, empty string." },
+  },
+  required: ["text", "isCorrect", "correction", "explanation", "grammarPhrase", "errorPhrase", "mistakeType"],
+};
+
+const multipleChoiceSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    correction: { type: Type.STRING, description: "The full completed sentence with the correct option inserted." },
+    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of why the correct option fits." },
+    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence containing the target gap." },
     options: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "For multipleChoice mode: 4 distinct options (1 correct, 3 distractors).",
+      description: "4 distinct options (1 correct, 3 plausible distractors).",
     },
     correctAnswer: {
       type: Type.STRING,
-      description: "For Cloze modes: the exact primary word or option that fills '_____'.",
+      description: "The exact option string that fills '_____'.",
+    },
+  },
+  required: ["text", "correction", "explanation", "grammarPhrase", "options", "correctAnswer"],
+};
+
+const openClozeSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    correction: { type: Type.STRING, description: "The full completed sentence with the primary word filled in." },
+    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of the grammar rule requiring this word." },
+    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence around the gap." },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "The primary single word that fills '_____'.",
     },
     acceptedAnswers: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "For openCloze mode: array of all valid single-word answers (primary word + valid single-word synonyms).",
+      description: "Array of all valid single-word answers (primary word + valid single-word synonyms).",
     },
   },
-  required: ["text", "isCorrect", "correction", "explanation", "grammarPhrase"],
+  required: ["text", "correction", "explanation", "grammarPhrase", "correctAnswer", "acceptedAnswers"],
 };
+
+function getSentenceSchema(questionType: "binary" | "multipleChoice" | "openCloze") {
+  if (questionType === "multipleChoice") return multipleChoiceSentenceSchema;
+  if (questionType === "openCloze") return openClozeSentenceSchema;
+  return binarySentenceSchema;
+}
 
 const verificationSchema = {
   type: Type.OBJECT,
@@ -262,91 +316,46 @@ const batchClozeVerificationSchema = {
   required: ["evaluations"],
 };
 
-// Response helper
-function jsonResponse(status: number, data: any, headers: Record<string, string> = {}) {
-  return {
-    statusCode: status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      ...headers,
-    },
-    body: JSON.stringify(data),
-  };
-}
-
-export const handler: Handler = async (event: HandlerEvent, _context: HandlerContext) => {
-  // Handle CORS preflight
-  if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-      },
-      body: "",
-    };
-  }
-
-  if (event.httpMethod !== "POST") {
-    return jsonResponse(405, { error: "Method not allowed. Use POST." });
-  }
-
-  // Rate Limiting by IP
-  const clientIp =
-    event.headers["x-nf-client-connection-ip"] ||
-    event.headers["client-ip"] ||
-    event.headers["x-forwarded-for"]?.split(",")[0].trim() ||
-    "127.0.0.1";
+// --- Gemini Handler for Express ---
+async function handleGeminiRequest(req: Request, res: Response) {
+  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
 
   const rateCheck = checkRateLimit(clientIp);
   if (!rateCheck.allowed) {
-    return jsonResponse(
-      429,
-      { error: "Too many requests. Please wait a moment before trying again.", retryAfter: rateCheck.retryAfter },
-      { "Retry-After": String(rateCheck.retryAfter || 30) }
-    );
+    res.setHeader("Retry-After", String(rateCheck.retryAfter || 30));
+    return res.status(429).json({
+      error: "Too many requests. Please wait a moment before trying again.",
+      retryAfter: rateCheck.retryAfter,
+    });
   }
 
-  // In-flight concurrency guard
   if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
-    return jsonResponse(
-      429,
-      { error: "The casino table is experiencing high traffic. Please try again shortly.", retryAfter: 5 },
-      { "Retry-After": "5" }
-    );
+    res.setHeader("Retry-After", "5");
+    return res.status(429).json({
+      error: "The casino table is experiencing high traffic. Please try again shortly.",
+      retryAfter: 5,
+    });
   }
 
   activeRequests++;
   cleanupCache();
 
   try {
-    let payload: any;
-    try {
-      payload = JSON.parse(event.body || "{}");
-    } catch {
-      return jsonResponse(400, { error: "Invalid JSON request body." });
-    }
-
+    const payload = req.body || {};
     const { action } = payload;
     if (!action || typeof action !== "string") {
-      return jsonResponse(400, { error: "Missing or invalid 'action' parameter." });
+      return res.status(400).json({ error: "Missing or invalid 'action' parameter." });
     }
 
-    // Check API Key
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
-      return jsonResponse(503, {
-        error: "GEMINI_API_KEY is not configured in Netlify environment variables.",
+      return res.status(503).json({
+        error: "GEMINI_API_KEY is not configured.",
         code: "MISSING_API_KEY",
       });
     }
 
     switch (action) {
-      // 1. Generate Sentence
       case "generateSentence": {
         const {
           settings,
@@ -357,7 +366,7 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
           questionType: requestedQuestionType,
         } = payload;
         if (!settings || typeof settings.topic !== "string" || typeof settings.level !== "string") {
-          return jsonResponse(400, { error: "Invalid settings provided for sentence generation." });
+          return res.status(400).json({ error: "Invalid settings provided for sentence generation." });
         }
 
         const topic = String(settings.topic).slice(0, 100);
@@ -371,8 +380,8 @@ export const handler: Handler = async (event: HandlerEvent, _context: HandlerCon
             ? formatSetting
             : (["binary", "multipleChoice", "openCloze"] as const)[Math.floor(Math.random() * 3)];
 
-        const recentSentences = Array.isArray(pastSentences) ? pastSentences.slice(-50).map((s) => String(s).slice(0, 300)) : [];
-        const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-40).map((m) => String(m).slice(0, 150)) : [];
+        const recentSentences = Array.isArray(pastSentences) ? pastSentences.slice(-25).map((s) => String(s).slice(0, 250)) : [];
+        const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 120)) : [];
 
         const subtypeClause = subtype ? `\nThe grammatical focus MUST specifically be: ${String(subtype).slice(0, 100)}.` : "";
         const avoidSentencesClause = recentSentences.length > 0 ? `\nDO NOT repeat any of the following sentences: ${JSON.stringify(recentSentences)}` : "";
@@ -403,9 +412,8 @@ ${avoidMistakesClause}
 3. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
 4. Set "correctAnswer" to the exact correct option string.
 5. Set "options" to an array of 4 distinct strings (1 correct answer + 3 plausible grammatical distractors that test "${topic}" at CEFR ${level}), in randomized order.
-6. Set "isCorrect" to true.
-7. Set "explanation" to a clear explanation of why "${topic}" requires the correct option and why the distractors are incorrect.
-8. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
+6. Set "explanation" to a concise 1-2 sentence explanation of why "${topic}" requires the correct option.
+7. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
 
 Respond ONLY with valid JSON matching the schema.`;
         } else if (resolvedQuestionType === "openCloze") {
@@ -430,9 +438,8 @@ ${avoidMistakesClause}
 5. Set "correction" to the FULL completed sentence with the primary word filled in.
 6. Set "correctAnswer" to the primary single word (lowercase, unless it's at the start of the sentence or "I").
 7. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word synonyms/alternatives that fit the blank (all lowercase, trimmed, single words only).
-8. Set "isCorrect" to true.
-9. Set "explanation" to a clear explanation of the grammatical rule requiring this word.
-10. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
+8. Set "explanation" to a concise 1-2 sentence explanation of the grammatical rule requiring this word.
+9. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
 
 Respond ONLY with valid JSON matching the schema.`;
         } else {
@@ -462,19 +469,21 @@ ${avoidMistakesClause}
 grammarPhrase MUST be an exact substring of the generated sentence (3-6 words) representing the core grammatical feature.
 errorPhrase MUST be the exact erroneous snippet if the sentence is incorrect, or empty string if correct.
 mistakeType MUST be a short descriptor (2-4 words) of the error type if incorrect, or empty string if correct.
+explanation MUST be a concise 1-2 sentence explanation of the grammar rule.
 
-Respond ONLY with valid JSON matching the schema, no markdown wrappers:
-{"text":"...","isCorrect":true,"correction":"...","explanation":"...","grammarPhrase":"...","errorPhrase":"...","mistakeType":"..."}`;
+Respond ONLY with valid JSON matching the schema.`;
         }
 
+        const activeSchema = getSentenceSchema(resolvedQuestionType);
         const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
           return await ai.models.generateContent({
             model,
             contents: prompt,
             config: {
               responseMimeType: "application/json",
-              responseSchema: sentenceSchema,
+              responseSchema: activeSchema,
               temperature: 1,
+              thinkingConfig: getFastThinkingConfig(model),
             },
           });
         });
@@ -514,14 +523,13 @@ Respond ONLY with valid JSON matching the schema, no markdown wrappers:
           generatedData.acceptedAnswers = Array.from(normalizedSet);
         }
 
-        return jsonResponse(200, generatedData);
+        return res.status(200).json(generatedData);
       }
 
-      // 2. Get Hint
       case "getHint": {
         const { sentence, topic, level, questionType } = payload;
         if (!sentence || typeof sentence !== "string" || !topic || typeof topic !== "string") {
-          return jsonResponse(400, { error: "Missing required 'sentence' or 'topic' parameters." });
+          return res.status(400).json({ error: "Missing required 'sentence' or 'topic' parameters." });
         }
 
         const safeSentence = sentence.slice(0, 500);
@@ -547,15 +555,17 @@ Respond ONLY with the hint text.`;
           return await ai.models.generateContent({
             model,
             contents: prompt,
-            config: { temperature: 0.8 },
+            config: {
+              temperature: 0.8,
+              thinkingConfig: getFastThinkingConfig(model),
+            },
           });
         });
 
         const hint = (response.text || "").trim();
-        return jsonResponse(200, { hint });
+        return res.status(200).json({ hint });
       }
 
-      // 3. Verify Correction
       case "verifyCorrection": {
         const { originalSentence, userCorrection, intendedCorrection } = payload;
         if (
@@ -566,7 +576,7 @@ Respond ONLY with the hint text.`;
           !intendedCorrection ||
           typeof intendedCorrection !== "string"
         ) {
-          return jsonResponse(400, { error: "Missing sentence verification parameters." });
+          return res.status(400).json({ error: "Missing sentence verification parameters." });
         }
 
         const prompt = `You are a fair but strict judge in a grammar game.
@@ -586,20 +596,20 @@ Respond ONLY with the JSON object matching the provided schema.`;
             config: {
               responseMimeType: "application/json",
               responseSchema: verificationSchema,
+              thinkingConfig: getFastThinkingConfig(model),
             },
           });
         });
 
         const jsonText = response.text ? response.text.trim() : "";
         const result = JSON.parse(jsonText);
-        return jsonResponse(200, result);
+        return res.status(200).json(result);
       }
 
-      // 3b. Verify Open Cloze Unmatched Candidate Words in a Single Batched Call
       case "verifyOpenClozeBatch": {
         const { sentenceWithBlank, intendedAnswer, acceptedAnswers = [], candidateWords = [] } = payload;
         if (!sentenceWithBlank || typeof sentenceWithBlank !== "string" || !Array.isArray(candidateWords)) {
-          return jsonResponse(400, { error: "Missing parameters for verifyOpenClozeBatch." });
+          return res.status(400).json({ error: "Missing parameters for verifyOpenClozeBatch." });
         }
 
         const uniqueWords = Array.from(
@@ -611,7 +621,7 @@ Respond ONLY with the JSON object matching the provided schema.`;
         ).slice(0, 30);
 
         if (uniqueWords.length === 0) {
-          return jsonResponse(200, { results: {} });
+          return res.status(200).json({ results: {} });
         }
 
         const prompt = `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
@@ -636,6 +646,7 @@ Respond ONLY with valid JSON matching the schema.`;
             config: {
               responseMimeType: "application/json",
               responseSchema: batchClozeVerificationSchema,
+              thinkingConfig: getFastThinkingConfig(model),
             },
           });
         });
@@ -653,14 +664,13 @@ Respond ONLY with valid JSON matching the schema.`;
             }
           });
         }
-        return jsonResponse(200, { results });
+        return res.status(200).json({ results });
       }
 
-      // 4. Simplify Explanation (Cached)
       case "simplifyExplanation": {
         const { originalExplanation, topic } = payload;
         if (!originalExplanation || typeof originalExplanation !== "string") {
-          return jsonResponse(400, { error: "Missing 'originalExplanation' parameter." });
+          return res.status(400).json({ error: "Missing 'originalExplanation' parameter." });
         }
 
         const safeExpl = originalExplanation.slice(0, 1000);
@@ -669,7 +679,7 @@ Respond ONLY with valid JSON matching the schema.`;
 
         const cached = responseCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
-          return jsonResponse(200, { simplified: cached.data });
+          return res.status(200).json({ simplified: cached.data });
         }
 
         const prompt = `Re-explain the following grammar concept in very simple terms, as if for a 10-year-old. Keep it to 1-2 sentences.
@@ -681,20 +691,22 @@ Respond ONLY with valid JSON matching the schema.`;
           return await ai.models.generateContent({
             model,
             contents: prompt,
-            config: { temperature: 0.7 },
+            config: {
+              temperature: 0.7,
+              thinkingConfig: getFastThinkingConfig(model),
+            },
           });
         });
 
         const simplified = (response.text || "").trim();
         responseCache.set(cacheKey, { data: simplified, expiresAt: Date.now() + CACHE_TTL_MS });
-        return jsonResponse(200, { simplified });
+        return res.status(200).json({ simplified });
       }
 
-      // 5. Generate Speech (Cached)
       case "generateSpeech": {
         const { text } = payload;
         if (!text || typeof text !== "string") {
-          return jsonResponse(400, { error: "Missing 'text' parameter for speech generation." });
+          return res.status(400).json({ error: "Missing 'text' parameter for speech generation." });
         }
 
         const safeText = text.slice(0, 600);
@@ -702,7 +714,7 @@ Respond ONLY with valid JSON matching the schema.`;
 
         const cached = responseCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
-          return jsonResponse(200, { base64Audio: cached.data });
+          return res.status(200).json({ base64Audio: cached.data });
         }
 
         const base64Audio = await callWithModelRotation(TTS_MODELS, async (ai, model) => {
@@ -725,21 +737,60 @@ Respond ONLY with valid JSON matching the schema.`;
         });
 
         responseCache.set(cacheKey, { data: base64Audio, expiresAt: Date.now() + CACHE_TTL_MS });
-        return jsonResponse(200, { base64Audio });
+        return res.status(200).json({ base64Audio });
       }
 
       default:
-        return jsonResponse(400, { error: `Unsupported action: '${action}'.` });
+        return res.status(400).json({ error: `Unsupported action: '${action}'.` });
     }
   } catch (err: any) {
-    console.error("Netlify Function [gemini] error:", err);
+    console.error("Gemini route error:", err);
     const message = err?.message || "Internal server error";
     const status = isHighTrafficOrOverload(err) ? 429 : 500;
-    return jsonResponse(status, {
+    return res.status(status).json({
       error: message,
       isOverload: isHighTrafficOrOverload(err),
     });
   } finally {
     activeRequests = Math.max(0, activeRequests - 1);
   }
-};
+}
+
+// Support both endpoint paths used in web & Netlify legacy redirects
+app.post("/api/gemini", handleGeminiRequest);
+app.post("/.netlify/functions/gemini", handleGeminiRequest);
+
+// Health check endpoint
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", app: "grammar-casino" });
+});
+
+// --- Vite Middleware (Dev) or Static Files (Prod) ---
+async function startServer() {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.resolve(__dirname, "dist");
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
+  }
+
+  const PORT = 3000;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
