@@ -41,12 +41,29 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
     typeof window !== 'undefined' && window.location.hostname.includes('netlify.app');
   const isFileProtocol =
     typeof window !== 'undefined' && window.location.protocol === 'file:';
-  const [useNetlifyUrl, setUseNetlifyUrl] = useState<boolean>(() => isFileProtocol);
+  const isAiStudioHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname.startsWith('ais-dev-') ||
+      window.location.hostname.startsWith('ais-pre-') ||
+      window.location.hostname.endsWith('.run.app'));
+
+  // Default to the public Netlify URL when running inside Electron (file:) or AI Studio private preview (ais-dev-)
+  // because ais-dev-*.run.app is locked to the owner's Google account and returns 403 on other devices.
+  const [useNetlifyUrl, setUseNetlifyUrl] = useState<boolean>(
+    () => isFileProtocol || isAiStudioHost
+  );
+
+  // If the teacher chooses the current host while inside AI Studio's private `ais-dev-` preview,
+  // automatically convert `ais-dev-` to the shareable `ais-pre-` origin so other devices aren't blocked by dev-only auth.
+  const sharedCurrentOrigin =
+    typeof window !== 'undefined'
+      ? `${window.location.origin.replace('://ais-dev-', '://ais-pre-')}${window.location.pathname}`
+      : '';
 
   const baseOrigin =
     useNetlifyUrl || isFileProtocol
       ? 'https://grammarcasino.netlify.app/'
-      : `${window.location.origin}${window.location.pathname}`;
+      : sharedCurrentOrigin;
 
   const joinUrl = roomCode ? `${baseOrigin}?room=${roomCode}` : '';
 
@@ -193,20 +210,41 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                   </div>
 
                   {!isNetlifyHost && !isFileProtocol && (
-                    <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-amber-200/75">
-                      <span>QR Target URL:</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          playSound('click');
-                          setUseNetlifyUrl((prev) => !prev);
-                        }}
-                        className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-mono-casino text-[10px] cursor-pointer transition-colors"
-                      >
-                        {useNetlifyUrl
-                          ? '🌐 grammarcasino.netlify.app (Switch to Current Host)'
-                          : '🖥️ Current Host (Switch QR to Netlify)'}
-                      </button>
+                    <div className="mt-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-amber-200/75">
+                        <span>Student Link Mode:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playSound('click');
+                            setUseNetlifyUrl((prev) => !prev);
+                          }}
+                          className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-mono-casino text-[10px] cursor-pointer transition-colors"
+                        >
+                          {useNetlifyUrl
+                            ? '🌐 Public Web (grammarcasino.netlify.app) · Switch to Shared Host'
+                            : '🔗 Shared Host (ais-pre) · Switch to Public Netlify URL'}
+                        </button>
+                      </div>
+                      {isAiStudioHost && (
+                        <div className="text-[10px] leading-snug px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80">
+                          {useNetlifyUrl ? (
+                            <span>
+                              <strong>Public Mode (Recommended):</strong> Students join via{' '}
+                              <span className="font-mono-casino">grammarcasino.netlify.app</span> with{' '}
+                              <strong>no Google login required</strong> (make sure your latest build is deployed to Netlify).
+                            </span>
+                          ) : (
+                            <span>
+                              <strong>AI Studio Shared Mode:</strong> Uses{' '}
+                              <span className="font-mono-casino">ais-pre-...</span> instead of your private{' '}
+                              <span className="font-mono-casino">ais-dev-...</span> link. To avoid{' '}
+                              <strong>403 Access Denied</strong> on other people&apos;s phones, click{' '}
+                              <strong>Share</strong> in the top-right of AI Studio and enable public sharing first.
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -92,14 +92,14 @@ function getAIClient(): GoogleGenAI {
   return aiClient;
 }
 
-const TEXT_MODELS = ["gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
-const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"];
+const TEXT_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"];
 
 function getFastThinkingConfig(model: string) {
-  if (model.includes("3.8") || model.includes("3.") || model.includes("gemini-3")) {
+  if (model === "gemini-3.8-flash") {
     return { thinkingLevel: ThinkingLevel.LOW };
   }
-  return { thinkingBudget: 0 };
+  return undefined;
 }
 
 function isModelNotFound(e: any): boolean {
@@ -107,7 +107,7 @@ function isModelNotFound(e: any): boolean {
   const status = e.status || e.statusCode;
   if (status === 404) return true;
   const msg = String(e.message || "").toLowerCase();
-  return msg.includes("404") || msg.includes("not found") || msg.includes("is not supported");
+  return msg.includes("404") || msg.includes("not found") || msg.includes("is not supported") || msg.includes("no longer available");
 }
 
 function isHighTrafficOrOverload(e: any): boolean {
@@ -144,11 +144,12 @@ async function callWithModelRotation<T>(
       try {
         return await runner(ai, model);
       } catch (e: any) {
-        lastError = e;
         if (isModelNotFound(e)) {
+          if (!lastError) lastError = e;
           // Immediately rotate to next model if model alias is unavailable
           break;
         }
+        lastError = e;
         if (isHighTrafficOrOverload(e)) {
           attempts--;
           if (attempts > 0) {
