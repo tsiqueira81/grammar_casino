@@ -86,14 +86,17 @@ function getAIClient(): GoogleGenAI {
   if (!aiClient) {
     aiClient = new GoogleGenAI({
       apiKey,
-      httpOptions: { headers: { "User-Agent": "grammar-casino-express" } },
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } },
     });
   }
   return aiClient;
 }
 
-const TEXT_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+const TEXT_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
 const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"];
+
+// Track per-model cooldown timestamps when a model hits 429 quota or 404
+const modelCooldownUntil = new Map<string, number>();
 
 function getFastThinkingConfig(model: string) {
   if (model === "gemini-3.8-flash") {
@@ -110,23 +113,46 @@ function isModelNotFound(e: any): boolean {
   return msg.includes("404") || msg.includes("not found") || msg.includes("is not supported") || msg.includes("no longer available");
 }
 
-function isHighTrafficOrOverload(e: any): boolean {
+function isQuotaExhausted(e: any): boolean {
   if (!e) return false;
   const status = e.status || e.statusCode;
-  if (status === 429 || status === 503 || status === 500) return true;
+  if (status === 429) return true;
   const msg = String(e.message || "").toLowerCase();
   return (
     msg.includes("429") ||
-    msg.includes("503") ||
-    msg.includes("500") ||
     msg.includes("resource_exhausted") ||
     msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("exceeded your current quota")
+  );
+}
+
+function isHighTrafficOrOverload(e: any): boolean {
+  if (!e) return false;
+  if (isQuotaExhausted(e)) return true;
+  const status = e.status || e.statusCode;
+  if (status === 503 || status === 500) return true;
+  const msg = String(e.message || "").toLowerCase();
+  return (
+    msg.includes("503") ||
+    msg.includes("500") ||
     msg.includes("overloaded") ||
     msg.includes("high traffic") ||
-    msg.includes("rate limit") ||
     msg.includes("try again") ||
     msg.includes("deadline exceeded")
   );
+}
+
+function extractRetryDelayMs(e: any): number {
+  const msg = String(e?.message || "");
+  const retryMatch = msg.match(/retry in\s+([0-9.]+)s/i) || msg.match(/"retryDelay"\s*:\s*"([0-9.]+)s"/i);
+  if (retryMatch && retryMatch[1]) {
+    const parsedSeconds = parseFloat(retryMatch[1]);
+    if (!isNaN(parsedSeconds) && parsedSeconds > 0) {
+      return Math.min(Math.ceil(parsedSeconds * 1000) + 1500, 5 * 60_000);
+    }
+  }
+  return 60_000; // Default 60s cooldown for 429 RPM quota limits
 }
 
 async function callWithModelRotation<T>(
@@ -135,8 +161,17 @@ async function callWithModelRotation<T>(
 ): Promise<T> {
   const ai = getAIClient();
   let lastError: any = null;
+  const now = Date.now();
 
-  for (const model of models) {
+  const availableModels = models.filter((m) => (modelCooldownUntil.get(m) || 0) <= now);
+  if (availableModels.length === 0) {
+    const cooldownErr: any = new Error("All upstream Gemini models are currently cooling down from free-tier quota limits.");
+    cooldownErr.status = 429;
+    cooldownErr.code = "QUOTA_COOLDOWN";
+    throw cooldownErr;
+  }
+
+  for (const model of availableModels) {
     let attempts = 2;
     let delay = 600;
 
@@ -144,12 +179,17 @@ async function callWithModelRotation<T>(
       try {
         return await runner(ai, model);
       } catch (e: any) {
+        lastError = e;
         if (isModelNotFound(e)) {
-          if (!lastError) lastError = e;
-          // Immediately rotate to next model if model alias is unavailable
+          // Put unavailable model alias on a 10-minute cooldown and rotate immediately
+          modelCooldownUntil.set(model, Date.now() + 10 * 60_000);
           break;
         }
-        lastError = e;
+        if (isQuotaExhausted(e)) {
+          // Put rate-limited model on cooldown for its requested retryDelay and immediately try next model
+          modelCooldownUntil.set(model, Date.now() + extractRetryDelayMs(e));
+          break;
+        }
         if (isHighTrafficOrOverload(e)) {
           attempts--;
           if (attempts > 0) {
@@ -748,12 +788,15 @@ Respond ONLY with valid JSON matching the schema.`;
         return res.status(400).json({ error: `Unsupported action: '${action}'.` });
     }
   } catch (err: any) {
-    console.error("Gemini route error:", err);
-    const message = err?.message || "Internal server error";
-    const status = isHighTrafficOrOverload(err) ? 429 : 500;
-    return res.status(status).json({
-      error: message,
-      isOverload: isHighTrafficOrOverload(err),
+    const overload = isHighTrafficOrOverload(err);
+    const shortReason = overload
+      ? "Upstream Gemini rate limit or quota reached; activating curated local fallback."
+      : err?.message || "Gemini request failed; activating local fallback.";
+    console.warn(`[Gemini Route] ${shortReason}`);
+    return res.status(200).json({
+      fallback: true,
+      isOverload: overload,
+      error: shortReason,
     });
   } finally {
     activeRequests = Math.max(0, activeRequests - 1);

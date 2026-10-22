@@ -137,23 +137,32 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
         body: JSON.stringify({ action, ...payload }),
       });
 
-      if (!response.ok) {
-        let errJson: any = null;
-        try {
-          errJson = await response.json();
-        } catch {
-          // Non-JSON error response
-        }
-        const errorMsg = errJson?.error || `HTTP ${response.status} from ${endpoint}`;
+      // Only try the alternate endpoint if this route does not exist (404/405 on static hosts)
+      if (response.status === 404 || response.status === 405) {
+        lastError = new Error(`HTTP ${response.status} from ${endpoint}`);
+        continue;
+      }
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        // Non-JSON response
+      }
+
+      if (!response.ok || data?.fallback) {
+        const errorMsg = data?.error || `HTTP ${response.status} from ${endpoint}`;
         throw new Error(errorMsg);
       }
 
-      const data = await response.json();
       return data as T;
-    } catch (err) {
+    } catch (err: any) {
       lastError = err;
-      // If network failed or 404, try the alternate endpoint before giving up
-      continue;
+      // Do not hit the second alias on the same server if the first endpoint already answered with a fallback/quota message
+      if (err instanceof TypeError) {
+        continue;
+      }
+      break;
     }
   }
 

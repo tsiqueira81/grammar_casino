@@ -128,8 +128,9 @@ function getStatus() {
 }
 
 // --- Gemini Client & Rotation Setup ---
-const TEXT_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+const TEXT_MODELS = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
 const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+const modelCooldownUntil = new Map();
 
 function getFastThinkingConfig(model) {
   if (model === 'gemini-3.8-flash') {
@@ -146,6 +147,32 @@ function isModelNotFound(e) {
   return msg.includes('404') || msg.includes('not found') || msg.includes('is not supported') || msg.includes('no longer available');
 }
 
+function isQuotaExhausted(e) {
+  if (!e) return false;
+  const status = e.status || e.statusCode;
+  if (status === 429) return true;
+  const msg = String(e.message || '').toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('exceeded your current quota')
+  );
+}
+
+function extractRetryDelayMs(e) {
+  const msg = String((e && e.message) || '');
+  const retryMatch = msg.match(/retry in\s+([0-9.]+)s/i) || msg.match(/"retryDelay"\s*:\s*"([0-9.]+)s"/i);
+  if (retryMatch && retryMatch[1]) {
+    const parsedSeconds = parseFloat(retryMatch[1]);
+    if (!isNaN(parsedSeconds) && parsedSeconds > 0) {
+      return Math.min(Math.ceil(parsedSeconds * 1000) + 1500, 5 * 60000);
+    }
+  }
+  return 60000;
+}
+
 function getAIClient(customKey) {
   const apiKey = (customKey || getStoredApiKey() || '').trim();
   if (!apiKey) {
@@ -155,24 +182,21 @@ function getAIClient(customKey) {
   }
   return new GoogleGenAI({
     apiKey,
-    httpOptions: { headers: { 'User-Agent': 'grammar-casino-desktop' } },
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
   });
 }
 
 function isHighTrafficOrOverload(e) {
   if (!e) return false;
+  if (isQuotaExhausted(e)) return true;
   const status = e.status || e.statusCode;
-  if (status === 429 || status === 503 || status === 500) return true;
+  if (status === 503 || status === 500) return true;
   const msg = String(e.message || '').toLowerCase();
   return (
-    msg.includes('429') ||
     msg.includes('503') ||
     msg.includes('500') ||
-    msg.includes('resource_exhausted') ||
-    msg.includes('quota') ||
     msg.includes('overloaded') ||
     msg.includes('high traffic') ||
-    msg.includes('rate limit') ||
     msg.includes('try again') ||
     msg.includes('deadline exceeded')
   );
@@ -190,8 +214,17 @@ async function callWithModelRotation(models, runner, customKey) {
   assertNetworkOnline();
   const ai = getAIClient(customKey);
   let lastError = null;
+  const now = Date.now();
 
-  for (const model of models) {
+  const availableModels = models.filter((m) => (modelCooldownUntil.get(m) || 0) <= now);
+  if (availableModels.length === 0) {
+    const cooldownErr = new Error('All upstream Gemini models are currently cooling down from free-tier quota limits.');
+    cooldownErr.status = 429;
+    cooldownErr.code = 'QUOTA_COOLDOWN';
+    throw cooldownErr;
+  }
+
+  for (const model of availableModels) {
     let attempts = 2;
     let delay = 600;
 
@@ -199,11 +232,15 @@ async function callWithModelRotation(models, runner, customKey) {
       try {
         return await runner(ai, model);
       } catch (e) {
+        lastError = e;
         if (isModelNotFound(e)) {
-          if (!lastError) lastError = e;
+          modelCooldownUntil.set(model, Date.now() + 10 * 60000);
           break;
         }
-        lastError = e;
+        if (isQuotaExhausted(e)) {
+          modelCooldownUntil.set(model, Date.now() + extractRetryDelayMs(e));
+          break;
+        }
         if (isHighTrafficOrOverload(e)) {
           attempts--;
           if (attempts > 0) {

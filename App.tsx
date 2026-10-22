@@ -15,7 +15,7 @@ import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
 import Modal from './components/Modal';
 import PlayerBettingCard from './components/PlayerBettingCard';
-import { getTimerRemainingMs } from './components/TurnTimer';
+import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
 import PowerUpTooltip from './components/PowerUpTooltip';
 import GrammarReportCard from './components/GrammarReportCard';
@@ -290,6 +290,8 @@ export function App() {
     return 0;
   });
   const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
+  const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
+  const mpAutoStartedRoundRef = useRef<number>(0);
   const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
   const turnDurationMs = turnTimerSeconds * 1000;
@@ -570,9 +572,10 @@ export function App() {
     const player = players.find(p => p.id === playerId);
     if (!player || player.money <= 0) return false;
     if (isPlayerFrozen(playerId)) return false;
-    // In Multiplayer mode, connected remote seats act simultaneously until they lock in
-    if (mpRoomCode && mpSeats[playerId]) {
-      if (mpSeats[playerId].lockedIn) return false;
+    // In Multiplayer mode, all players act simultaneously until they lock in or the shared round timer expires
+    if (mpRoomCode) {
+      if (mpSeats[playerId]?.lockedIn) return false;
+      if (isTurnTimerEnabled && mpRoundTimer.status === 'locked') return false;
       return true;
     }
     if (!isTurnTimerEnabled) return true;
@@ -580,7 +583,7 @@ export function App() {
     if (!t || t.status !== 'running') return false;
     if (!t.held && t.endsAt !== undefined && Date.now() >= t.endsAt) return false;
     return true;
-  }, [players, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers]);
+  }, [players, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, mpRoundTimer.status, turnTimers]);
 
   // Helper to lock a player and optionally auto-advance to the next unfrozen idle player in sequence
   const lockPlayerAndMaybeAdvance = useCallback((
@@ -633,9 +636,9 @@ export function App() {
     return next;
   }, [activePlayers, isPlayerFrozen, isTimerSystemHeld, turnDurationMs]);
 
-  // Automatically skip & lock frozen players (Deep Freeze / Sub-Zero), and chain if they were mid-turn
+  // Automatically skip & lock frozen players (Deep Freeze / Sub-Zero), and chain if they were mid-turn (Single-screen mode only)
   useEffect(() => {
-    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    if (!isTurnTimerEnabled || Boolean(mpRoomCode) || step !== 'IN_GAME') return;
     setTurnTimers(prev => {
       let changed = false;
       let next = { ...prev };
@@ -654,11 +657,11 @@ export function App() {
       });
       return changed ? next : prev;
     });
-  }, [isTurnTimerEnabled, step, activePlayers, isPlayerFrozen, autoStartNextTimer, lockPlayerAndMaybeAdvance]);
+  }, [isTurnTimerEnabled, mpRoomCode, step, activePlayers, isPlayerFrozen, autoStartNextTimer, lockPlayerAndMaybeAdvance]);
 
-  // Auto-hold running timers while any modal/popup is open or a hint is loading, and resume afterwards
+  // Auto-hold running timers while any modal/popup is open or a hint is loading, and resume afterwards (Single-screen mode only)
   useEffect(() => {
-    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    if (!isTurnTimerEnabled || Boolean(mpRoomCode) || step !== 'IN_GAME') return;
     const now = Date.now();
     setTurnTimers(prev => {
       let changed = false;
@@ -679,11 +682,11 @@ export function App() {
       });
       return changed ? next : prev;
     });
-  }, [isTimerSystemHeld, isTurnTimerEnabled, step, turnDurationMs]);
+  }, [isTimerSystemHeld, isTurnTimerEnabled, mpRoomCode, step, turnDurationMs]);
 
-  // Watch the active running timer's absolute `endsAt` deadline and lock when time runs out
+  // Watch the active running timer's absolute `endsAt` deadline and lock when time runs out (Single-screen mode only)
   useEffect(() => {
-    if (!isTurnTimerEnabled || step !== 'IN_GAME') return;
+    if (!isTurnTimerEnabled || Boolean(mpRoomCode) || step !== 'IN_GAME') return;
     const runningEntry = (Object.entries(turnTimers) as [string, PlayerTurnTimer][]).find(
       ([, t]) => t?.status === 'running' && !t.held && t.endsAt !== undefined
     );
@@ -809,6 +812,159 @@ export function App() {
       return next;
     });
   }, [isTurnTimerEnabled, isPlayerFrozen, playSound, turnDurationMs, isTimerSystemHeld]);
+
+  // --- Shared Multiplayer Round Timer Effects & Controls ---
+  // Auto-start the shared round timer when a new hand is revealed in Multiplayer mode (if Auto-Start is ON)
+  useEffect(() => {
+    if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
+    if (!isSentenceRevealed || isLoading || !autoStartNextTimer) return;
+    if (mpAutoStartedRoundRef.current === currentRound) return;
+    mpAutoStartedRoundRef.current = currentRound;
+    const now = Date.now();
+    setMpRoundTimer(prev => {
+      if (prev.status !== 'idle') return prev;
+      return isTimerSystemHeld
+        ? { status: 'running', held: true, remainingMs: turnDurationMs }
+        : { status: 'running', held: false, endsAt: now + turnDurationMs, remainingMs: turnDurationMs };
+    });
+  }, [mpRoomCode, isTurnTimerEnabled, step, isSentenceRevealed, isLoading, autoStartNextTimer, currentRound, isTimerSystemHeld, turnDurationMs]);
+
+  // Auto-hold & resume the shared Multiplayer round timer when a modal or hint is loading
+  useEffect(() => {
+    if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
+    const now = Date.now();
+    setMpRoundTimer(prev => {
+      if (prev.status !== 'running') return prev;
+      if (isTimerSystemHeld && !prev.held) {
+        const rem = prev.endsAt !== undefined ? Math.max(0, prev.endsAt - now) : (prev.remainingMs ?? turnDurationMs);
+        return { ...prev, held: true, remainingMs: rem, endsAt: undefined };
+      }
+      if (!isTimerSystemHeld && prev.held) {
+        const rem = Math.max(0, prev.remainingMs ?? turnDurationMs);
+        return { ...prev, held: false, endsAt: now + rem, remainingMs: rem };
+      }
+      return prev;
+    });
+  }, [mpRoomCode, isTurnTimerEnabled, step, isTimerSystemHeld, turnDurationMs]);
+
+  // Pause shared Multiplayer round timer automatically if every active unfrozen player locks in early
+  useEffect(() => {
+    if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
+    const unfrozen = activePlayers.filter(p => !isPlayerFrozen(p.id));
+    if (unfrozen.length === 0) return;
+    const qType: QuestionType = currentSentence?.questionType || 'binary';
+    const allLocked = unfrozen.every(p => {
+      if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
+      const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+      return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit);
+    });
+    if (allLocked && mpRoundTimer.status === 'running') {
+      const now = Date.now();
+      setMpRoundTimer(prev => {
+        if (prev.status !== 'running') return prev;
+        const rem = getTimerRemainingMs(prev, turnDurationMs, now);
+        return { status: 'paused', remainingMs: rem, held: false, endsAt: undefined };
+      });
+    }
+  }, [mpRoomCode, isTurnTimerEnabled, step, activePlayers, isPlayerFrozen, currentSentence, mpSeats, activePowerUps, bets, mpRoundTimer.status, turnDurationMs]);
+
+  // Watch the shared Multiplayer round timer's `endsAt` deadline and lock all seats when time expires
+  useEffect(() => {
+    if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
+    if (mpRoundTimer.status !== 'running' || mpRoundTimer.held || mpRoundTimer.endsAt === undefined) return;
+    const endsAt = mpRoundTimer.endsAt;
+
+    const checkExpiry = () => {
+      if (Date.now() >= endsAt) {
+        playSound('timeUp');
+        setMpRoundTimer({ status: 'locked', remainingMs: 0, held: false, endsAt: undefined });
+        setTeacherRevealOverride(true);
+        setMpSeats(prev => {
+          const next: Record<number, MultiplayerSeat> = {};
+          (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+            next[Number(k)] = { ...seat, lockedIn: true };
+          });
+          return next;
+        });
+      }
+    };
+
+    const delay = Math.max(0, endsAt - Date.now());
+    const timeoutId = window.setTimeout(checkExpiry, delay + 15);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') checkExpiry();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [mpRoomCode, isTurnTimerEnabled, step, mpRoundTimer, playSound]);
+
+  const handleMpRoundTimerStart = useCallback(() => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setMpRoundTimer(prev => {
+      const rem = prev.status === 'paused' && prev.remainingMs && prev.remainingMs > 0
+        ? prev.remainingMs
+        : turnDurationMs;
+      return isTimerSystemHeld
+        ? { status: 'running', held: true, remainingMs: rem }
+        : { status: 'running', held: false, endsAt: now + rem, remainingMs: rem };
+    });
+  }, [isTurnTimerEnabled, playSound, turnDurationMs, isTimerSystemHeld]);
+
+  const handleMpRoundTimerPause = useCallback(() => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setMpRoundTimer(prev => {
+      if (prev.status !== 'running') return prev;
+      const rem = getTimerRemainingMs(prev, turnDurationMs, now);
+      return { status: 'paused', remainingMs: rem, held: false, endsAt: undefined };
+    });
+  }, [isTurnTimerEnabled, playSound, turnDurationMs]);
+
+  const handleMpRoundTimerAddTime = useCallback(() => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setMpRoundTimer(prev => {
+      if (prev.status !== 'running' && prev.status !== 'paused') return prev;
+      const rem = getTimerRemainingMs(prev, turnDurationMs, now) + TURN_TIMER_BONUS_MS;
+      if (prev.status === 'running' && !prev.held) {
+        return { ...prev, endsAt: now + rem, remainingMs: rem };
+      }
+      return { ...prev, remainingMs: rem };
+    });
+  }, [isTurnTimerEnabled, playSound, turnDurationMs]);
+
+  const handleMpRoundTimerLockNow = useCallback(() => {
+    if (!isTurnTimerEnabled) return;
+    playSound('timeUp');
+    setMpRoundTimer({ status: 'locked', remainingMs: 0, held: false, endsAt: undefined });
+    setTeacherRevealOverride(true);
+    setMpSeats(prev => {
+      const next: Record<number, MultiplayerSeat> = {};
+      (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+        next[Number(k)] = { ...seat, lockedIn: true };
+      });
+      return next;
+    });
+  }, [isTurnTimerEnabled, playSound]);
+
+  const handleMpRoundTimerReset = useCallback(() => {
+    if (!isTurnTimerEnabled) return;
+    playSound('click');
+    const now = Date.now();
+    setTeacherRevealOverride(false);
+    setMpRoundTimer(
+      isTimerSystemHeld
+        ? { status: 'running', held: true, remainingMs: turnDurationMs }
+        : { status: 'running', held: false, endsAt: now + turnDurationMs, remainingMs: turnDurationMs }
+    );
+  }, [isTurnTimerEnabled, playSound, isTimerSystemHeld, turnDurationMs]);
 
   // Save game state
   useEffect(() => { 
@@ -1213,6 +1369,8 @@ export function App() {
     setRoundSpending({});
     setUsedSubtypes([]);
     setTurnTimers({});
+    setMpRoundTimer({ status: 'idle', remainingMs: turnDurationMs });
+    mpAutoStartedRoundRef.current = 0;
     setTeacherRevealOverride(false);
     setMpStudentPendingTarget({});
     setMpStudentPendingWheel({});
@@ -1257,8 +1415,8 @@ export function App() {
       }
   }, [canPlayerAct, players, currentSentence, settings.topic, settings.level, playSound, hints]); 
   
-  const handleBetChange = useCallback((playerId: number, field: keyof Bet, value: any) => {
-    if (!canPlayerAct(playerId)) return;
+  const handleBetChange = useCallback((playerId: number, field: keyof Bet, value: any, ignoreLock = false) => {
+    if (!ignoreLock && !canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
     if (!player) return;
 
@@ -1850,6 +2008,8 @@ export function App() {
     setRoundSpending({});
     setSimplifiedExplanation({ text: null, loading: false });
     setTurnTimers({});
+    setMpRoundTimer({ status: 'idle', remainingMs: turnDurationMs });
+    mpAutoStartedRoundRef.current = 0;
     setTeacherRevealOverride(false);
     setMpStudentPendingTarget({});
     setMpStudentPendingWheel({});
@@ -2104,11 +2264,17 @@ export function App() {
           case 'SET_FULL_BET': {
             const entries = Object.entries(intent.bet || {}) as [keyof Bet, any][];
             entries.forEach(([field, val]) => {
-              handleBetChange(playerId, field, val);
+              handleBetChange(playerId, field, val, true);
             });
             break;
           }
           case 'LOCK_IN': {
+            if (intent.bet) {
+              const entries = Object.entries(intent.bet) as [keyof Bet, any][];
+              entries.forEach(([field, val]) => {
+                handleBetChange(playerId, field, val, true);
+              });
+            }
             if (intent.locked) {
               playSound('bet');
               setMpSeats(prev => {
@@ -2273,6 +2439,8 @@ export function App() {
       studentPendingTarget: mpStudentPendingTarget,
       studentPendingWheel: mpStudentPendingWheel,
       studentNotifications: mpStudentNotifications,
+      roundTimer: isTurnTimerEnabled ? mpRoundTimer : undefined,
+      turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
     });
     mpControllerRef.current.pushViews(views);
   }, [
@@ -2301,6 +2469,9 @@ export function App() {
     mpStudentPendingTarget,
     mpStudentPendingWheel,
     mpStudentNotifications,
+    isTurnTimerEnabled,
+    mpRoundTimer,
+    turnDurationMs,
   ]); 
 
   const verifyPlayerCorrections = useCallback(async () => {
@@ -2383,7 +2554,20 @@ export function App() {
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
-    if (isTurnTimerEnabled) {
+    if (mpRoomCode) {
+      const allMpReady = unfrozenPlayers.every(p => {
+        if (mpSeats[p.id]?.lockedIn) return true;
+        const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+        return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit);
+      });
+      if (!allMpReady && !teacherRevealOverride) {
+        setError({
+          title: "Bets Not Locked In",
+          message: "Every active player must lock in their wager before revealing results (or use Teacher Override)."
+        });
+        return;
+      }
+    } else if (isTurnTimerEnabled) {
       const allLocked = unfrozenPlayers.every(p => turnTimers[p.id]?.status === 'locked');
       if (!allLocked && !teacherRevealOverride) {
         setError({ title: "Turns Still Active", message: "Every active player's turn must be locked before revealing results (or use Teacher Override)." });
@@ -2425,8 +2609,16 @@ export function App() {
       return;
     }
 
-    // Lock all active players' timers when results are revealed
-    if (isTurnTimerEnabled) {
+    // Lock all active players' timers or multiplayer seats when results are revealed
+    if (mpRoomCode) {
+      setMpSeats(prev => {
+        const next: Record<number, MultiplayerSeat> = {};
+        (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+          next[Number(k)] = { ...seat, lockedIn: true };
+        });
+        return next;
+      });
+    } else if (isTurnTimerEnabled) {
       setTurnTimers(prev => {
         const next = { ...prev };
         activePlayers.forEach(p => {
@@ -2442,8 +2634,10 @@ export function App() {
       });
     }
 
-    // Active participating players (excluding frozen players and, when timer is on, players who didn't bet)
-    const validPlayers = unfrozenPlayers.filter(p => isTurnTimerEnabled ? hasPlayerPlacedBet(p.id) : true);
+    // Active participating players (excluding frozen players and players who sat out without placing a bet)
+    const validPlayers = unfrozenPlayers.filter(p =>
+      (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !teacherRevealOverride
+    );
 
     playSound('flip');
     setIsProcessing(true);
@@ -2657,8 +2851,10 @@ export function App() {
           return { ...player, effects: updatedEffects };
       }
 
-      // If turn timer is active (or teacher overrode) and player did not place a complete bet, they sit out as if frozen
-      const satOut = isTurnTimerEnabled ? !hasPlayerPlacedBet(player.id) : !hasPlayerPlacedBet(player.id) && teacherRevealOverride;
+      // If turn timer is active in single-screen mode (or teacher overrode) and player did not place a complete bet, they sit out as if frozen
+      const satOut = (isTurnTimerEnabled && !mpRoomCode)
+        ? !hasPlayerPlacedBet(player.id)
+        : !hasPlayerPlacedBet(player.id) && teacherRevealOverride;
       if (satOut) {
           newRoundResultsData.push({
             name: player.name,
@@ -3133,7 +3329,7 @@ export function App() {
     setIsProcessing(false);
     setProcessingStatus('');
     setStep('RESULTS');
-  }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
   
   const handleNextRound = useCallback(() => {
     const stillActivePlayers = players.filter(p => p.money > 0);
@@ -3212,6 +3408,8 @@ export function App() {
         setRoundSpending({});
         setSimplifiedExplanation({ text: null, loading: false });
         setTurnTimers({});
+        setMpRoundTimer({ status: 'idle', remainingMs: turnDurationMs });
+        mpAutoStartedRoundRef.current = 0;
         setTeacherRevealOverride(false);
         
         // Pass current pastSentences history, using queued nextRoundSettings if set
@@ -4213,15 +4411,17 @@ export function App() {
                     </div> 
                   </div> 
 
-                  {/* VII. Betting Turn Clock */}
+                  {/* VII. Betting Turn / Round Clock */}
                   <div className="text-left border-t border-[#d4af37]/25 pt-6">
                     <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                          VII. Betting Turn Clock
+                          {mpRoomCode ? 'VII. Shared Round Clock' : 'VII. Betting Turn Clock'}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                          Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups
+                          {mpRoomCode
+                            ? 'Set a shared countdown timer displayed to everyone while all players place their bets simultaneously'
+                            : 'Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups'}
                         </p>
                       </div>
                       {turnTimerSeconds > 0 && (
@@ -4233,9 +4433,15 @@ export function App() {
                               ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
                               : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
                           }`}
-                          title="When enabled, locking or finishing one player's timer automatically starts the next player's timer"
+                          title={
+                            mpRoomCode
+                              ? 'When enabled, the shared round timer starts automatically as soon as each hand is dealt'
+                              : "When enabled, locking or finishing one player's timer automatically starts the next player's timer"
+                          }
                         >
-                          {autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF'}
+                          {mpRoomCode
+                            ? (autoStartNextTimer ? '✓ Auto-Start Round Timer: ON' : 'Auto-Start Round Timer: OFF')
+                            : (autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF')}
                         </button>
                       )}
                     </div>
@@ -4251,6 +4457,8 @@ export function App() {
                               playSound('click');
                               setTurnTimerSeconds(secs);
                               setTurnTimers({});
+                              setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                              mpAutoStartedRoundRef.current = 0;
                             }}
                             className={`p-3.5 rounded-xl transition-all duration-200 font-serif border cursor-pointer flex flex-col items-center justify-center gap-1 ${
                               isSelected
@@ -4629,9 +4837,9 @@ export function App() {
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">⚙️</span>
                                       </button>
 
-{/* Turn Clock Quick Selector Pill */}
+{/* Turn / Round Clock Quick Selector Pill */}
                                       <div className="px-3 py-1 felt-well rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
-                                        <span>⏱️ Turn Clock:</span>
+                                        <span>⏱️ {mpRoomCode ? 'Round Clock:' : 'Turn Clock:'}</span>
                                         {TURN_TIMER_OPTIONS.map(secs => (
                                           <button
                                             key={secs}
@@ -4640,6 +4848,8 @@ export function App() {
                                               playSound('click');
                                               setTurnTimerSeconds(secs);
                                               setTurnTimers({});
+                                              setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                                              mpAutoStartedRoundRef.current = 0;
                                             }}
                                             className={`px-2 py-0.5 rounded-full font-mono-casino text-[10px] font-bold transition-all cursor-pointer ${
                                               turnTimerSeconds === secs
@@ -4761,8 +4971,33 @@ export function App() {
                   </div>
                 </div>
 
-                {/* Croupier's Sequential Turn Bar when Turn Timer is enabled */}
-                {isTurnTimerEnabled && (
+                {/* In Multiplayer mode, display the Shared Round Timer for everyone instead of a Turn Sequence frame */}
+                {isTurnTimerEnabled && mpRoomCode && (
+                  <MultiplayerRoundTimerFrame
+                    timer={mpRoundTimer}
+                    turnDurationMs={turnDurationMs}
+                    turnTimerSeconds={turnTimerSeconds}
+                    allPlayersLocked={allMpPlayersLocked}
+                    lockedCount={mpLockedCount}
+                    totalActivePlayers={unfrozenActivePlayers.length}
+                    autoStartTimer={autoStartNextTimer}
+                    onToggleAutoStart={() => {
+                      playSound('click');
+                      setAutoStartNextTimer(v => !v);
+                    }}
+                    onStart={handleMpRoundTimerStart}
+                    onPause={handleMpRoundTimerPause}
+                    onAddTime={handleMpRoundTimerAddTime}
+                    onLockNow={handleMpRoundTimerLockNow}
+                    onReset={handleMpRoundTimerReset}
+                    onOpenAiSettings={() => handleOpenSettingsModal('ai')}
+                    aiStatusLabel={desktopStatus.hasKey && desktopStatus.isOnline ? '⚡ Gemini AI' : '💾 Offline Bank'}
+                    playSound={playSound}
+                  />
+                )}
+
+                {/* Croupier's Sequential Turn Bar when Turn Timer is enabled (Single-screen / Hot-Seat mode only) */}
+                {isTurnTimerEnabled && !mpRoomCode && (
                   <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="text-xs font-serif font-extrabold uppercase tracking-[0.2em] text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
@@ -5035,12 +5270,12 @@ export function App() {
                                 onChangeAvatar={handleOpenAvatarModal}
                                 onUpdateName={handleUpdatePlayerName}
                                 targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
-                                timerEnabled={isTurnTimerEnabled}
+                                timerEnabled={isTurnTimerEnabled && !mpRoomCode}
                                 turnTimer={playerTimer}
                                 turnDurationMs={turnDurationMs}
                                 canAct={canPlayerAct(player.id)}
-                                isSatOut={isSatOut}
-                                timerBlockedByName={activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
+                                isSatOut={isSatOut && !mpRoomCode}
+                                timerBlockedByName={!mpRoomCode && activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
                                 onTimerStart={handleTimerStart}
                                 onTimerPause={handleTimerPause}
                                 onTimerAddTime={handleTimerAddTime}
@@ -5061,7 +5296,7 @@ export function App() {
                     {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : 'CALL THE HAND & REVEAL 🎲'}
                   </ActionButton>
 
-                  {((isTurnTimerEnabled && !allActivePlayersLocked) || (mpRoomCode && !allMpPlayersLocked)) && (
+                  {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
                     <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-serif text-slate-600 dark:text-amber-200/75">
                       <span>
                         🔒 Locked Players: <strong className="font-mono-casino">{mpRoomCode ? mpLockedCount : lockedCount}/{unfrozenActivePlayers.length}</strong>

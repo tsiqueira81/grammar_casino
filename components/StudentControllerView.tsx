@@ -13,6 +13,7 @@ import {
 } from '../utils/multiplayerProtocol';
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
+import { StudentRoundTimerBar } from './TurnTimer';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
 
@@ -51,10 +52,24 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [seenNotificationId, setSeenNotificationId] = useState<string | null>(null);
   const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [lockWarning, setLockWarning] = useState<{
+    message: string;
+    missingField: 'answer' | 'wager' | 'both';
+  } | null>(null);
 
   const controllerRef = useRef<StudentRoomController | null>(null);
   const lastRoundRef = useRef<number>(0);
   const lastStepRef = useRef<string>('');
+
+  // Focus & scroll refs for incomplete lock-in warnings
+  const answerSectionRef = useRef<HTMLDivElement>(null);
+  const wagerSectionRef = useRef<HTMLDivElement>(null);
+  const firstOpinionBtnRef = useRef<HTMLButtonElement>(null);
+  const firstOptionBtnRef = useRef<HTMLButtonElement>(null);
+  const clozeWordInputRef = useRef<HTMLInputElement>(null);
+  const splitWord1InputRef = useRef<HTMLInputElement>(null);
+  const splitWord2InputRef = useRef<HTMLInputElement>(null);
+  const wagerInputRef = useRef<HTMLInputElement>(null);
 
   // Load saved session on mount and auto-reconnect if matching room code
   useEffect(() => {
@@ -87,6 +102,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       if (nextView.round !== lastRoundRef.current) {
         lastRoundRef.current = nextView.round;
         setLocalBet(nextView.myBet || {});
+        setLockWarning(null);
       } else {
         setLocalBet((prev) => {
           // If server clamped the bet (e.g. Bet Cap or money reduction), sync the clamped bet
@@ -217,6 +233,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       }
     }
     setLocalBet((prev) => ({ ...prev, [field]: finalVal }));
+    if (lockWarning) {
+      setLockWarning(null);
+    }
     sendIntent({ type: 'SET_BET', field, value: finalVal });
   };
 
@@ -224,25 +243,108 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     if (!view || view.isFrozen) return;
     if (view.lockedIn) {
       playSound('click');
+      setLockWarning(null);
       sendIntent({ type: 'LOCK_IN', locked: false });
       return;
     }
 
     const qType: QuestionType = view.sentence?.questionType || 'binary';
     const hasSplitBet = view.myActivePowerUps.some((pu) => pu.type === 'SPLIT_BET');
-    if (!isBetCompleteForQuestionType(localBet, qType, hasSplitBet)) {
+
+    const hasValidWager =
+      localBet.bet !== undefined &&
+      localBet.bet !== '' &&
+      !isNaN(Number(localBet.bet)) &&
+      Number(localBet.bet) > 0;
+
+    let hasValidAnswer = false;
+    if (qType === 'multipleChoice') {
+      hasValidAnswer = hasSplitBet
+        ? (localBet.splitOptions?.length || 0) >= 1
+        : Boolean(localBet.selectedOption?.trim());
+    } else if (qType === 'openCloze') {
+      hasValidAnswer = hasSplitBet
+        ? Boolean(localBet.splitClozeAnswers?.[0]?.trim() || localBet.splitClozeAnswers?.[1]?.trim())
+        : Boolean(localBet.clozeAnswer?.trim());
+    } else {
+      hasValidAnswer = hasSplitBet
+        ? true
+        : localBet.opinion === 'correct' || localBet.opinion === 'incorrect';
+    }
+
+    if (!hasValidAnswer || !hasValidWager || !isBetCompleteForQuestionType(localBet, qType, hasSplitBet)) {
       playSound('error');
-      setActiveToast({
-        title: 'Incomplete Wager',
-        message: 'Choose your answer and enter a bet amount before locking in.',
-        icon: '⚠️',
+      if ('vibrate' in navigator) {
+        try {
+          navigator.vibrate([100, 50, 100]);
+        } catch {}
+      }
+
+      let message = '';
+      let missingField: 'answer' | 'wager' | 'both' = 'both';
+      if (!hasValidAnswer && !hasValidWager) {
+        missingField = 'both';
+        if (qType === 'multipleChoice') {
+          message = hasSplitBet
+            ? 'Hold on! Pick 2 options (50/50) or tap 1 option twice for 100% (2×), and enter a wager amount before locking in.'
+            : 'Hold on! Choose an option (A–D) in Step 1 and enter a wager amount in Step 2 before locking in.';
+        } else if (qType === 'openCloze') {
+          message = hasSplitBet
+            ? 'Hold on! Type at least 1 candidate word in Step 1 and enter a wager amount in Step 2 before locking in.'
+            : 'Hold on! Type the missing word in Step 1 and enter a wager amount in Step 2 before locking in.';
+        } else {
+          message = 'Hold on! Choose Valid or Flawed in Step 1 and enter a wager amount in Step 2 before locking in.';
+        }
+      } else if (!hasValidAnswer) {
+        missingField = 'answer';
+        if (qType === 'multipleChoice') {
+          message = hasSplitBet
+            ? 'Step 1 Incomplete: Pick 2 options (50/50) or tap the same option twice for 100% (2×) before locking in!'
+            : 'Step 1 Incomplete: Please choose an option (A, B, C, or D) before locking in!';
+        } else if (qType === 'openCloze') {
+          message = hasSplitBet
+            ? 'Step 1 Incomplete: Please type at least 1 candidate word before locking in!'
+            : 'Step 1 Incomplete: Please type the missing word before locking in!';
+        } else {
+          message = 'Step 1 Incomplete: Please choose Valid (✓) or Flawed (✕) before locking in!';
+        }
+      } else {
+        missingField = 'wager';
+        message = 'Step 2 Incomplete: Please enter a wager amount ($1 or more, or tap a quick chip) before locking in!';
+      }
+
+      setLockWarning({ message, missingField });
+
+      // Scroll to and focus the specific control that needs doing
+      window.requestAnimationFrame(() => {
+        if (!hasValidAnswer) {
+          answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (qType === 'multipleChoice') {
+            firstOptionBtnRef.current?.focus();
+          } else if (qType === 'openCloze') {
+            if (hasSplitBet) {
+              const targetInput = !localBet.splitClozeAnswers?.[0]?.trim()
+                ? splitWord1InputRef.current
+                : splitWord2InputRef.current;
+              targetInput?.focus();
+            } else {
+              clozeWordInputRef.current?.focus();
+            }
+          } else {
+            firstOpinionBtnRef.current?.focus();
+          }
+        } else {
+          wagerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          wagerInputRef.current?.focus();
+        }
       });
       return;
     }
 
+    setLockWarning(null);
     playSound('bet');
     sendIntent({ type: 'SET_FULL_BET', bet: localBet });
-    sendIntent({ type: 'LOCK_IN', locked: true });
+    sendIntent({ type: 'LOCK_IN', locked: true, bet: localBet });
   };
 
   const handleLeaveRoom = () => {
@@ -541,6 +643,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
            ================================================================ */}
         {view.step === 'IN_GAME' && (
           <>
+            {/* Shared Multiplayer Round Timer Bar (when enabled by Teacher) */}
+            {view.turnDurationMs && view.turnDurationMs > 0 && (
+              <StudentRoundTimerBar
+                timer={view.roundTimer}
+                turnDurationMs={view.turnDurationMs}
+                lockedIn={view.lockedIn}
+              />
+            )}
+
             {/* Status Banner if Frozen or Capped */}
             {view.isFrozen && (
               <div className="p-4 rounded-2xl bg-cyan-500/20 border-2 border-cyan-400 text-center space-y-1">
@@ -614,263 +725,341 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
 
             {/* Answer Selection Controls */}
-            {!view.isFrozen && view.sentence && (
-              <div
-                className={`glass-panel rounded-2xl p-4 sm:p-5 space-y-4 border border-[#d4af37]/40 transition-opacity ${
-                  view.lockedIn ? 'opacity-70 pointer-events-none' : ''
-                }`}
-              >
-                <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
-                  1. Choose Your Ruling {hasSplitBet ? '(⚖️ Split Bet Active)' : ''}
-                </div>
+            {!view.isFrozen && view.sentence && (() => {
+              const highlightAnswerMissing =
+                lockWarning?.missingField === 'answer' || lockWarning?.missingField === 'both';
+              const highlightWagerMissing =
+                lockWarning?.missingField === 'wager' || lockWarning?.missingField === 'both';
 
-                {/* Format A: Binary (Valid / Flawed) */}
-                {qType === 'binary' && (
-                  <div className="space-y-3">
-                    {hasSplitBet ? (
-                      <div className="space-y-2 felt-well p-3.5 rounded-xl">
-                        <div className="flex justify-between text-xs font-mono-casino font-bold">
-                          <span className="text-emerald-600 dark:text-emerald-400">
-                            ✓ Valid: {localBet.splitCorrectPercent ?? 50}%
-                          </span>
-                          <span className="text-rose-600 dark:text-rose-400">
-                            ✕ Flawed: {100 - (localBet.splitCorrectPercent ?? 50)}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          step={10}
-                          value={localBet.splitCorrectPercent ?? 50}
-                          onChange={(e) => updateBetField('splitCorrectPercent', Number(e.target.value))}
-                          className="w-full accent-amber-500 h-6 cursor-pointer"
-                        />
+              return (
+                <div
+                  className={`glass-panel rounded-2xl p-4 sm:p-5 space-y-4 border border-[#d4af37]/40 transition-opacity ${
+                    view.lockedIn ? 'opacity-70 pointer-events-none' : ''
+                  }`}
+                >
+                  {lockWarning && (
+                    <div
+                      role="alert"
+                      className="px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/75 border-2 border-rose-500 text-rose-900 dark:text-rose-100 text-xs sm:text-sm font-serif font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-fade-in"
+                    >
+                      <div className="flex items-center gap-2 text-left">
+                        <span className="text-base select-none shrink-0">⚠️</span>
+                        <span>{lockWarning.message}</span>
                       </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => updateBetField('opinion', 'correct')}
-                          className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                            localBet.opinion === 'correct'
-                              ? 'bg-emerald-600 text-white border-emerald-300 shadow-lg scale-[1.01]'
-                              : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                          }`}
-                        >
-                          <span>✓</span>
-                          <span>Valid</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => updateBetField('opinion', 'incorrect')}
-                          className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                            localBet.opinion === 'incorrect'
-                              ? 'bg-rose-600 text-white border-rose-300 shadow-lg scale-[1.01]'
-                              : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                          }`}
-                        >
-                          <span>✕</span>
-                          <span>Flawed</span>
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => setLockWarning(null)}
+                        className="text-xs px-2 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-rose-900 dark:text-rose-100 font-sans font-bold cursor-pointer shrink-0"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  )}
+
+                  <div
+                    ref={answerSectionRef}
+                    className={`space-y-3 rounded-xl transition-all ${
+                      highlightAnswerMissing
+                        ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
+                        1. Choose Your Ruling {hasSplitBet ? '(⚖️ Split Bet Active)' : ''}
+                      </div>
+                      {highlightAnswerMissing && (
+                        <span className="text-[10px] font-serif font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
+                          Required
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Format A: Binary (Valid / Flawed) */}
+                    {qType === 'binary' && (
+                      <div className="space-y-3">
+                        {hasSplitBet ? (
+                          <div className="space-y-2 felt-well p-3.5 rounded-xl">
+                            <div className="flex justify-between text-xs font-mono-casino font-bold">
+                              <span className="text-emerald-600 dark:text-emerald-400">
+                                ✓ Valid: {localBet.splitCorrectPercent ?? 50}%
+                              </span>
+                              <span className="text-rose-600 dark:text-rose-400">
+                                ✕ Flawed: {100 - (localBet.splitCorrectPercent ?? 50)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              step={10}
+                              value={localBet.splitCorrectPercent ?? 50}
+                              onChange={(e) => updateBetField('splitCorrectPercent', Number(e.target.value))}
+                              className="w-full accent-amber-500 h-6 cursor-pointer"
+                            />
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              ref={firstOpinionBtnRef}
+                              type="button"
+                              onClick={() => updateBetField('opinion', 'correct')}
+                              className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                                localBet.opinion === 'correct'
+                                  ? 'bg-emerald-600 text-white border-emerald-300 shadow-lg scale-[1.01]'
+                                  : highlightAnswerMissing
+                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
+                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
+                              }`}
+                            >
+                              <span>✓</span>
+                              <span>Valid</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateBetField('opinion', 'incorrect')}
+                              className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                                localBet.opinion === 'incorrect'
+                                  ? 'bg-rose-600 text-white border-rose-300 shadow-lg scale-[1.01]'
+                                  : highlightAnswerMissing
+                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
+                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
+                              }`}
+                            >
+                              <span>✕</span>
+                              <span>Flawed</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {(localBet.opinion === 'incorrect' ||
+                          (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
+                          <div>
+                            <label className="block text-[11px] font-serif uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mb-1">
+                              Optional Bonus Correction (+100% Payout if Flawed):
+                            </label>
+                            <input
+                              type="text"
+                              value={localBet.userCorrection || ''}
+                              onChange={(e) => updateBetField('userCorrection', e.target.value)}
+                              placeholder="Type the corrected sentence or phrase..."
+                              className="w-full min-h-[46px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4af37]"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {(localBet.opinion === 'incorrect' ||
-                      (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
-                      <div>
-                        <label className="block text-[11px] font-serif uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mb-1">
-                          Optional Bonus Correction (+100% Payout if Flawed):
-                        </label>
-                        <input
-                          type="text"
-                          value={localBet.userCorrection || ''}
-                          onChange={(e) => updateBetField('userCorrection', e.target.value)}
-                          placeholder="Type the corrected sentence or phrase..."
-                          className="w-full min-h-[46px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4af37]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Format B: Multiple Choice Cloze */}
-                {qType === 'multipleChoice' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {(view.sentence.options || []).map((opt, idx) => {
-                      const letter = ['A', 'B', 'C', 'D'][idx] || '';
-                      const splitList = localBet.splitOptions || [];
-                      const isSelected = hasSplitBet
-                        ? splitList.includes(opt)
-                        : localBet.selectedOption === opt;
-                      const isDoubleStacked =
-                        hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
-
-                      return (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => {
-                            if (hasSplitBet) {
-                              let next: string[];
-                              if (splitList.length === 0) {
-                                next = [opt];
-                              } else if (splitList.length === 1) {
-                                next = [splitList[0], opt];
-                              } else if (splitList.includes(opt)) {
-                                next = splitList.filter((o) => o !== opt);
-                              } else {
-                                next = [splitList[1], opt];
-                              }
-                              updateBetField('splitOptions', next);
-                            } else {
-                              updateBetField('selectedOption', opt);
-                            }
-                          }}
-                          className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-serif font-bold text-sm transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                            isSelected
-                              ? 'bg-emerald-600 text-white border-emerald-300 shadow-md'
-                              : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                          }`}
-                        >
-                          <span>
-                            <strong className="font-mono-casino mr-2">{letter}.</strong>
-                            {opt}
-                          </span>
-                          {isDoubleStacked && (
-                            <span className="text-[10px] font-mono-casino bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
-                              2×
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Format C: Open Cloze */}
-                {qType === 'openCloze' && (
-                  <div className="space-y-2.5">
-                    {hasSplitBet ? (
+                    {/* Format B: Multiple Choice Cloze */}
+                    {qType === 'multipleChoice' && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <input
-                          type="text"
-                          value={localBet.splitClozeAnswers?.[0] || ''}
-                          onChange={(e) =>
-                            updateBetField('splitClozeAnswers', [
-                              e.target.value,
-                              localBet.splitClozeAnswers?.[1] || '',
-                            ])
-                          }
-                          placeholder="Candidate Word #1 (50%)"
-                          className="w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-sm font-semibold text-slate-900 dark:text-white"
-                        />
-                        <input
-                          type="text"
-                          value={localBet.splitClozeAnswers?.[1] || ''}
-                          onChange={(e) =>
-                            updateBetField('splitClozeAnswers', [
-                              localBet.splitClozeAnswers?.[0] || '',
-                              e.target.value,
-                            ])
-                          }
-                          placeholder="Candidate Word #2 (50%)"
-                          className="w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-sm font-semibold text-slate-900 dark:text-white"
-                        />
+                        {(view.sentence.options || []).map((opt, idx) => {
+                          const letter = ['A', 'B', 'C', 'D'][idx] || '';
+                          const splitList = localBet.splitOptions || [];
+                          const isSelected = hasSplitBet
+                            ? splitList.includes(opt)
+                            : localBet.selectedOption === opt;
+                          const isDoubleStacked =
+                            hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
+
+                          return (
+                            <button
+                              key={opt}
+                              ref={idx === 0 ? firstOptionBtnRef : undefined}
+                              type="button"
+                              onClick={() => {
+                                if (hasSplitBet) {
+                                  let next: string[];
+                                  if (splitList.length === 0) {
+                                    next = [opt];
+                                  } else if (splitList.length === 1) {
+                                    next = [splitList[0], opt];
+                                  } else if (splitList.includes(opt)) {
+                                    next = splitList.filter((o) => o !== opt);
+                                  } else {
+                                    next = [splitList[1], opt];
+                                  }
+                                  updateBetField('splitOptions', next);
+                                } else {
+                                  updateBetField('selectedOption', opt);
+                                }
+                              }}
+                              className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-serif font-bold text-sm transition-all cursor-pointer flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                                isSelected
+                                  ? 'bg-emerald-600 text-white border-emerald-300 shadow-md'
+                                  : highlightAnswerMissing
+                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
+                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
+                              }`}
+                            >
+                              <span>
+                                <strong className="font-mono-casino mr-2">{letter}.</strong>
+                                {opt}
+                              </span>
+                              {isDoubleStacked && (
+                                <span className="text-[10px] font-mono-casino bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
+                                  2×
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
-                    ) : (
-                      <input
-                        type="text"
-                        value={localBet.clozeAnswer || ''}
-                        onChange={(e) => updateBetField('clozeAnswer', e.target.value)}
-                        placeholder="Type the single missing word..."
-                        className="w-full min-h-[50px] px-4 rounded-xl bg-white/90 dark:bg-black/50 border-2 border-[#d4af37]/60 text-base font-bold text-slate-900 dark:text-white focus:outline-none focus:border-[#d4af37]"
-                      />
+                    )}
+
+                    {/* Format C: Open Cloze */}
+                    {qType === 'openCloze' && (
+                      <div className="space-y-2.5">
+                        {hasSplitBet ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <input
+                              ref={splitWord1InputRef}
+                              type="text"
+                              value={localBet.splitClozeAnswers?.[0] || ''}
+                              onChange={(e) =>
+                                updateBetField('splitClozeAnswers', [
+                                  e.target.value,
+                                  localBet.splitClozeAnswers?.[1] || '',
+                                ])
+                              }
+                              placeholder="Candidate Word #1 (50%)"
+                              className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
+                                highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
+                              }`}
+                            />
+                            <input
+                              ref={splitWord2InputRef}
+                              type="text"
+                              value={localBet.splitClozeAnswers?.[1] || ''}
+                              onChange={(e) =>
+                                updateBetField('splitClozeAnswers', [
+                                  localBet.splitClozeAnswers?.[0] || '',
+                                  e.target.value,
+                                ])
+                              }
+                              placeholder="Candidate Word #2 (50%)"
+                              className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
+                                highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
+                              }`}
+                            />
+                          </div>
+                        ) : (
+                          <input
+                            ref={clozeWordInputRef}
+                            type="text"
+                            value={localBet.clozeAnswer || ''}
+                            onChange={(e) => updateBetField('clozeAnswer', e.target.value)}
+                            placeholder="Type the single missing word..."
+                            className={`w-full min-h-[50px] px-4 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-base font-bold text-slate-900 dark:text-white focus:outline-none ${
+                              highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/60 focus:border-[#d4af37]'
+                            }`}
+                          />
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
 
-                {/* Wager Amount Controls */}
-                <div className="pt-3 border-t border-[#d4af37]/20 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
-                      2. Set Your Wager
-                    </span>
-                    <span className="text-xs font-mono-casino text-amber-800 dark:text-[#fef08a] tabular-nums">
-                      Max: ${maxAllowedBet.toLocaleString()}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono-casino font-bold text-amber-700 dark:text-[#fef08a]">
-                        $
+                  {/* Wager Amount Controls */}
+                  <div
+                    ref={wagerSectionRef}
+                    className={`pt-3 border-t border-[#d4af37]/20 space-y-2.5 rounded-xl transition-all ${
+                      highlightWagerMissing
+                        ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
+                          2. Set Your Wager
+                        </span>
+                        {highlightWagerMissing && (
+                          <span className="text-[10px] font-serif font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
+                            Required
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs font-mono-casino text-amber-800 dark:text-[#fef08a] tabular-nums">
+                        Max: ${maxAllowedBet.toLocaleString()}
                       </span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={maxAllowedBet}
-                        value={localBet.bet ?? ''}
-                        onChange={(e) => updateBetField('bet', e.target.value)}
-                        placeholder="0"
-                        className="w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 border-[#d4af37]/60 font-mono-casino font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none"
-                      />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono-casino font-bold text-amber-700 dark:text-[#fef08a]">
+                          $
+                        </span>
+                        <input
+                          ref={wagerInputRef}
+                          type="number"
+                          min={0}
+                          max={maxAllowedBet}
+                          value={localBet.bet ?? ''}
+                          onChange={(e) => updateBetField('bet', e.target.value)}
+                          placeholder="0"
+                          className={`w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 font-mono-casino font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none ${
+                            highlightWagerMissing
+                              ? 'border-rose-500 ring-2 ring-rose-500/35'
+                              : 'border-[#d4af37]/60 focus:border-[#d4af37]'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Chip Buttons */}
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { label: '$50', val: Math.min(50, maxAllowedBet) },
+                        { label: '25%', val: Math.floor(maxAllowedBet * 0.25) },
+                        { label: '50%', val: Math.floor(maxAllowedBet * 0.5) },
+                        { label: 'ALL IN', val: maxAllowedBet },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => updateBetField('bet', preset.val)}
+                          className="min-h-[44px] rounded-xl felt-well border border-[#d4af37]/40 hover:border-[#d4af37] font-mono-casino font-bold text-xs text-slate-900 dark:text-[#fef08a] active:scale-95 transition-transform cursor-pointer"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Quick Chip Buttons */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { label: '$50', val: Math.min(50, maxAllowedBet) },
-                      { label: '25%', val: Math.floor(maxAllowedBet * 0.25) },
-                      { label: '50%', val: Math.floor(maxAllowedBet * 0.5) },
-                      { label: 'ALL IN', val: maxAllowedBet },
-                    ].map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        onClick={() => updateBetField('bet', preset.val)}
-                        className="min-h-[44px] rounded-xl felt-well border border-[#d4af37]/40 hover:border-[#d4af37] font-mono-casino font-bold text-xs text-slate-900 dark:text-[#fef08a] active:scale-95 transition-transform cursor-pointer"
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
+                  {/* Hint & Power-Up Row */}
+                  <div className="pt-3 border-t border-[#d4af37]/20 grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      disabled={
+                        Boolean(view.myHint?.text || view.myHint?.isLoading) ||
+                        view.me.money < HINT_COST
+                      }
+                      onClick={() => {
+                        playSound('hint');
+                        sendIntent({ type: 'BUY_HINT' });
+                      }}
+                      className="min-h-[46px] px-3 rounded-xl felt-well border border-amber-400/50 text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>💡</span>
+                      <span>{view.myHint?.text ? 'Hint Active' : `Buy Hint ($${HINT_COST})`}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!view.canBuyPowerUp}
+                      onClick={() => {
+                        playSound('powerUp');
+                        sendIntent({ type: 'BUY_RANDOM_POWER_UP' });
+                      }}
+                      className="min-h-[46px] px-3 rounded-xl bg-purple-600/25 border border-purple-400/60 text-xs font-serif font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-100 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>⚡</span>
+                      <span>Power-Up (${POWERUP_COST})</span>
+                    </button>
                   </div>
                 </div>
-
-                {/* Hint & Power-Up Row */}
-                <div className="pt-3 border-t border-[#d4af37]/20 grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    disabled={
-                      Boolean(view.myHint?.text || view.myHint?.isLoading) ||
-                      view.me.money < HINT_COST
-                    }
-                    onClick={() => {
-                      playSound('hint');
-                      sendIntent({ type: 'BUY_HINT' });
-                    }}
-                    className="min-h-[46px] px-3 rounded-xl felt-well border border-amber-400/50 text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <span>💡</span>
-                    <span>{view.myHint?.text ? 'Hint Active' : `Buy Hint ($${HINT_COST})`}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={!view.canBuyPowerUp}
-                    onClick={() => {
-                      playSound('powerUp');
-                      sendIntent({ type: 'BUY_RANDOM_POWER_UP' });
-                    }}
-                    className="min-h-[46px] px-3 rounded-xl bg-purple-600/25 border border-purple-400/60 text-xs font-serif font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-100 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <span>⚡</span>
-                    <span>Power-Up (${POWERUP_COST})</span>
-                  </button>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </>
         )}
 

@@ -12,6 +12,7 @@ import {
   GameMode,
   QuestionType,
   PlayerEffect,
+  PlayerTurnTimer,
 } from '../types';
 import { BET_CAP_AMOUNT, CLOZE_DISABLED_POWER_UPS } from '../constants';
 
@@ -108,12 +109,14 @@ export interface PlayerViewPayload {
   myRoundResult?: RoundResultInfo | null;
   allRoundResults: RoundResultInfo[];
   winner?: Player | null;
+  roundTimer?: PlayerTurnTimer;
+  turnDurationMs?: number;
 }
 
 export type StudentIntent =
   | { type: 'SET_BET'; field: keyof Bet; value: any }
   | { type: 'SET_FULL_BET'; bet: Partial<Bet> }
-  | { type: 'LOCK_IN'; locked: boolean }
+  | { type: 'LOCK_IN'; locked: boolean; bet?: Partial<Bet> }
   | { type: 'BUY_HINT' }
   | { type: 'BUY_RANDOM_POWER_UP' }
   | { type: 'SELECT_POWER_UP_TARGET'; powerUp: PowerUpKey; targetId: number }
@@ -147,6 +150,8 @@ export interface BuildPlayerViewsParams {
   studentPendingTarget: Record<number, PowerUpKey | null>;
   studentPendingWheel: Record<number, boolean>;
   studentNotifications: Record<number, { id: string; title: string; message: string; icon?: string } | null>;
+  roundTimer?: PlayerTurnTimer;
+  turnDurationMs?: number;
 }
 
 /**
@@ -228,6 +233,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     studentPendingTarget,
     studentPendingWheel,
     studentNotifications,
+    roundTimer,
+    turnDurationMs,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -374,6 +381,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       myRoundResult: myResult,
       allRoundResults: step === 'RESULTS' || step === 'GAME_OVER' ? roundResults : [],
       winner: step === 'GAME_OVER' ? winner : null,
+      roundTimer,
+      turnDurationMs,
     };
   }
 

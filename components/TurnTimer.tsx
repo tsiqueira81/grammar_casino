@@ -233,3 +233,299 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
     </div>
   );
 };
+
+interface MultiplayerRoundTimerFrameProps {
+  timer: PlayerTurnTimer | undefined;
+  turnDurationMs: number;
+  turnTimerSeconds: number;
+  allPlayersLocked: boolean;
+  lockedCount: number;
+  totalActivePlayers: number;
+  autoStartTimer: boolean;
+  onToggleAutoStart: () => void;
+  onStart: () => void;
+  onPause: () => void;
+  onAddTime: () => void;
+  onLockNow: () => void;
+  onReset: () => void;
+  onOpenAiSettings?: () => void;
+  aiStatusLabel?: string;
+  playSound?: (sound: SoundEffect) => void;
+}
+
+/**
+ * Shared Round Timer frame displayed on the Host/Projector in Multiplayer mode
+ * instead of the Turn Sequence frame, since all players bet simultaneously.
+ */
+export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProps> = ({
+  timer,
+  turnDurationMs,
+  turnTimerSeconds,
+  allPlayersLocked,
+  lockedCount,
+  totalActivePlayers,
+  autoStartTimer,
+  onToggleAutoStart,
+  onStart,
+  onPause,
+  onAddTime,
+  onLockNow,
+  onReset,
+  onOpenAiSettings,
+  aiStatusLabel,
+  playSound,
+}) => {
+  const { remainingMs, fraction, isWarning } = useTurnCountdown(timer, turnDurationMs, playSound);
+  const status = timer?.status ?? 'idle';
+  const held = status === 'running' && !!timer?.held;
+
+  let subtitle: string;
+  let subtitleClass = 'text-amber-800 dark:text-amber-200/80';
+  if (allPlayersLocked) {
+    subtitle = `All ${totalActivePlayers} Players Locked In · Ready to Reveal!`;
+    subtitleClass = 'text-emerald-700 dark:text-emerald-300';
+  } else if (status === 'running') {
+    if (held) {
+      subtitle = 'Clock Held · Modal or Hint Open';
+      subtitleClass = 'text-sky-700 dark:text-sky-300';
+    } else if (isWarning) {
+      subtitle = 'Final Seconds! Lock In Your Wagers Now!';
+      subtitleClass = 'text-rose-600 dark:text-rose-400 animate-pulse';
+    } else {
+      subtitle = `All Players Betting Simultaneously (${lockedCount}/${totalActivePlayers} Locked)`;
+      subtitleClass = 'text-emerald-700 dark:text-emerald-300';
+    }
+  } else if (status === 'paused') {
+    subtitle = `Timer Paused by Teacher (${lockedCount}/${totalActivePlayers} Locked)`;
+    subtitleClass = 'text-sky-700 dark:text-sky-300';
+  } else if (status === 'locked') {
+    subtitle = "Time's Up · Round Betting Closed";
+    subtitleClass = 'text-rose-700 dark:text-rose-300';
+  } else {
+    subtitle = `Simultaneous Betting Open · Click Start for ${turnTimerSeconds}s Countdown`;
+  }
+
+  const clockClass =
+    allPlayersLocked
+      ? 'text-emerald-600 dark:text-emerald-400'
+      : status === 'locked'
+        ? 'text-rose-600 dark:text-rose-400'
+        : isWarning
+          ? 'text-rose-600 dark:text-rose-400 animate-pulse drop-shadow-[0_0_12px_rgba(244,63,94,0.65)]'
+          : status === 'paused' || held
+            ? 'text-sky-700 dark:text-sky-300'
+            : 'text-amber-900 dark:text-[#fef08a] drop-shadow-[0_0_10px_rgba(212,175,55,0.35)]';
+
+  const barColor =
+    allPlayersLocked
+      ? 'from-emerald-400 via-emerald-500 to-emerald-600'
+      : status === 'locked'
+        ? 'from-rose-500 to-rose-700'
+        : isWarning
+          ? 'from-rose-500 via-red-500 to-amber-500 animate-pulse'
+          : status === 'paused' || held
+            ? 'from-sky-400 to-sky-600'
+            : fraction < 0.35
+              ? 'from-amber-400 to-orange-500'
+              : 'from-[#fef08a] via-[#d4af37] to-emerald-500';
+
+  return (
+    <div
+      className={`mb-5 p-4 sm:px-6 rounded-2xl glass-panel border-2 transition-all flex flex-col gap-3 ${
+        isWarning && !allPlayersLocked
+          ? 'border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
+          : allPlayersLocked
+            ? 'border-emerald-500/80 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
+            : status === 'running' && !held
+              ? 'border-emerald-500/60 shadow-[0_0_18px_rgba(16,185,129,0.18)]'
+              : 'border-[#d4af37]/60'
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* Left: Label + Big Shared Countdown Clock */}
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl felt-well border border-[#d4af37]/50 flex items-center justify-center text-2xl sm:text-3xl select-none shrink-0">
+            {allPlayersLocked ? '✅' : status === 'locked' ? '🔒' : isWarning ? '🚨' : '⏱️'}
+          </div>
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] sm:text-xs font-serif font-extrabold uppercase tracking-[0.22em] text-amber-900 dark:text-[#d4af37]">
+                Shared Round Timer ({turnTimerSeconds}s)
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]">
+                🔒 {lockedCount}/{totalActivePlayers} Locked
+              </span>
+            </div>
+            <span className={`text-xs sm:text-sm font-serif font-bold truncate ${subtitleClass}`}>
+              {subtitle}
+            </span>
+          </div>
+        </div>
+
+        {/* Center/Right: Giant Digital Clock Display + Teacher Controls */}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 ml-auto">
+          <div className="px-4 py-1.5 rounded-2xl felt-well border border-[#d4af37]/50 flex items-center gap-2">
+            <span className="text-[10px] font-serif uppercase tracking-widest text-amber-800/80 dark:text-amber-200/70 font-bold">
+              Time Left
+            </span>
+            <span
+              className={`font-mono-casino font-black text-3xl sm:text-4xl tabular-nums tracking-tight ${clockClass}`}
+              aria-live="off"
+            >
+              {formatClock(remainingMs)}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(status === 'idle' || status === 'paused') && !allPlayersLocked && (
+              <button
+                type="button"
+                onClick={onStart}
+                className={`${btnBase} bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border-emerald-300/80 shadow-[0_2px_0_#064e3b] px-3.5 py-2 text-xs`}
+              >
+                ▶ {status === 'paused' ? 'Resume' : 'Start Timer'}
+              </button>
+            )}
+            {status === 'running' && (
+              <button
+                type="button"
+                onClick={onPause}
+                className={`${btnBase} bg-gradient-to-b from-sky-500 to-sky-700 text-white border-sky-300/70 shadow-[0_2px_0_#0c4a6e] px-3 py-2 text-xs`}
+              >
+                ⏸ Pause
+              </button>
+            )}
+            {(status === 'running' || status === 'paused') && (
+              <>
+                <button
+                  type="button"
+                  onClick={onAddTime}
+                  title={`Add ${TURN_TIMER_BONUS_MS / 1000} seconds to the round timer`}
+                  className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
+                >
+                  +{TURN_TIMER_BONUS_MS / 1000}s
+                </button>
+                <button
+                  type="button"
+                  onClick={onLockNow}
+                  title="End the round timer immediately and lock betting"
+                  className={`${btnBase} bg-black/10 dark:bg-black/40 text-slate-800 dark:text-slate-200 border-slate-400/50 hover:border-slate-300 px-3 py-2 text-xs`}
+                >
+                  🔒 End Timer
+                </button>
+              </>
+            )}
+            {(status === 'locked' || status === 'paused') && (
+              <button
+                type="button"
+                onClick={onReset}
+                title="Reset and reopen the round timer for all players"
+                className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
+              >
+                {status === 'locked' ? '🔓 Reopen Timer' : '↺ Reset'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onToggleAutoStart}
+              className={`px-3 py-2 rounded-lg text-[10px] sm:text-[11px] font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                autoStartTimer
+                  ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
+                  : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
+              }`}
+              title="Automatically start the shared round timer when each hand is dealt"
+            >
+              Auto-Start: {autoStartTimer ? 'ON' : 'OFF'}
+            </button>
+            {onOpenAiSettings && aiStatusLabel && (
+              <button
+                type="button"
+                onClick={onOpenAiSettings}
+                className="px-3 py-1.5 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                title="Click to view AI & Offline Settings"
+              >
+                <span>{aiStatusLabel}</span>
+                <span className="text-[10px] text-amber-600 dark:text-amber-400">⚙️</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Full-width Countdown Progress Bar */}
+      <div className="w-full h-2.5 rounded-full bg-black/15 dark:bg-black/50 overflow-hidden p-0.5 border border-[#d4af37]/25">
+        <div
+          className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-200`}
+          style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Compact live round countdown bar displayed on Student Mobile Controllers
+ * when the teacher has enabled a Round Timer in Multiplayer mode.
+ */
+export const StudentRoundTimerBar: React.FC<{
+  timer: PlayerTurnTimer | undefined;
+  turnDurationMs: number;
+  lockedIn: boolean;
+}> = ({ timer, turnDurationMs, lockedIn }) => {
+  const { remainingMs, fraction, isWarning } = useTurnCountdown(timer, turnDurationMs);
+  const status = timer?.status ?? 'idle';
+  const held = status === 'running' && !!timer?.held;
+
+  return (
+    <div
+      className={`p-3 rounded-2xl glass-panel border transition-all flex flex-col gap-2 ${
+        isWarning && !lockedIn
+          ? 'border-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.3)]'
+          : lockedIn
+            ? 'border-emerald-500/60'
+            : 'border-[#d4af37]/50'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{lockedIn ? '✅' : status === 'locked' ? '🔒' : isWarning ? '🚨' : '⏱️'}</span>
+          <span className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+            {status === 'locked'
+              ? "Time's Up · Round Closed"
+              : status === 'paused' || held
+                ? 'Round Timer Paused'
+                : status === 'running'
+                  ? isWarning
+                    ? 'Hurry! Lock In Your Wager!'
+                    : 'Round Timer Running'
+                  : 'Round Timer Ready'}
+          </span>
+        </div>
+        <span
+          className={`font-mono-casino font-black text-xl tabular-nums ${
+            status === 'locked'
+              ? 'text-rose-600 dark:text-rose-400'
+              : isWarning && !lockedIn
+                ? 'text-rose-600 dark:text-rose-400 animate-pulse'
+                : 'text-amber-900 dark:text-[#fef08a]'
+          }`}
+        >
+          {formatClock(remainingMs)}
+        </span>
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-black/15 dark:bg-black/50 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-200 ${
+            isWarning && !lockedIn
+              ? 'bg-rose-500 animate-pulse'
+              : lockedIn
+                ? 'bg-emerald-500'
+                : 'bg-gradient-to-r from-[#fef08a] via-[#d4af37] to-emerald-500'
+          }`}
+          style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+

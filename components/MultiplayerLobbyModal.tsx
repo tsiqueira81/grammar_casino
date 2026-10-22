@@ -62,7 +62,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
 
   const baseOrigin =
     useNetlifyUrl || isFileProtocol
-      ? 'https://grammarcasino.netlify.app/'
+      ? 'https://siqueiragrammarcasino.netlify.app/'
       : sharedCurrentOrigin;
 
   const joinUrl = roomCode ? `${baseOrigin}?room=${roomCode}` : '';
@@ -222,7 +222,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                           className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-mono-casino text-[10px] cursor-pointer transition-colors"
                         >
                           {useNetlifyUrl
-                            ? '🌐 Public Web (grammarcasino.netlify.app) · Switch to Shared Host'
+                            ? '🌐 Public Web (siqueiragrammarcasino.netlify.app) · Switch to Shared Host'
                             : '🔗 Shared Host (ais-pre) · Switch to Public Netlify URL'}
                         </button>
                       </div>
@@ -231,8 +231,8 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                           {useNetlifyUrl ? (
                             <span>
                               <strong>Public Mode (Recommended):</strong> Students join via{' '}
-                              <span className="font-mono-casino">grammarcasino.netlify.app</span> with{' '}
-                              <strong>no Google login required</strong> (make sure your latest build is deployed to Netlify).
+                              <span className="font-mono-casino">siqueiragrammarcasino.netlify.app</span> with{' '}
+                              <strong>no Google login required</strong>.
                             </span>
                           ) : (
                             <span>
