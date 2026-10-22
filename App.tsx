@@ -548,7 +548,7 @@ export function App() {
     const anyModalOpen = Boolean(
       error ||
       historyPlayer ||
-      showPowerUpModal ||
+      (!mpRoomCode && showPowerUpModal) ||
       showTargetModal ||
       showAvatarModal ||
       showWheelModal ||
@@ -562,7 +562,7 @@ export function App() {
     const anyHintLoading = (Object.values(hints) as Hint[]).some(h => Boolean(h?.isLoading));
     return anyModalOpen || anyHintLoading;
   }, [
-    error, historyPlayer, showPowerUpModal, showTargetModal, showAvatarModal,
+    error, historyPlayer, mpRoomCode, showPowerUpModal, showTargetModal, showAvatarModal,
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
     showDeckConfigModal, isLoading, isProcessing, hints
   ]);
@@ -1627,7 +1627,7 @@ export function App() {
                 return p;
             });
             setPlayers(updatedTaxedPlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p)); 
-            modalMessage = `${powerUp.icon} You collected $${taxCollected} from other players!`;
+            modalMessage = `${powerUp.icon} Stole $${TAXMAN_AMOUNT} per rival — collected $${taxCollected.toLocaleString()} total!`;
         } else if (powerUpKey === 'THE_TITHE') {
              let taxCollected = 0;
              const updatedTithePlayers = players.map(p => {
@@ -1641,7 +1641,7 @@ export function App() {
                 return p;
              });
              setPlayers(updatedTithePlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p));
-             modalMessage = `${powerUp.icon} You tithed $${taxCollected} (10%) from others!`;
+             modalMessage = `${powerUp.icon} Tithed 10% per rival — collected $${taxCollected.toLocaleString()} total!`;
         } else if (powerUpKey === 'GENEROUS') {
             const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
             const totalGiftCost = activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT;
@@ -1651,7 +1651,7 @@ export function App() {
                 if (activePlayers.find(ap => ap.id === p.id)) return {...p, money: p.money + GENEROUS_GIFT_AMOUNT}; 
                 return p;
             }));
-             modalMessage = `${powerUp.icon} You gave $${GENEROUS_GIFT_AMOUNT} to ${activeOtherPlayersCount} other player(s).`;
+             modalMessage = `${powerUp.icon} Gave $${GENEROUS_GIFT_AMOUNT} to ${activeOtherPlayersCount} other player(s).`;
         } else if (powerUpKey === 'GUARDIAN_ANGEL') {
             const newActivePowerUps = { ...activePowerUps };
             Object.keys(newActivePowerUps).forEach(sourceId => {
@@ -1671,7 +1671,7 @@ export function App() {
                 }
                 return p;
             }));
-            modalMessage = `${powerUp.icon} You are cleansed and protected!`;
+            modalMessage = `${powerUp.icon} Cleared negative effects and blocked rival attacks this round.`;
         } else if (powerUpKey === 'BLESSING') {
              setPlayers(ps => ps.map(p => {
                  if (p.id === playerId) {
@@ -1679,7 +1679,7 @@ export function App() {
                  }
                  return p;
              }));
-             modalMessage = `${powerUp.icon} You are Blessed for 3 rounds! (30% of your losses will be forgiven)`;
+             modalMessage = `${powerUp.icon} Reduces any bet losses by 30% for the next 3 rounds.`;
         } else if (powerUpKey === 'SECOND_CHANCE') {
              setPlayers(ps => ps.map(p => {
                  if (p.id === playerId) {
@@ -1687,7 +1687,7 @@ export function App() {
                  }
                  return p;
              }));
-             modalMessage = `${powerUp.icon} You have a Second Chance! (Auto-revive at $0)`;
+             modalMessage = `${powerUp.icon} Auto-revives you with $100 the next time you hit $0.`;
         } else if (powerUpKey === 'ROBIN_HOOD') {
              const richestAmount = Math.max(...activePlayers.map(p => p.money));
              const richestPlayers = activePlayers.filter(p => p.money === richestAmount);
@@ -1724,15 +1724,13 @@ export function App() {
                      return p;
                  }));
                  
-                 modalMessage = `${powerUp.icon} Robin Hood Redistribution!\n\n` + 
-                                `📉 Taken from:\n${stolenLog.join('\n')}\n\n` +
-                                `📈 Given to:\n${receivedLog.join('\n')}`;
+                 modalMessage = `${powerUp.icon} Took 20% from ${stolenLog.join(', ')} and shared it with ${receivedLog.join(', ')}.`;
              } else {
                  setPlayers(newPlayerState); 
                  if (totalStolen > 0) {
-                     modalMessage = `${powerUp.icon} Robin Hood stole from ${stolenLog.join(', ')} but found no one else to give to! (Money lost)`;
+                     modalMessage = `${powerUp.icon} Took 20% from ${stolenLog.join(', ')}, with no eligible players to receive it.`;
                  } else {
-                     modalMessage = `${powerUp.icon} Robin Hood found the rich too heavily guarded! No money stolen.`;
+                     modalMessage = `${powerUp.icon} The richest player is shielded — no money stolen.`;
                  }
              }
 
@@ -1753,7 +1751,7 @@ export function App() {
                     }
                     return p;
                 }));
-                modalMessage = `${powerUp.icon} Teacher's Pet Honor Roll! You already have a ${player.winStreak}-round win streak! The House grants you an additional 50% of your funds (+$${grant.toLocaleString()})!`;
+                modalMessage = `${powerUp.icon} 3-win streak active! Instant +50% bankroll bonus (+$${grant.toLocaleString()}).`;
             } else {
                 setPlayers(ps => ps.map(p => {
                     if (p.id === playerId) {
@@ -1763,14 +1761,14 @@ export function App() {
                     return p;
                 }));
                 setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-                modalMessage = `${powerUp.icon} Teacher's Pet Active! Whenever you reach a 3-win streak, the House will grant you +50% of your funds! (Current streak: ${player.winStreak}/3)`;
+                modalMessage = `${powerUp.icon} Reach a 3-win streak to earn +50% of your bankroll (Current: ${player.winStreak}/3).`;
             }
         } else if (powerUpKey === 'CORRECTION_BOUNTY') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-            modalMessage = `${powerUp.icon} Correction Bounty Active! If the sentence is Incorrect, you bet on "Incorrect", and properly correct it, you will earn an extra bonus of 100% of your bet!`;
+            modalMessage = `${powerUp.icon} ${powerUp.description}`;
         } else if (powerUpKey === 'LONE_WOLF') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-            modalMessage = `${powerUp.icon} Lone Wolf Active! If you are the only player at the table who bets on the correct outcome while all other players pick the wrong side, you win a 3× payout!`;
+            modalMessage = `${powerUp.icon} ${powerUp.description}`;
         } else {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         }
@@ -1779,9 +1777,8 @@ export function App() {
             ...prev,
             [playerId]: { id: String(Date.now()), title: powerUp.name, message: modalMessage, icon: powerUp.icon },
           }));
-        } else {
-          setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon});
         }
+        setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon });
     }
   }, [canPlayerAct, players, activePlayers, currentSentence, availablePowerUps, bets, powerUpsUsedThisRound, playSound, activePowerUps, mpRoomCode, mpSeats]); 
 
@@ -1903,7 +1900,7 @@ export function App() {
     }
 
     const wheelTitle = item.type === 'positive' ? '🎡 Fortune Smiled!' : '🎡 Misfortune Struck!';
-    const wheelMsg = `${item.icon} ${item.name} (${item.shortDesc}): ${item.description}`;
+    const wheelMsg = `${item.icon} ${item.name}: ${item.description}`;
     if (mpRoomCode && mpSeats[playerId]) {
       setMpStudentPendingWheel(prev => {
         const next = { ...prev };
@@ -1914,13 +1911,12 @@ export function App() {
         ...prev,
         [playerId]: { id: String(Date.now()), title: wheelTitle, message: wheelMsg, icon: item.icon },
       }));
-    } else {
-      setShowPowerUpModal({
-        title: wheelTitle,
-        message: wheelMsg,
-        icon: item.icon,
-      });
     }
+    setShowPowerUpModal({
+      title: wheelTitle,
+      message: wheelMsg,
+      icon: item.icon,
+    });
   }, [bets, activePowerUps, players, mpRoomCode, mpSeats]); 
   
   const handleBuyRandomPowerUp = useCallback((playerId: number) => {
@@ -2086,6 +2082,7 @@ export function App() {
     if (powerUpKey === 'THE_PUNISHER') {
         const newMoney = Math.floor(targetPlayer.money * 0.75);
         setPlayers(ps => ps.map(p => p.id === targetId ? {...p, money: newMoney} : p));
+        customModalMessage = `${powerUpInfo.icon} Cut ${targetPlayer.name}'s bankroll by 25% (now $${newMoney.toLocaleString()}).`;
     } else if (powerUpKey === 'SWAP') {
         const sourcePlayer = players.find(p => p.id === playerId);
         const sourceFunds = sourcePlayer ? sourcePlayer.money : 0;
@@ -2108,7 +2105,7 @@ export function App() {
             }
             return changed ? nextBets : prevBets;
         });
-        customModalMessage = `${powerUpInfo.icon} Vault Swap! You swapped your $${sourceFunds.toLocaleString()} with ${targetPlayer.name}'s $${targetFunds.toLocaleString()}!`;
+        customModalMessage = `${powerUpInfo.icon} Swapped bankrolls with ${targetPlayer.name} ($${sourceFunds.toLocaleString()} ↔ $${targetFunds.toLocaleString()}).`;
     } else if (powerUpKey === 'CRUCIO') {
         setPlayers(ps => ps.map(p => {
             if (p.id === targetId) {
@@ -2144,7 +2141,7 @@ export function App() {
     }
 
     playSound('powerUp');
-    const finalMsg = customModalMessage || `${powerUpInfo.icon} You used ${powerUpInfo.name} on ${targetPlayer.name}. ${powerUpInfo.description}`;
+    const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${powerUpInfo.description}`;
     if (isRemoteBuyer) {
       setMpStudentPendingTarget(prev => {
         const next = { ...prev };
@@ -2157,8 +2154,8 @@ export function App() {
       }));
     } else {
       setShowTargetModal(null);
-      setShowPowerUpModal({ title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon});
     }
+    setShowPowerUpModal({ title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon });
   }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats]); 
 
   const handleCancelTargetModal = useCallback((overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {

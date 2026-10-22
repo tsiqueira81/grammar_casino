@@ -128,7 +128,7 @@ function getStatus() {
 }
 
 // --- Gemini Client & Rotation Setup ---
-const TEXT_MODELS = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+const TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
 const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
 const modelCooldownUntil = new Map();
 

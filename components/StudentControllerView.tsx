@@ -13,6 +13,7 @@ import {
 } from '../utils/multiplayerProtocol';
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
+import Modal from './Modal';
 import { StudentRoundTimerBar } from './TurnTimer';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
@@ -49,7 +50,6 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
   const [localBet, setLocalBet] = useState<Bet>({});
-  const [seenNotificationId, setSeenNotificationId] = useState<string | null>(null);
   const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [lockWarning, setLockWarning] = useState<{
@@ -58,6 +58,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   } | null>(null);
 
   const controllerRef = useRef<StudentRoomController | null>(null);
+  const seenNotificationIdRef = useRef<string | null>(null);
   const lastRoundRef = useRef<number>(0);
   const lastStepRef = useRef<string>('');
 
@@ -133,17 +134,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
       if (
         nextView.lastNotification &&
-        nextView.lastNotification.id !== seenNotificationId
+        nextView.lastNotification.id !== seenNotificationIdRef.current
       ) {
-        setSeenNotificationId(nextView.lastNotification.id);
+        seenNotificationIdRef.current = nextView.lastNotification.id;
         setActiveToast({
           title: nextView.lastNotification.title,
           message: nextView.lastNotification.message,
           icon: nextView.lastNotification.icon,
         });
+        playSound('powerUp');
       }
     },
-    [seenNotificationId]
+    [playSound]
   );
 
   const handleJoinRoom = async (
@@ -575,29 +577,6 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
       {/* Main Content Container */}
       <main className="w-full max-w-xl mx-auto px-3 sm:px-4 pt-4 space-y-4 flex-1">
-        {/* Toast Alert */}
-        {activeToast && (
-          <div className="p-3.5 rounded-2xl glass-panel border border-[#d4af37] flex items-center justify-between gap-3 animate-fade-in">
-            <div className="flex items-center gap-2.5 text-left">
-              <span className="text-2xl shrink-0">{activeToast.icon || '✨'}</span>
-              <div>
-                <div className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">
-                  {activeToast.title}
-                </div>
-                <div className="text-xs text-slate-700 dark:text-amber-100/90 leading-snug">
-                  {activeToast.message}
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveToast(null)}
-              className="min-h-[40px] min-w-[40px] text-lg font-bold text-slate-500 hover:text-white"
-            >
-              &times;
-            </button>
-          </div>
-        )}
 
         {/* ================================================================
             WAITING IN LOBBY (PLAYER_SETUP or SETTINGS)
@@ -1259,6 +1238,25 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           }}
           playSound={playSound}
         />
+      )}
+
+      {/* Power-Up Activation Modal Window */}
+      {activeToast && (
+        <Modal
+          title={activeToast.title}
+          onClose={() => setActiveToast(null)}
+          playSound={playSound}
+          hideCloseButton
+        >
+          <div className="text-center py-4">
+            <div className="text-7xl mb-5 filter drop-shadow-lg flex justify-center">
+              <span>{activeToast.icon || '✨'}</span>
+            </div>
+            <p className="text-lg sm:text-xl text-slate-800 dark:text-slate-200 font-medium leading-relaxed whitespace-pre-line">
+              {activeToast.message}
+            </p>
+          </div>
+        </Modal>
       )}
     </div>
   );
