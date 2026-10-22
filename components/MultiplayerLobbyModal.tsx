@@ -37,18 +37,25 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const isNetlifyHost =
+    typeof window !== 'undefined' && window.location.hostname.includes('netlify.app');
+  const isFileProtocol =
+    typeof window !== 'undefined' && window.location.protocol === 'file:';
+  const [useNetlifyUrl, setUseNetlifyUrl] = useState<boolean>(() => isFileProtocol);
 
-  const joinUrl = roomCode
-    ? `${window.location.origin}${window.location.pathname}?room=${roomCode}`
-    : '';
+  const baseOrigin =
+    useNetlifyUrl || isFileProtocol
+      ? 'https://grammarcasino.netlify.app/'
+      : `${window.location.origin}${window.location.pathname}`;
+
+  const joinUrl = roomCode ? `${baseOrigin}?room=${roomCode}` : '';
 
   useEffect(() => {
-    if (!roomCode) {
+    if (!roomCode || !joinUrl) {
       setQrDataUrl('');
       return;
     }
-    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-    QRCode.toDataURL(url, {
+    QRCode.toDataURL(joinUrl, {
       width: 260,
       margin: 2,
       color: {
@@ -58,7 +65,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
     })
       .then(setQrDataUrl)
       .catch((err) => console.error('QR generation failed:', err));
-  }, [roomCode]);
+  }, [roomCode, joinUrl]);
 
   if (!isOpen) return null;
 
@@ -184,6 +191,24 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       {copiedLink ? 'Copied ✓' : 'Copy Link'}
                     </button>
                   </div>
+
+                  {!isNetlifyHost && !isFileProtocol && (
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-amber-200/75">
+                      <span>QR Target URL:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setUseNetlifyUrl((prev) => !prev);
+                        }}
+                        className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-mono-casino text-[10px] cursor-pointer transition-colors"
+                      >
+                        {useNetlifyUrl
+                          ? '🌐 grammarcasino.netlify.app (Switch to Current Host)'
+                          : '🖥️ Current Host (Switch QR to Netlify)'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Host Controls */}
