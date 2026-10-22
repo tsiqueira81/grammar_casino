@@ -5,7 +5,7 @@ import {
   POWERUP_COST,
   POWER_UPS,
 } from '../constants';
-import { Bet, PowerUpKey, QuestionType, SoundEffect, WheelItem } from '../types';
+import { Bet, Player, PowerUpKey, QuestionType, SoundEffect, WheelItem } from '../types';
 import {
   PlayerViewPayload,
   StudentIntent,
@@ -15,6 +15,7 @@ import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
 import Modal from './Modal';
 import { StudentRoundTimerBar } from './TurnTimer';
+import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
 
@@ -52,6 +53,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [localBet, setLocalBet] = useState<Bet>({});
   const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfStatusToast, setPdfStatusToast] = useState<string | null>(null);
   const [lockWarning, setLockWarning] = useState<{
     message: string;
     missingField: 'answer' | 'wager' | 'both';
@@ -1043,9 +1046,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         )}
 
         {/* ================================================================
-            ROUND RESULTS & GAME OVER (RESULTS / GAME_OVER)
+            ROUND RESULTS (RESULTS)
            ================================================================ */}
-        {(view.step === 'RESULTS' || view.step === 'GAME_OVER') && (
+        {view.step === 'RESULTS' && (
           <div className="space-y-4 animate-fade-in">
             {/* Personal Outcome Banner */}
             {view.myRoundResult && (
@@ -1100,7 +1103,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {/* Live Standings */}
             <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
               <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
-                {view.step === 'GAME_OVER' ? '🏆 Final Standings' : 'Table Standings'}
+                Table Standings
               </div>
               <div className="divide-y divide-[#d4af37]/15">
                 {[...view.peers]
@@ -1126,6 +1129,220 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
           </div>
         )}
+
+        {/* ================================================================
+            TABLE CLOSED / GAME OVER (GAME_OVER)
+           ================================================================ */}
+        {view.step === 'GAME_OVER' && (() => {
+          const sortedPeers = [...view.peers].sort((a, b) => b.money - a.money);
+          const myRank = Math.max(1, sortedPeers.findIndex(p => p.id === view.me.id) + 1);
+          const history = view.roundHistory || [];
+          let myTotalHands = 0;
+          let myWins = 0;
+          history.forEach(round => {
+            const res = round.playerResults.find(
+              pr => pr.playerId === view.me.id || pr.playerName === view.me.name
+            );
+            if (res) {
+              myTotalHands++;
+              if (res.isWin) myWins++;
+            }
+          });
+          const myAccuracy = myTotalHands > 0 ? Math.round((myWins / myTotalHands) * 100) : 0;
+          const isMeChampion = view.winner?.id === view.me.id;
+
+          const handleDownloadPdf = () => {
+            if (isGeneratingPdf || history.length === 0) return;
+            playSound('click');
+            setIsGeneratingPdf(true);
+            setPdfStatusToast(null);
+
+            setTimeout(() => {
+              try {
+                const reportPlayers: Player[] = view.peers.map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  avatar: p.avatar,
+                  money: p.money,
+                  winStreak: p.winStreak,
+                  effects: p.effects,
+                  history: [],
+                }));
+
+                const doc = generateGrammarReportPDF({
+                  history,
+                  players: reportPlayers,
+                  winner: view.winner || null,
+                  settings: {
+                    topic: view.settings.topic,
+                    level: view.settings.level as any,
+                    theme: view.settings.theme,
+                  },
+                  gameMode: view.gameMode,
+                  totalRounds: view.totalRounds,
+                  targetAmount: view.targetAmount,
+                  filterName: 'All Rounds',
+                });
+
+                const dateStamp = new Date().toISOString().slice(0, 10);
+                doc.save(`Grammar_Casino_Report_Card_${dateStamp}.pdf`);
+                playSound('success');
+                setPdfStatusToast('✨ Grammar Report Card PDF downloaded!');
+                setTimeout(() => setPdfStatusToast(null), 4000);
+              } catch (err) {
+                console.error('Failed to generate PDF on student device:', err);
+                setPdfStatusToast('⚠️ Could not generate PDF. Please try again.');
+                setTimeout(() => setPdfStatusToast(null), 4000);
+              } finally {
+                setIsGeneratingPdf(false);
+              }
+            }, 100);
+          };
+
+          return (
+            <div className="space-y-4 animate-fade-in pb-8">
+              {/* Table Closed Header Banner */}
+              <div className="text-center pt-2 pb-1">
+                <div className="text-[11px] font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] font-bold">
+                  Salon Privé · Final Settlement
+                </div>
+                <h1 className="text-3xl sm:text-4xl font-black text-gold tracking-wider font-display title-glow mt-1">
+                  TABLE CLOSED
+                </h1>
+                <div className="h-[1px] w-36 mx-auto bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mt-2" />
+              </div>
+
+              {/* Champion Card */}
+              {view.winner ? (
+                <div className="luxury-card rounded-3xl p-6 text-center relative border-2 border-[#d4af37] shadow-2xl space-y-3">
+                  <div className="text-4xl filter drop-shadow">👑</div>
+                  <div className="w-20 h-20 mx-auto rounded-full border-3 border-[#d4af37] felt-well flex items-center justify-center text-5xl shadow-lg">
+                    {view.winner.avatar}
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#fef08a] font-bold">
+                      {isMeChampion ? '🎉 You Are The Champion!' : 'Grand Salon Champion'}
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-serif font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider mt-0.5">
+                      {view.winner.name}
+                    </h2>
+                  </div>
+                  <div className="felt-well rounded-2xl p-3.5 border border-[#d4af37]/30">
+                    <div className="text-[10px] font-serif uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
+                      Winning Vault Balance
+                    </div>
+                    <div className="text-3xl font-mono-casino font-black text-gold-flat tabular-nums mt-0.5">
+                      ${view.winner.money.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="luxury-card rounded-3xl p-6 text-center border-2 border-[#d4af37]/50 shadow-xl space-y-2">
+                  <div className="text-5xl">🏛️</div>
+                  <h2 className="text-2xl font-serif font-extrabold text-slate-900 dark:text-amber-100 uppercase tracking-wider">
+                    The House Prevails
+                  </h2>
+                  <p className="text-xs text-slate-600 dark:text-amber-200/70 font-editorial italic">
+                    Final accounts have been settled at the table.
+                  </p>
+                </div>
+              )}
+
+              {/* Personal Session Stats */}
+              <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/50 space-y-3">
+                <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37] flex items-center justify-between">
+                  <span>Your Final Summary</span>
+                  <span className="font-mono-casino text-slate-700 dark:text-[#fef08a]">
+                    Rank #{myRank} of {sortedPeers.length}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5 text-center">
+                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
+                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                      Final Vault
+                    </div>
+                    <div className="text-base sm:text-lg font-mono-casino font-black text-emerald-700 dark:text-[#fef08a] tabular-nums mt-0.5">
+                      ${view.me.money.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
+                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                      Hands Won
+                    </div>
+                    <div className="text-base sm:text-lg font-mono-casino font-black text-slate-900 dark:text-amber-50 tabular-nums mt-0.5">
+                      {myWins}/{myTotalHands}
+                    </div>
+                  </div>
+                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
+                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                      Accuracy
+                    </div>
+                    <div className="text-base sm:text-lg font-mono-casino font-black text-amber-800 dark:text-amber-300 tabular-nums mt-0.5">
+                      {myAccuracy}%
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Download PDF Report Card CTA */}
+              {history.length > 0 && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={isGeneratingPdf}
+                    className="w-full min-h-[52px] px-5 py-3.5 rounded-2xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] font-serif font-black text-sm sm:text-base uppercase tracking-[0.14em] shadow-xl active:scale-98 transition-all cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2.5"
+                  >
+                    {isGeneratingPdf ? (
+                      <>
+                        <span className="animate-spin text-base">⏳</span>
+                        <span>Generating Report Card PDF...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-lg leading-none">📄</span>
+                        <span>Download Grammar Report Card (PDF)</span>
+                      </>
+                    )}
+                  </button>
+                  {pdfStatusToast && (
+                    <div className="text-center text-xs font-serif font-bold text-emerald-700 dark:text-emerald-300 py-1 animate-fade-in">
+                      {pdfStatusToast}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Final Standings Leaderboard */}
+              <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
+                <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
+                  🏆 Final Standings
+                </div>
+                <div className="divide-y divide-[#d4af37]/15">
+                  {sortedPeers.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      className={`py-2.5 flex items-center justify-between text-sm ${
+                        p.id === view.me.id ? 'font-extrabold text-amber-700 dark:text-[#fef08a]' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="font-mono-casino text-xs opacity-70 w-6">
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                        </span>
+                        <span className="text-xl">{p.avatar}</span>
+                        <span className="truncate font-serif uppercase">{p.name}</span>
+                      </div>
+                      <span className="font-mono-casino font-bold tabular-nums">
+                        ${p.money.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </main>
 
       {/* Sticky Bottom CTA Bar during IN_GAME */}

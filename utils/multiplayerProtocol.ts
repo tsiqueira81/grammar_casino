@@ -13,6 +13,7 @@ import {
   QuestionType,
   PlayerEffect,
   PlayerTurnTimer,
+  RoundHistoryRecord,
 } from '../types';
 import { BET_CAP_AMOUNT, CLOZE_DISABLED_POWER_UPS } from '../constants';
 
@@ -109,6 +110,7 @@ export interface PlayerViewPayload {
   myRoundResult?: RoundResultInfo | null;
   allRoundResults: RoundResultInfo[];
   winner?: Player | null;
+  roundHistory?: RoundHistoryRecord[];
   roundTimer?: PlayerTurnTimer;
   turnDurationMs?: number;
 }
@@ -146,6 +148,7 @@ export interface BuildPlayerViewsParams {
   availablePowerUps: PowerUpKey[];
   currentSentence: GeneratedSentence | null;
   roundResults: RoundResultInfo[];
+  roundHistory?: RoundHistoryRecord[];
   winner: Player | null;
   studentPendingTarget: Record<number, PowerUpKey | null>;
   studentPendingWheel: Record<number, boolean>;
@@ -229,6 +232,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     availablePowerUps,
     currentSentence,
     roundResults,
+    roundHistory,
     winner,
     studentPendingTarget,
     studentPendingWheel,
@@ -381,6 +385,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       myRoundResult: myResult,
       allRoundResults: step === 'RESULTS' || step === 'GAME_OVER' ? roundResults : [],
       winner: step === 'GAME_OVER' ? winner : null,
+      roundHistory: step === 'GAME_OVER' ? (roundHistory || []) : undefined,
       roundTimer,
       turnDurationMs,
     };

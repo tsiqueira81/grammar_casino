@@ -2432,6 +2432,7 @@ export function App() {
       powerUpsUsedThisRound,
       availablePowerUps,
       roundResults,
+      roundHistory,
       winner,
       studentPendingTarget: mpStudentPendingTarget,
       studentPendingWheel: mpStudentPendingWheel,
@@ -2462,6 +2463,7 @@ export function App() {
     powerUpsUsedThisRound,
     availablePowerUps,
     roundResults,
+    roundHistory,
     winner,
     mpStudentPendingTarget,
     mpStudentPendingWheel,
@@ -3658,11 +3660,16 @@ export function App() {
     setSimplifiedExplanation({ text: null, loading: true });
     setError(null);
     try {
-        const simplified = await GeminiService.simplifyExplanation(currentSentence.explanation, settings.topic);
-        setSimplifiedExplanation({ text: simplified, loading: false });
+        const detailed = await GeminiService.simplifyExplanation(
+          currentSentence.explanation,
+          settings.topic,
+          currentSentence.text,
+          currentSentence.correction
+        );
+        setSimplifiedExplanation({ text: detailed, loading: false });
         playSound('hint');
     } catch (err: any) {
-        setError({ title: "AI Error", message: err.message || "Couldn't simplify the explanation. Please try again." });
+        setError({ title: "AI Error", message: err.message || "Couldn't load the detailed explanation. Please try again." });
         setSimplifiedExplanation({ text: null, loading: false });
     }
   }, [currentSentence, settings.topic, simplifiedExplanation.loading, simplifiedExplanation.text, playSound]);
@@ -5462,13 +5469,13 @@ export function App() {
                                 disabled={simplifiedExplanation.loading || !!simplifiedExplanation.text} 
                                 className="shrink-0 text-xs text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider border border-[#d4af37]/50 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
                             >
-                                {simplifiedExplanation.loading ? 'Simplifying...' : simplifiedExplanation.text ? 'Simplified ✓' : 'Plain English'}
+                                {simplifiedExplanation.loading ? 'Loading Details...' : simplifiedExplanation.text ? 'Detailed ✓' : 'Detailed Explanation'}
                             </button>
                           )}
                       </div>
                       {simplifiedExplanation.text && (
                           <div className="mt-2.5 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-xs sm:text-sm text-sky-900 dark:text-sky-200 font-sans">
-                              <strong>In Plain Terms:</strong> {simplifiedExplanation.text}
+                              <strong>Detailed Grammar Breakdown:</strong> {simplifiedExplanation.text}
                           </div>
                       )}
                     </div>

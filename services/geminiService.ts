@@ -379,19 +379,26 @@ export const verifyOpenClozeBatch = async (
   return fallbackResults;
 };
 
-export const simplifyExplanation = async (originalExplanation: string, topic: string): Promise<string> => {
+export const simplifyExplanation = async (
+  originalExplanation: string,
+  topic: string,
+  sentence?: string,
+  correction?: string
+): Promise<string> => {
   try {
-    const data = await requestDealerAction<{ simplified: string }>('simplifyExplanation', {
+    const data = await requestDealerAction<{ simplified?: string; detailed?: string }>('simplifyExplanation', {
       originalExplanation,
       topic,
+      sentence,
+      correction,
     });
-    if (data?.simplified) return data.simplified.trim();
+    const text = data?.detailed || data?.simplified;
+    if (text) return text.trim();
   } catch (err) {
-    console.warn("Using fallback explanation simplification:", err);
+    console.warn("Using fallback detailed explanation:", err);
   }
 
-  const sentences = (originalExplanation || '').split(/(?<=[.?!])\s+/);
-  return sentences.slice(0, 2).join(' ') || originalExplanation;
+  return `Grammatical Focus (${topic}): ${originalExplanation}${correction ? ` Standard target structure: "${correction}".` : ''}`;
 };
 
 export const generateSpeech = async (text: string): Promise<string> => {

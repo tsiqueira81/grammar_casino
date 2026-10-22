@@ -278,7 +278,10 @@ const binarySentenceSchema = {
     text: { type: Type.STRING, description: "The generated sentence." },
     isCorrect: { type: Type.BOOLEAN, description: "Whether the sentence is grammatically correct." },
     correction: { type: Type.STRING, description: "The full corrected version of the sentence (or original if correct)." },
-    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of the grammar rule." },
+    explanation: {
+      type: Type.STRING,
+      description: "A clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon).",
+    },
     grammarPhrase: { type: Type.STRING, description: "Key part of the sentence (3-5 words) testing the rule." },
     errorPhrase: { type: Type.STRING, description: "If incorrect, the exact erroneous phrase. If correct, empty string." },
     mistakeType: { type: Type.STRING, description: "If incorrect, 2-4 word descriptor of error mechanism. If correct, empty string." },
@@ -289,9 +292,12 @@ const binarySentenceSchema = {
 const multipleChoiceSentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
     correction: { type: Type.STRING, description: "The full completed sentence with the correct option inserted." },
-    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of why the correct option fits." },
+    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    explanation: {
+      type: Type.STRING,
+      description: "A clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why the correct option fits.",
+    },
     grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence containing the target gap." },
     options: {
       type: Type.ARRAY,
@@ -303,33 +309,140 @@ const multipleChoiceSentenceSchema = {
       description: "The exact option string that fills '_____'.",
     },
   },
-  required: ["text", "correction", "explanation", "grammarPhrase", "options", "correctAnswer"],
+  required: ["correction", "text", "explanation", "grammarPhrase", "options", "correctAnswer"],
 };
 
 const openClozeSentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
-    correction: { type: Type.STRING, description: "The full completed sentence with the primary word filled in." },
-    explanation: { type: Type.STRING, description: "A concise 1-2 sentence explanation of the grammar rule requiring this word." },
-    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence around the gap." },
+    correction: {
+      type: Type.STRING,
+      description: "Step 1: Write the FULL, 100% grammatically complete sentence first (with NO blanks and NO missing prepositions or particles).",
+    },
     correctAnswer: {
       type: Type.STRING,
-      description: "The primary single word that fills '_____'.",
+      description: "Step 2: Choose ONE single word from 'correction' to be the missing word.",
     },
+    text: {
+      type: Type.STRING,
+      description: "Step 3: Copy 'correction' word-for-word and replace ONLY that single 'correctAnswer' word with '_____'. Every other word (such as 'to', 'with', 'of', 'for') MUST remain in 'text'.",
+    },
+    explanation: {
+      type: Type.STRING,
+      description: "A clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.",
+    },
+    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence around the gap." },
     acceptedAnswers: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
       description: "Array of all valid single-word answers (primary word + valid single-word synonyms).",
     },
   },
-  required: ["text", "correction", "explanation", "grammarPhrase", "correctAnswer", "acceptedAnswers"],
+  required: ["correction", "correctAnswer", "text", "explanation", "grammarPhrase", "acceptedAnswers"],
 };
 
 function getSentenceSchema(questionType: "binary" | "multipleChoice" | "openCloze") {
   if (questionType === "multipleChoice") return multipleChoiceSentenceSchema;
   if (questionType === "openCloze") return openClozeSentenceSchema;
   return binarySentenceSchema;
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Guarantees that an Open Cloze challenge has a single-word gap and that
+ * replacing "_____" with `correctAnswer` in `text` produces `correction` word-for-word,
+ * without ever dropping prepositions or particles (e.g., "look forward to visiting").
+ */
+function enforceOpenClozeIntegrity(data: any) {
+  let corr = String(data.correction || "").replace(/\s+/g, " ").trim();
+  let txt = String(data.text || "").replace(/\s+/g, " ").trim();
+  const rawAnswer = String(data.correctAnswer || "").trim();
+  const answerWords = rawAnswer.split(/\s+/).filter(Boolean);
+  let primary = answerWords[0] || "";
+
+  // 1. If the model put multiple words in correctAnswer (e.g. "forward to"), restore trailing words into `text`
+  if (answerWords.length > 1 && /_{2,}/.test(txt)) {
+    const trailing = answerWords.slice(1).join(" ");
+    const afterBlankRegex = new RegExp(`_{2,}\\s+${escapeRegExp(trailing)}\\b`, "i");
+    if (!afterBlankRegex.test(txt)) {
+      txt = txt.replace(/_{2,}/, `_____ ${trailing}`);
+    }
+  }
+
+  // 2. Repair common 3-part phrasal-prepositional verb omissions in `correction` (e.g., "look forward visiting" -> "look forward to visiting")
+  const phrasalRepairs: Array<[RegExp, string]> = [
+    [/\b(look(?:s|ed|ing)?\s+forward)\s+(?!to\b)([a-z]+ing)\b/gi, "$1 to $2"],
+    [/\b(put(?:s|ting)?\s+up)\s+(?!with\b)([a-z]+ing)\b/gi, "$1 with $2"],
+    [/\b(came|come(?:s|ing)?)\s+up\s+(?!with\b)(a|an|the|some|this|that|an?\s+idea|a\s+plan)\b/gi, "$1 up with $2"],
+    [/\b(ran|run(?:s|ning)?)\s+out\s+(?!of\b)([a-z]+)\b/gi, "$1 out of $2"],
+  ];
+  for (const [pattern, replacement] of phrasalRepairs) {
+    corr = corr.replace(pattern, replacement);
+  }
+
+  // 3. Ensure `text` with `primary` substituted in place of `_____` matches `correction` word-for-word
+  if (primary && corr) {
+    const filled = txt.replace(/_{2,}/, primary).replace(/\s+/g, " ").trim();
+    if (filled.toLowerCase() !== corr.toLowerCase()) {
+      const wordRegex = new RegExp(`\\b${escapeRegExp(primary)}\\b`, "i");
+      const phrase = String(data.grammarPhrase || "").trim();
+      let rebuilt = "";
+
+      // Prefer blanking the target word inside `grammarPhrase` if `grammarPhrase` appears in `correction`
+      if (phrase && corr.toLowerCase().includes(phrase.toLowerCase()) && wordRegex.test(phrase)) {
+        const phraseMatch = corr.match(new RegExp(escapeRegExp(phrase), "i"));
+        if (phraseMatch && phraseMatch.index !== undefined) {
+          const before = corr.slice(0, phraseMatch.index);
+          const matchedPhrase = phraseMatch[0];
+          const after = corr.slice(phraseMatch.index + matchedPhrase.length);
+          const blankedPhrase = matchedPhrase.replace(wordRegex, (m) => {
+            primary = m;
+            return "_____";
+          });
+          rebuilt = `${before}${blankedPhrase}${after}`;
+        }
+      }
+
+      if (!rebuilt && wordRegex.test(corr)) {
+        rebuilt = corr.replace(wordRegex, (m) => {
+          primary = m;
+          return "_____";
+        });
+      }
+
+      if (rebuilt && /_{2,}/.test(rebuilt)) {
+        txt = rebuilt;
+      } else if (/_{2,}/.test(txt)) {
+        // Fallback: if `primary` wasn't found in `corr`, make `corr` match `filled` (with phrasal repairs applied)
+        let repairedFilled = filled;
+        for (const [pattern, replacement] of phrasalRepairs) {
+          repairedFilled = repairedFilled.replace(pattern, replacement);
+        }
+        corr = repairedFilled;
+        if (repairedFilled.toLowerCase() !== filled.toLowerCase() && wordRegex.test(corr)) {
+          txt = corr.replace(wordRegex, "_____");
+        }
+      }
+    }
+  }
+
+  data.correction = corr;
+  data.text = txt;
+  data.correctAnswer = primary;
+
+  const rawAccepted = Array.isArray(data.acceptedAnswers) ? data.acceptedAnswers : [];
+  const normalizedSet = new Set<string>();
+  if (primary) normalizedSet.add(primary.toLowerCase());
+  rawAccepted.forEach((ans: any) => {
+    const clean = String(ans || "").trim().toLowerCase();
+    if (clean && !clean.includes(" ")) {
+      normalizedSet.add(clean);
+    }
+  });
+  data.acceptedAnswers = Array.from(normalizedSet);
 }
 
 const verificationSchema = {
@@ -451,12 +564,12 @@ ${avoidSentencesClause}
 ${avoidMistakesClause}
 
 === MULTIPLE-CHOICE CLOZE RULES ===
-1. Write a grammatically sound sentence and replace the key target word or short grammatical phrase (1-3 words testing "${topic}") with an exact 5-underscore blank: "_____".
-2. Set "text" to the sentence containing "_____".
-3. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
+1. Write a grammatically sound sentence ("correction") and replace the key target word or short grammatical phrase (1-3 words testing "${topic}") with an exact 5-underscore blank: "_____" in "text".
+2. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
+3. Set "text" to the sentence containing "_____".
 4. Set "correctAnswer" to the exact correct option string.
 5. Set "options" to an array of 4 distinct strings (1 correct answer + 3 plausible grammatical distractors that test "${topic}" at CEFR ${level}), in randomized order.
-6. Set "explanation" to a concise 1-2 sentence explanation of why "${topic}" requires the correct option.
+6. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why "${topic}" requires the correct option.
 7. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
 
 Respond ONLY with valid JSON matching the schema.`;
@@ -475,15 +588,14 @@ ${avoidSentencesClause}
 ${avoidMistakesClause}
 
 === CAMBRIDGE OPEN CLOZE STRICT RULES ===
-1. Constrain the gap to a SINGLE WORD ONLY (Cambridge style). Never require two or more words in the gap.
-2. The missing single word MUST test "${topic}" (e.g., an auxiliary verb, modal, preposition, article, conjunction, relative pronoun, phrasal verb particle, or verb form).
-3. Replace that single word in the sentence with an exact 5-underscore blank: "_____".
-4. Set "text" to the sentence containing "_____".
-5. Set "correction" to the FULL completed sentence with the primary word filled in.
-6. Set "correctAnswer" to the primary single word (lowercase, unless it's at the start of the sentence or "I").
-7. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word synonyms/alternatives that fit the blank (all lowercase, trimmed, single words only).
-8. Set "explanation" to a concise 1-2 sentence explanation of the grammatical rule requiring this word.
-9. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence around the gap.
+1. STEP 1 ("correction"): First, write a FULL, 100% grammatically complete sentence with NO blanks. Double-check multi-word phrasal verbs and dependent prepositions (e.g., "look forward to visiting", "come up with", "put up with", "run out of", "insist on going") to ensure NO preposition or particle is missing in "correction".
+2. STEP 2 ("correctAnswer"): Pick ONE SINGLE WORD from "correction" that tests "${topic}" (lowercase, unless it is at the start of the sentence or "I"). Never put two or more words in "correctAnswer".
+3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY that single "correctAnswer" word with an exact 5-underscore blank: "_____".
+   - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
+   - NEVER replace a two-word phrase (like "forward to" or "up with") with a single "_____". For example, if testing "look forward to visiting", "text" MUST be either "I look _____ to visiting" (answer: "forward") OR "I look forward _____ visiting" (answer: "to") — NEVER "I look _____ visiting".
+4. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word alternatives that fit the blank (all lowercase, trimmed, single words only).
+5. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.
+6. Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
 
 Respond ONLY with valid JSON matching the schema.`;
         } else {
@@ -513,7 +625,7 @@ ${avoidMistakesClause}
 grammarPhrase MUST be an exact substring of the generated sentence (3-6 words) representing the core grammatical feature.
 errorPhrase MUST be the exact erroneous snippet if the sentence is incorrect, or empty string if correct.
 mistakeType MUST be a short descriptor (2-4 words) of the error type if incorrect, or empty string if correct.
-explanation MUST be a concise 1-2 sentence explanation of the grammar rule.
+explanation MUST be a clear, plain-English 1-2 sentence explanation of why the sentence is right or wrong (easy for students to understand without heavy linguistic jargon).
 
 Respond ONLY with valid JSON matching the schema.`;
         }
@@ -553,18 +665,7 @@ Respond ONLY with valid JSON matching the schema.`;
           generatedData.acceptedAnswers = generatedData.correctAnswer ? [String(generatedData.correctAnswer).trim()] : [];
         } else if (resolvedQuestionType === "openCloze") {
           generatedData.isCorrect = true;
-          const primary = String(generatedData.correctAnswer || "").trim().split(/\s+/)[0] || "";
-          generatedData.correctAnswer = primary;
-          const rawAccepted = Array.isArray(generatedData.acceptedAnswers) ? generatedData.acceptedAnswers : [];
-          const normalizedSet = new Set<string>();
-          if (primary) normalizedSet.add(primary.toLowerCase());
-          rawAccepted.forEach((ans: any) => {
-            const clean = String(ans || "").trim().toLowerCase();
-            if (clean && !clean.includes(" ")) {
-              normalizedSet.add(clean);
-            }
-          });
-          generatedData.acceptedAnswers = Array.from(normalizedSet);
+          enforceOpenClozeIntegrity(generatedData);
         }
 
         return res.status(200).json(generatedData);
@@ -711,40 +812,43 @@ Respond ONLY with valid JSON matching the schema.`;
         return res.status(200).json({ results });
       }
 
+      case "detailExplanation":
       case "simplifyExplanation": {
-        const { originalExplanation, topic } = payload;
+        const { originalExplanation, topic, sentence, correction } = payload;
         if (!originalExplanation || typeof originalExplanation !== "string") {
           return res.status(400).json({ error: "Missing 'originalExplanation' parameter." });
         }
 
         const safeExpl = originalExplanation.slice(0, 1000);
         const safeTopic = String(topic || "Grammar").slice(0, 100);
-        const cacheKey = `simplify:${safeTopic}:${safeExpl}`;
+        const safeSentence = sentence ? String(sentence).slice(0, 400) : "";
+        const safeCorrection = correction ? String(correction).slice(0, 400) : "";
+        const cacheKey = `detail:${safeTopic}:${safeSentence}:${safeExpl}`;
 
         const cached = responseCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
-          return res.status(200).json({ simplified: cached.data });
+          return res.status(200).json({ simplified: cached.data, detailed: cached.data });
         }
 
-        const prompt = `Re-explain the following grammar concept in very simple terms, as if for a 10-year-old. Keep it to 1-2 sentences.
-- Topic: ${safeTopic}
-- Original Explanation: "${safeExpl}"
-- Simplified Explanation:`;
+        const prompt = `You are a senior English linguistics professor. Expand the following plain-English grammar note into a precise, detailed grammatical explanation (2-3 sentences). Name the exact grammatical rule, syntactic structure, or part-of-speech mechanism involved and briefly explain why other forms fail.
+- Topic: ${safeTopic}${safeSentence ? `\n- Sentence: "${safeSentence}"` : ""}${safeCorrection ? `\n- Correct Form: "${safeCorrection}"` : ""}
+- Plain-English Summary: "${safeExpl}"
+- Detailed Grammatical Explanation:`;
 
         const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
           return await ai.models.generateContent({
             model,
             contents: prompt,
             config: {
-              temperature: 0.7,
+              temperature: 0.6,
               thinkingConfig: getFastThinkingConfig(model),
             },
           });
         });
 
-        const simplified = (response.text || "").trim();
-        responseCache.set(cacheKey, { data: simplified, expiresAt: Date.now() + CACHE_TTL_MS });
-        return res.status(200).json({ simplified });
+        const detailed = (response.text || "").trim();
+        responseCache.set(cacheKey, { data: detailed, expiresAt: Date.now() + CACHE_TTL_MS });
+        return res.status(200).json({ simplified: detailed, detailed });
       }
 
       case "generateSpeech": {
