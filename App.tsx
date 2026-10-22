@@ -22,7 +22,18 @@ import GrammarReportCard from './components/GrammarReportCard';
 import { ChipRack, PokerChip } from './components/ChipStacks';
 import RoundSettingsModal, { SettingsModalTab } from './components/RoundSettingsModal';
 import DeckConfigModal from './components/DeckConfigModal';
+import MultiplayerLobbyModal from './components/MultiplayerLobbyModal';
+import StudentControllerView from './components/StudentControllerView';
+import {
+  MultiplayerSeat,
+  buildAllPlayerViews,
+  isPlayerTargetedThisRound,
+  isBetCompleteForQuestionType,
+} from './utils/multiplayerProtocol';
+import { HostRoomController, HostEventPayload } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+
+const HOUSE_BAILOUT_AMOUNT = 150;
 
 // --- Tone.js Sound Manager ---
 declare global {
@@ -284,6 +295,28 @@ export function App() {
   const turnDurationMs = turnTimerSeconds * 1000;
   const isTurnTimerEnabled = turnTimerSeconds > 0;
 
+  // --- Live Classroom Multiplayer State ---
+  const [initialUrlRoomCode] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('room')?.trim().toUpperCase() || '';
+    }
+    return '';
+  });
+  const [isStudentControllerMode, setIsStudentControllerMode] = useState<boolean>(() => Boolean(initialUrlRoomCode));
+  const [mpRoomCode, setMpRoomCode] = useState<string | null>(null);
+  const [mpRoomLocked, setMpRoomLocked] = useState<boolean>(false);
+  const [mpHostConnected, setMpHostConnected] = useState<boolean>(false);
+  const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
+  const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
+  const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
+  const [mpStudentPendingTarget, setMpStudentPendingTarget] = useState<Record<number, PowerUpKey | null>>({});
+  const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, boolean>>({});
+  const [mpStudentNotifications, setMpStudentNotifications] = useState<
+    Record<number, { id: string; title: string; message: string; icon?: string } | null>
+  >({});
+  const mpControllerRef = useRef<HostRoomController | null>(null);
+  const mpEventHandlerRef = useRef<(ev: HostEventPayload) => void>(() => {});
+
   // Desktop AI Engine and DPAPI Encryption status
   const [desktopStatus, setDesktopStatus] = useState<GeminiService.DesktopStatus>({
     isDesktop: false,
@@ -537,12 +570,17 @@ export function App() {
     const player = players.find(p => p.id === playerId);
     if (!player || player.money <= 0) return false;
     if (isPlayerFrozen(playerId)) return false;
+    // In Multiplayer mode, connected remote seats act simultaneously until they lock in
+    if (mpRoomCode && mpSeats[playerId]) {
+      if (mpSeats[playerId].lockedIn) return false;
+      return true;
+    }
     if (!isTurnTimerEnabled) return true;
     const t = turnTimers[playerId];
     if (!t || t.status !== 'running') return false;
     if (!t.held && t.endsAt !== undefined && Date.now() >= t.endsAt) return false;
     return true;
-  }, [players, isPlayerFrozen, isTurnTimerEnabled, turnTimers]);
+  }, [players, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers]);
 
   // Helper to lock a player and optionally auto-advance to the next unfrozen idle player in sequence
   const lockPlayerAndMaybeAdvance = useCallback((
@@ -1176,6 +1214,16 @@ export function App() {
     setUsedSubtypes([]);
     setTurnTimers({});
     setTeacherRevealOverride(false);
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setMpSeats(prev => {
+      const next: Record<number, MultiplayerSeat> = {};
+      (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+        next[Number(k)] = { ...seat, lockedIn: false };
+      });
+      return next;
+    });
     
     setSentenceBatch([]);
     // Pass undefined for forcedBatch so fetchNewSentence consumes the Round 1 sentence pre-fetched on Settings Part 2
@@ -1355,17 +1403,27 @@ export function App() {
       const eligibleTargets = players.filter(p => p.id !== playerId && p.money > 0);
       const unshieldedTargets = eligibleTargets.filter(p => {
         const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-        return !pActivePowerUps.some(pu => pu.type === 'SHIELD');
+        const hasShield = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+        const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+        return !hasShield && !alreadyAttacked;
       });
       if (eligibleTargets.length === 0 || unshieldedTargets.length === 0) {
         playSound('error');
-        setShowPowerUpModal({
-          title: "No Available Targets",
-          message: eligibleTargets.length === 0
-            ? `There are no other active players at the table to target with ${powerUp.name}! Your $50 was not spent.`
-            : `All other active players have an active Shield! Cannot target anyone with ${powerUp.name}. Your $50 was not spent.`,
-          icon: "⚠️"
-        });
+        const msg = eligibleTargets.length === 0
+          ? `There are no other active players at the table to target with ${powerUp.name}! Your $50 was not spent.`
+          : `All other active players are protected by a Shield or have already been attacked once this round! Your $50 was not spent.`;
+        if (mpRoomCode && mpSeats[playerId]) {
+          setMpStudentNotifications(prev => ({
+            ...prev,
+            [playerId]: { id: String(Date.now()), title: 'No Available Targets', message: msg, icon: '🛡️' },
+          }));
+        } else {
+          setShowPowerUpModal({
+            title: "No Available Targets",
+            message: msg,
+            icon: "⚠️"
+          });
+        }
         return;
       }
     }
@@ -1384,13 +1442,19 @@ export function App() {
     setAvailablePowerUps(avail => avail.filter(p => p !== powerUpKey));
 
     if (powerUp.requiresTarget) {
-        setShowTargetModal({ powerUp: powerUpKey, playerId });
+        if (mpRoomCode && mpSeats[playerId]) {
+          setMpStudentPendingTarget(prev => ({ ...prev, [playerId]: powerUpKey }));
+        } else {
+          setShowTargetModal({ powerUp: powerUpKey, playerId });
+        }
     } else {
         // ... (Immediate effect logic)
         let modalMessage = `${powerUp.icon} ${powerUp.description}`;
         
         if (powerUpKey === 'GRAMMAR_GOGGLES' && currentSentence) {
-            setHighlightedPhrase(currentSentence.grammarPhrase || 'the key part of the sentence');
+            if (!mpRoomCode || !mpSeats[playerId]) {
+              setHighlightedPhrase(currentSentence.grammarPhrase || 'the key part of the sentence');
+            }
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         } else if (powerUpKey === 'TAXMAN') {
             let taxCollected = 0;
@@ -1515,7 +1579,11 @@ export function App() {
              }
 
         } else if (powerUpKey === 'THE_WHEEL') {
-            setShowWheelModal({ playerId });
+            if (mpRoomCode && mpSeats[playerId]) {
+              setMpStudentPendingWheel(prev => ({ ...prev, [playerId]: true }));
+            } else {
+              setShowWheelModal({ playerId });
+            }
             return;
         } else if (powerUpKey === 'TEACHERS_PET') {
             if (player.winStreak >= 3) {
@@ -1548,9 +1616,16 @@ export function App() {
         } else {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         }
-        setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon});
+        if (mpRoomCode && mpSeats[playerId]) {
+          setMpStudentNotifications(prev => ({
+            ...prev,
+            [playerId]: { id: String(Date.now()), title: powerUp.name, message: modalMessage, icon: powerUp.icon },
+          }));
+        } else {
+          setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon});
+        }
     }
-  }, [canPlayerAct, players, activePlayers, currentSentence, availablePowerUps, bets, powerUpsUsedThisRound, playSound, activePowerUps]); 
+  }, [canPlayerAct, players, activePlayers, currentSentence, availablePowerUps, bets, powerUpsUsedThisRound, playSound, activePowerUps, mpRoomCode, mpSeats]); 
 
   const handleApplyWheelResult = useCallback((playerId: number, item: WheelItem) => {
     switch (item.id) {
@@ -1669,12 +1744,26 @@ export function App() {
         break;
     }
 
-    setShowPowerUpModal({
-      title: item.type === 'positive' ? '🎡 Fortune Smiled!' : '🎡 Misfortune Struck!',
-      message: `${item.icon} ${item.name} (${item.shortDesc}): ${item.description}`,
-      icon: item.icon,
-    });
-  }, [bets, activePowerUps, players]); 
+    const wheelTitle = item.type === 'positive' ? '🎡 Fortune Smiled!' : '🎡 Misfortune Struck!';
+    const wheelMsg = `${item.icon} ${item.name} (${item.shortDesc}): ${item.description}`;
+    if (mpRoomCode && mpSeats[playerId]) {
+      setMpStudentPendingWheel(prev => {
+        const next = { ...prev };
+        delete next[playerId];
+        return next;
+      });
+      setMpStudentNotifications(prev => ({
+        ...prev,
+        [playerId]: { id: String(Date.now()), title: wheelTitle, message: wheelMsg, icon: item.icon },
+      }));
+    } else {
+      setShowPowerUpModal({
+        title: wheelTitle,
+        message: wheelMsg,
+        icon: item.icon,
+      });
+    }
+  }, [bets, activePowerUps, players, mpRoomCode, mpSeats]); 
   
   const handleBuyRandomPowerUp = useCallback((playerId: number) => {
     if (!canPlayerAct(playerId)) return;
@@ -1692,13 +1781,20 @@ export function App() {
       : availablePowerUps;
 
     if (drawablePool.length === 0) {
-         setError({ title: "Empty Deck", message: "No more eligible power-ups available in the shoe for this hand!" });
+         if (mpRoomCode && mpSeats[playerId]) {
+           setMpStudentNotifications(prev => ({
+             ...prev,
+             [playerId]: { id: String(Date.now()), title: 'Empty Deck', message: 'No more eligible power-ups available in the shoe for this hand!', icon: '🃏' },
+           }));
+         } else {
+           setError({ title: "Empty Deck", message: "No more eligible power-ups available in the shoe for this hand!" });
+         }
          return;
     }
     const randomIndex = Math.floor(Math.random() * drawablePool.length);
     const selectedPowerUp = drawablePool[randomIndex];
     handleBuyPowerUp(playerId, selectedPowerUp);
-  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp]);
+  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats]);
 
   const handleTogglePowerUpInDeck = useCallback((key: PowerUpKey) => {
     const isCurrentlyActive = selectedPowerUps.includes(key);
@@ -1755,22 +1851,49 @@ export function App() {
     setSimplifiedExplanation({ text: null, loading: false });
     setTurnTimers({});
     setTeacherRevealOverride(false);
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setMpSeats(prev => {
+      const next: Record<number, MultiplayerSeat> = {};
+      (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+        next[Number(k)] = { ...seat, lockedIn: false };
+      });
+      return next;
+    });
     // Clear any in-flight next-round prefetch so redealing the current hand generates a fresh sentence
     prefetchRef.current = null;
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
 
-  const handleTargetedPowerUp = useCallback((targetId: number) => {
-    if (!showTargetModal) return;
-    const { powerUp: powerUpKey, playerId } = showTargetModal;
+  const handleTargetedPowerUp = useCallback((targetId: number, overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
+    const playerId = overridePlayerId ?? showTargetModal?.playerId;
+    const powerUpKey = overridePowerUpKey ?? showTargetModal?.powerUp;
+    if (playerId === undefined || !powerUpKey) return;
     const powerUpInfo = POWER_UPS[powerUpKey];
     const targetPlayer = players.find(p => p.id === targetId);
-    
+    const isRemoteBuyer = Boolean(mpRoomCode && mpSeats[playerId]);
+
     const targetActivePowerUps = (activePowerUps[targetId] || []) as ActivePowerUp[];
-    const isTargetShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD');
-    if (isTargetShielded) {
-        setShowTargetModal(null);
-        setShowPowerUpModal({ title: "Blocked!", message: `🛡️ ${targetPlayer?.name} has a Shield active! Power-up failed.`, icon: "🛡️" });
+    const isTargetShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+    const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(targetId, powerUpsUsedThisRound, activePowerUps);
+    if (isTargetShielded || alreadyAttacked) {
+        if (isRemoteBuyer) {
+          setMpStudentNotifications(prev => ({
+            ...prev,
+            [playerId]: {
+              id: String(Date.now()),
+              title: 'Target Protected!',
+              message: alreadyAttacked
+                ? `🛡️ ${targetPlayer?.name} has already been targeted once this round! Pick another player.`
+                : `🛡️ ${targetPlayer?.name} has a Shield active! Pick another player.`,
+              icon: '🛡️',
+            },
+          }));
+        } else {
+          setShowTargetModal(null);
+          setShowPowerUpModal({ title: "Blocked!", message: `🛡️ ${targetPlayer?.name} has a Shield active! Power-up failed.`, icon: "🛡️" });
+        }
         return;
     }
     if (!targetPlayer) return;
@@ -1861,14 +1984,28 @@ export function App() {
     }
 
     playSound('powerUp');
-    setShowTargetModal(null);
-    setShowPowerUpModal({ title: powerUpInfo.name, message: customModalMessage || `${powerUpInfo.icon} You used ${powerUpInfo.name} on ${targetPlayer.name}. ${powerUpInfo.description}`, icon: powerUpInfo.icon});
-  }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound]); 
+    const finalMsg = customModalMessage || `${powerUpInfo.icon} You used ${powerUpInfo.name} on ${targetPlayer.name}. ${powerUpInfo.description}`;
+    if (isRemoteBuyer) {
+      setMpStudentPendingTarget(prev => {
+        const next = { ...prev };
+        delete next[playerId];
+        return next;
+      });
+      setMpStudentNotifications(prev => ({
+        ...prev,
+        [playerId]: { id: String(Date.now()), title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon },
+      }));
+    } else {
+      setShowTargetModal(null);
+      setShowPowerUpModal({ title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon});
+    }
+  }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats]); 
 
-  const handleCancelTargetModal = useCallback(() => {
-    if (!showTargetModal) return;
-    if (showTargetModal.powerUp === 'SWAP') return; // The Swap power-up cannot be refunded
-    const { playerId, powerUp: powerUpKey } = showTargetModal;
+  const handleCancelTargetModal = useCallback((overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
+    const playerId = overridePlayerId ?? showTargetModal?.playerId;
+    const powerUpKey = overridePowerUpKey ?? showTargetModal?.powerUp;
+    if (playerId === undefined || !powerUpKey) return;
+    if (powerUpKey === 'SWAP') return; // The Swap power-up cannot be refunded
     setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
     setPowerUpsUsedThisRound(prev => {
       const list = prev[playerId] || [];
@@ -1882,16 +2019,296 @@ export function App() {
     });
     setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - POWERUP_COST) }));
     setAvailablePowerUps(avail => avail.includes(powerUpKey) ? avail : [...avail, powerUpKey]);
-    setShowTargetModal(null);
+    if (mpRoomCode && mpSeats[playerId]) {
+      setMpStudentPendingTarget(prev => {
+        const next = { ...prev };
+        delete next[playerId];
+        return next;
+      });
+    } else {
+      setShowTargetModal(null);
+    }
     playSound('click');
-  }, [showTargetModal, playSound]); 
+  }, [showTargetModal, playSound, mpRoomCode, mpSeats]);
+
+  // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
+  useEffect(() => {
+    mpEventHandlerRef.current = (event: HostEventPayload) => {
+      if (event.type === 'STUDENT_JOINED' && event.seat) {
+        const seat = event.seat;
+        const { playerId, name, avatar } = seat;
+        playSound('addPlayer');
+        setPlayers(prev => {
+          if (prev.some(p => p.id === playerId)) {
+            return prev.map(p => p.id === playerId ? { ...p, name, avatar } : p);
+          }
+          return [
+            ...prev,
+            {
+              id: playerId,
+              name,
+              money: startingCash,
+              history: [],
+              avatar: avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+              winStreak: 0,
+              effects: [],
+            },
+          ];
+        });
+        setMpSeats(prev => ({
+          ...prev,
+          [playerId]: {
+            ...seat,
+            connected: true,
+            lockedIn: prev[playerId]?.lockedIn ?? false,
+            lastSeen: Date.now(),
+          },
+        }));
+      } else if (event.type === 'STUDENT_RECONNECTED' && event.seat) {
+        const seat = event.seat;
+        const { playerId, name, avatar } = seat;
+        setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, name: name || p.name, avatar: avatar || p.avatar } : p));
+        setMpSeats(prev => ({
+          ...prev,
+          [playerId]: {
+            ...(prev[playerId] || seat),
+            connected: true,
+            lastSeen: Date.now(),
+          },
+        }));
+      } else if (event.type === 'STUDENT_DISCONNECTED' && event.playerId !== undefined) {
+        const playerId = event.playerId;
+        setMpSeats(prev => {
+          if (!prev[playerId]) return prev;
+          return {
+            ...prev,
+            [playerId]: { ...prev[playerId], connected: false },
+          };
+        });
+      } else if (event.type === 'STUDENT_INTENT' && event.playerId !== undefined && event.intent) {
+        const playerId = event.playerId;
+        const intent = event.intent;
+        setMpSeats(prev => {
+          if (!prev[playerId]) return prev;
+          return {
+            ...prev,
+            [playerId]: { ...prev[playerId], lastSeen: Date.now() },
+          };
+        });
+
+        switch (intent.type) {
+          case 'SET_BET': {
+            handleBetChange(playerId, intent.field, intent.value);
+            break;
+          }
+          case 'SET_FULL_BET': {
+            const entries = Object.entries(intent.bet || {}) as [keyof Bet, any][];
+            entries.forEach(([field, val]) => {
+              handleBetChange(playerId, field, val);
+            });
+            break;
+          }
+          case 'LOCK_IN': {
+            if (intent.locked) {
+              playSound('bet');
+              setMpSeats(prev => {
+                if (!prev[playerId]) return prev;
+                return { ...prev, [playerId]: { ...prev[playerId], lockedIn: true } };
+              });
+            } else if (step === 'IN_GAME' && !isProcessing) {
+              setMpSeats(prev => {
+                if (!prev[playerId]) return prev;
+                return { ...prev, [playerId]: { ...prev[playerId], lockedIn: false } };
+              });
+            }
+            break;
+          }
+          case 'BUY_HINT': {
+            handleGetHint(playerId);
+            break;
+          }
+          case 'BUY_RANDOM_POWER_UP': {
+            handleBuyRandomPowerUp(playerId);
+            break;
+          }
+          case 'SELECT_POWER_UP_TARGET': {
+            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            if (pendingKey) {
+              handleTargetedPowerUp(intent.targetId, playerId, pendingKey);
+            }
+            break;
+          }
+          case 'CANCEL_POWER_UP_TARGET': {
+            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            if (pendingKey) {
+              handleCancelTargetModal(playerId, pendingKey);
+            }
+            break;
+          }
+          case 'APPLY_WHEEL_RESULT': {
+            if (mpStudentPendingWheel[playerId]) {
+              const matchedItem = WHEEL_ITEMS.find(w => w.id === intent.itemId) || WHEEL_ITEMS[Math.floor(Math.random() * WHEEL_ITEMS.length)];
+              playSound('powerUp');
+              handleApplyWheelResult(playerId, matchedItem);
+            }
+            break;
+          }
+          case 'UPDATE_PROFILE': {
+            if (intent.name?.trim()) handleUpdatePlayerName(playerId, intent.name.trim());
+            if (intent.avatar) handleUpdateAvatar(playerId, intent.avatar);
+            break;
+          }
+        }
+      }
+    };
+  }, [
+    playSound,
+    startingCash,
+    handleBetChange,
+    step,
+    isProcessing,
+    handleGetHint,
+    handleBuyRandomPowerUp,
+    mpStudentPendingTarget,
+    handleTargetedPowerUp,
+    handleCancelTargetModal,
+    mpStudentPendingWheel,
+    handleApplyWheelResult,
+    handleUpdatePlayerName,
+  ]);
+
+  const handleCreateMpRoom = useCallback(async () => {
+    try {
+      playSound('startGame');
+      if (mpControllerRef.current) {
+        mpControllerRef.current.destroy();
+      }
+      const controller = await HostRoomController.createRoom(
+        (ev) => mpEventHandlerRef.current(ev),
+        (connected) => setMpHostConnected(connected)
+      );
+      mpControllerRef.current = controller;
+      setMpRoomCode(controller.code);
+      setMpRoomLocked(false);
+      setShowMpLobbyModal(true);
+    } catch (e: any) {
+      setError({ title: 'Multiplayer Error', message: e?.message || 'Could not create multiplayer room.' });
+    }
+  }, [playSound]);
+
+  const handleCloseMpRoom = useCallback(() => {
+    playSound('click');
+    if (mpControllerRef.current) {
+      mpControllerRef.current.destroy();
+      mpControllerRef.current = null;
+    }
+    setMpRoomCode(null);
+    setMpRoomLocked(false);
+    setMpHostConnected(false);
+    setMpSeats({});
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setShowMpLobbyModal(false);
+  }, [playSound]);
+
+  const handleToggleLockMpRoom = useCallback(() => {
+    playSound('click');
+    setMpRoomLocked(prev => {
+      const next = !prev;
+      mpControllerRef.current?.setRoomLocked(next);
+      return next;
+    });
+  }, [playSound]);
+
+  const handleKickMpPlayer = useCallback((playerId: number) => {
+    playSound('lose', 0);
+    mpControllerRef.current?.kickPlayer(playerId);
+    setMpSeats(prev => {
+      const next = { ...prev };
+      delete next[playerId];
+      return next;
+    });
+    setPlayers(prev => prev.filter(p => p.id !== playerId));
+  }, [playSound]);
+
+  const handleBailoutBankruptPlayers = useCallback(() => {
+    playSound('win', 0);
+    setPlayers(prev => prev.map(p => p.money <= 0 ? { ...p, money: HOUSE_BAILOUT_AMOUNT } : p));
+  }, [playSound]);
+
+  // Cleanup multiplayer room controller on unmount
+  useEffect(() => {
+    return () => {
+      mpControllerRef.current?.destroy();
+    };
+  }, []);
+
+  // Broadcast per-player filtered views whenever relevant game state changes
+  useEffect(() => {
+    if (!mpRoomCode || !mpControllerRef.current) return;
+    const views = buildAllPlayerViews({
+      roomCode: mpRoomCode,
+      roomLocked: mpRoomLocked,
+      step,
+      currentRound,
+      totalRounds: typeof totalRounds === 'string' ? parseInt(totalRounds, 10) || 10 : totalRounds,
+      gameMode,
+      targetAmount: typeof targetAmount === 'string' ? parseInt(targetAmount, 10) || DEFAULT_TARGET_AMOUNT : targetAmount,
+      settings,
+      customTopic,
+      customTheme,
+      currentSentence,
+      isLoading,
+      isProcessing,
+      players,
+      seats: mpSeats,
+      bets,
+      hints,
+      activePowerUps,
+      powerUpsUsedThisRound,
+      availablePowerUps,
+      roundResults,
+      winner,
+      studentPendingTarget: mpStudentPendingTarget,
+      studentPendingWheel: mpStudentPendingWheel,
+      studentNotifications: mpStudentNotifications,
+    });
+    mpControllerRef.current.pushViews(views);
+  }, [
+    mpRoomCode,
+    mpRoomLocked,
+    step,
+    currentRound,
+    totalRounds,
+    gameMode,
+    targetAmount,
+    settings,
+    customTopic,
+    customTheme,
+    currentSentence,
+    isLoading,
+    isProcessing,
+    players,
+    mpSeats,
+    bets,
+    hints,
+    activePowerUps,
+    powerUpsUsedThisRound,
+    availablePowerUps,
+    roundResults,
+    winner,
+    mpStudentPendingTarget,
+    mpStudentPendingWheel,
+    mpStudentNotifications,
+  ]); 
 
   const verifyPlayerCorrections = useCallback(async () => {
     const qType: QuestionType = currentSentence?.questionType || 'binary';
     if (!currentSentence || qType !== 'binary' || currentSentence.isCorrect) return {}; 
     const playersToVerify = activePlayers.filter(p => {
         if (isPlayerFrozen(p.id)) return false;
-        if (isTurnTimerEnabled && !hasPlayerPlacedBet(p.id)) return false;
+        if (isTurnTimerEnabled && !mpRoomCode && !hasPlayerPlacedBet(p.id)) return false;
         const b = bets[p.id];
         if (!b) return false;
         
@@ -1903,19 +2320,64 @@ export function App() {
         return isIncorrectVote && b.userCorrection?.trim();
     });
 
-    const verifications: Record<number, {isCorrect: boolean; feedback: string}> = {};
+    if (playersToVerify.length === 0) return {};
+
+    // Deduplicate normalized corrections across the classroom so identical student answers are verified once in parallel
+    const normalizeText = (s: string) =>
+      s.trim().toLowerCase().replace(/[.!?]+$/g, '').replace(/\s+/g, ' ');
+
+    const officialNorm = normalizeText(currentSentence.correction || '');
+    const verifications: Record<number, { isCorrect: boolean; feedback: string }> = {};
+    const uniqueGroups = new Map<string, { rawText: string; playerIds: number[] }>();
+
     for (const player of playersToVerify) {
-      setProcessingStatus(`Verifying ${player.name}'s correction...`);
-      const userCorrection = bets[player.id]?.userCorrection || "";
-      try {
-        verifications[player.id] = await GeminiService.verifyCorrection(currentSentence.text, userCorrection, currentSentence.correction);
-      } catch (err: any) {
-        verifications[player.id] = { isCorrect: false, feedback: "AI Judge could not verify due to an error." };
+      const rawCorrection = (bets[player.id]?.userCorrection || '').trim();
+      const norm = normalizeText(rawCorrection);
+      if (officialNorm && norm === officialNorm) {
+        verifications[player.id] = {
+          isCorrect: true,
+          feedback: 'Exact match with House revision!',
+        };
+      } else {
+        const existing = uniqueGroups.get(norm);
+        if (existing) {
+          existing.playerIds.push(player.id);
+        } else {
+          uniqueGroups.set(norm, { rawText: rawCorrection, playerIds: [player.id] });
+        }
       }
     }
+
+    if (uniqueGroups.size > 0) {
+      setProcessingStatus(
+        `Verifying ${uniqueGroups.size} unique correction(s) across ${playersToVerify.length} player(s)...`
+      );
+      await Promise.all(
+        Array.from(uniqueGroups.values()).map(async (group) => {
+          try {
+            const res = await GeminiService.verifyCorrection(
+              currentSentence.text,
+              group.rawText,
+              currentSentence.correction
+            );
+            group.playerIds.forEach((pid) => {
+              verifications[pid] = res;
+            });
+          } catch {
+            group.playerIds.forEach((pid) => {
+              verifications[pid] = {
+                isCorrect: false,
+                feedback: 'AI Judge could not verify due to an error.',
+              };
+            });
+          }
+        })
+      );
+    }
+
     setProcessingStatus('');
     return verifications;
-  }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
+  }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
   const handleRevealResults = useCallback(async () => {
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
@@ -2678,25 +3140,27 @@ export function App() {
     const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     
-    // Logic: Game ends if round limit reached OR target amount reached OR only 1 player remains in multiplayer OR 0 players remain.
+    // In Multiplayer Classroom Mode, bankrupt players receive an automatic $150 House Bailout on the next round instead of permanent elimination
     const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
     const hasTargetWinner = gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount);
-    const isMultiplayerWinner = players.length > 1 && stillActivePlayers.length <= 1;
-    const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || stillActivePlayers.length === 0;
+    const isMultiplayerWinner = !mpRoomCode && players.length > 1 && stillActivePlayers.length <= 1;
+    const isAllBankruptGameOver = !mpRoomCode && stillActivePlayers.length === 0;
+    const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || isAllBankruptGameOver;
 
     if (isGameOver) {
         playSound('gameOver');
         let finalWinnerPlayer: Player | null = null;
+        const pool = stillActivePlayers.length > 0 ? stillActivePlayers : players;
         if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
             const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
             finalWinnerPlayer = qualifiers[0];
             if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) {
                 finalWinnerPlayer = null; // Tied
             }
-        } else if (stillActivePlayers.length === 1) {
+        } else if (stillActivePlayers.length === 1 && !mpRoomCode) {
             finalWinnerPlayer = stillActivePlayers[0];
-        } else if (stillActivePlayers.length > 1 && isRoundLimitReached) {
-             const sortedPlayers = [...stillActivePlayers].sort((a,b) => b.money - a.money);
+        } else if (pool.length >= 1 && isRoundLimitReached) {
+             const sortedPlayers = [...pool].sort((a,b) => b.money - a.money);
              finalWinnerPlayer = sortedPlayers[0]; 
              if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
         } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
@@ -2706,8 +3170,37 @@ export function App() {
         playSound('success');
         setCurrentRound(prev => prev + 1);
         const eliminatedPlayers = players.filter(p => p.money <= 0);
-        const playerQueue = [...stillActivePlayers.slice(1), stillActivePlayers[0]]; 
-        setPlayers([...playerQueue, ...eliminatedPlayers]);
+        const playerQueue = stillActivePlayers.length > 0
+          ? [...stillActivePlayers.slice(1), stillActivePlayers[0]]
+          : [];
+        if (mpRoomCode) {
+          const bailedOut = eliminatedPlayers.map(p => ({ ...p, money: HOUSE_BAILOUT_AMOUNT }));
+          setPlayers([...playerQueue, ...bailedOut]);
+          const nextNotifs: Record<number, { id: string; title: string; message: string; icon: string }> = {};
+          eliminatedPlayers.forEach(p => {
+            if (mpSeats[p.id]) {
+              nextNotifs[p.id] = {
+                id: String(Date.now()) + '_' + p.id,
+                title: '🏦 House Bailout!',
+                message: `The Croupier granted you a $${HOUSE_BAILOUT_AMOUNT} House Bailout so you stay in the action!`,
+                icon: '🏦',
+              };
+            }
+          });
+          setMpStudentNotifications(nextNotifs);
+        } else {
+          setPlayers([...playerQueue, ...eliminatedPlayers]);
+          setMpStudentNotifications({});
+        }
+        setMpStudentPendingTarget({});
+        setMpStudentPendingWheel({});
+        setMpSeats(prev => {
+          const next: Record<number, MultiplayerSeat> = {};
+          (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+            next[Number(k)] = { ...seat, lockedIn: false };
+          });
+          return next;
+        });
         setBets({});
         setHints({});
         setPowerUpsUsedThisRound({});
@@ -2730,7 +3223,7 @@ export function App() {
         fetchNewSentence(activeSettings, pastSentences, undefined, pastMistakes);
         setStep('IN_GAME');
     }
-  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes]);
+  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats]);
 
   const handleEndGameEarly = useCallback(() => {
     playSound('gameOver');
@@ -3111,6 +3604,70 @@ export function App() {
                 )}
               </div>
 
+              {/* Live Classroom Multiplayer Bar */}
+              <div className="mb-5 p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/10 via-amber-500/10 to-emerald-950/10 dark:from-[#062415] dark:via-[#0b351f] dark:to-[#062415] border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-[#d4af37]/20 border border-[#d4af37]/50 flex items-center justify-center text-lg shrink-0">
+                    📱
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                        Live Classroom Multiplayer
+                      </span>
+                      {mpRoomCode && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-extrabold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40">
+                          ROOM {mpRoomCode} · {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length} ONLINE
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-amber-100/70">
+                      {mpRoomCode
+                        ? 'Students can scan the QR code or enter the room code on their phones to claim a seat.'
+                        : 'Let students join from their phones via QR code or 4-letter Room Code — or play on this screen.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {mpRoomCode ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound('click');
+                        setShowMpLobbyModal(true);
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                    >
+                      <span>📡</span>
+                      <span>Show QR &amp; Room ({mpRoomCode})</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleCreateMpRoom}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                    >
+                      <span>📱</span>
+                      <span>Open Live Room (QR)</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setIsStudentControllerMode(true);
+                    }}
+                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
+                    title="Join an existing room as a student controller"
+                  >
+                    <span>🎮</span>
+                    <span>Join Room</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Add Player Input Row */}
               <div className="flex flex-col sm:flex-row gap-3 mb-6"> 
                 <TextInput
@@ -3137,12 +3694,14 @@ export function App() {
                   <div className="felt-well rounded-xl p-6 text-center flex flex-col items-center justify-center gap-2">
                     <div className="text-2xl opacity-60 select-none">🃏</div>
                     <div className="text-slate-600 dark:text-amber-100/70 font-editorial italic text-base">
-                      The velvet seats are open. Enter a player name above to claim a seat at the table.
+                      The velvet seats are open. Enter a player name above or open a Live Room so students can join from their phones.
                     </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {players.map((player, index) => ( 
+                    {players.map((player, index) => {
+                      const mpSeat = mpSeats[player.id];
+                      return ( 
                       <div
                         key={player.id}
                         className="felt-well rounded-xl p-3 flex items-center justify-between gap-3 group hover:border-[#d4af37]/70 transition-all"
@@ -3155,10 +3714,23 @@ export function App() {
                             title="Change Avatar"
                           >
                             {player.avatar}
+                            {mpSeat && (
+                              <span
+                                className={`w-3 h-3 rounded-full border-2 border-white dark:border-[#04150c] absolute -bottom-0.5 -right-0.5 ${
+                                  mpSeat.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                                }`}
+                                title={mpSeat.connected ? 'Connected via Mobile' : 'Mobile Disconnected'}
+                              />
+                            )}
                           </button> 
                           <div className="min-w-0">
-                            <div className="text-[9px] font-mono-casino uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80">
-                              Seat #{index + 1} &middot; ${player.money.toLocaleString()}
+                            <div className="text-[9px] font-mono-casino uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80 flex items-center gap-1">
+                              <span>Seat #{index + 1} &middot; ${player.money.toLocaleString()}</span>
+                              {mpSeat && (
+                                <span className="text-[8px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                                  📱
+                                </span>
+                              )}
                             </div>
                             {editingPlayerIdInSetup === player.id ? (
                               <input
@@ -3202,14 +3774,15 @@ export function App() {
                         </div>
 
                         <button
-                          onClick={() => handleDeletePlayer(player.id)}
+                          onClick={() => mpSeat ? handleKickMpPlayer(player.id) : handleDeletePlayer(player.id)}
                           className="w-7 h-7 rounded-full border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center text-base transition-colors cursor-pointer shrink-0"
                           title="Remove Seat"
                         >
                           &times;
                         </button> 
                       </div> 
-                    ))}
+                    );
+                    })}
                   </div>
                 )} 
               </div> 
@@ -3749,9 +4322,17 @@ export function App() {
 
             const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
             const lockedCount = unfrozenActivePlayers.filter(p => turnTimers[p.id]?.status === 'locked').length;
-            const canRevealResults = isTurnTimerEnabled
-              ? (allActivePlayersLocked || teacherRevealOverride)
-              : (allValidBetsFinalized || teacherRevealOverride);
+            const mpLockedCount = unfrozenActivePlayers.filter(p => {
+              if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
+              const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+              return isBetCompleteForQuestionType(bets[p.id], currentQuestionType, hasSplit);
+            }).length;
+            const allMpPlayersLocked = unfrozenActivePlayers.length > 0 && mpLockedCount === unfrozenActivePlayers.length;
+            const canRevealResults = mpRoomCode
+              ? (allMpPlayersLocked || allValidBetsFinalized || teacherRevealOverride)
+              : isTurnTimerEnabled
+                ? (allActivePlayersLocked || teacherRevealOverride)
+                : (allValidBetsFinalized || teacherRevealOverride);
 
             // Find the single player whose turn is currently active (running or paused)
             const activeTurnPlayer = isTurnTimerEnabled
@@ -4251,59 +4832,224 @@ export function App() {
                     </div>
                   </div>
                 )}
-                
-                <div className="grid grid-cols-1 gap-5 sm:gap-6"> 
-                  {players.map(player => { 
-                    const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
-                    const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                    const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
-                    const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-                    const betCapAmount = playerCaps.length > 0 
-                      ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-                      : (isBetCapped ? 50 : BET_CAP_AMOUNT);
-                    const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
-                    const myActive = playerActive[0]; 
-                    const playerTimer = turnTimers[player.id];
-                    const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
-                    
-                    return <PlayerBettingCard 
-                              key={player.id} 
-                              player={player} 
-                              bet={bets[player.id]} 
-                              onBetChange={handleBetChange} 
-                              onGetHint={handleGetHint} 
-                              hint={hints[player.id]} 
-                              playSound={playSound} 
-                              onGetPowerUp={handleBuyRandomPowerUp} 
-                              powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
-                              activePowerUp={myActive} 
-                              isBetCapped={isBetCapped} 
-                              betCapAmount={betCapAmount}
-                              isFrozen={isFrozen}
-                              activePowerUps={playerActive} 
-                              usedPowerUps={powerUpsUsedThisRound[player.id] || []}
-                              players={players} 
-                              onUpdateMoney={handleUpdatePlayerMoney}
-                              currentSentenceText={currentSentence?.text}
-                              questionType={currentQuestionType}
-                              options={currentSentence?.options}
-                              onChangeAvatar={handleOpenAvatarModal}
-                              onUpdateName={handleUpdatePlayerName}
-                              targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
-                              timerEnabled={isTurnTimerEnabled}
-                              turnTimer={playerTimer}
-                              turnDurationMs={turnDurationMs}
-                              canAct={canPlayerAct(player.id)}
-                              isSatOut={isSatOut}
-                              timerBlockedByName={activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
-                              onTimerStart={handleTimerStart}
-                              onTimerPause={handleTimerPause}
-                              onTimerAddTime={handleTimerAddTime}
-                              onTimerLockNow={handleTimerLockNow}
-                              onTimerUnlock={handleTimerUnlock}
-                            /> 
-                  })} 
-                </div> 
+                {/* Live Classroom Multiplayer Projector Bar */}
+                {mpRoomCode && (
+                  <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3 border border-[#d4af37]/50">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setShowMpLobbyModal(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-mono-casino font-extrabold text-xs uppercase tracking-widest border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                      >
+                        <span>📱 Room {mpRoomCode}</span>
+                        <span className="text-[10px]">QR</span>
+                      </button>
+
+                      <div className="text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-2">
+                        <span>🔒 Wagers Locked:</span>
+                        <span className="px-2.5 py-0.5 rounded-full felt-well font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">
+                          {mpLockedCount} / {unfrozenActivePlayers.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playSound('click');
+                          setMpHideProjectorBets(v => !v);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
+                          mpHideProjectorBets
+                            ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-900 dark:text-emerald-200'
+                            : 'felt-well border-[#d4af37]/50 text-slate-700 dark:text-amber-100'
+                        }`}
+                        title="Toggle between hiding student bets on the projector (recommended for mobile play) or showing full interactive betting cards"
+                      >
+                        <span>{mpHideProjectorBets ? '🙈' : '👁️'}</span>
+                        <span>{mpHideProjectorBets ? 'Projector Privacy: ON' : 'Full Cards View'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {mpRoomCode && mpHideProjectorBets ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {players.map((player, idx) => {
+                      const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
+                      const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
+                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+                      const mpSeat = mpSeats[player.id];
+                      const hasSplit = playerActive.some(pu => pu.type === 'SPLIT_BET');
+                      const isBetReady = mpSeat
+                        ? mpSeat.lockedIn
+                        : isBetCompleteForQuestionType(bets[player.id], currentQuestionType, hasSplit);
+                      const isBankrupt = player.money <= 0;
+
+                      return (
+                        <div
+                          key={player.id}
+                          className={`glass-panel rounded-2xl p-4 border-2 transition-all flex flex-col justify-between gap-3 ${
+                            isBankrupt
+                              ? 'opacity-55 border-slate-500/30'
+                              : isFrozen
+                                ? 'border-cyan-400/60 bg-cyan-950/20'
+                                : isBetReady
+                                  ? 'border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                                  : 'border-[#d4af37]/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-12 h-12 rounded-full border-2 border-[#d4af37] bg-black/30 flex items-center justify-center text-2xl relative shrink-0">
+                                {player.avatar}
+                                {mpSeat && (
+                                  <span
+                                    className={`w-3 h-3 rounded-full border-2 border-[#04150c] absolute -bottom-0.5 -right-0.5 ${
+                                      mpSeat.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                                    }`}
+                                    title={mpSeat.connected ? 'Online on Mobile' : 'Disconnected'}
+                                  />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-[10px] font-mono-casino uppercase tracking-widest text-amber-800/75 dark:text-[#d4af37]/80">
+                                  Seat #{idx + 1} {mpSeat ? '· 📱 Mobile' : '· 🖥️ Table'}
+                                </div>
+                                <div className="font-serif font-extrabold uppercase tracking-wider text-base text-slate-900 dark:text-amber-50 truncate">
+                                  {player.name}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60">
+                                Bankroll
+                              </div>
+                              <div className="font-mono-casino font-black text-base text-emerald-700 dark:text-[#fef08a]">
+                                ${player.money.toLocaleString()}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Active power-ups / effects row */}
+                          {(playerActive.length > 0 || player.effects.length > 0) && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {playerActive.map((pu, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-serif font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]"
+                                >
+                                  {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
+                                </span>
+                              ))}
+                              {player.effects.map((ef, i) => (
+                                <span
+                                  key={`ef-${i}`}
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-serif font-bold bg-purple-500/15 border border-purple-400/40 text-purple-900 dark:text-purple-200"
+                                >
+                                  {POWER_UPS[ef.type as PowerUpKey]?.icon || '✨'} {ef.type}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Status Pill */}
+                          <div
+                            className={`w-full py-2.5 px-3 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
+                              isBankrupt
+                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                                : isFrozen
+                                  ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
+                                  : isBetReady
+                                    ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
+                                    : 'felt-well border-[#d4af37]/30 text-amber-900/80 dark:text-amber-200/80 animate-pulse'
+                            }`}
+                          >
+                            {isBankrupt ? (
+                              <>
+                                <span>💸</span>
+                                <span>Awaiting Next-Round Bailout</span>
+                              </>
+                            ) : isFrozen ? (
+                              <>
+                                <span>❄️</span>
+                                <span>Frozen This Hand</span>
+                              </>
+                            ) : isBetReady ? (
+                              <>
+                                <span>🔒</span>
+                                <span>Wager Locked In (Hidden)</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>🤔</span>
+                                <span>Deciding on Device...</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-5 sm:gap-6"> 
+                    {players.map(player => { 
+                      const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
+                      const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
+                      const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
+                      const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
+                      const betCapAmount = playerCaps.length > 0 
+                        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+                        : (isBetCapped ? 50 : BET_CAP_AMOUNT);
+                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+                      const myActive = playerActive[0]; 
+                      const playerTimer = turnTimers[player.id];
+                      const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
+                      
+                      return <PlayerBettingCard 
+                                key={player.id} 
+                                player={player} 
+                                bet={bets[player.id]} 
+                                onBetChange={handleBetChange} 
+                                onGetHint={handleGetHint} 
+                                hint={hints[player.id]} 
+                                playSound={playSound} 
+                                onGetPowerUp={handleBuyRandomPowerUp} 
+                                powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
+                                activePowerUp={myActive} 
+                                isBetCapped={isBetCapped} 
+                                betCapAmount={betCapAmount}
+                                isFrozen={isFrozen}
+                                activePowerUps={playerActive} 
+                                usedPowerUps={powerUpsUsedThisRound[player.id] || []}
+                                players={players} 
+                                onUpdateMoney={handleUpdatePlayerMoney}
+                                currentSentenceText={currentSentence?.text}
+                                questionType={currentQuestionType}
+                                options={currentSentence?.options}
+                                onChangeAvatar={handleOpenAvatarModal}
+                                onUpdateName={handleUpdatePlayerName}
+                                targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
+                                timerEnabled={isTurnTimerEnabled}
+                                turnTimer={playerTimer}
+                                turnDurationMs={turnDurationMs}
+                                canAct={canPlayerAct(player.id)}
+                                isSatOut={isSatOut}
+                                timerBlockedByName={activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
+                                onTimerStart={handleTimerStart}
+                                onTimerPause={handleTimerPause}
+                                onTimerAddTime={handleTimerAddTime}
+                                onTimerLockNow={handleTimerLockNow}
+                                onTimerUnlock={handleTimerUnlock}
+                              /> 
+                    })} 
+                  </div>
+                )}
                 <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
                   <ActionButton 
                     onClick={handleRevealResults} 
@@ -4315,10 +5061,10 @@ export function App() {
                     {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : 'CALL THE HAND & REVEAL 🎲'}
                   </ActionButton>
 
-                  {isTurnTimerEnabled && !allActivePlayersLocked && (
+                  {((isTurnTimerEnabled && !allActivePlayersLocked) || (mpRoomCode && !allMpPlayersLocked)) && (
                     <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-serif text-slate-600 dark:text-amber-200/75">
                       <span>
-                        🔒 Locked Players: <strong className="font-mono-casino">{lockedCount}/{unfrozenActivePlayers.length}</strong>
+                        🔒 Locked Players: <strong className="font-mono-casino">{mpRoomCode ? mpLockedCount : lockedCount}/{unfrozenActivePlayers.length}</strong>
                       </span>
                       <button
                         type="button"
@@ -4331,7 +5077,7 @@ export function App() {
                             ? 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
                             : 'felt-well border-[#d4af37]/50 text-amber-900 dark:text-[#fef08a] hover:border-[#d4af37]'
                         }`}
-                        title="Teacher Override: unlock Reveal Results before every player's timer has locked"
+                        title="Teacher Override: unlock Reveal Results before every player has locked in"
                       >
                         {teacherRevealOverride ? '⚡ Teacher Override Active (Click to Disable)' : '🔓 Teacher Override: Unlock Reveal'}
                       </button>
@@ -4346,8 +5092,9 @@ export function App() {
             const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
             const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
             const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
-            const isEliminationVictory = players.length > 1 && activePlayers.length <= 1;
-            const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || activePlayers.length === 0;
+            const isEliminationVictory = !mpRoomCode && players.length > 1 && activePlayers.length <= 1;
+            const isAllBankrupt = !mpRoomCode && activePlayers.length === 0;
+            const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || isAllBankrupt;
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze';
             const nextFormatObj = CHALLENGE_FORMATS.find(f => f.id === (nextRoundSettings?.challengeFormat || settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
@@ -4734,6 +5481,28 @@ export function App() {
     }
   };
 
+  if (isStudentControllerMode) {
+    const initialUrlRoom = typeof window !== 'undefined'
+      ? (new URLSearchParams(window.location.search).get('room') || '')
+      : '';
+    return (
+      <StudentControllerView
+        initialRoomCode={initialUrlRoom}
+        playSound={playSound}
+        isDarkMode={isDarkMode}
+        onToggleTheme={toggleTheme}
+        onExitStudentMode={() => {
+          if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('room');
+            window.history.replaceState({}, '', url.toString());
+          }
+          setIsStudentControllerMode(false);
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300">
@@ -4752,8 +5521,26 @@ export function App() {
           </div>
         )}
         
-        {/* Top Controls: Theme Toggle & Audio */}
+        {/* Top Controls: Multiplayer Room Badge, Theme Toggle & Audio */}
         <div className="fixed top-4 right-4 z-50 flex items-center gap-2.5">
+          {mpRoomCode && (
+            <button
+              type="button"
+              onClick={() => {
+                playSound('click');
+                setShowMpLobbyModal(true);
+              }}
+              className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/80 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-mono-casino text-xs font-extrabold uppercase tracking-wider"
+              title="Open Live Classroom Multiplayer Room Manager & QR Code"
+            >
+              <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span>📱 {mpRoomCode}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
+                {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length}
+              </span>
+            </button>
+          )}
+
           <button 
             onClick={toggleTheme}
             className="text-lg w-11 h-11 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-[#051c10]/90 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer" 
@@ -4888,7 +5675,9 @@ export function App() {
                   {players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).length > 0 ?
                    (players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).map(p => {
                       const targetActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                      const isShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD');
+                      const hasShield = targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                      const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+                      const isShielded = hasShield || alreadyAttacked;
                       return ( 
                       <ActionButton 
                           key={p.id} 
@@ -4896,7 +5685,7 @@ export function App() {
                           variant="purple"
                           className={`w-full py-3 px-4 transition-all ${isShielded ? 'grayscale opacity-50 cursor-not-allowed' : 'hover:scale-[1.01]'}`}
                           disabled={isShielded}
-                          title={isShielded ? `${p.name} is Shielded!` : `Target ${p.name}`}
+                          title={isShielded ? `${p.name} is Protected!` : `Target ${p.name}`}
                       > 
                           <div className="flex items-center justify-between w-full gap-3">
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -4905,7 +5694,7 @@ export function App() {
                                 <span className="font-bold text-lg tracking-wide block truncate">{p.name}</span>
                                 {isShielded && (
                                   <span className="text-[10px] text-amber-300 font-bold uppercase tracking-wider block">
-                                    🛡️ Shield Active
+                                    🛡️ {alreadyAttacked ? 'Already Targeted This Hand' : 'Shield Active'}
                                   </span>
                                 )}
                               </div>
@@ -4922,7 +5711,7 @@ export function App() {
                   {!isSwap && (
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
                       <ActionButton
-                        onClick={handleCancelTargetModal}
+                        onClick={() => handleCancelTargetModal()}
                         variant="secondary"
                         className="w-full py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5"
                       >
@@ -5090,6 +5879,23 @@ export function App() {
               setAvailablePowerUps([]);
             }
           }}
+          playSound={playSound}
+        />
+      )}
+      {showMpLobbyModal && (
+        <MultiplayerLobbyModal
+          isOpen={showMpLobbyModal}
+          onClose={() => setShowMpLobbyModal(false)}
+          roomCode={mpRoomCode}
+          roomLocked={mpRoomLocked}
+          hostConnected={mpHostConnected}
+          players={players}
+          seats={mpSeats}
+          onCreateRoom={handleCreateMpRoom}
+          onToggleLockRoom={handleToggleLockMpRoom}
+          onKickPlayer={handleKickMpPlayer}
+          onCloseRoom={handleCloseMpRoom}
+          onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
           playSound={playSound}
         />
       )}
