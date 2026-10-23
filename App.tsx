@@ -355,7 +355,7 @@ export function App() {
     };
   }, [refreshDesktopStatus]);
 
-  const handleOpenTeacherPinModal = useCallback(() => {
+  const handleOpenTeacherPinModal = () => {
     playSound('click');
     pendingCreateRoomAfterPinRef.current = false;
     setTeacherPinInput('');
@@ -363,9 +363,9 @@ export function App() {
     setShowChangePinForm(false);
     setTeacherPinNotice(null);
     setShowTeacherPinModal(true);
-  }, [playSound]);
+  };
 
-  const startHostMultiplayerRoom = useCallback(async () => {
+  const startHostMultiplayerRoom = async () => {
     try {
       playSound('startGame');
       if (mpControllerRef.current) {
@@ -382,7 +382,7 @@ export function App() {
     } catch (e: any) {
       setError({ title: 'Multiplayer Error', message: e?.message || 'Could not create multiplayer room.' });
     }
-  }, [playSound]);
+  };
 
   const handleUnlockTeacherPin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -2524,7 +2524,7 @@ export function App() {
       return;
     }
     await startHostMultiplayerRoom();
-  }, [desktopStatus.isDesktop, playSound, startHostMultiplayerRoom]);
+  }, [desktopStatus.isDesktop, playSound]);
 
   const handleCloseMpRoom = useCallback(() => {
     playSound('click');
