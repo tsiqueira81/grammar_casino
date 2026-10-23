@@ -292,24 +292,30 @@ const binarySentenceSchema = {
 const multipleChoiceSentenceSchema = {
   type: Type.OBJECT,
   properties: {
-    correction: { type: Type.STRING, description: "The full completed sentence with the correct option inserted." },
-    text: { type: Type.STRING, description: "The generated sentence containing '_____'." },
+    correction: {
+      type: Type.STRING,
+      description: "Step 1: Write the FULL, 100% grammatically complete sentence first (with NO blanks and NO missing prepositions or particles).",
+    },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "Step 2: Choose ONLY the exact target word (or exact target verb form) from 'correction' to be the gap. NEVER include surrounding words from the sentence.",
+    },
+    text: {
+      type: Type.STRING,
+      description: "Step 3: Copy 'correction' word-for-word and replace ONLY 'correctAnswer' with '_____'. Replacing '_____' with 'correctAnswer' MUST produce 'correction' word-for-word without duplicating any word.",
+    },
+    options: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Step 4: 4 distinct options (1 'correctAnswer' + 3 plausible grammatical distractors) containing ONLY the word(s) for '_____', NEVER words already present in 'text'.",
+    },
     explanation: {
       type: Type.STRING,
       description: "A clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why the correct option fits.",
     },
-    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence containing the target gap." },
-    options: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "4 distinct options (1 correct, 3 plausible distractors).",
-    },
-    correctAnswer: {
-      type: Type.STRING,
-      description: "The exact option string that fills '_____'.",
-    },
+    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from 'correction' containing the target gap." },
   },
-  required: ["correction", "text", "explanation", "grammarPhrase", "options", "correctAnswer"],
+  required: ["correction", "correctAnswer", "text", "options", "explanation", "grammarPhrase"],
 };
 
 const openClozeSentenceSchema = {
@@ -349,6 +355,221 @@ function getSentenceSchema(questionType: "binary" | "multipleChoice" | "openCloz
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Guarantees that a Multiple-Choice Cloze challenge has options and `correctAnswer`
+ * that ONLY represent the missing gap `_____` in `text`, never duplicating words
+ * that already appear in the given sentence around the gap.
+ */
+function enforceMultipleChoiceIntegrity(data: any) {
+  let corr = String(data.correction || "").replace(/\s+/g, " ").trim();
+  let txt = String(data.text || "").replace(/\s+/g, " ").trim();
+  let answer = String(data.correctAnswer || "").replace(/\s+/g, " ").trim();
+  let opts: string[] = Array.isArray(data.options)
+    ? data.options.map((o: any) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+
+  if (/_{2,}/.test(txt)) {
+    txt = txt.replace(/_{2,}/, "_____");
+  }
+
+  // 1. Repair common 3-part phrasal-prepositional verb omissions in `correction`
+  const phrasalRepairs: Array<[RegExp, string]> = [
+    [/\b(look(?:s|ed|ing)?\s+forward)\s+(?!to\b)([a-z]+ing)\b/gi, "$1 to $2"],
+    [/\b(put(?:s|ting)?\s+up)\s+(?!with\b)([a-z]+ing)\b/gi, "$1 with $2"],
+    [/\b(came|come(?:s|ing)?)\s+up\s+(?!with\b)(a|an|the|some|this|that|an?\s+idea|a\s+plan)\b/gi, "$1 up with $2"],
+    [/\b(ran|run(?:s|ning)?)\s+out\s+(?!of\b)([a-z]+)\b/gi, "$1 out of $2"],
+  ];
+  for (const [pattern, replacement] of phrasalRepairs) {
+    corr = corr.replace(pattern, replacement);
+  }
+
+  // 2. If all options (and correctAnswer) share an identical leading word or trailing word,
+  // strip that constant word from all options and correctAnswer so unchanging sentence words aren't in the choices.
+  const allChoices = answer ? [answer, ...opts] : [...opts];
+  if (allChoices.length >= 2) {
+    while (allChoices.every((c) => c.split(/\s+/).length > 1)) {
+      const firstWord = allChoices[0].split(/\s+/)[0].toLowerCase();
+      if (allChoices.every((c) => c.split(/\s+/)[0].toLowerCase() === firstWord)) {
+        const stripLeading = (s: string) => s.replace(/^\S+\s+/, "").trim();
+        answer = stripLeading(answer);
+        opts = opts.map(stripLeading);
+        for (let i = 0; i < allChoices.length; i++) allChoices[i] = stripLeading(allChoices[i]);
+      } else {
+        break;
+      }
+    }
+    while (allChoices.every((c) => c.split(/\s+/).length > 1)) {
+      const words0 = allChoices[0].split(/\s+/);
+      const lastWord = words0[words0.length - 1].toLowerCase();
+      if (
+        allChoices.every((c) => {
+          const w = c.split(/\s+/);
+          return w[w.length - 1].toLowerCase() === lastWord;
+        })
+      ) {
+        const stripTrailing = (s: string) => s.replace(/\s+\S+$/, "").trim();
+        answer = stripTrailing(answer);
+        opts = opts.map(stripTrailing);
+        for (let i = 0; i < allChoices.length; i++) allChoices[i] = stripTrailing(allChoices[i]);
+      } else {
+        break;
+      }
+    }
+  }
+
+  // 3. Check for overlap between `answer` / `opts` and the words immediately before/after `_____` in `txt`
+  if (txt.includes("_____") && corr) {
+    const [beforeRaw, afterRaw] = txt.split("_____");
+    const beforeWords = beforeRaw.trim().split(/\s+/).filter(Boolean);
+    const afterWords = (afterRaw || "").trim().split(/\s+/).filter(Boolean);
+    const prevWord = beforeWords.length > 0 ? beforeWords[beforeWords.length - 1].replace(/^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$/g, "") : "";
+    const nextWord = afterWords.length > 0 ? afterWords[0].replace(/^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$/g, "") : "";
+
+    if (prevWord) {
+      const prevPrefixRe = new RegExp(`^${escapeRegExp(prevWord)}\\s+`, "i");
+      if (prevPrefixRe.test(answer)) {
+        const strippedAnswer = answer.replace(prevPrefixRe, "").trim();
+        const strippedOpts = opts.map((o) => o.replace(prevPrefixRe, "").trim());
+        const uniqueStripped = new Set(strippedOpts.map((o) => o.toLowerCase()));
+        const testFilled = txt.replace("_____", strippedAnswer).replace(/\s+/g, " ").trim();
+        if (strippedAnswer && testFilled.toLowerCase() === corr.toLowerCase() && uniqueStripped.size === opts.length) {
+          answer = strippedAnswer;
+          opts = strippedOpts;
+        } else {
+          txt = txt.replace(new RegExp(`\\b${escapeRegExp(prevWord)}\\s+_____`, "i"), "_____");
+        }
+      } else if (opts.some((o) => o.toLowerCase() === `${prevWord.toLowerCase()} ${answer.toLowerCase()}`)) {
+        // E.g. txt = "He decided to _____ the offer", answer = "accept", opts = ["accept", "to accept", "accepting", "accepted"]
+        const expandedAnswer = `${prevWord} ${answer}`;
+        const expandedTxt = txt.replace(new RegExp(`\\b${escapeRegExp(prevWord)}\\s+_____`, "i"), "_____");
+        if (expandedTxt.replace("_____", expandedAnswer).replace(/\s+/g, " ").trim().toLowerCase() === corr.toLowerCase()) {
+          txt = expandedTxt;
+          answer = expandedAnswer;
+        }
+      }
+    }
+
+    const [, afterRaw2] = txt.split("_____");
+    const afterWords2 = (afterRaw2 || "").trim().split(/\s+/).filter(Boolean);
+    const nextWord2 = afterWords2.length > 0 ? afterWords2[0].replace(/^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$/g, "") : "";
+
+    if (nextWord2) {
+      const nextSuffixRe = new RegExp(`\\s+${escapeRegExp(nextWord2)}$`, "i");
+      if (nextSuffixRe.test(answer)) {
+        const strippedAnswer = answer.replace(nextSuffixRe, "").trim();
+        const strippedOpts = opts.map((o) => o.replace(nextSuffixRe, "").trim());
+        const uniqueStripped = new Set(strippedOpts.map((o) => o.toLowerCase()));
+        const testFilled = txt.replace("_____", strippedAnswer).replace(/\s+/g, " ").trim();
+        if (strippedAnswer && testFilled.toLowerCase() === corr.toLowerCase() && uniqueStripped.size === opts.length) {
+          answer = strippedAnswer;
+          opts = strippedOpts;
+        } else {
+          txt = txt.replace(new RegExp(`_____\\s+${escapeRegExp(nextWord2)}\\b`, "i"), "_____");
+        }
+      }
+    }
+  }
+
+  // 4. Ensure `txt` with `answer` substituted in place of `_____` matches `corr` word-for-word
+  if (answer && corr) {
+    const filled = txt.replace(/_{2,}/, answer).replace(/\s+/g, " ").trim();
+    if (filled.toLowerCase() !== corr.toLowerCase()) {
+      const targetRegex = new RegExp(`\\b${escapeRegExp(answer)}\\b`, "i");
+      const phrase = String(data.grammarPhrase || "").trim();
+      let rebuilt = "";
+
+      if (phrase && corr.toLowerCase().includes(phrase.toLowerCase()) && targetRegex.test(phrase)) {
+        const phraseMatch = corr.match(new RegExp(escapeRegExp(phrase), "i"));
+        if (phraseMatch && phraseMatch.index !== undefined) {
+          const before = corr.slice(0, phraseMatch.index);
+          const matchedPhrase = phraseMatch[0];
+          const after = corr.slice(phraseMatch.index + matchedPhrase.length);
+          const blankedPhrase = matchedPhrase.replace(targetRegex, (m) => {
+            answer = m;
+            return "_____";
+          });
+          rebuilt = `${before}${blankedPhrase}${after}`;
+        }
+      }
+
+      if (!rebuilt && targetRegex.test(corr)) {
+        rebuilt = corr.replace(targetRegex, (m) => {
+          answer = m;
+          return "_____";
+        });
+      }
+
+      if (rebuilt && /_{2,}/.test(rebuilt)) {
+        txt = rebuilt;
+      } else if (/_{2,}/.test(txt)) {
+        let repairedFilled = filled;
+        for (const [pattern, replacement] of phrasalRepairs) {
+          repairedFilled = repairedFilled.replace(pattern, replacement);
+        }
+        corr = repairedFilled;
+        if (repairedFilled.toLowerCase() !== filled.toLowerCase() && targetRegex.test(corr)) {
+          txt = corr.replace(targetRegex, "_____");
+        }
+      }
+    }
+  }
+
+  // 5. Strip adjacent `prevWord` or `nextWord` from any individual distractor option that still includes it
+  if (txt.includes("_____")) {
+    const [beforeFinal, afterFinal] = txt.split("_____");
+    const bw = beforeFinal.trim().split(/\s+/).filter(Boolean);
+    const aw = (afterFinal || "").trim().split(/\s+/).filter(Boolean);
+    const finalPrev = bw.length > 0 ? bw[bw.length - 1].replace(/^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$/g, "") : "";
+    const finalNext = aw.length > 0 ? aw[0].replace(/^[^a-zA-Z0-9']+|[^a-zA-Z0-9']+$/g, "") : "";
+
+    const prevRe = finalPrev ? new RegExp(`^${escapeRegExp(finalPrev)}\\s+`, "i") : null;
+    const nextRe = finalNext ? new RegExp(`\\s+${escapeRegExp(finalNext)}$`, "i") : null;
+
+    opts = opts.map((opt) => {
+      if (opt.toLowerCase() === answer.toLowerCase()) return answer;
+      let cleaned = opt;
+      if (prevRe && prevRe.test(cleaned)) {
+        const candidate = cleaned.replace(prevRe, "").trim();
+        if (candidate && candidate.toLowerCase() !== answer.toLowerCase()) {
+          cleaned = candidate;
+        }
+      }
+      if (nextRe && nextRe.test(cleaned)) {
+        const candidate = cleaned.replace(nextRe, "").trim();
+        if (candidate && candidate.toLowerCase() !== answer.toLowerCase()) {
+          cleaned = candidate;
+        }
+      }
+      return cleaned;
+    });
+  }
+
+  // 6. Deduplicate options and ensure `answer` is present
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const o of opts) {
+    const key = o.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      deduped.push(o.trim());
+    }
+  }
+  if (answer && !seen.has(answer.toLowerCase())) {
+    if (deduped.length >= 4) {
+      deduped[0] = answer;
+    } else {
+      deduped.unshift(answer);
+    }
+    seen.add(answer.toLowerCase());
+  }
+
+  data.correction = corr;
+  data.text = txt;
+  data.correctAnswer = answer;
+  data.options = deduped;
+  data.acceptedAnswers = answer ? [answer] : [];
 }
 
 /**
@@ -563,14 +784,21 @@ ${subtypeClause}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
-=== MULTIPLE-CHOICE CLOZE RULES ===
-1. Write a grammatically sound sentence ("correction") and replace the key target word or short grammatical phrase (1-3 words testing "${topic}") with an exact 5-underscore blank: "_____" in "text".
-2. Set "correction" to the FULL completed sentence with the correct option inserted in place of "_____".
-3. Set "text" to the sentence containing "_____".
-4. Set "correctAnswer" to the exact correct option string.
-5. Set "options" to an array of 4 distinct strings (1 correct answer + 3 plausible grammatical distractors that test "${topic}" at CEFR ${level}), in randomized order.
-6. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why "${topic}" requires the correct option.
-7. Set "grammarPhrase" to the 3-5 word phrase from the completed sentence that contains the target gap.
+=== MULTIPLE-CHOICE CLOZE STRICT RULES ===
+1. STEP 1 ("correction"): First, write a FULL, 100% grammatically complete sentence with NO blanks.
+2. STEP 2 ("correctAnswer"): Pick ONLY the exact missing word (prefer a SINGLE word whenever possible) from "correction" that tests "${topic}". NEVER include surrounding words from the sentence in "correctAnswer".
+3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY "correctAnswer" with an exact 5-underscore blank: "_____".
+   - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
+   - NEVER leave any word from "correctAnswer" or "options" visible in "text" immediately before or after "_____".
+     * WRONG: text = "She has _____ in Madrid", options = ["has lived", "have lived", "lived", "living"] ("has" is already in the sentence!).
+     * RIGHT: text = "She has _____ in Madrid", options = ["lived", "live", "living", "lives"] (OR text = "She _____ in Madrid", options = ["has lived", "have lived", "lived", "is living"]).
+     * WRONG: text = "He is good _____ playing chess", options = ["good at", "good in", "good on", "good for"] ("good" is already in the sentence!).
+     * RIGHT: text = "He is good _____ playing chess", options = ["at", "in", "on", "for"].
+4. STEP 4 ("options"): Set "options" to an array of 4 distinct strings (1 "correctAnswer" + 3 plausible grammatical distractors testing "${topic}" at CEFR ${level}), in randomized order.
+   - Every option MUST contain ONLY the word(s) that fill "_____", NEVER words that already appear in the given sentence.
+   - NEVER pick random words from elsewhere in the sentence as distractors.
+5. STEP 5 ("explanation"): Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why the correct option fits.
+6. STEP 6 ("grammarPhrase"): Set "grammarPhrase" to the 3-5 word phrase from "correction" that contains the target gap.
 
 Respond ONLY with valid JSON matching the schema.`;
         } else if (resolvedQuestionType === "openCloze") {
@@ -654,15 +882,7 @@ Respond ONLY with valid JSON matching the schema.`;
           }
         } else if (resolvedQuestionType === "multipleChoice") {
           generatedData.isCorrect = true;
-          if (Array.isArray(generatedData.options) && generatedData.correctAnswer) {
-            const hasCorrect = generatedData.options.some(
-              (o: string) => o.trim().toLowerCase() === String(generatedData.correctAnswer).trim().toLowerCase()
-            );
-            if (!hasCorrect) {
-              generatedData.options[0] = generatedData.correctAnswer;
-            }
-          }
-          generatedData.acceptedAnswers = generatedData.correctAnswer ? [String(generatedData.correctAnswer).trim()] : [];
+          enforceMultipleChoiceIntegrity(generatedData);
         } else if (resolvedQuestionType === "openCloze") {
           generatedData.isCorrect = true;
           enforceOpenClozeIntegrity(generatedData);

@@ -292,6 +292,7 @@ export function App() {
   const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
   const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
   const mpAutoStartedRoundRef = useRef<number>(0);
+  const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
   const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
   const turnDurationMs = turnTimerSeconds * 1000;
@@ -573,8 +574,21 @@ export function App() {
     if (!player || player.money <= 0) return false;
     if (isPlayerFrozen(playerId)) return false;
     // In Multiplayer mode, all players act simultaneously until they lock in or the shared round timer expires
+    // (When the round timer expires, all seats are automatically set to lockedIn = true, and only the teacher can unlock a seat)
     if (mpRoomCode) {
-      if (mpSeats[playerId]?.lockedIn) return false;
+      if (mpSeats[playerId]) {
+        if (mpSeats[playerId].lockedIn) return false;
+        if (
+          isTurnTimerEnabled &&
+          mpRoundTimer.status === 'running' &&
+          !mpRoundTimer.held &&
+          mpRoundTimer.endsAt !== undefined &&
+          Date.now() >= mpRoundTimer.endsAt
+        ) {
+          return false;
+        }
+        return true;
+      }
       if (isTurnTimerEnabled && mpRoundTimer.status === 'locked') return false;
       return true;
     }
@@ -583,7 +597,7 @@ export function App() {
     if (!t || t.status !== 'running') return false;
     if (!t.held && t.endsAt !== undefined && Date.now() >= t.endsAt) return false;
     return true;
-  }, [players, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, mpRoundTimer.status, turnTimers]);
+  }, [players, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, mpRoundTimer, turnTimers]);
 
   // Helper to lock a player and optionally auto-advance to the next unfrozen idle player in sequence
   const lockPlayerAndMaybeAdvance = useCallback((
@@ -847,27 +861,6 @@ export function App() {
     });
   }, [mpRoomCode, isTurnTimerEnabled, step, isTimerSystemHeld, turnDurationMs]);
 
-  // Pause shared Multiplayer round timer automatically if every active unfrozen player locks in early
-  useEffect(() => {
-    if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
-    const unfrozen = activePlayers.filter(p => !isPlayerFrozen(p.id));
-    if (unfrozen.length === 0) return;
-    const qType: QuestionType = currentSentence?.questionType || 'binary';
-    const allLocked = unfrozen.every(p => {
-      if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
-      const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-      return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit);
-    });
-    if (allLocked && mpRoundTimer.status === 'running') {
-      const now = Date.now();
-      setMpRoundTimer(prev => {
-        if (prev.status !== 'running') return prev;
-        const rem = getTimerRemainingMs(prev, turnDurationMs, now);
-        return { status: 'paused', remainingMs: rem, held: false, endsAt: undefined };
-      });
-    }
-  }, [mpRoomCode, isTurnTimerEnabled, step, activePlayers, isPlayerFrozen, currentSentence, mpSeats, activePowerUps, bets, mpRoundTimer.status, turnDurationMs]);
-
   // Watch the shared Multiplayer round timer's `endsAt` deadline and lock all seats when time expires
   useEffect(() => {
     if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
@@ -877,6 +870,7 @@ export function App() {
     const checkExpiry = () => {
       if (Date.now() >= endsAt) {
         playSound('timeUp');
+        mpTimerAutoPausedByAllLockedRef.current = false;
         setMpRoundTimer({ status: 'locked', remainingMs: 0, held: false, endsAt: undefined });
         setTeacherRevealOverride(true);
         setMpSeats(prev => {
@@ -891,12 +885,14 @@ export function App() {
 
     const delay = Math.max(0, endsAt - Date.now());
     const timeoutId = window.setTimeout(checkExpiry, delay + 15);
+    const intervalId = window.setInterval(checkExpiry, 250);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') checkExpiry();
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [mpRoomCode, isTurnTimerEnabled, step, mpRoundTimer, playSound]);
@@ -904,6 +900,7 @@ export function App() {
   const handleMpRoundTimerStart = useCallback(() => {
     if (!isTurnTimerEnabled) return;
     playSound('click');
+    mpTimerAutoPausedByAllLockedRef.current = false;
     const now = Date.now();
     setMpRoundTimer(prev => {
       const rem = prev.status === 'paused' && prev.remainingMs && prev.remainingMs > 0
@@ -918,6 +915,7 @@ export function App() {
   const handleMpRoundTimerPause = useCallback(() => {
     if (!isTurnTimerEnabled) return;
     playSound('click');
+    mpTimerAutoPausedByAllLockedRef.current = false;
     const now = Date.now();
     setMpRoundTimer(prev => {
       if (prev.status !== 'running') return prev;
@@ -929,8 +927,16 @@ export function App() {
   const handleMpRoundTimerAddTime = useCallback(() => {
     if (!isTurnTimerEnabled) return;
     playSound('click');
+    mpTimerAutoPausedByAllLockedRef.current = false;
     const now = Date.now();
+    setTeacherRevealOverride(false);
     setMpRoundTimer(prev => {
+      if (prev.status === 'locked') {
+        const rem = TURN_TIMER_BONUS_MS;
+        return isTimerSystemHeld
+          ? { status: 'running', held: true, remainingMs: rem }
+          : { status: 'running', held: false, endsAt: now + rem, remainingMs: rem };
+      }
       if (prev.status !== 'running' && prev.status !== 'paused') return prev;
       const rem = getTimerRemainingMs(prev, turnDurationMs, now) + TURN_TIMER_BONUS_MS;
       if (prev.status === 'running' && !prev.held) {
@@ -938,11 +944,21 @@ export function App() {
       }
       return { ...prev, remainingMs: rem };
     });
-  }, [isTurnTimerEnabled, playSound, turnDurationMs]);
+    if (mpRoundTimer.status === 'locked') {
+      setMpSeats(prev => {
+        const next: Record<number, MultiplayerSeat> = {};
+        (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+          next[Number(k)] = { ...seat, lockedIn: false };
+        });
+        return next;
+      });
+    }
+  }, [isTurnTimerEnabled, playSound, turnDurationMs, isTimerSystemHeld, mpRoundTimer.status]);
 
   const handleMpRoundTimerLockNow = useCallback(() => {
     if (!isTurnTimerEnabled) return;
     playSound('timeUp');
+    mpTimerAutoPausedByAllLockedRef.current = false;
     setMpRoundTimer({ status: 'locked', remainingMs: 0, held: false, endsAt: undefined });
     setTeacherRevealOverride(true);
     setMpSeats(prev => {
@@ -957,14 +973,33 @@ export function App() {
   const handleMpRoundTimerReset = useCallback(() => {
     if (!isTurnTimerEnabled) return;
     playSound('click');
+    mpTimerAutoPausedByAllLockedRef.current = false;
     const now = Date.now();
     setTeacherRevealOverride(false);
+    setMpSeats(prev => {
+      const next: Record<number, MultiplayerSeat> = {};
+      (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+        next[Number(k)] = { ...seat, lockedIn: false };
+      });
+      return next;
+    });
     setMpRoundTimer(
       isTimerSystemHeld
         ? { status: 'running', held: true, remainingMs: turnDurationMs }
         : { status: 'running', held: false, endsAt: now + turnDurationMs, remainingMs: turnDurationMs }
     );
   }, [isTurnTimerEnabled, playSound, isTimerSystemHeld, turnDurationMs]);
+
+  const handleMpUnlockPlayer = useCallback((playerId: number) => {
+    playSound('click');
+    setMpSeats(prev => {
+      if (!prev[playerId]) return prev;
+      return {
+        ...prev,
+        [playerId]: { ...prev[playerId], lockedIn: false },
+      };
+    });
+  }, [playSound]);
 
   // Save game state
   useEffect(() => { 
@@ -2217,7 +2252,7 @@ export function App() {
           [playerId]: {
             ...seat,
             connected: true,
-            lockedIn: prev[playerId]?.lockedIn ?? false,
+            lockedIn: prev[playerId]?.lockedIn ?? (step === 'IN_GAME' && isTurnTimerEnabled && mpRoundTimer.status === 'locked'),
             lastSeen: Date.now(),
           },
         }));
@@ -2266,6 +2301,28 @@ export function App() {
             break;
           }
           case 'LOCK_IN': {
+            const isMpTimeUp =
+              isTurnTimerEnabled &&
+              (mpRoundTimer.status === 'locked' ||
+                (mpRoundTimer.status === 'running' &&
+                  !mpRoundTimer.held &&
+                  getTimerRemainingMs(mpRoundTimer, turnDurationMs) <= 0) ||
+                (mpRoundTimer.status === 'paused' &&
+                  (mpRoundTimer.remainingMs ?? 1) <= 0));
+
+            if (isMpTimeUp && mpRoundTimer.status === 'running') {
+              mpTimerAutoPausedByAllLockedRef.current = false;
+              setMpRoundTimer({ status: 'locked', remainingMs: 0, held: false, endsAt: undefined });
+              setTeacherRevealOverride(true);
+              setMpSeats(prev => {
+                const next: Record<number, MultiplayerSeat> = {};
+                (Object.entries(prev) as [string, MultiplayerSeat][]).forEach(([k, seat]) => {
+                  next[Number(k)] = { ...seat, lockedIn: true };
+                });
+                return next;
+              });
+            }
+
             if (intent.bet) {
               const entries = Object.entries(intent.bet) as [keyof Bet, any][];
               entries.forEach(([field, val]) => {
@@ -2278,7 +2335,7 @@ export function App() {
                 if (!prev[playerId]) return prev;
                 return { ...prev, [playerId]: { ...prev[playerId], lockedIn: true } };
               });
-            } else if (step === 'IN_GAME' && !isProcessing) {
+            } else if (step === 'IN_GAME' && !isProcessing && !isMpTimeUp) {
               setMpSeats(prev => {
                 if (!prev[playerId]) return prev;
                 return { ...prev, [playerId]: { ...prev[playerId], lockedIn: false } };
@@ -2330,6 +2387,9 @@ export function App() {
     handleBetChange,
     step,
     isProcessing,
+    isTurnTimerEnabled,
+    mpRoundTimer,
+    turnDurationMs,
     handleGetHint,
     handleBuyRandomPowerUp,
     mpStudentPendingTarget,
@@ -5198,37 +5258,50 @@ export function App() {
                           )}
 
                           {/* Status Pill */}
-                          <div
-                            className={`w-full py-2.5 px-3 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
-                              isBankrupt
-                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
-                                : isFrozen
-                                  ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
-                                  : isBetReady
-                                    ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
-                                    : 'felt-well border-[#d4af37]/30 text-amber-900/80 dark:text-amber-200/80 animate-pulse'
-                            }`}
-                          >
-                            {isBankrupt ? (
-                              <>
-                                <span>💸</span>
-                                <span>Awaiting Next-Round Bailout</span>
-                              </>
-                            ) : isFrozen ? (
-                              <>
-                                <span>❄️</span>
-                                <span>Frozen This Hand</span>
-                              </>
-                            ) : isBetReady ? (
-                              <>
-                                <span>🔒</span>
-                                <span>Wager Locked In (Hidden)</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>🤔</span>
-                                <span>Deciding on Device...</span>
-                              </>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`flex-1 py-2.5 px-3 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
+                                isBankrupt
+                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                                  : isFrozen
+                                    ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
+                                    : isBetReady
+                                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
+                                      : 'felt-well border-[#d4af37]/30 text-amber-900/80 dark:text-amber-200/80 animate-pulse'
+                              }`}
+                            >
+                              {isBankrupt ? (
+                                <>
+                                  <span>💸</span>
+                                  <span>Awaiting Next-Round Bailout</span>
+                                </>
+                              ) : isFrozen ? (
+                                <>
+                                  <span>❄️</span>
+                                  <span>Frozen This Hand</span>
+                                </>
+                              ) : isBetReady ? (
+                                <>
+                                  <span>🔒</span>
+                                  <span>Wager Locked In (Hidden)</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>🤔</span>
+                                  <span>Deciding on Device...</span>
+                                </>
+                              )}
+                            </div>
+                            {mpSeat?.lockedIn && !isBankrupt && !isFrozen && (
+                              <button
+                                type="button"
+                                onClick={() => handleMpUnlockPlayer(player.id)}
+                                title="Teacher Only: Unlock this player's wager so they can change their bet"
+                                className="px-3 py-2.5 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/60 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
+                              >
+                                <span>🔓</span>
+                                <span>Unlock</span>
+                              </button>
                             )}
                           </div>
                         </div>
@@ -5249,43 +5322,64 @@ export function App() {
                       const myActive = playerActive[0]; 
                       const playerTimer = turnTimers[player.id];
                       const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
+                      const mpSeat = mpSeats[player.id];
                       
-                      return <PlayerBettingCard 
-                                key={player.id} 
-                                player={player} 
-                                bet={bets[player.id]} 
-                                onBetChange={handleBetChange} 
-                                onGetHint={handleGetHint} 
-                                hint={hints[player.id]} 
-                                playSound={playSound} 
-                                onGetPowerUp={handleBuyRandomPowerUp} 
-                                powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
-                                activePowerUp={myActive} 
-                                isBetCapped={isBetCapped} 
-                                betCapAmount={betCapAmount}
-                                isFrozen={isFrozen}
-                                activePowerUps={playerActive} 
-                                usedPowerUps={powerUpsUsedThisRound[player.id] || []}
-                                players={players} 
-                                onUpdateMoney={handleUpdatePlayerMoney}
-                                currentSentenceText={currentSentence?.text}
-                                questionType={currentQuestionType}
-                                options={currentSentence?.options}
-                                onChangeAvatar={handleOpenAvatarModal}
-                                onUpdateName={handleUpdatePlayerName}
-                                targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
-                                timerEnabled={isTurnTimerEnabled && !mpRoomCode}
-                                turnTimer={playerTimer}
-                                turnDurationMs={turnDurationMs}
-                                canAct={canPlayerAct(player.id)}
-                                isSatOut={isSatOut && !mpRoomCode}
-                                timerBlockedByName={!mpRoomCode && activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
-                                onTimerStart={handleTimerStart}
-                                onTimerPause={handleTimerPause}
-                                onTimerAddTime={handleTimerAddTime}
-                                onTimerLockNow={handleTimerLockNow}
-                                onTimerUnlock={handleTimerUnlock}
-                              /> 
+                      return (
+                        <div key={player.id} className="space-y-2">
+                          {mpRoomCode && mpSeat?.lockedIn && !isFrozen && player.money > 0 && (
+                            <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/50 text-emerald-900 dark:text-emerald-200">
+                              <span className="text-xs font-serif font-extrabold uppercase tracking-wider flex items-center gap-2">
+                                <span>🔒</span>
+                                <span>{player.name} Locked In Wager on Device</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMpUnlockPlayer(player.id)}
+                                title="Teacher Only: Unlock this player's wager so they can change their bet"
+                                className="px-3 py-1 rounded-lg font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
+                              >
+                                <span>🔓</span>
+                                <span>Unlock Player</span>
+                              </button>
+                            </div>
+                          )}
+                          <PlayerBettingCard 
+                            player={player} 
+                            bet={bets[player.id]} 
+                            onBetChange={handleBetChange} 
+                            onGetHint={handleGetHint} 
+                            hint={hints[player.id]} 
+                            playSound={playSound} 
+                            onGetPowerUp={handleBuyRandomPowerUp} 
+                            powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
+                            activePowerUp={myActive} 
+                            isBetCapped={isBetCapped} 
+                            betCapAmount={betCapAmount}
+                            isFrozen={isFrozen}
+                            activePowerUps={playerActive} 
+                            usedPowerUps={powerUpsUsedThisRound[player.id] || []}
+                            players={players} 
+                            onUpdateMoney={handleUpdatePlayerMoney}
+                            currentSentenceText={currentSentence?.text}
+                            questionType={currentQuestionType}
+                            options={currentSentence?.options}
+                            onChangeAvatar={handleOpenAvatarModal}
+                            onUpdateName={handleUpdatePlayerName}
+                            targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
+                            timerEnabled={isTurnTimerEnabled && !mpRoomCode}
+                            turnTimer={playerTimer}
+                            turnDurationMs={turnDurationMs}
+                            canAct={canPlayerAct(player.id)}
+                            isSatOut={isSatOut && !mpRoomCode}
+                            timerBlockedByName={!mpRoomCode && activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
+                            onTimerStart={handleTimerStart}
+                            onTimerPause={handleTimerPause}
+                            onTimerAddTime={handleTimerAddTime}
+                            onTimerLockNow={handleTimerLockNow}
+                            onTimerUnlock={handleTimerUnlock}
+                          />
+                        </div>
+                      );
                     })} 
                   </div>
                 )}

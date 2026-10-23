@@ -1187,7 +1187,7 @@ export class StudentRoomController {
       }
     }
 
-    const res = await safeFetchJson<{ view?: PlayerViewPayload }>(`/api/mp/room/${this.code}/intent`, {
+    await safeFetchJson<{ view?: PlayerViewPayload }>(`/api/mp/room/${this.code}/intent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1196,9 +1196,6 @@ export class StudentRoomController {
         intent,
       }),
     });
-    if (res.ok && res.isJson && res.data?.view) {
-      this.onViewUpdate(res.data.view);
-    }
   }
 
   public destroy() {

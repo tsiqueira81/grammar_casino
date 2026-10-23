@@ -14,7 +14,7 @@ import {
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
 import Modal from './Modal';
-import { StudentRoundTimerBar } from './TurnTimer';
+import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
@@ -62,7 +62,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   const controllerRef = useRef<StudentRoomController | null>(null);
   const seenNotificationIdRef = useRef<string | null>(null);
-  const lastRoundRef = useRef<number>(0);
+  const lastRoundRef = useRef<number>(-1);
+  const lastSentenceTextRef = useRef<string>('');
   const lastStepRef = useRef<string>('');
 
   // Focus & scroll refs for incomplete lock-in warnings
@@ -102,23 +103,38 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     (nextView: PlayerViewPayload) => {
       setView(nextView);
 
-      // Sync localBet when a new round starts or if localBet is empty
-      if (nextView.round !== lastRoundRef.current) {
+      const nextSentenceText = nextView.sentence?.text || '';
+      const isNewRound = nextView.round !== lastRoundRef.current;
+      const isRedealtSentence =
+        Boolean(nextSentenceText) &&
+        Boolean(lastSentenceTextRef.current) &&
+        nextSentenceText !== lastSentenceTextRef.current;
+
+      // Sync localBet when a new round starts or when the teacher redeals a fresh sentence
+      if (isNewRound || isRedealtSentence) {
         lastRoundRef.current = nextView.round;
+        lastSentenceTextRef.current = nextSentenceText;
         setLocalBet(nextView.myBet || {});
         setLockWarning(null);
       } else {
+        if (nextSentenceText && !lastSentenceTextRef.current) {
+          lastSentenceTextRef.current = nextSentenceText;
+        }
+        // Only clamp localBet.bet if the player's maximum allowed wager dropped (e.g. Bet Cap, Hint, Power-Up).
+        // Never overwrite localBet.bet with stale server echoes while the player is typing.
         setLocalBet((prev) => {
-          // If server clamped the bet (e.g. Bet Cap or money reduction), sync the clamped bet
+          const maxAllowed = Math.max(
+            0,
+            nextView.isBetCapped
+              ? Math.min(nextView.me.money, nextView.betCapAmount)
+              : nextView.me.money
+          );
           if (
-            nextView.myBet?.bet !== undefined &&
             prev.bet !== undefined &&
-            Number(nextView.myBet.bet) < Number(prev.bet)
+            prev.bet !== '' &&
+            Number(prev.bet) > maxAllowed
           ) {
-            return { ...prev, bet: nextView.myBet.bet };
-          }
-          if (Object.keys(prev).length === 0 && nextView.myBet) {
-            return nextView.myBet;
+            return { ...prev, bet: maxAllowed > 0 ? maxAllowed : '' };
           }
           return prev;
         });
@@ -223,17 +239,51 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     controllerRef.current?.sendIntent(intent);
   }, []);
 
+  const { remainingMs: roundTimerRemainingMs } = useTurnCountdown(
+    view?.roundTimer,
+    view?.turnDurationMs || 0
+  );
+
+  const isRoundTimeUp = Boolean(
+    view?.turnDurationMs &&
+      view.turnDurationMs > 0 &&
+      view.roundTimer &&
+      (view.roundTimer.status === 'locked' ||
+        (view.roundTimer.status === 'running' &&
+          !view.roundTimer.held &&
+          roundTimerRemainingMs <= 0) ||
+        (view.roundTimer.status === 'paused' &&
+          (view.roundTimer.remainingMs ?? 1) <= 0))
+  );
+
+  const isAutoLockedByLocalExpiry = Boolean(
+    view?.turnDurationMs &&
+      view.turnDurationMs > 0 &&
+      view.roundTimer?.status === 'running' &&
+      !view.roundTimer?.held &&
+      roundTimerRemainingMs <= 0
+  );
+
+  const isPlayerLocked = Boolean(view?.lockedIn || isAutoLockedByLocalExpiry);
+  const canStudentUnlock = Boolean(
+    isPlayerLocked && !isRoundTimeUp && !view?.isProcessingResults
+  );
+
   const updateBetField = (field: keyof Bet, value: any) => {
-    if (!view || view.lockedIn || view.isFrozen) return;
+    if (!view || isPlayerLocked || view.isFrozen) return;
     let finalVal = value;
     if (field === 'bet') {
-      const maxAllowed = view.isBetCapped
-        ? Math.min(view.me.money, view.betCapAmount)
-        : view.me.money;
-      if (value === '') {
+      const maxAllowed = Math.max(
+        0,
+        view.isBetCapped
+          ? Math.min(view.me.money, view.betCapAmount)
+          : view.me.money
+      );
+      const cleaned = String(value).replace(/[^\d]/g, '');
+      if (cleaned === '') {
         finalVal = '';
       } else {
-        const parsed = parseInt(String(value), 10);
+        const parsed = parseInt(cleaned, 10);
         finalVal = isNaN(parsed) ? '' : Math.max(0, Math.min(parsed, maxAllowed));
       }
     }
@@ -246,7 +296,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   const handleToggleLockIn = () => {
     if (!view || view.isFrozen) return;
-    if (view.lockedIn) {
+    if (isPlayerLocked) {
+      // Players cannot unlock their bet after the round timer has expired; only the teacher can unlock
+      if (!canStudentUnlock) return;
       playSound('click');
       setLockWarning(null);
       sendIntent({ type: 'LOCK_IN', locked: false });
@@ -630,7 +682,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <StudentRoundTimerBar
                 timer={view.roundTimer}
                 turnDurationMs={view.turnDurationMs}
-                lockedIn={view.lockedIn}
+                lockedIn={isPlayerLocked}
               />
             )}
 
@@ -716,7 +768,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               return (
                 <div
                   className={`glass-panel rounded-2xl p-4 sm:p-5 space-y-4 border border-[#d4af37]/40 transition-opacity ${
-                    view.lockedIn ? 'opacity-70 pointer-events-none' : ''
+                    isPlayerLocked ? 'opacity-70 pointer-events-none' : ''
                   }`}
                 >
                   {lockWarning && (
@@ -973,9 +1025,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         </span>
                         <input
                           ref={wagerInputRef}
-                          type="number"
-                          min={0}
-                          max={maxAllowedBet}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={localBet.bet ?? ''}
                           onChange={(e) => updateBetField('bet', e.target.value)}
                           placeholder="0"
@@ -1352,17 +1404,28 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <button
               type="button"
               onClick={handleToggleLockIn}
-              className={`w-full min-h-[52px] rounded-2xl font-serif font-black text-sm sm:text-base uppercase tracking-[0.18em] shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                view.lockedIn
-                  ? 'bg-emerald-600 text-white border-2 border-emerald-300'
-                  : 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3]'
+              disabled={isPlayerLocked && !canStudentUnlock}
+              className={`w-full min-h-[52px] rounded-2xl font-serif font-black text-sm sm:text-base uppercase tracking-[0.18em] shadow-xl transition-all flex items-center justify-center gap-2 ${
+                isPlayerLocked
+                  ? !canStudentUnlock
+                    ? 'bg-slate-800/95 text-amber-200 border-2 border-amber-500/50 cursor-not-allowed opacity-95'
+                    : 'bg-emerald-600 text-white border-2 border-emerald-300 cursor-pointer'
+                  : 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer'
               }`}
             >
-              {view.lockedIn ? (
-                <>
-                  <span>✓ WAGER LOCKED IN</span>
-                  <span className="text-[11px] font-sans font-normal opacity-90">(Tap to Unlock)</span>
-                </>
+              {isPlayerLocked ? (
+                !canStudentUnlock ? (
+                  <span>
+                    {isRoundTimeUp
+                      ? '🔒 TIME\u2019S UP · WAGER LOCKED'
+                      : '🔒 WAGER LOCKED IN'}
+                  </span>
+                ) : (
+                  <>
+                    <span>✓ WAGER LOCKED IN</span>
+                    <span className="text-[11px] font-sans font-normal opacity-90">(Tap to Unlock)</span>
+                  </>
+                )
               ) : (
                 <span>LOCK IN WAGER 🔒</span>
               )}

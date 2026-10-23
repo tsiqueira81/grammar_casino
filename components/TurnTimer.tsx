@@ -395,25 +395,25 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
                 ⏸ Pause
               </button>
             )}
+            {(status === 'running' || status === 'paused' || status === 'locked') && (
+              <button
+                type="button"
+                onClick={onAddTime}
+                title={`Add ${TURN_TIMER_BONUS_MS / 1000} seconds to the round timer`}
+                className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
+              >
+                +{TURN_TIMER_BONUS_MS / 1000}s
+              </button>
+            )}
             {(status === 'running' || status === 'paused') && (
-              <>
-                <button
-                  type="button"
-                  onClick={onAddTime}
-                  title={`Add ${TURN_TIMER_BONUS_MS / 1000} seconds to the round timer`}
-                  className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
-                >
-                  +{TURN_TIMER_BONUS_MS / 1000}s
-                </button>
-                <button
-                  type="button"
-                  onClick={onLockNow}
-                  title="End the round timer immediately and lock betting"
-                  className={`${btnBase} bg-black/10 dark:bg-black/40 text-slate-800 dark:text-slate-200 border-slate-400/50 hover:border-slate-300 px-3 py-2 text-xs`}
-                >
-                  🔒 End Timer
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={onLockNow}
+                title="End the round timer immediately and lock betting"
+                className={`${btnBase} bg-black/10 dark:bg-black/40 text-slate-800 dark:text-slate-200 border-slate-400/50 hover:border-slate-300 px-3 py-2 text-xs`}
+              >
+                🔒 End Timer
+              </button>
             )}
             {(status === 'locked' || status === 'paused') && (
               <button
@@ -475,23 +475,29 @@ export const StudentRoundTimerBar: React.FC<{
   const { remainingMs, fraction, isWarning } = useTurnCountdown(timer, turnDurationMs);
   const status = timer?.status ?? 'idle';
   const held = status === 'running' && !!timer?.held;
+  const isTimeUp =
+    status === 'locked' ||
+    (status === 'running' && !held && remainingMs <= 0) ||
+    (status === 'paused' && remainingMs <= 0);
 
   return (
     <div
       className={`p-3 rounded-2xl glass-panel border transition-all flex flex-col gap-2 ${
-        isWarning && !lockedIn
+        isWarning && !lockedIn && !isTimeUp
           ? 'border-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.3)]'
-          : lockedIn
+          : lockedIn || isTimeUp
             ? 'border-emerald-500/60'
             : 'border-[#d4af37]/50'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-base">{lockedIn ? '✅' : status === 'locked' ? '🔒' : isWarning ? '🚨' : '⏱️'}</span>
+          <span className="text-base">{lockedIn ? (isTimeUp ? '🔒' : '✅') : isTimeUp ? '🔒' : isWarning ? '🚨' : '⏱️'}</span>
           <span className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
-            {status === 'locked'
-              ? "Time's Up · Round Closed"
+            {isTimeUp
+              ? lockedIn
+                ? "Time's Up · Round Closed"
+                : "Time's Up · Unlocked by Teacher"
               : status === 'paused' || held
                 ? 'Round Timer Paused'
                 : status === 'running'
@@ -503,7 +509,7 @@ export const StudentRoundTimerBar: React.FC<{
         </div>
         <span
           className={`font-mono-casino font-black text-xl tabular-nums ${
-            status === 'locked'
+            isTimeUp
               ? 'text-rose-600 dark:text-rose-400'
               : isWarning && !lockedIn
                 ? 'text-rose-600 dark:text-rose-400 animate-pulse'
@@ -516,9 +522,9 @@ export const StudentRoundTimerBar: React.FC<{
       <div className="w-full h-1.5 rounded-full bg-black/15 dark:bg-black/50 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-200 ${
-            isWarning && !lockedIn
+            isWarning && !lockedIn && !isTimeUp
               ? 'bg-rose-500 animate-pulse'
-              : lockedIn
+              : lockedIn || isTimeUp
                 ? 'bg-emerald-500'
                 : 'bg-gradient-to-r from-[#fef08a] via-[#d4af37] to-emerald-500'
           }`}

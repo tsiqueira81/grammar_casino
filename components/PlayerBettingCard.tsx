@@ -183,7 +183,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   
   const handleBetAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isBlocked) return;
-    const val = e.target.value;
+    const val = e.target.value.replace(/[^\d]/g, '');
     if (val === '') {
       onBetChange(player.id, 'bet', '');
       return;
@@ -854,13 +854,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
                     <TextInput
                       ref={wagerInputRef}
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={String(betAmount)}
                       onChange={handleBetAmountChange}
                       placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                       disabled={isBlocked || player.money === 0}
-                      min="0"
-                      max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
                       className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                   </div>
@@ -1018,13 +1018,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
                     <TextInput
                       ref={wagerInputRef}
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={String(betAmount)}
                       onChange={handleBetAmountChange}
                       placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                       disabled={isBlocked || player.money === 0}
-                      min="0"
-                      max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
                       className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                   </div>
@@ -1090,13 +1090,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-600 dark:text-indigo-300 font-mono-casino font-bold text-lg">$</span>
                     <TextInput 
                         ref={wagerInputRef}
-                        type="number"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         value={String(betAmount)}
                         onChange={handleBetAmountChange}
                         placeholder={isBetCapped ? `Wager (Max $${effectiveBetCap})` : "Total Wager"}
                         disabled={isBlocked || player.money === 0}
-                        min="0"
-                        max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
                         className={`pl-9 text-center font-mono-casino font-bold bg-white/90 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-500/50 text-xl text-slate-900 dark:text-white h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                     <button
@@ -1233,13 +1233,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
                       <TextInput 
                           ref={wagerInputRef}
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={String(betAmount)}
                           onChange={handleBetAmountChange}
                           placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                           disabled={isBlocked || player.money === 0}
-                          min="0"
-                          max={isBetCapped ? Math.min(player.money, effectiveBetCap) : player.money}
                           className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                       />
                    </div>
