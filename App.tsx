@@ -328,8 +328,19 @@ export function App() {
     isEncrypted: false,
   });
 
+  // Teacher PIN Gate for Web Live AI & Live Classroom Hosting (Offline-Only Fallback for Unauthenticated Visitors)
+  const [isTeacherAiUnlocked, setIsTeacherAiUnlocked] = useState<boolean>(() => GeminiService.isTeacherPinUnlocked());
+  const [showTeacherPinModal, setShowTeacherPinModal] = useState<boolean>(false);
+  const [teacherPinInput, setTeacherPinInput] = useState<string>('');
+  const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
+  const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
+  const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
+  const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
+
   const refreshDesktopStatus = useCallback(() => {
     GeminiService.getDesktopStatus().then(setDesktopStatus);
+    GeminiService.checkTeacherPinStatus().then(setIsTeacherAiUnlocked);
   }, []);
 
   useEffect(() => {
@@ -343,6 +354,104 @@ export function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, [refreshDesktopStatus]);
+
+  const handleOpenTeacherPinModal = useCallback(() => {
+    playSound('click');
+    pendingCreateRoomAfterPinRef.current = false;
+    setTeacherPinInput('');
+    setNewTeacherPinInput('');
+    setShowChangePinForm(false);
+    setTeacherPinNotice(null);
+    setShowTeacherPinModal(true);
+  }, [playSound]);
+
+  const startHostMultiplayerRoom = useCallback(async () => {
+    try {
+      playSound('startGame');
+      if (mpControllerRef.current) {
+        mpControllerRef.current.destroy();
+      }
+      const controller = await HostRoomController.createRoom(
+        (ev) => mpEventHandlerRef.current(ev),
+        (connected) => setMpHostConnected(connected)
+      );
+      mpControllerRef.current = controller;
+      setMpRoomCode(controller.code);
+      setMpRoomLocked(false);
+      setShowMpLobbyModal(true);
+    } catch (e: any) {
+      setError({ title: 'Multiplayer Error', message: e?.message || 'Could not create multiplayer room.' });
+    }
+  }, [playSound]);
+
+  const handleUnlockTeacherPin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!teacherPinInput.trim() || isVerifyingTeacherPin) return;
+    setIsVerifyingTeacherPin(true);
+    setTeacherPinNotice(null);
+    const res = await GeminiService.verifyTeacherPinOnServer(teacherPinInput);
+    setIsVerifyingTeacherPin(false);
+    if (res.valid) {
+      playSound('success');
+      setIsTeacherAiUnlocked(true);
+      setTeacherPinInput('');
+      if (pendingCreateRoomAfterPinRef.current) {
+        pendingCreateRoomAfterPinRef.current = false;
+        setShowTeacherPinModal(false);
+        await startHostMultiplayerRoom();
+        return;
+      }
+      setTeacherPinNotice({
+        type: 'success',
+        text: 'Teacher PIN verified! Live Gemini AI & Live Room Hosting are unlocked for this game session.',
+      });
+    } else {
+      playSound('error');
+      setTeacherPinNotice({ type: 'error', text: res.error || 'Incorrect Teacher PIN.' });
+    }
+  };
+
+  const handleLockTeacherPin = () => {
+    playSound('click');
+    pendingCreateRoomAfterPinRef.current = false;
+    GeminiService.clearSavedTeacherPin();
+    setIsTeacherAiUnlocked(false);
+    setShowChangePinForm(false);
+    if (mpControllerRef.current) {
+      mpControllerRef.current.destroy();
+      mpControllerRef.current = null;
+    }
+    setMpRoomCode(null);
+    setMpRoomLocked(false);
+    setMpHostConnected(false);
+    setMpSeats({});
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setShowMpLobbyModal(false);
+    setTeacherPinNotice({ type: 'success', text: 'Locked! Switched to Offline Curated Bank Mode (0 Gemini API usage).' });
+  };
+
+  const handleChangeTeacherPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentPin = teacherPinInput.trim() || GeminiService.getSavedTeacherPin();
+    if (!currentPin || !newTeacherPinInput.trim() || isVerifyingTeacherPin) return;
+    setIsVerifyingTeacherPin(true);
+    setTeacherPinNotice(null);
+    const res = await GeminiService.changeTeacherPinOnServer(currentPin, newTeacherPinInput);
+    setIsVerifyingTeacherPin(false);
+    if (res.ok) {
+      playSound('success');
+      setIsTeacherAiUnlocked(true);
+      setTeacherPinInput('');
+      setNewTeacherPinInput('');
+      setShowChangePinForm(false);
+      setTeacherPinNotice({ type: 'success', text: 'Teacher PIN updated! Keep your new PIN safe.' });
+    } else {
+      playSound('error');
+      setTeacherPinNotice({ type: 'error', text: res.error || 'Could not update Teacher PIN.' });
+    }
+  };
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -1191,7 +1300,7 @@ export function App() {
       targetSettings = candidate;
     }
 
-    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${pastSentences.length}`;
+    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${pastSentences.length}|${isTeacherAiUnlocked ? 'ai' : 'offline'}`;
     if (prefetchRef.current?.key === settingsKey) return;
 
     const triggerPrefetch = () => {
@@ -1246,7 +1355,7 @@ export function App() {
     }
 
     triggerPrefetch();
-  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes]);
+  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes, isTeacherAiUnlocked]);
 
   const fetchNewSentence = useCallback(async (currentSettings: Settings, history: string[], forcedBatch?: boolean[], mistakeHistory?: string[]) => {
     setIsLoading(true);
@@ -1259,7 +1368,7 @@ export function App() {
             throw new Error("Invalid settings provided to fetch a new sentence.");
         }
         const formatSetting: ChallengeFormat = currentSettings.challengeFormat || 'binary';
-        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${history.length}`;
+        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${history.length}|${GeminiService.isTeacherPinUnlocked() ? 'ai' : 'offline'}`;
 
         let generated: GeneratedSentence | null = null;
         let subtype: string | null = null;
@@ -2401,23 +2510,21 @@ export function App() {
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
-    try {
-      playSound('startGame');
-      if (mpControllerRef.current) {
-        mpControllerRef.current.destroy();
-      }
-      const controller = await HostRoomController.createRoom(
-        (ev) => mpEventHandlerRef.current(ev),
-        (connected) => setMpHostConnected(connected)
-      );
-      mpControllerRef.current = controller;
-      setMpRoomCode(controller.code);
-      setMpRoomLocked(false);
-      setShowMpLobbyModal(true);
-    } catch (e: any) {
-      setError({ title: 'Multiplayer Error', message: e?.message || 'Could not create multiplayer room.' });
+    if (!desktopStatus.isDesktop && !GeminiService.isTeacherPinUnlocked()) {
+      playSound('click');
+      pendingCreateRoomAfterPinRef.current = true;
+      setTeacherPinInput('');
+      setNewTeacherPinInput('');
+      setShowChangePinForm(false);
+      setTeacherPinNotice({
+        type: 'error',
+        text: 'Teacher PIN required to host a Live Classroom Room (QR). Enter your PIN below to unlock.',
+      });
+      setShowTeacherPinModal(true);
+      return;
     }
-  }, [playSound]);
+    await startHostMultiplayerRoom();
+  }, [desktopStatus.isDesktop, playSound, startHostMultiplayerRoom]);
 
   const handleCloseMpRoom = useCallback(() => {
     playSound('click');
@@ -2433,6 +2540,10 @@ export function App() {
     setMpStudentPendingWheel({});
     setMpStudentNotifications({});
     setShowMpLobbyModal(false);
+    // Automatically lock Teacher PIN when closing the live room so students or subsequent sessions cannot re-host without the PIN
+    GeminiService.clearSavedTeacherPin();
+    setIsTeacherAiUnlocked(false);
+    prefetchRef.current = null;
   }, [playSound]);
 
   const handleToggleLockMpRoom = useCallback(() => {
@@ -3420,6 +3531,10 @@ export function App() {
              if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
         } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
         setWinner(finalWinnerPlayer);
+        // Automatically lock Live Mode when the game finishes so starting a new live game requires the Teacher PIN
+        GeminiService.clearSavedTeacherPin();
+        setIsTeacherAiUnlocked(false);
+        prefetchRef.current = null;
         setStep('GAME_OVER');
     } else {
         playSound('success');
@@ -3499,12 +3614,31 @@ export function App() {
          if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
     }
     setWinner(finalWinnerPlayer);
+    // Automatically lock Live Mode when the game ends early so starting a new live game requires the Teacher PIN
+    GeminiService.clearSavedTeacherPin();
+    setIsTeacherAiUnlocked(false);
+    prefetchRef.current = null;
     setStep('GAME_OVER');
   }, [players, gameMode, targetAmount, playSound]);
 
   const handleRestartGame = useCallback(() => {
     localStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
+    // Automatically close any open multiplayer room and lock Teacher PIN on restart / returning to lobby
+    if (mpControllerRef.current) {
+      mpControllerRef.current.destroy();
+      mpControllerRef.current = null;
+    }
+    setMpRoomCode(null);
+    setMpRoomLocked(false);
+    setMpHostConnected(false);
+    setMpSeats({});
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setShowMpLobbyModal(false);
+    GeminiService.clearSavedTeacherPin();
+    setIsTeacherAiUnlocked(false);
     setStep('PLAYER_SETUP');
     setSettingsPart(1);
     prefetchRef.current = null;
@@ -3909,9 +4043,14 @@ export function App() {
                       type="button"
                       onClick={handleCreateMpRoom}
                       className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                      title={
+                        isTeacherAiUnlocked || desktopStatus.isDesktop
+                          ? 'Open a Live Classroom Room with QR Code'
+                          : 'Teacher PIN required to host a Live Classroom Room'
+                      }
                     >
-                      <span>📱</span>
-                      <span>Open Live Room (QR)</span>
+                      <span>{isTeacherAiUnlocked || desktopStatus.isDesktop ? '📱' : '🔒'}</span>
+                      <span>{isTeacherAiUnlocked || desktopStatus.isDesktop ? 'Open Live Room (QR)' : 'Open Live Room (PIN)'}</span>
                     </button>
                   )}
 
@@ -5830,6 +5969,8 @@ export function App() {
             url.searchParams.delete('room');
             window.history.replaceState({}, '', url.toString());
           }
+          GeminiService.clearSavedTeacherPin();
+          setIsTeacherAiUnlocked(false);
           setIsStudentControllerMode(false);
         }}
       />
@@ -5854,7 +5995,7 @@ export function App() {
           </div>
         )}
         
-        {/* Top Controls: Multiplayer Room Badge, Theme Toggle & Audio */}
+        {/* Top Controls: Multiplayer Room Badge, Teacher AI / Offline Mode Gate, Theme Toggle & Audio */}
         <div className="fixed top-4 right-4 z-50 flex items-center gap-2.5">
           {mpRoomCode && (
             <button
@@ -5871,6 +6012,27 @@ export function App() {
               <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
                 {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length}
               </span>
+            </button>
+          )}
+
+          {!desktopStatus.isDesktop && (
+            <button
+              type="button"
+              onClick={handleOpenTeacherPinModal}
+              className={`h-11 px-3.5 flex items-center gap-2 rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-serif text-xs font-extrabold uppercase tracking-wider ${
+                isTeacherAiUnlocked
+                  ? 'bg-emerald-950/90 border-emerald-400/70 hover:border-emerald-300 text-emerald-200'
+                  : 'bg-amber-50/95 dark:bg-[#051c10]/95 border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a]'
+              }`}
+              title={
+                isTeacherAiUnlocked
+                  ? 'Live Gemini AI Unlocked (Teacher Mode) — Click to lock or manage Teacher PIN'
+                  : 'Offline Curated Bank Mode (0 API usage) — Click to enter Teacher PIN for Live AI'
+              }
+            >
+              <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span>{isTeacherAiUnlocked ? '✨ Live AI' : '📚 Offline Bank'}</span>
+              <span className="text-[11px] opacity-80">{isTeacherAiUnlocked ? '🔓' : '🔒'}</span>
             </button>
           )}
 
@@ -6231,6 +6393,164 @@ export function App() {
           onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
           playSound={playSound}
         />
+      )}
+      {showTeacherPinModal && (
+        <Modal
+          title={isTeacherAiUnlocked ? 'Teacher Live AI Unlocked' : 'Offline Curated Mode · Teacher Unlock'}
+          onClose={() => setShowTeacherPinModal(false)}
+          playSound={playSound}
+          hideOkButton
+        >
+          <div className="space-y-4 text-left">
+            <div
+              className={`p-3.5 rounded-xl border flex items-start gap-3 ${
+                isTeacherAiUnlocked
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-950 dark:text-emerald-100'
+                  : 'bg-amber-500/10 border-[#d4af37]/40 text-amber-950 dark:text-amber-100'
+              }`}
+            >
+              <span className="text-2xl select-none mt-0.5">{isTeacherAiUnlocked ? '✨' : '📚'}</span>
+              <div className="text-xs sm:text-sm leading-relaxed">
+                {isTeacherAiUnlocked ? (
+                  <>
+                    <strong className="font-serif uppercase tracking-wider block text-emerald-800 dark:text-emerald-300 mb-0.5">
+                      Live Gemini AI &amp; Live Room Hosting Active (Current Game Only)
+                    </strong>
+                    This session is authorized to host a Live Classroom Room (QR) and generate dynamic AI sentences, AI Judge verifications, AI hints, and neural speech. For security, Live Mode is never saved in browser storage and automatically locks when the game finishes, when you return to the lobby, or if the URL is edited/reloaded.
+                  </>
+                ) : (
+                  <>
+                    <strong className="font-serif uppercase tracking-wider block text-amber-900 dark:text-[#fef08a] mb-0.5">
+                      Playing in Free Offline Curated Mode (0 API Usage)
+                    </strong>
+                    Students and visitors without the Teacher PIN play in 100% free Offline Curated Mode (0 Gemini API calls) and cannot host a Live Classroom Room. Enter your Teacher PIN below to unlock Live Gemini AI and Live Room Hosting for the current game session.
+                  </>
+                )}
+              </div>
+            </div>
+
+            {teacherPinNotice && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+                  teacherPinNotice.type === 'success'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-800 dark:text-rose-200'
+                }`}
+              >
+                <span>{teacherPinNotice.type === 'success' ? '✓' : '⚠️'}</span>
+                <span>{teacherPinNotice.text}</span>
+              </div>
+            )}
+
+            {!isTeacherAiUnlocked ? (
+              <form onSubmit={handleUnlockTeacherPin} className="space-y-3 pt-1">
+                <div>
+                  <label className="block text-xs font-serif font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
+                    Enter Teacher PIN to Unlock Live AI
+                  </label>
+                  <input
+                    type="password"
+                    value={teacherPinInput}
+                    onChange={(e) => setTeacherPinInput(e.target.value)}
+                    placeholder="Enter Teacher PIN..."
+                    autoFocus
+                    className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-mono-casino text-base tracking-widest"
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <ActionButton
+                    type="button"
+                    onClick={() => setShowTeacherPinModal(false)}
+                    playSound={playSound}
+                    variant="outline-gold"
+                    className="py-2.5 px-4 text-xs"
+                  >
+                    Stay in Offline Mode
+                  </ActionButton>
+                  <ActionButton
+                    type="submit"
+                    playSound={playSound}
+                    variant="gold"
+                    disabled={!teacherPinInput.trim() || isVerifyingTeacherPin}
+                    className="py-2.5 px-6 text-xs"
+                  >
+                    {isVerifyingTeacherPin ? 'Verifying...' : '🔑 Unlock Live AI'}
+                  </ActionButton>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <ActionButton
+                    type="button"
+                    onClick={handleLockTeacherPin}
+                    playSound={playSound}
+                    variant="outline-red"
+                    className="py-2.5 px-4 text-xs"
+                  >
+                    🔒 Lock &amp; Switch to Offline Mode
+                  </ActionButton>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setShowChangePinForm((prev) => !prev);
+                      setTeacherPinNotice(null);
+                    }}
+                    className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
+                  >
+                    {showChangePinForm ? 'Cancel PIN Change' : '⚙️ Change Teacher PIN'}
+                  </button>
+                </div>
+
+                {showChangePinForm && (
+                  <form
+                    onSubmit={handleChangeTeacherPin}
+                    className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3"
+                  >
+                    <div className="text-xs font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+                      Update Server Teacher PIN
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-600 dark:text-amber-200/75 mb-1">
+                        New Teacher PIN (4–32 characters)
+                      </label>
+                      <input
+                        type="password"
+                        value={newTeacherPinInput}
+                        onChange={(e) => setNewTeacherPinInput(e.target.value)}
+                        placeholder="Enter new PIN..."
+                        className="w-full px-3 py-2 rounded-lg bg-white/80 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white font-mono-casino text-sm focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <ActionButton
+                        type="submit"
+                        variant="gold"
+                        disabled={newTeacherPinInput.trim().length < 4 || isVerifyingTeacherPin}
+                        className="py-2 px-4 text-xs"
+                      >
+                        {isVerifyingTeacherPin ? 'Saving...' : 'Save New PIN'}
+                      </ActionButton>
+                    </div>
+                  </form>
+                )}
+
+                <div className="flex justify-end pt-1 border-t border-[#d4af37]/20">
+                  <ActionButton
+                    onClick={() => setShowTeacherPinModal(false)}
+                    playSound={playSound}
+                    variant="outline-gold"
+                    className="py-2 px-5 text-xs"
+                  >
+                    Done
+                  </ActionButton>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
     </>
   );

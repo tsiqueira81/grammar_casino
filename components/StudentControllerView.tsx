@@ -425,7 +425,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               onClick={onExitStudentMode}
               className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer min-h-[44px] flex items-center"
             >
-              &larr; Host Table
+              &larr; Solo Offline Table
             </button>
             <button
               type="button"

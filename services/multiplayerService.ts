@@ -1,4 +1,5 @@
 import { MultiplayerSeat, PlayerViewPayload, StudentIntent } from '../utils/multiplayerProtocol';
+import { getSavedTeacherPin, isDesktopApp } from './geminiService';
 
 export interface HostEventPayload {
   id: string;
@@ -486,11 +487,24 @@ export class HostRoomController {
     onEvent: (event: HostEventPayload) => void,
     onConnectionChange?: (connected: boolean) => void
   ): Promise<HostRoomController> {
+    const savedPin = getSavedTeacherPin();
+    if (!isDesktopApp() && !savedPin) {
+      throw new Error('Teacher PIN required to host a Live Classroom Room.');
+    }
+
     // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Cloud Relay
-    const res = await safeFetchJson<{ code: string; hostToken: string }>('/api/mp/room/create', {
+    const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(savedPin ? { 'x-teacher-pin': savedPin } : {}),
+      },
+      body: JSON.stringify({ teacherPin: savedPin }),
     });
+
+    if (res.status === 401 || res.status === 403) {
+      throw new Error((res.data as any)?.error || 'Teacher PIN required to host a Live Classroom Room.');
+    }
 
     if (res.ok && res.isJson && res.data?.code && res.data?.hostToken) {
       return new HostRoomController(

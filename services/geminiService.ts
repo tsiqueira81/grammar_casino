@@ -121,10 +121,132 @@ export const clearPortableGame = async () => {
   return { success: false };
 };
 
+// --- Teacher PIN Gate (Offline-Only Fallback for Unauthenticated Visitors) ---
+const TEACHER_PIN_STORAGE_KEY = 'grammar_casino_teacher_pin';
+
+// Stored strictly in volatile memory (never persisted in localStorage/sessionStorage).
+// Editing the URL, reloading the page, opening a new tab, or finishing a game automatically locks Live Mode.
+let activeSessionTeacherPin = '';
+
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+    sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+  } catch {}
+}
+
+export const getSavedTeacherPin = (): string => {
+  return activeSessionTeacherPin.trim();
+};
+
+export const setSavedTeacherPin = (pin: string): void => {
+  activeSessionTeacherPin = (pin || '').trim();
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+      sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+    } catch {}
+  }
+};
+
+export const clearSavedTeacherPin = (): void => {
+  activeSessionTeacherPin = '';
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+      sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
+    } catch {}
+  }
+};
+
+export const isTeacherPinUnlocked = (): boolean => {
+  if (isDesktopApp()) return true;
+  return Boolean(getSavedTeacherPin());
+};
+
+export const checkTeacherPinStatus = async (): Promise<boolean> => {
+  if (isDesktopApp()) return true;
+  const savedPin = getSavedTeacherPin();
+  if (!savedPin) return false;
+  try {
+    const res = await fetch('/api/teacher-auth/status', {
+      headers: { 'x-teacher-pin': savedPin },
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data?.unlocked) {
+      clearSavedTeacherPin();
+      return false;
+    }
+    return true;
+  } catch {
+    return Boolean(savedPin);
+  }
+};
+
+export const verifyTeacherPinOnServer = async (pin: string): Promise<{ valid: boolean; error?: string }> => {
+  const cleanPin = (pin || '').trim();
+  if (!cleanPin) return { valid: false, error: 'Please enter the Teacher PIN.' };
+  try {
+    const res = await fetch('/api/teacher-auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: cleanPin }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json') && (res.status === 404 || res.status === 405)) {
+      if (cleanPin === '7777') {
+        setSavedTeacherPin(cleanPin);
+        return { valid: true };
+      }
+      return { valid: false, error: 'Incorrect Teacher PIN.' };
+    }
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data?.valid) {
+      setSavedTeacherPin(cleanPin);
+      return { valid: true };
+    }
+    return { valid: false, error: data?.error || 'Incorrect Teacher PIN.' };
+  } catch {
+    return { valid: false, error: 'Could not reach the server to verify PIN.' };
+  }
+};
+
+export const changeTeacherPinOnServer = async (
+  currentPin: string,
+  newPin: string
+): Promise<{ ok: boolean; error?: string }> => {
+  const cleanCurrent = (currentPin || '').trim();
+  const cleanNew = (newPin || '').trim();
+  if (cleanNew.length < 4) {
+    return { ok: false, error: 'New PIN must be at least 4 characters.' };
+  }
+  try {
+    const res = await fetch('/api/teacher-auth/change-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPin: cleanCurrent, newPin: cleanNew }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data?.ok) {
+      setSavedTeacherPin(cleanNew);
+      return { ok: true };
+    }
+    return { ok: false, error: data?.error || 'Failed to update Teacher PIN.' };
+  } catch {
+    return { ok: false, error: 'Could not reach the server to update PIN.' };
+  }
+};
+
 // Primary endpoint with fallback to direct Netlify function path for web deployment
 const API_ENDPOINTS = ['/api/gemini', '/.netlify/functions/gemini'];
 
 async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
+  const savedPin = getSavedTeacherPin();
+  if (!savedPin) {
+    throw new Error('Offline Curated Mode active (Teacher PIN required for live Gemini AI).');
+  }
+
   let lastError: any = null;
 
   for (const endpoint of API_ENDPOINTS) {
@@ -133,8 +255,9 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-teacher-pin': savedPin,
         },
-        body: JSON.stringify({ action, ...payload }),
+        body: JSON.stringify({ action, teacherPin: savedPin, ...payload }),
       });
 
       // Only try the alternate endpoint if this route does not exist (404/405 on static hosts)
@@ -148,6 +271,10 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
         data = await response.json();
       } catch {
         // Non-JSON response
+      }
+
+      if (data?.offlineMode) {
+        clearSavedTeacherPin();
       }
 
       if (!response.ok || data?.fallback) {
@@ -168,6 +295,7 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
 
   throw lastError || new Error("Failed to communicate with the casino dealer service.");
 }
+
 
 async function requestDealerAction<T>(action: string, payload: Record<string, any>): Promise<T> {
   // If running inside Electron desktop, execute strictly via IPC in the main process

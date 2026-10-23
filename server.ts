@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import http from 'http';
 import crypto from 'crypto';
@@ -11,6 +12,33 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+
+// --- Teacher PIN Gate for Live Gemini AI (Offline-Only Fallback for Students) ---
+const TEACHER_PIN_FILE = path.resolve(__dirname, '.teacher-pin.json');
+let activeTeacherPin = (process.env.TEACHER_PIN || '7777').trim();
+
+try {
+  if (fs.existsSync(TEACHER_PIN_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(TEACHER_PIN_FILE, 'utf-8'));
+    if (saved && typeof saved.pin === 'string' && saved.pin.trim().length >= 4) {
+      activeTeacherPin = saved.pin.trim();
+    }
+  }
+} catch (err) {
+  console.warn('Could not read .teacher-pin.json, using default/env TEACHER_PIN.');
+}
+
+function verifyPinMatch(candidate: string): boolean {
+  const cleanCandidate = String(candidate || '').trim();
+  if (!cleanCandidate || !activeTeacherPin) return false;
+  return cleanCandidate === activeTeacherPin;
+}
+
+function isTeacherAuthorized(req: Request, payload?: any): boolean {
+  const headerPin = req.headers['x-teacher-pin'];
+  const rawPin = Array.isArray(headerPin) ? headerPin[0] : headerPin || payload?.teacherPin || '';
+  return verifyPinMatch(String(rawPin));
+}
 
 // --- Rate Limiting & Abuse Protection ---
 interface RateLimitBucket {
@@ -696,6 +724,15 @@ const batchClozeVerificationSchema = {
 
 // --- Gemini Handler for Express ---
 async function handleGeminiRequest(req: Request, res: Response) {
+  // Enforce Teacher PIN: Any visitor without the Teacher PIN plays in 100% free Offline Curated Mode
+  if (!isTeacherAuthorized(req, req.body)) {
+    return res.status(200).json({
+      fallback: true,
+      offlineMode: true,
+      error: "Offline Curated Mode active (Teacher PIN required for live Gemini AI).",
+    });
+  }
+
   const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
 
   const rateCheck = checkRateLimit(clientIp);
@@ -1131,6 +1168,51 @@ Respond ONLY with valid JSON matching the schema.`;
 app.post("/api/gemini", handleGeminiRequest);
 app.post("/.netlify/functions/gemini", handleGeminiRequest);
 
+// Teacher PIN Auth & Status Endpoints
+app.get("/api/teacher-auth/status", (req, res) => {
+  res.json({
+    unlocked: isTeacherAuthorized(req),
+    pinRequired: true,
+  });
+});
+
+app.post("/api/teacher-auth/verify", (req, res) => {
+  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+  const rateCheck = checkRateLimit(clientIp);
+  if (!rateCheck.allowed) {
+    return res.status(429).json({ valid: false, error: "Too many attempts. Please wait a moment." });
+  }
+  const candidate = String(req.body?.pin || "").trim();
+  const valid = verifyPinMatch(candidate);
+  if (!valid) {
+    return res.status(401).json({ valid: false, error: "Incorrect Teacher PIN." });
+  }
+  return res.json({ valid: true });
+});
+
+app.post("/api/teacher-auth/change-pin", (req, res) => {
+  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
+  const rateCheck = checkRateLimit(clientIp);
+  if (!rateCheck.allowed) {
+    return res.status(429).json({ ok: false, error: "Too many attempts. Please wait a moment." });
+  }
+  const currentPin = String(req.body?.currentPin || "").trim();
+  const newPin = String(req.body?.newPin || "").trim();
+  if (!verifyPinMatch(currentPin)) {
+    return res.status(401).json({ ok: false, error: "Current Teacher PIN is incorrect." });
+  }
+  if (newPin.length < 4 || newPin.length > 32) {
+    return res.status(400).json({ ok: false, error: "New PIN must be between 4 and 32 characters." });
+  }
+  activeTeacherPin = newPin;
+  try {
+    fs.writeFileSync(TEACHER_PIN_FILE, JSON.stringify({ pin: activeTeacherPin }, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("Could not persist .teacher-pin.json to disk, updated in memory:", err);
+  }
+  return res.json({ ok: true });
+});
+
 // Health check endpoint
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", app: "grammar-casino" });
@@ -1237,8 +1319,13 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
-// 1. Create Room (Host)
-app.post("/api/mp/room/create", (_req, res) => {
+// 1. Create Room (Host — requires Teacher PIN)
+app.post("/api/mp/room/create", (req, res) => {
+  if (!isTeacherAuthorized(req, req.body)) {
+    return res.status(403).json({
+      error: "Teacher PIN required to host a Live Classroom Room.",
+    });
+  }
   const code = generateRoomCode();
   const hostToken = crypto.randomBytes(16).toString("hex");
   const now = Date.now();
