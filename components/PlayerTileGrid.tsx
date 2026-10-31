@@ -68,17 +68,17 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
                 {player.avatar}
               </div>
               <div className="min-w-0">
-                <div className="font-serif font-extrabold uppercase tracking-wide text-base leading-tight text-slate-900 dark:text-amber-50 truncate">
+                <div className="font-sans font-extrabold uppercase tracking-wide text-base leading-tight text-slate-900 dark:text-amber-50 truncate">
                   {player.name}
                 </div>
-                <div className="font-mono-casino font-black text-base text-emerald-800 dark:text-[#fef08a]">
+                <div className="font-sans tabular-nums font-black text-base text-emerald-800 dark:text-[#fef08a]">
                   ${player.money.toLocaleString()}
                 </div>
               </div>
             </div>
 
             <div
-              className={`rounded-lg px-2 py-1.5 text-sm font-serif font-bold flex items-center justify-center gap-1.5 border ${
+              className={`rounded-lg px-2 py-1.5 text-sm font-sans font-bold flex items-center justify-center gap-1.5 border ${
                 isDone
                   ? 'bg-emerald-500/20 border-emerald-400 text-emerald-950 dark:text-emerald-100'
                   : status === 'turn'

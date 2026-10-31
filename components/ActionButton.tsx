@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
+import { twMerge } from 'tailwind-merge';
 import { SoundEffect } from '../types';
 
 interface ActionButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -56,7 +57,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
   if (className?.includes('bg-purple')) gradientClasses = "bg-gradient-to-b from-purple-500 via-purple-700 to-indigo-950 text-white border border-purple-300/80 shadow-md";
 
   const baseClasses = `
-    relative px-6 py-2.5 rounded-lg font-serif uppercase tracking-wider font-bold
+    relative px-6 py-2.5 rounded-lg font-sans uppercase tracking-wider font-bold
     transition-all duration-200 ease-out cursor-pointer select-none
     disabled:opacity-45 disabled:cursor-not-allowed disabled:grayscale disabled:shadow-none
   `;
@@ -66,7 +67,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
       whileHover={{ scale: rest.disabled ? 1 : 1.02, y: rest.disabled ? 0 : -1 }}
       whileTap={{ scale: rest.disabled ? 1 : 0.97, y: rest.disabled ? 0 : 1 }}
       onClick={handleClick} 
-      className={`${baseClasses} ${gradientClasses} ${className || ''}`} 
+      className={twMerge(baseClasses, gradientClasses, className)} 
       {...rest}
     >
       <span className={`block w-full ${variant === 'gold' ? 'drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]' : 'drop-shadow-sm'}`}>{children}</span>

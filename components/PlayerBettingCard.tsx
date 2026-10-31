@@ -491,21 +491,21 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
       {isEliminated && <div className="bankrupt-stamp">BANKRUPT</div>}
       {isFrozen && (
         <div className="absolute inset-0 bg-cyan-950/35 backdrop-blur-[1px] z-20 flex items-center justify-center pointer-events-none rounded-2xl">
-          <span className="text-4xl sm:text-5xl font-extrabold text-cyan-200 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] transform -rotate-12 border-4 border-double border-cyan-300 px-6 py-3 rounded-xl bg-slate-950/90 font-serif tracking-widest">
+          <span className="text-4xl sm:text-5xl font-extrabold text-cyan-200 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] transform -rotate-12 border-4 border-double border-cyan-300 px-6 py-3 rounded-xl bg-slate-950/90 font-sans tracking-widest">
             FROZEN ❄️
           </span>
         </div>
       )}
       {!isFrozen && !isEliminated && isSatOut && (
         <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px] z-20 flex items-center justify-center pointer-events-none rounded-2xl">
-          <span className="text-3xl sm:text-4xl font-extrabold text-rose-200 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] transform -rotate-6 border-4 border-double border-rose-400 px-6 py-3 rounded-xl bg-slate-950/90 font-serif tracking-widest text-center leading-tight">
+          <span className="text-3xl sm:text-4xl font-extrabold text-rose-200 drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)] transform -rotate-6 border-4 border-double border-rose-400 px-6 py-3 rounded-xl bg-slate-950/90 font-sans tracking-widest text-center leading-tight">
             SAT OUT ⏱️
             <span className="block text-[11px] sm:text-xs tracking-[0.25em] text-rose-300/80 mt-1 font-sans">No bet placed in time</span>
           </span>
         </div>
       )}
       {isTurnLocked && !isFrozen && !isEliminated && !isSatOut && (
-        <div className="pointer-events-none absolute top-0 right-6 z-20 bg-gradient-to-b from-slate-700 to-slate-900 text-slate-100 border border-t-0 border-slate-400/60 rounded-b-lg px-3 py-1 text-[10px] font-serif font-extrabold uppercase tracking-[0.2em] shadow-lg">
+        <div className="pointer-events-none absolute top-0 right-6 z-20 bg-gradient-to-b from-slate-700 to-slate-900 text-slate-100 border border-t-0 border-slate-400/60 rounded-b-lg px-3 py-1 text-[10px] font-sans font-extrabold uppercase tracking-[0.2em] shadow-lg">
           🔒 Bet Locked
         </div>
       )}
@@ -559,7 +559,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   onKeyDown={handleNameKeyDown}
                   autoFocus
                   maxLength={24}
-                  className="text-lg font-serif uppercase tracking-wider font-bold text-slate-900 dark:text-amber-100 bg-amber-50 dark:bg-[#04180d] border-b-2 border-[#d4af37] px-2 py-0.5 w-36 sm:w-44 focus:outline-none rounded-t"
+                  className="text-lg font-sans uppercase tracking-wider font-bold text-slate-900 dark:text-amber-100 bg-amber-50 dark:bg-[#04180d] border-b-2 border-[#d4af37] px-2 py-0.5 w-36 sm:w-44 focus:outline-none rounded-t"
                   placeholder="Player name..."
                 />
                 <button
@@ -592,7 +592,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 className={`group/name flex items-center gap-2 ${onUpdateName ? 'cursor-pointer' : ''}`}
                 title={onUpdateName ? "Click to edit name" : undefined}
               >
-                <h3 className={`text-xl sm:text-2xl font-serif tracking-wider uppercase font-extrabold transition-all ${
+                <h3 className={`text-xl sm:text-2xl font-sans tracking-wider uppercase font-extrabold transition-all ${
                   powerUpUsedThisRound ? 'text-purple-700 dark:text-purple-300' : 'text-slate-900 dark:text-amber-50'
                 } ${onUpdateName ? 'group-hover/name:text-amber-700 dark:group-hover/name:text-[#fef08a]' : ''}`}>
                   {player.name}
@@ -633,12 +633,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         {/* Bankroll Vault Plaque */}
         <div className="flex flex-col items-end ml-auto">
            <div className="px-4 py-2 rounded-xl bg-gradient-to-b from-amber-100/80 to-amber-50/90 dark:from-[#03140b] dark:to-[#072214] border border-[#d4af37]/60 shadow-[inset_0_2px_6px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_2px_8px_rgba(0,0,0,0.8),0_1px_0_rgba(254,240,138,0.15)] flex flex-col items-end">
-             <span className="text-[9px] font-serif uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">
+             <span className="text-[9px] font-sans uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">
                Vault Balance
              </span>
              {isEditingMoney ? (
                <div className="flex items-center justify-end mt-0.5">
-                 <span className="text-xl font-mono-casino font-extrabold text-[#ca8a04] mr-1">$</span>
+                 <span className="text-xl font-sans tabular-nums font-extrabold text-[#ca8a04] mr-1">$</span>
                  <input 
                    type="number"
                    value={tempMoney}
@@ -647,12 +647,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                    onKeyDown={handleMoneyKeyDown}
                    onWheel={(e) => e.currentTarget.blur()}
                    autoFocus
-                   className="text-xl font-mono-casino font-extrabold text-amber-700 dark:text-[#fef08a] bg-transparent border-b border-[#ca8a04] w-24 text-right focus:outline-none p-0 appearance-none rounded-none"
+                   className="text-xl font-sans tabular-nums font-extrabold text-amber-700 dark:text-[#fef08a] bg-transparent border-b border-[#ca8a04] w-24 text-right focus:outline-none p-0 appearance-none rounded-none"
                  />
                </div>
              ) : (
                <div 
-                 className={`text-xl sm:text-2xl font-mono-casino font-extrabold text-gold-flat tracking-tight flex items-center gap-1.5 ${onUpdateMoney ? 'cursor-pointer hover:brightness-125 transition-all' : ''}`}
+                 className={`text-xl sm:text-2xl font-sans tabular-nums font-extrabold text-gold-flat tracking-tight flex items-center gap-1.5 ${onUpdateMoney ? 'cursor-pointer hover:brightness-125 transition-all' : ''}`}
                  onClick={handleMoneyClick}
                  title={onUpdateMoney ? "Click to adjust player bankroll" : ""}
                >
@@ -664,7 +664,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
 
            {targetAmount && targetAmount > 0 && (
              <div 
-               className={`text-[11px] font-mono-casino font-medium mt-1.5 flex items-center gap-1.5 justify-end ${player.money >= targetAmount ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-500 dark:text-amber-200/60'}`}
+               className={`text-[11px] font-sans tabular-nums mt-1.5 flex items-center gap-1.5 justify-end ${player.money >= targetAmount ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'font-medium text-slate-500 dark:text-amber-200/60'}`}
                title={`Target goal: $${targetAmount.toLocaleString()}`}
              >
                <span>🎯 Target: ${targetAmount.toLocaleString()}</span>
@@ -882,7 +882,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           {lockWarning && (
             <div
               role="alert"
-              className="mb-4 -mt-2 px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/60 border-2 border-rose-500/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-serif font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-fade-in"
+              className="mb-4 -mt-2 px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/60 border-2 border-rose-500/80 text-rose-900 dark:text-rose-200 text-xs sm:text-sm font-sans font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-fade-in"
             >
               <div className="flex items-center gap-2">
                 <span className="text-base select-none">⚠️</span>
@@ -903,11 +903,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
       {audiencePollFeed && (
         <div className="mb-5 p-3.5 rounded-xl bg-sky-500/15 border border-sky-400/50 space-y-2 text-xs text-sky-950 dark:text-sky-100 animate-fade-in">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-serif font-extrabold uppercase tracking-wider text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+            <span className="font-sans font-extrabold uppercase tracking-wider text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
               <span>📊</span>
               <span>Ask the Table · Live Anonymized Poll</span>
             </span>
-            <span className="text-[11px] font-mono-casino font-bold px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40">
+            <span className="text-[11px] font-sans tabular-nums font-bold px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40">
               {audiencePollFeed.summaryText}
             </span>
           </div>
@@ -920,7 +920,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 >
                   <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
                     <span className="truncate">{item.label}</span>
-                    <span className="font-mono-casino text-sky-700 dark:text-sky-300 shrink-0">
+                    <span className="font-sans tabular-nums text-sky-700 dark:text-sky-300 shrink-0">
                       {item.percent}%
                     </span>
                   </div>
@@ -948,7 +948,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 const splitOpts = Array.isArray(bet?.splitOptions) ? bet!.splitOptions! : [];
                 const isDoubleStacked = splitOpts.length === 2 && splitOpts[0] === splitOpts[1];
                 return (
-                  <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 flex flex-wrap items-center justify-between gap-2 text-xs font-serif text-indigo-950 dark:text-indigo-200">
+                  <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 flex flex-wrap items-center justify-between gap-2 text-xs font-sans text-indigo-950 dark:text-indigo-200">
                     <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
                       <span>⚖️</span>
                       <span>
@@ -957,7 +957,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           : 'Split Bet · Pick 2 (50/50) or Click 1 Twice (100%)'}
                       </span>
                     </div>
-                    <span className={`font-mono-casino text-[11px] font-bold px-2 py-0.5 rounded border ${
+                    <span className={`font-sans tabular-nums text-[11px] font-bold px-2 py-0.5 rounded border ${
                       isDoubleStacked
                         ? 'bg-amber-500/25 text-amber-950 dark:text-[#fef08a] border-[#d4af37]/60'
                         : 'bg-indigo-500/20 border-indigo-400/40'
@@ -1026,7 +1026,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             onBetChange(player.id, 'selectedOption', opt);
                           }
                         }}
-                        className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-serif transition-all duration-200 border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                        className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-sans transition-all duration-200 border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
                           isEliminatedOpt
                             ? 'opacity-40 grayscale cursor-not-allowed bg-slate-900/20 border-rose-500/40 text-slate-500 dark:text-slate-400 line-through'
                             : isPicked
@@ -1039,7 +1039,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-mono-casino font-extrabold text-sm border shrink-0 transition-transform group-hover/opt:scale-105 ${
+                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-sans tabular-nums font-extrabold text-sm border shrink-0 transition-transform group-hover/opt:scale-105 ${
                             isPicked
                               ? hasSplitBet
                                 ? isStacked2x
@@ -1055,11 +1055,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           </span>
                         </div>
                         {isEliminatedOpt ? (
-                          <span className="text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/40 shrink-0 no-underline">
+                          <span className="text-[10px] font-sans tabular-nums font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/40 shrink-0 no-underline">
                             ✂️ Cut
                           </span>
                         ) : isPicked ? (
-                          <span className={`text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
+                          <span className={`text-[10px] font-sans tabular-nums font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
                             hasSplitBet
                               ? isStacked2x
                                 ? 'bg-[#d4af37]/30 text-amber-950 dark:text-[#fef08a] border border-[#d4af37]/60'
@@ -1079,7 +1079,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <div className="space-y-2">
                 <div className="flex gap-2.5">
                   <div className="relative flex-1">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-sans tabular-nums font-bold text-lg select-none">$</span>
                     <TextInput
                       ref={wagerInputRef}
                       type="text"
@@ -1089,7 +1089,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       onChange={handleBetAmountChange}
                       placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                       disabled={isBlocked || player.money === 0}
-                      className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                      className={`w-full pl-8 pr-4 text-lg font-sans tabular-nums font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                   </div>
                   <ActionButton
@@ -1147,11 +1147,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 <div className="p-3 rounded-xl bg-amber-500/15 border-2 border-[#d4af37] flex flex-wrap items-center justify-between gap-2 shadow-sm">
                   <div className="flex items-center gap-2">
                     <span className="text-base">🧬</span>
-                    <span className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
+                    <span className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
                       Base Word to Transform:
                     </span>
                   </div>
-                  <span className="px-3 py-1 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-mono-casino font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
+                  <span className="px-3 py-1 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-sans tabular-nums font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
                     ({baseWord.toUpperCase()})
                   </span>
                 </div>
@@ -1161,7 +1161,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="text-base">🔑</span>
                     <div>
-                      <div className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
+                      <div className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
                         Key Word (Do Not Change):
                       </div>
                       <div className="text-[10px] font-sans text-slate-600 dark:text-amber-200/75">
@@ -1169,18 +1169,18 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       </div>
                     </div>
                   </div>
-                  <span className="px-3.5 py-1 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border-2 border-[#d4af37] font-mono-casino font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
+                  <span className="px-3.5 py-1 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border-2 border-[#d4af37] font-sans tabular-nums font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
                     {baseWord.toUpperCase()}
                   </span>
                 </div>
               )}
               {scalpelHint?.clozeMask && (
-                <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs font-serif text-cyan-950 dark:text-cyan-200">
+                <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs font-sans text-cyan-950 dark:text-cyan-200">
                   <span className="font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <span>✂️</span>
                     <span>50/50 Scalpel Clue:</span>
                   </span>
-                  <span className="font-mono-casino font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/40 tracking-wider">
+                  <span className="font-sans tabular-nums font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/40 tracking-wider">
                     {scalpelHint.clozeMask}
                   </span>
                 </div>
@@ -1195,7 +1195,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 return (
                   <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500' : ''}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                      <span className="text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
                         <span>⚖️</span>
                         <span>
                           {questionType === 'keyWordTransformation'
@@ -1203,7 +1203,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             : 'Split Hedge · 1 Word (100% Payout) or 2 Words (50% Each)'}
                         </span>
                       </span>
-                      <span className={`text-[11px] font-mono-casino font-bold px-2 py-0.5 rounded border ${
+                      <span className={`text-[11px] font-sans tabular-nums font-bold px-2 py-0.5 rounded border ${
                         isSingleOrSameWord
                           ? 'bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/50'
                           : 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-400/40'
@@ -1215,7 +1215,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                        <label className="block text-[10px] font-sans uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
                           {isSingleOrSameWord && Boolean(w1) && !w2
                             ? 'Candidate #1 (100% Wager)'
                             : 'Candidate #1 (50%)'}
@@ -1246,7 +1246,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
+                        <label className="block text-[10px] font-sans uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
                           {isSingleOrSameWord && Boolean(w2) && !w1
                             ? 'Candidate #2 (100% Wager)'
                             : isSingleOrSameWord && Boolean(w1) && Boolean(w2)
@@ -1282,7 +1282,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               })() : (
                 <div className={`p-4 felt-well rounded-xl border-2 border-[#d4af37]/50 space-y-2 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
+                    <label className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
                       <span>
                         {questionType === 'keyWordTransformation'
                           ? '🔑'
@@ -1298,7 +1298,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             : 'Type the Missing Word (Single-Word Gap)'}
                       </span>
                     </label>
-                    <span className="text-[10px] font-mono-casino uppercase tracking-wider text-slate-500 dark:text-amber-200/60 shrink-0">
+                    <span className="text-[10px] font-sans tabular-nums uppercase tracking-wider text-slate-500 dark:text-amber-200/60 shrink-0">
                       {questionType === 'keyWordTransformation' ? '2–6 Words' : '1 Word Only'}
                     </span>
                   </div>
@@ -1329,7 +1329,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     const check = inspectKwtPhrase(bet?.clozeAnswer);
                     if (!check.trimmed) return null;
                     return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] font-serif">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] font-sans">
                         <span
                           className={`px-2 py-0.5 rounded font-bold border ${
                             check.hasKeyWord
@@ -1342,7 +1342,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             : `⚠️ Must include unchanged "${(baseWord || 'KEY').toUpperCase()}"`}
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded font-mono-casino font-bold border ${
+                          className={`px-2 py-0.5 rounded font-sans tabular-nums font-bold border ${
                             check.isValidCount
                               ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
                               : 'bg-amber-500/20 text-amber-900 dark:text-amber-200 border-amber-500/50'
@@ -1356,7 +1356,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 </div>
               )}
               {isUnchangedBaseWord && (
-                <div className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-serif font-bold flex items-center gap-2 animate-fade-in">
+                <div className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-sans font-bold flex items-center gap-2 animate-fade-in">
                   <span>⚠️</span>
                   <span>
                     You typed the unchanged base word <strong>({(baseWord || '').toUpperCase()})</strong>. Change its form (e.g. add a prefix or suffix) to lock in!
@@ -1368,7 +1368,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <div className="space-y-2">
                 <div className="flex gap-2.5">
                   <div className="relative flex-1">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-sans tabular-nums font-bold text-lg select-none">$</span>
                     <TextInput
                       ref={wagerInputRef}
                       type="text"
@@ -1378,7 +1378,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       onChange={handleBetAmountChange}
                       placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                       disabled={isBlocked || player.money === 0}
-                      className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                      className={`w-full pl-8 pr-4 text-lg font-sans tabular-nums font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                   </div>
                   <ActionButton
@@ -1441,12 +1441,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
             <div className="p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner relative overflow-hidden">
               <div className="absolute top-0 right-0 p-2 opacity-10 text-6xl select-none">⚖️</div>
               <div className="flex justify-between items-center mb-4 relative z-10">
-                 <h4 className="text-lg font-serif font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">Split Hedge Wager</h4>
+                 <h4 className="text-lg font-sans font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">Split Hedge Wager</h4>
               </div>
               
               <div className="mb-5 relative z-10">
                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-600 dark:text-indigo-300 font-mono-casino font-bold text-lg">$</span>
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-600 dark:text-indigo-300 font-sans tabular-nums font-bold text-lg">$</span>
                     <TextInput 
                         ref={wagerInputRef}
                         type="text"
@@ -1456,13 +1456,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         onChange={handleBetAmountChange}
                         placeholder={isBetCapped ? `Wager (Max $${effectiveBetCap})` : "Total Wager"}
                         disabled={isBlocked || player.money === 0}
-                        className={`pl-9 text-center font-mono-casino font-bold bg-white/90 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-500/50 text-xl text-slate-900 dark:text-white h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                        className={`pl-9 text-center font-sans tabular-nums font-bold bg-white/90 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-500/50 text-xl text-slate-900 dark:text-white h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                     />
                     <button
                       type="button"
                       onClick={handleAllIn}
                       disabled={isBlocked || player.money === 0}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2.5 py-1 text-[10px] font-serif uppercase tracking-wider font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded shadow transition-all cursor-pointer"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2.5 py-1 text-[10px] font-sans uppercase tracking-wider font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded shadow transition-all cursor-pointer"
                     >
                       {isBetCapped && effectiveBetCap < player.money ? `MAX ($${effectiveBetCap})` : 'MAX'}
                     </button>
@@ -1485,7 +1485,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                  </div>
               </div>
 
-              <div className="mb-2 flex justify-between text-xs font-serif uppercase tracking-wider font-bold relative z-10">
+              <div className="mb-2 flex justify-between text-xs font-sans uppercase tracking-wider font-bold relative z-10">
                 <span className="text-rose-600 dark:text-rose-400">Flawed ({100 - splitPercent}%)</span>
                 <span className="text-emerald-700 dark:text-emerald-400">Valid ({splitPercent}%)</span>
               </div>
@@ -1503,18 +1503,18 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <div className="flex justify-between gap-3 relative z-10">
                  <div className="flex-1 bg-rose-500/10 border border-rose-500/30 rounded-lg p-2.5 text-center">
                     <div className="text-[10px] text-rose-700 dark:text-rose-300 uppercase tracking-widest font-bold">Flawed Pot</div>
-                    <div className="text-lg font-mono-casino text-rose-700 dark:text-rose-400 font-extrabold">${splitIncorrectAmount.toLocaleString()}</div>
+                    <div className="text-lg font-sans tabular-nums text-rose-700 dark:text-rose-400 font-extrabold">${splitIncorrectAmount.toLocaleString()}</div>
                  </div>
                  <div className="flex-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2.5 text-center">
                     <div className="text-[10px] text-emerald-800 dark:text-emerald-300 uppercase tracking-widest font-bold">Valid Pot</div>
-                    <div className="text-lg font-mono-casino text-emerald-700 dark:text-emerald-400 font-extrabold">${splitCorrectAmount.toLocaleString()}</div>
+                    <div className="text-lg font-sans tabular-nums text-emerald-700 dark:text-emerald-400 font-extrabold">${splitCorrectAmount.toLocaleString()}</div>
                  </div>
               </div>
 
                {/* Correction Input for Split Bet */}
                {splitPercent < 100 && (
                  <div className="mt-4 animate-fade-in text-left relative z-10">
-                    <label className="block text-xs font-serif font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-widest mb-1.5">
+                    <label className="block text-xs font-sans font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-widest mb-1.5">
                       Croupier's Bonus · Proposed Revision
                     </label>
                     <textarea 
@@ -1542,7 +1542,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   type="button"
                   onClick={() => handleOpinionClick('correct')}
                   disabled={isBlocked}
-                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-sans uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
                     bet?.opinion === 'correct'
                       ? 'bg-gradient-to-b from-emerald-600/25 via-emerald-700/30 to-emerald-950/60 border-emerald-400 text-emerald-900 dark:text-emerald-200 shadow-[0_0_25px_rgba(16,185,129,0.35),inset_0_0_15px_rgba(16,185,129,0.25)] scale-[1.01]'
                       : 'felt-well border-emerald-600/35 dark:border-emerald-500/30 text-emerald-900/75 dark:text-emerald-300/65 hover:border-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-900 dark:hover:text-emerald-200'
@@ -1565,7 +1565,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   type="button"
                   onClick={() => handleOpinionClick('incorrect')}
                   disabled={isBlocked}
-                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-serif uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-rose-400 ${
+                  className={`relative overflow-hidden py-4 px-3 rounded-xl font-sans uppercase tracking-widest transition-all duration-200 border-2 flex flex-col items-center justify-center gap-1.5 cursor-pointer select-none group/zone focus:outline-none focus:ring-2 focus:ring-rose-400 ${
                     bet?.opinion === 'incorrect'
                       ? 'bg-gradient-to-b from-rose-600/25 via-red-800/30 to-red-950/60 border-rose-400 text-rose-900 dark:text-rose-200 shadow-[0_0_25px_rgba(244,63,94,0.35),inset_0_0_15px_rgba(244,63,94,0.25)] scale-[1.01]'
                       : 'felt-well border-rose-600/35 dark:border-rose-500/30 text-rose-900/75 dark:text-rose-300/65 hover:border-rose-500 hover:bg-rose-500/10 hover:text-rose-900 dark:hover:text-rose-200'
@@ -1589,7 +1589,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <div className="space-y-2">
                 <div className="flex gap-2.5">
                    <div className="relative flex-1">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-mono-casino font-bold text-lg select-none">$</span>
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#ca8a04] font-sans tabular-nums font-bold text-lg select-none">$</span>
                       <TextInput 
                           ref={wagerInputRef}
                           type="text"
@@ -1599,7 +1599,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           onChange={handleBetAmountChange}
                           placeholder={isBetCapped ? `Max $${effectiveBetCap}` : "Enter wager..."}
                           disabled={isBlocked || player.money === 0}
-                          className={`w-full pl-8 pr-4 text-lg font-mono-casino font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
+                          className={`w-full pl-8 pr-4 text-lg font-sans tabular-nums font-bold h-12 ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
                       />
                    </div>
                    <ActionButton
@@ -1647,7 +1647,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               {bet?.opinion === 'incorrect' && (
                  <div className="animate-fade-in pt-1">
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-serif font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
+                      <label className="block text-xs font-sans font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
                         ✦ Bonus Payout · Propose Correction
                       </label>
                       {currentSentenceText && !isBlocked && (
@@ -1657,7 +1657,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             playSound('click');
                             onBetChange(player.id, 'userCorrection', currentSentenceText);
                           }}
-                          className="text-[10px] font-serif uppercase tracking-wider text-amber-700 dark:text-amber-300 hover:underline cursor-pointer"
+                          className="text-[10px] font-sans uppercase tracking-wider text-amber-700 dark:text-amber-300 hover:underline cursor-pointer"
                         >
                           Copy Original Text
                         </button>
@@ -1685,7 +1685,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         {/* Right Column: Croupier Services & Arcane Deck (5 cols) */}
         <div className="lg:col-span-5 flex flex-col justify-between gap-3.5 border-t lg:border-t-0 lg:border-l border-[#d4af37]/25 pt-4 lg:pt-0 lg:pl-6">
           <div className="space-y-3">
-            <div className="text-[10px] font-serif uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">
+            <div className="text-[10px] font-sans uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">
               House Privileges & Deck
             </div>
 
@@ -1706,7 +1706,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <div className="text-[10px] font-sans normal-case opacity-75 font-normal">Request a subtle grammatical clue</div>
                   </div>
                 </div>
-                <span className="font-mono-casino text-xs font-extrabold px-2 py-1 rounded bg-black/10 dark:bg-black/40 border border-[#d4af37]/30 text-amber-900 dark:text-[#fef08a]">
+                <span className="font-sans tabular-nums text-xs font-extrabold px-2 py-1 rounded bg-black/10 dark:bg-black/40 border border-[#d4af37]/30 text-amber-900 dark:text-[#fef08a]">
                   -${HINT_COST}
                 </span>
               </div>
@@ -1714,7 +1714,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
 
             {hint && (
               <div className="bg-gradient-to-br from-amber-50 to-amber-100/70 dark:from-[#082415] dark:to-[#04140b] border border-[#d4af37]/60 p-3.5 rounded-xl text-amber-950 dark:text-[#fef08a] text-sm font-editorial italic animate-fade-in shadow-inner relative">
-                <div className="text-[9px] font-serif uppercase tracking-widest text-[#ca8a04] font-bold not-italic mb-1 flex items-center gap-1">
+                <div className="text-[9px] font-sans uppercase tracking-widest text-[#ca8a04] font-bold not-italic mb-1 flex items-center gap-1">
                   <span>✦</span> Croupier's Note
                 </div>
                 {hint.isLoading ? (
@@ -1755,7 +1755,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </div>
                 </PowerUpTooltip>
                 {!isSilenced && (
-                  <span className="font-mono-casino text-xs font-extrabold px-2 py-1 rounded bg-black/10 dark:bg-black/40 border border-[#d4af37]/30 text-amber-900 dark:text-[#fef08a]">
+                  <span className="font-sans tabular-nums text-xs font-extrabold px-2 py-1 rounded bg-black/10 dark:bg-black/40 border border-[#d4af37]/30 text-amber-900 dark:text-[#fef08a]">
                     -${POWERUP_COST}
                   </span>
                 )}
@@ -1764,7 +1764,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           </div>
 
           {/* Bottom Status Indicator */}
-          <div className="pt-2 border-t border-[#d4af37]/20 flex items-center justify-between text-[11px] font-serif text-slate-500 dark:text-amber-200/50">
+          <div className="pt-2 border-t border-[#d4af37]/20 flex items-center justify-between text-[11px] font-sans text-slate-500 dark:text-amber-200/50">
             <span>Status:</span>
             {isEliminated ? (
               <span className="text-rose-500 font-bold uppercase tracking-wider">Eliminated</span>

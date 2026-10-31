@@ -510,7 +510,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <button
               type="button"
               onClick={onExitStudentMode}
-              className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer min-h-[44px] flex items-center"
+              className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer min-h-[44px] flex items-center"
             >
               &larr; Solo Offline Table
             </button>
@@ -525,7 +525,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           </div>
 
           <div className="text-center space-y-1">
-            <div className="text-xs font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
+            <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
               Student Controller
             </div>
             <h1 className="text-3xl sm:text-4xl font-display font-black text-gold tracking-wider">
@@ -547,7 +547,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-serif uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
+              <label className="block text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
                 4-Letter Room Code
               </label>
               <input
@@ -561,7 +561,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-serif uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
+              <label className="block text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
                 Your High-Roller Name
               </label>
               <input
@@ -579,7 +579,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-serif uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
+                <label className="text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
                   Choose Avatar
                 </label>
                 <span className="text-2xl">{selectedAvatar}</span>
@@ -609,7 +609,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               type="button"
               disabled={isJoining}
               onClick={() => handleJoinRoom()}
-              className="w-full min-h-[52px] rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-black text-base uppercase tracking-[0.18em] shadow-lg active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              className="w-full min-h-[52px] rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-black text-base uppercase tracking-[0.18em] shadow-lg active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
             >
               {isJoining ? (joinWaitingMessage ? 'WAITING FOR TEACHER...' : 'CONNECTING...') : 'TAKE SEAT AT TABLE →'}
             </button>
@@ -641,11 +641,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   if (isClozeRound && sentenceHtml) {
     const inlineBaseBadge =
       qType === 'wordFormation' && view.sentence?.baseWord
-        ? ` <span class="inline-block px-2 py-0.5 rounded bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] text-amber-950 dark:text-[#fef08a] font-mono-casino font-black text-xs sm:text-sm tracking-widest not-italic align-middle">(${view.sentence.baseWord.toUpperCase()})</span>`
+        ? ` <span class="inline-block px-2 py-0.5 rounded bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black text-xs sm:text-sm tracking-widest not-italic align-middle">(${view.sentence.baseWord.toUpperCase()})</span>`
         : '';
     sentenceHtml = sentenceHtml.replace(
       /_{3,}/g,
-      `<span class="inline-block min-w-[3.2rem] px-2 py-0.5 mx-1 rounded bg-amber-500/20 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic">_____</span>${inlineBaseBadge}`
+      `<span class="inline-block min-w-[3.2rem] px-2 py-0.5 mx-1 rounded bg-amber-500/20 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans tabular-nums font-bold not-italic">_____</span>${inlineBaseBadge}`
     );
   }
 
@@ -663,10 +663,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {view.me.avatar}
           </button>
           <div className="min-w-0">
-            <div className="text-xs sm:text-sm font-serif font-extrabold text-slate-900 dark:text-amber-50 truncate">
+            <div className="text-xs sm:text-sm font-sans font-extrabold text-slate-900 dark:text-amber-50 truncate">
               {view.me.name}
             </div>
-            <div className="text-[10px] font-mono-casino text-slate-500 dark:text-amber-200/70 flex items-center gap-1.5">
+            <div className="text-[10px] font-sans tabular-nums text-slate-500 dark:text-amber-200/70 flex items-center gap-1.5">
               <span>Room {view.roomCode}</span>
               <span>&middot;</span>
               <span>{isConnected ? 'Live' : 'Syncing'}</span>
@@ -676,17 +676,17 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
         <div className="flex items-center gap-2.5 shrink-0">
           {view.me.winStreak > 0 && (
-            <span className="text-xs font-mono-casino font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+            <span className="text-xs font-sans tabular-nums font-bold text-amber-700 dark:text-amber-300 tabular-nums">
               🔥 {view.me.winStreak}
             </span>
           )}
-          <div className="px-3 py-1 rounded-xl felt-well border border-[#d4af37]/60 font-mono-casino font-black text-sm sm:text-base text-amber-900 dark:text-[#fef08a] tabular-nums">
+          <div className="px-3 py-1 rounded-xl felt-well border border-[#d4af37]/60 font-sans tabular-nums font-black text-sm sm:text-base text-amber-900 dark:text-[#fef08a] tabular-nums">
             ${view.me.money.toLocaleString()}
           </div>
           <button
             type="button"
             onClick={handleLeaveRoom}
-            className="min-h-[40px] px-2.5 rounded-lg border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-serif font-bold uppercase cursor-pointer"
+            className="min-h-[40px] px-2.5 rounded-lg border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-sans font-bold uppercase cursor-pointer"
             title="Leave Room"
           >
             Exit
@@ -699,7 +699,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         <div className="w-full max-w-xl mx-auto px-4 pt-3">
           <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/50">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-serif font-bold uppercase tracking-wider">Tap New Avatar</span>
+              <span className="text-xs font-sans font-bold uppercase tracking-wider">Tap New Avatar</span>
               <button
                 type="button"
                 onClick={() => setShowAvatarPicker(false)}
@@ -739,10 +739,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {view.me.avatar}
             </div>
             <div className="space-y-1">
-              <div className="text-xs font-serif uppercase tracking-[0.25em] text-emerald-600 dark:text-emerald-400 font-bold">
+              <div className="text-xs font-sans uppercase tracking-[0.25em] text-emerald-600 dark:text-emerald-400 font-bold">
                 Seat Confirmed · Ready to Deal
               </div>
-              <h2 className="text-2xl font-serif font-black text-slate-900 dark:text-amber-50 uppercase">
+              <h2 className="text-2xl font-sans font-black text-slate-900 dark:text-amber-50 uppercase">
                 Welcome, {view.me.name}!
               </h2>
               <p className="text-xs text-slate-600 dark:text-amber-200/75">
@@ -751,14 +751,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
 
             <div className="felt-well rounded-2xl p-4 text-left space-y-2">
-              <div className="text-xs font-serif uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
+              <div className="text-xs font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
                 Players at the Table ({view.peers.length})
               </div>
               <div className="flex flex-wrap gap-2">
                 {view.peers.map((p) => (
                   <span
                     key={p.id}
-                    className="px-3 py-1.5 rounded-xl bg-white/70 dark:bg-black/40 border border-[#d4af37]/30 text-xs font-serif font-bold flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl bg-white/70 dark:bg-black/40 border border-[#d4af37]/30 text-xs font-sans font-bold flex items-center gap-1.5"
                   >
                     <span>{p.avatar}</span>
                     <span>{p.name}</span>
@@ -787,7 +787,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {view.me.money <= 0 ? (
               <div className="p-4 rounded-2xl bg-rose-500/20 border-2 border-rose-400 text-center space-y-1">
                 <div className="text-2xl">💸</div>
-                <div className="text-sm font-serif font-extrabold uppercase tracking-wider text-rose-900 dark:text-rose-200">
+                <div className="text-sm font-sans font-extrabold uppercase tracking-wider text-rose-900 dark:text-rose-200">
                   {view.gameMode === 'lastPlayer' ? 'Eliminated (Bankrupt)!' : 'Bankrupt This Hand!'}
                 </div>
                 <div className="text-xs text-rose-800 dark:text-rose-100/80">
@@ -799,7 +799,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             ) : view.isFrozen ? (
               <div className="p-4 rounded-2xl bg-cyan-500/20 border-2 border-cyan-400 text-center space-y-1">
                 <div className="text-2xl">❄️</div>
-                <div className="text-sm font-serif font-extrabold uppercase tracking-wider text-cyan-900 dark:text-cyan-200">
+                <div className="text-sm font-sans font-extrabold uppercase tracking-wider text-cyan-900 dark:text-cyan-200">
                   Frozen This Round!
                 </div>
                 <div className="text-xs text-cyan-800 dark:text-cyan-100/80">
@@ -810,7 +810,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
             {/* Sentence Card */}
             <div className="glass-panel rounded-2xl p-4 sm:p-5 border-2 border-[#d4af37] shadow-xl space-y-3">
-              <div className="flex items-center justify-between text-[11px] font-serif uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
+              <div className="flex items-center justify-between text-[11px] font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
                 <span>
                   Hand #{view.round} &middot; {view.settings.topic} ({view.settings.level})
                 </span>
@@ -830,7 +830,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {view.isLoadingSentence || !view.sentence ? (
                 <div className="py-8 text-center space-y-2">
                   <div className="text-3xl animate-bounce">♠️</div>
-                  <div className="text-sm font-serif font-bold uppercase tracking-widest text-amber-700 dark:text-[#fef08a]">
+                  <div className="text-sm font-sans font-bold uppercase tracking-widest text-amber-700 dark:text-[#fef08a]">
                     Croupier is Dealing Hand #{view.round}...
                   </div>
                 </div>
@@ -838,7 +838,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 <div className="space-y-2.5 py-1">
                   {qType === 'keyWordTransformation' && view.sentence.leadInSentence && (
                     <div className="p-3 rounded-xl felt-well border border-[#d4af37]/40 text-center space-y-1">
-                      <div className="text-[10px] font-serif uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
+                      <div className="text-[10px] font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
                         Lead-In Sentence
                       </div>
                       <p className="text-base sm:text-lg font-editorial italic text-slate-900 dark:text-amber-50 leading-snug">
@@ -846,10 +846,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       </p>
                       {view.sentence.baseWord && (
                         <div className="pt-1 flex items-center justify-center gap-2">
-                          <span className="text-[10px] font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-amber-200">
+                          <span className="text-[10px] font-sans font-extrabold uppercase tracking-widest text-amber-900 dark:text-amber-200">
                             🔑 Key Word:
                           </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-mono-casino font-black text-xs sm:text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                          <span className="px-2.5 py-0.5 rounded-md bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-sans tabular-nums font-black text-xs sm:text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
                             {view.sentence.baseWord.toUpperCase()}
                           </span>
                         </div>
@@ -890,11 +890,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {/* 50/50 Scalpel Open Cloze Clue */}
               {view.scalpelHint?.clozeMask && (
                 <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs text-cyan-950 dark:text-cyan-100">
-                  <strong className="font-serif uppercase tracking-wider flex items-center gap-1.5">
+                  <strong className="font-sans uppercase tracking-wider flex items-center gap-1.5">
                     <span>✂️</span>
                     <span>50/50 Scalpel Clue:</span>
                   </strong>
-                  <span className="font-mono-casino font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/25 border border-cyan-400/50 tracking-wider">
+                  <span className="font-sans tabular-nums font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/25 border border-cyan-400/50 tracking-wider">
                     {view.scalpelHint.clozeMask}
                   </span>
                 </div>
@@ -903,9 +903,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {/* Peekaboo Live Spy Feed */}
               {view.peekabooSpyFeed && view.peekabooSpyFeed.length > 0 && (
                 <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 space-y-1.5 text-xs text-indigo-950 dark:text-indigo-100">
-                  <div className="font-serif font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
+                  <div className="font-sans font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
                     <span>🕵️ Peekaboo Live Spyglass</span>
-                    <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-indigo-500/25">
+                    <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-indigo-500/25">
                       LIVE FEED
                     </span>
                   </div>
@@ -917,11 +917,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       <div className="flex items-center gap-1.5 font-bold">
                         <span>{spy.targetAvatar}</span>
                         <span>{spy.targetName}</span>
-                        <span className="text-[10px] font-mono-casino opacity-80">
+                        <span className="text-[10px] font-sans tabular-nums opacity-80">
                           {spy.lockedIn ? '🔒 Locked' : '✏️ Drafting'}
                         </span>
                       </div>
-                      <div className="font-mono-casino font-bold text-right">
+                      <div className="font-sans tabular-nums font-bold text-right">
                         <span className="text-amber-700 dark:text-[#fef08a] mr-2">
                           {spy.answerSummary}
                         </span>
@@ -937,9 +937,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {/* Ask the Table Live Anonymized Poll Feed */}
               {view.audiencePollFeed && (
                 <div className="p-3 rounded-xl bg-sky-500/15 border border-sky-400/50 space-y-2 text-xs text-sky-950 dark:text-sky-100">
-                  <div className="font-serif font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300 flex items-center justify-between gap-2">
+                  <div className="font-sans font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300 flex items-center justify-between gap-2">
                     <span>📊 Ask the Table · Live Poll</span>
-                    <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-sky-500/25">
+                    <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-sky-500/25">
                       {view.audiencePollFeed.summaryText}
                     </span>
                   </div>
@@ -952,7 +952,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         >
                           <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
                             <span className="truncate">{item.label}</span>
-                            <span className="font-mono-casino text-amber-700 dark:text-[#fef08a] shrink-0">
+                            <span className="font-sans tabular-nums text-amber-700 dark:text-[#fef08a] shrink-0">
                               {item.percent}%
                             </span>
                           </div>
@@ -972,7 +972,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {/* Private AI Hint Display */}
               {view.myHint && (
                 <div className="p-3 rounded-xl felt-well border border-amber-400/50 text-xs text-slate-800 dark:text-amber-100">
-                  <strong className="font-serif uppercase tracking-wider text-amber-700 dark:text-[#fef08a]">
+                  <strong className="font-sans uppercase tracking-wider text-amber-700 dark:text-[#fef08a]">
                     💡 Private Croupier Hint:{' '}
                   </strong>
                   {view.myHint.isLoading ? 'Consulting the Croupier...' : view.myHint.text}
@@ -996,7 +996,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {lockWarning && (
                     <div
                       role="alert"
-                      className="px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/75 border-2 border-rose-500 text-rose-900 dark:text-rose-100 text-xs sm:text-sm font-serif font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-fade-in"
+                      className="px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/75 border-2 border-rose-500 text-rose-900 dark:text-rose-100 text-xs sm:text-sm font-sans font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-fade-in"
                     >
                       <div className="flex items-center gap-2 text-left">
                         <span className="text-base select-none shrink-0">⚠️</span>
@@ -1021,11 +1021,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
+                      <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
                         1. Choose Your Ruling {hasSplitBet ? '(⚖️ Split Bet Active)' : ''}
                       </div>
                       {highlightAnswerMissing && (
-                        <span className="text-[10px] font-serif font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
+                        <span className="text-[10px] font-sans font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
                           Required
                         </span>
                       )}
@@ -1036,7 +1036,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       <div className="space-y-3">
                         {hasSplitBet ? (
                           <div className="space-y-2 felt-well p-3.5 rounded-xl">
-                            <div className="flex justify-between text-xs font-mono-casino font-bold">
+                            <div className="flex justify-between text-xs font-sans tabular-nums font-bold">
                               <span className="text-emerald-600 dark:text-emerald-400">
                                 ✓ Valid: {localBet.splitCorrectPercent ?? 50}%
                               </span>
@@ -1060,7 +1060,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                               ref={firstOpinionBtnRef}
                               type="button"
                               onClick={() => updateBetField('opinion', 'correct')}
-                              className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                              className={`min-h-[54px] rounded-xl font-sans font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
                                 localBet.opinion === 'correct'
                                   ? 'bg-emerald-600 text-white border-emerald-300 shadow-lg scale-[1.01]'
                                   : highlightAnswerMissing
@@ -1074,7 +1074,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => updateBetField('opinion', 'incorrect')}
-                              className={`min-h-[54px] rounded-xl font-serif font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                              className={`min-h-[54px] rounded-xl font-sans font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
                                 localBet.opinion === 'incorrect'
                                   ? 'bg-rose-600 text-white border-rose-300 shadow-lg scale-[1.01]'
                                   : highlightAnswerMissing
@@ -1091,7 +1091,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         {(localBet.opinion === 'incorrect' ||
                           (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
                           <div>
-                            <label className="block text-[11px] font-serif uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mb-1">
+                            <label className="block text-[11px] font-sans uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mb-1">
                               Optional Bonus Correction (+100% Payout if Flawed):
                             </label>
                             <input
@@ -1149,7 +1149,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                     updateBetField('selectedOption', opt);
                                   }
                                 }}
-                                className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-serif font-bold text-sm transition-all flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                                className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-sans font-bold text-sm transition-all flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
                                   isEliminatedOpt
                                     ? 'opacity-40 grayscale cursor-not-allowed bg-slate-900/30 border-rose-500/40 text-slate-400 line-through'
                                     : isSelected
@@ -1160,15 +1160,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                 }`}
                               >
                                 <span className={isEliminatedOpt ? 'line-through' : ''}>
-                                  <strong className="font-mono-casino mr-2">{letter}.</strong>
+                                  <strong className="font-sans tabular-nums mr-2">{letter}.</strong>
                                   {opt}
                                 </span>
                                 {isEliminatedOpt ? (
-                                  <span className="text-[10px] font-mono-casino bg-rose-500/25 text-rose-200 px-1.5 py-0.5 rounded font-black no-underline">
+                                  <span className="text-[10px] font-sans tabular-nums bg-rose-500/25 text-rose-200 px-1.5 py-0.5 rounded font-black no-underline">
                                     ✂️ Cut
                                   </span>
                                 ) : isDoubleStacked ? (
-                                  <span className="text-[10px] font-mono-casino bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
+                                  <span className="text-[10px] font-sans tabular-nums bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
                                     2×
                                   </span>
                                 ) : null}
@@ -1207,11 +1207,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         <div className="space-y-2.5">
                           {qType === 'wordFormation' && view.sentence?.baseWord && (
                             <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                              <span className="text-[11px] font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
                                 <span>🧬</span>
                                 <span>Base Word to Transform:</span>
                               </span>
-                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-mono-casino font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-sans tabular-nums font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
                                 ({view.sentence.baseWord.toUpperCase()})
                               </span>
                             </div>
@@ -1219,7 +1219,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           {qType === 'keyWordTransformation' && view.sentence?.baseWord && (
                             <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
                               <div className="text-left">
-                                <span className="text-[11px] font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                                <span className="text-[11px] font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
                                   <span>🔑</span>
                                   <span>Key Word (Do Not Change):</span>
                                 </span>
@@ -1227,7 +1227,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   2–6 words · 1 Mark (1×) or 2 Marks (2×)
                                 </span>
                               </div>
-                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-mono-casino font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-sans tabular-nums font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
                                 {view.sentence.baseWord.toUpperCase()}
                               </span>
                             </div>
@@ -1310,7 +1310,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             />
                           )}
                           {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-serif">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-sans">
                               <span
                                 className={`px-2 py-0.5 rounded font-bold border ${
                                   kwtCheck.hasKeyWord
@@ -1323,7 +1323,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   : `⚠️ Include unchanged "${(view.sentence?.baseWord || 'KEY').toUpperCase()}"`}
                               </span>
                               <span
-                                className={`px-2 py-0.5 rounded font-mono-casino font-bold border ${
+                                className={`px-2 py-0.5 rounded font-sans tabular-nums font-bold border ${
                                   kwtCheck.isValidCount
                                     ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
                                     : 'bg-amber-500/20 text-amber-900 dark:text-amber-200 border-amber-500/50'
@@ -1334,7 +1334,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             </div>
                           )}
                           {isUnchangedBase && (
-                            <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-serif font-bold flex items-center gap-2">
+                            <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-sans font-bold flex items-center gap-2">
                               <span>⚠️</span>
                               <span>
                                 You typed the unchanged base word <strong>({(view.sentence?.baseWord || '').toUpperCase()})</strong>. Transform its form (e.g. add a prefix or suffix) to lock in!
@@ -1349,31 +1349,31 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {/* Wager Amount Controls */}
                   <div
                     ref={wagerSectionRef}
-                    className={`pt-3 border-t border-[#d4af37]/20 space-y-2.5 rounded-xl transition-all ${
+                    className={`space-y-2.5 rounded-xl transition-all ${
                       highlightWagerMissing
                         ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
-                        : ''
+                        : 'pt-3 border-t border-[#d4af37]/20'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-serif font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
+                        <span className="text-xs font-sans font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
                           2. Set Your Wager
                         </span>
                         {highlightWagerMissing && (
-                          <span className="text-[10px] font-serif font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
+                          <span className="text-[10px] font-sans font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
                             Required
                           </span>
                         )}
                       </div>
-                      <span className="text-xs font-mono-casino text-amber-800 dark:text-[#fef08a] tabular-nums">
+                      <span className="text-xs font-sans tabular-nums text-amber-800 dark:text-[#fef08a] tabular-nums">
                         {view.isHighRoller ? `Min: $${view.minBetAmount.toLocaleString()} · ` : ''}Max: ${maxAllowedBet.toLocaleString()}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono-casino font-bold text-amber-700 dark:text-[#fef08a]">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-sans tabular-nums font-bold text-amber-700 dark:text-[#fef08a]">
                           $
                         </span>
                         <input
@@ -1384,7 +1384,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           value={localBet.bet ?? ''}
                           onChange={(e) => updateBetField('bet', e.target.value)}
                           placeholder={view.isHighRoller ? String(view.minBetAmount) : '0'}
-                          className={`w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 font-mono-casino font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none ${
+                          className={`w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 font-sans tabular-nums font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none ${
                             highlightWagerMissing
                               ? 'border-rose-500 ring-2 ring-rose-500/35'
                               : 'border-[#d4af37]/60 focus:border-[#d4af37]'
@@ -1422,7 +1422,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           key={preset.label}
                           type="button"
                           onClick={() => updateBetField('bet', preset.val)}
-                          className="min-h-[44px] rounded-xl felt-well border border-[#d4af37]/40 hover:border-[#d4af37] font-mono-casino font-bold text-xs text-slate-900 dark:text-[#fef08a] active:scale-95 transition-transform cursor-pointer"
+                          className="min-h-[44px] rounded-xl felt-well border border-[#d4af37]/40 hover:border-[#d4af37] font-sans tabular-nums font-bold text-xs text-slate-900 dark:text-[#fef08a] active:scale-95 transition-transform cursor-pointer"
                         >
                           {preset.label}
                         </button>
@@ -1442,7 +1442,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         playSound('hint');
                         sendIntent({ type: 'BUY_HINT' });
                       }}
-                      className="min-h-[46px] px-3 rounded-xl felt-well border border-amber-400/50 text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
+                      className="min-h-[46px] px-3 rounded-xl felt-well border border-amber-400/50 text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>💡</span>
                       <span>{view.myHint?.text ? 'Hint Active' : `Buy Hint ($${HINT_COST})`}</span>
@@ -1455,7 +1455,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         playSound('powerUp');
                         sendIntent({ type: 'BUY_RANDOM_POWER_UP' });
                       }}
-                      className="min-h-[46px] px-3 rounded-xl bg-purple-600/25 border border-purple-400/60 text-xs font-serif font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-100 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
+                      className="min-h-[46px] px-3 rounded-xl bg-purple-600/25 border border-purple-400/60 text-xs font-sans font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-100 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>⚡</span>
                       <span>Power-Up (${POWERUP_COST})</span>
@@ -1483,22 +1483,22 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       : 'glass-panel border-[#d4af37]'
                 }`}
               >
-                <div className="text-xs font-serif uppercase tracking-[0.25em] font-bold opacity-80 flex items-center justify-center gap-2">
+                <div className="text-xs font-sans uppercase tracking-[0.25em] font-bold opacity-80 flex items-center justify-center gap-2">
                   <span>Hand #{view.round} Settlement</span>
                   {qType === 'keyWordTransformation' && view.myRoundResult.marksAwarded !== undefined && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino bg-amber-400/30 border border-amber-300/60 text-amber-100">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums bg-amber-400/30 border border-amber-300/60 text-amber-100">
                       {view.myRoundResult.marksAwarded}/2 Marks
                     </span>
                   )}
                 </div>
-                <div className="text-3xl font-mono-casino font-black tabular-nums">
+                <div className="text-3xl font-sans tabular-nums font-black tabular-nums">
                   {view.myRoundResult.amountChanged > 0
                     ? `+$${view.myRoundResult.amountChanged.toLocaleString()}`
                     : view.myRoundResult.amountChanged < 0
                       ? `-$${Math.abs(view.myRoundResult.amountChanged).toLocaleString()}`
                       : '$0'}
                 </div>
-                <div className="text-sm font-serif font-extrabold uppercase tracking-wider">
+                <div className="text-sm font-sans font-extrabold uppercase tracking-wider">
                   {view.myRoundResult.outcomeText}
                 </div>
                 {view.myRoundResult.correctionFeedback && (
@@ -1512,7 +1512,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {/* Official House Ruling */}
             {view.sentence && (
               <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-[#d4af37]/50 space-y-2.5 text-left">
-                <div className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">
+                <div className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">
                   {isClozeRound
                     ? `✓ Official Answer: "${view.sentence.correctAnswer}"`
                     : view.sentence.isCorrect
@@ -1529,7 +1529,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
             {/* Live Standings */}
             <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
-              <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
+              <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
                 Table Standings
               </div>
               <div className="divide-y divide-[#d4af37]/15">
@@ -1543,11 +1543,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="font-mono-casino text-xs opacity-70 w-5">#{idx + 1}</span>
+                        <span className="font-sans tabular-nums text-xs opacity-70 w-5">#{idx + 1}</span>
                         <span className="text-xl">{p.avatar}</span>
-                        <span className="truncate font-serif uppercase">{p.name}</span>
+                        <span className="truncate font-sans uppercase">{p.name}</span>
                       </div>
-                      <span className="font-mono-casino font-bold tabular-nums">
+                      <span className="font-sans tabular-nums font-bold tabular-nums">
                         ${p.money.toLocaleString()}
                       </span>
                     </div>
@@ -1630,7 +1630,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <div className="space-y-4 animate-fade-in pb-8">
               {/* Table Closed Header Banner */}
               <div className="text-center pt-2 pb-1">
-                <div className="text-[11px] font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] font-bold">
+                <div className="text-[11px] font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] font-bold">
                   Salon Privé · Final Settlement
                 </div>
                 <h1 className="text-3xl sm:text-4xl font-black text-gold tracking-wider font-display title-glow mt-1">
@@ -1647,18 +1647,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {view.winner.avatar}
                   </div>
                   <div>
-                    <div className="text-[11px] font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#fef08a] font-bold">
+                    <div className="text-[11px] font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#fef08a] font-bold">
                       {isMeChampion ? '🎉 You Are The Champion!' : 'Grand Salon Champion'}
                     </div>
-                    <h2 className="text-2xl sm:text-3xl font-serif font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider mt-0.5">
+                    <h2 className="text-2xl sm:text-3xl font-sans font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider mt-0.5">
                       {view.winner.name}
                     </h2>
                   </div>
                   <div className="felt-well rounded-2xl p-3.5 border border-[#d4af37]/30">
-                    <div className="text-[10px] font-serif uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
+                    <div className="text-[10px] font-sans uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
                       Winning Vault Balance
                     </div>
-                    <div className="text-3xl font-mono-casino font-black text-gold-flat tabular-nums mt-0.5">
+                    <div className="text-3xl font-sans tabular-nums font-black text-gold-flat tabular-nums mt-0.5">
                       ${view.winner.money.toLocaleString()}
                     </div>
                   </div>
@@ -1666,7 +1666,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               ) : (
                 <div className="luxury-card rounded-3xl p-6 text-center border-2 border-[#d4af37]/50 shadow-xl space-y-2">
                   <div className="text-5xl">🏛️</div>
-                  <h2 className="text-2xl font-serif font-extrabold text-slate-900 dark:text-amber-100 uppercase tracking-wider">
+                  <h2 className="text-2xl font-sans font-extrabold text-slate-900 dark:text-amber-100 uppercase tracking-wider">
                     The House Prevails
                   </h2>
                   <p className="text-xs text-slate-600 dark:text-amber-200/70 font-editorial italic">
@@ -1677,34 +1677,34 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
               {/* Personal Session Stats */}
               <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/50 space-y-3">
-                <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37] flex items-center justify-between">
+                <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37] flex items-center justify-between">
                   <span>Your Final Summary</span>
-                  <span className="font-mono-casino text-slate-700 dark:text-[#fef08a]">
+                  <span className="font-sans tabular-nums text-slate-700 dark:text-[#fef08a]">
                     Rank #{myRank} of {sortedPeers.length}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2.5 text-center">
                   <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
                       Final Vault
                     </div>
-                    <div className="text-base sm:text-lg font-mono-casino font-black text-emerald-700 dark:text-[#fef08a] tabular-nums mt-0.5">
+                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-emerald-700 dark:text-[#fef08a] tabular-nums mt-0.5">
                       ${view.me.money.toLocaleString()}
                     </div>
                   </div>
                   <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
                       Hands Won
                     </div>
-                    <div className="text-base sm:text-lg font-mono-casino font-black text-slate-900 dark:text-amber-50 tabular-nums mt-0.5">
+                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-slate-900 dark:text-amber-50 tabular-nums mt-0.5">
                       {myWins}/{myTotalHands}
                     </div>
                   </div>
                   <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
+                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
                       Accuracy
                     </div>
-                    <div className="text-base sm:text-lg font-mono-casino font-black text-amber-800 dark:text-amber-300 tabular-nums mt-0.5">
+                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-amber-800 dark:text-amber-300 tabular-nums mt-0.5">
                       {myAccuracy}%
                     </div>
                   </div>
@@ -1718,7 +1718,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     type="button"
                     onClick={handleDownloadPdf}
                     disabled={isGeneratingPdf}
-                    className="w-full min-h-[52px] px-5 py-3.5 rounded-2xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] font-serif font-black text-sm sm:text-base uppercase tracking-[0.14em] shadow-xl active:scale-98 transition-all cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2.5"
+                    className="w-full min-h-[52px] px-5 py-3.5 rounded-2xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] font-sans font-black text-sm sm:text-base uppercase tracking-[0.14em] shadow-xl active:scale-98 transition-all cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2.5"
                   >
                     {isGeneratingPdf ? (
                       <>
@@ -1733,7 +1733,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     )}
                   </button>
                   {pdfStatusToast && (
-                    <div className="text-center text-xs font-serif font-bold text-emerald-700 dark:text-emerald-300 py-1 animate-fade-in">
+                    <div className="text-center text-xs font-sans font-bold text-emerald-700 dark:text-emerald-300 py-1 animate-fade-in">
                       {pdfStatusToast}
                     </div>
                   )}
@@ -1742,7 +1742,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
               {/* Final Standings Leaderboard */}
               <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
-                <div className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
+                <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
                   🏆 Final Standings
                 </div>
                 <div className="divide-y divide-[#d4af37]/15">
@@ -1754,13 +1754,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="font-mono-casino text-xs opacity-70 w-6">
+                        <span className="font-sans tabular-nums text-xs opacity-70 w-6">
                           {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
                         </span>
                         <span className="text-xl">{p.avatar}</span>
-                        <span className="truncate font-serif uppercase">{p.name}</span>
+                        <span className="truncate font-sans uppercase">{p.name}</span>
                       </div>
-                      <span className="font-mono-casino font-bold tabular-nums">
+                      <span className="font-sans tabular-nums font-bold tabular-nums">
                         ${p.money.toLocaleString()}
                       </span>
                     </div>
@@ -1780,7 +1780,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               type="button"
               onClick={handleToggleLockIn}
               disabled={isPlayerLocked && !canStudentUnlock}
-              className={`w-full min-h-[52px] rounded-2xl font-serif font-black text-sm sm:text-base uppercase tracking-[0.18em] shadow-xl transition-all flex items-center justify-center gap-2 ${
+              className={`w-full min-h-[52px] rounded-2xl font-sans font-black text-sm sm:text-base uppercase tracking-[0.18em] shadow-xl transition-all flex items-center justify-center gap-2 ${
                 isPlayerLocked
                   ? !canStudentUnlock
                     ? 'bg-slate-800/95 text-amber-200 border-2 border-amber-500/50 cursor-not-allowed opacity-95'
@@ -1815,7 +1815,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <div className="glass-panel rounded-3xl max-w-md w-full p-6 border-2 border-[#d4af37] space-y-4">
             <div className="text-center space-y-1">
               <div className="text-4xl">{POWER_UPS[view.pendingTarget.powerUp]?.icon}</div>
-              <h3 className="text-xl font-serif font-black text-gold uppercase">
+              <h3 className="text-xl font-sans font-black text-gold uppercase">
                 Activate {POWER_UPS[view.pendingTarget.powerUp]?.name}
               </h3>
               <p className="text-xs text-slate-600 dark:text-amber-100/80">
@@ -1838,16 +1838,16 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         targetId: t.id,
                       })
                     }
-                    className={`w-full min-h-[52px] px-4 py-2.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                    className={`w-full min-h-[52px] px-4 py-2.5 rounded-xl border flex items-center justify-between transition-all ${
                       blocked
                         ? 'opacity-45 grayscale cursor-not-allowed felt-well border-slate-500/30'
-                        : 'felt-well border-[#d4af37]/60 hover:border-[#d4af37]'
+                        : 'felt-well border-[#d4af37]/60 hover:border-[#d4af37] cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
                       <span className="text-2xl">{t.avatar}</span>
                       <div className="text-left">
-                        <div className="text-sm font-serif font-bold text-slate-900 dark:text-white">
+                        <div className="text-sm font-sans font-bold text-slate-900 dark:text-white">
                           {t.name}
                         </div>
                         {blocked && (
@@ -1857,7 +1857,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
                       </div>
                     </div>
-                    <span className="font-mono-casino font-bold text-sm text-emerald-500 tabular-nums">
+                    <span className="font-sans tabular-nums font-bold text-sm text-emerald-500 tabular-nums">
                       ${t.money.toLocaleString()}
                     </span>
                   </button>
@@ -1874,7 +1874,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     powerUp: view.pendingTarget!.powerUp,
                   })
                 }
-                className="w-full min-h-[46px] rounded-xl felt-well border border-slate-400/40 text-xs font-serif font-bold uppercase tracking-wider"
+                className="w-full min-h-[46px] rounded-xl felt-well border border-slate-400/40 text-xs font-sans font-bold uppercase tracking-wider"
               >
                 Cancel &amp; Refund ($50)
               </button>

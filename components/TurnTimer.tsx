@@ -123,7 +123,7 @@ interface TurnTimerControlsProps {
   onUnlock: () => void;
 }
 
-const btnBase = 'px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-serif font-extrabold uppercase tracking-wider border transition-all cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed active:scale-95';
+const btnBase = 'px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-sans font-extrabold uppercase tracking-wider border transition-all cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed active:scale-95';
 
 /** Teacher-facing control strip for a player's betting turn. */
 export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
@@ -169,10 +169,10 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
       <div className="flex items-center gap-3 min-w-0">
         <span className="text-lg select-none" aria-hidden="true">{status === 'locked' ? '🔒' : '⏱️'}</span>
         <div className="flex flex-col leading-tight min-w-0">
-          <span className="text-[9px] font-serif uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">Turn Clock</span>
-          <span className={`text-[11px] font-serif font-bold truncate ${labelClass}`}>{label}</span>
+          <span className="text-[9px] font-sans uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">Turn Clock</span>
+          <span className={`text-[11px] font-sans font-bold truncate ${labelClass}`}>{label}</span>
         </div>
-        <span className={`font-mono-casino font-extrabold text-2xl tabular-nums tracking-tight ${clockClass}`} aria-live="off">
+        <span className={`font-sans tabular-nums font-extrabold text-2xl tabular-nums tracking-tight ${clockClass}`} aria-live="off">
           {formatClock(remainingMs)}
         </span>
       </div>
@@ -349,14 +349,14 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
           </div>
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] sm:text-xs font-serif font-extrabold uppercase tracking-[0.22em] text-amber-900 dark:text-[#d4af37]">
+              <span className="text-[10px] sm:text-xs font-sans font-extrabold uppercase tracking-[0.22em] text-amber-900 dark:text-[#d4af37]">
                 Shared Round Timer ({turnTimerSeconds}s)
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]">
                 🔒 {lockedCount}/{totalActivePlayers} Locked
               </span>
             </div>
-            <span className={`text-xs sm:text-sm font-serif font-bold truncate ${subtitleClass}`}>
+            <span className={`text-xs sm:text-sm font-sans font-bold truncate ${subtitleClass}`}>
               {subtitle}
             </span>
           </div>
@@ -365,11 +365,11 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
         {/* Center/Right: Giant Digital Clock Display + Teacher Controls */}
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 ml-auto">
           <div className="px-4 py-1.5 rounded-2xl felt-well border border-[#d4af37]/50 flex items-center gap-2">
-            <span className="text-[10px] font-serif uppercase tracking-widest text-amber-800/80 dark:text-amber-200/70 font-bold">
+            <span className="text-[10px] font-sans uppercase tracking-widest text-amber-800/80 dark:text-amber-200/70 font-bold">
               Time Left
             </span>
             <span
-              className={`font-mono-casino font-black text-3xl sm:text-4xl tabular-nums tracking-tight ${clockClass}`}
+              className={`font-sans tabular-nums font-black text-3xl sm:text-4xl tabular-nums tracking-tight ${clockClass}`}
               aria-live="off"
             >
               {formatClock(remainingMs)}
@@ -428,7 +428,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
             <button
               type="button"
               onClick={onToggleAutoStart}
-              className={`px-3 py-2 rounded-lg text-[10px] sm:text-[11px] font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-lg text-[10px] sm:text-[11px] font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
                 autoStartTimer
                   ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
                   : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
@@ -441,7 +441,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
               <button
                 type="button"
                 onClick={onOpenAiSettings}
-                className="px-3 py-1.5 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                className="px-3 py-1.5 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                 title="Click to view AI & Offline Settings"
               >
                 <span>{aiStatusLabel}</span>
@@ -493,7 +493,7 @@ export const StudentRoundTimerBar: React.FC<{
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-base">{lockedIn ? (isTimeUp ? '🔒' : '✅') : isTimeUp ? '🔒' : isWarning ? '🚨' : '⏱️'}</span>
-          <span className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+          <span className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
             {isTimeUp
               ? lockedIn
                 ? "Time's Up · Round Closed"
@@ -508,7 +508,7 @@ export const StudentRoundTimerBar: React.FC<{
           </span>
         </div>
         <span
-          className={`font-mono-casino font-black text-xl tabular-nums ${
+          className={`font-sans tabular-nums font-black text-xl tabular-nums ${
             isTimeUp
               ? 'text-rose-600 dark:text-rose-400'
               : isWarning && !lockedIn
