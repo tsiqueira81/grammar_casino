@@ -762,3 +762,80 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
 
   return views;
 }
+
+// ============================================================================
+// Shared table vs. private seat data (used by the Firestore room relay)
+// ============================================================================
+//
+// The room document is readable by anyone who knows the room code, so it may only hold
+// what every student's own phone already shows: the round, the sentence, names and money,
+// and the results once they are revealed. Everything else (bets, hints, power-ups,
+// notifications, Grammar Goggles clues) goes into each student's private seat record.
+//
+// A key is shared only when it is on this list AND it is identical in every player's view.
+// So if one student's copy of a shared key differs (for example the sentence for a Grammar
+// Goggles holder), that key is kept private for everyone that round.
+export const SHARED_VIEW_KEYS = [
+  'roomCode',
+  'roomLocked',
+  'step',
+  'round',
+  'gameMode',
+  'totalRounds',
+  'targetAmount',
+  'settings',
+  'isLoadingSentence',
+  'isProcessingResults',
+  'sentence',
+  'peers',
+  'allRoundResults',
+  'winner',
+  'roundHistory',
+  'roundTimer',
+  'turnDurationMs',
+] as const satisfies readonly (keyof PlayerViewPayload)[];
+
+export interface SplitPlayerViews {
+  table: Partial<PlayerViewPayload>;
+  privateByPlayer: Record<number, Partial<PlayerViewPayload>>;
+}
+
+export function splitPlayerViews(views: Record<number, PlayerViewPayload>): SplitPlayerViews {
+  const ids = Object.keys(views).map(Number);
+  const table: Record<string, any> = {};
+  const sharedKeys = new Set<string>();
+
+  if (ids.length > 0) {
+    for (const key of SHARED_VIEW_KEYS) {
+      const first = (views[ids[0]] as any)[key];
+      if (first === undefined) continue;
+      const firstJson = JSON.stringify(first);
+      const sameForAll = ids.every((id) => {
+        const value = (views[id] as any)[key];
+        return value !== undefined && JSON.stringify(value) === firstJson;
+      });
+      if (sameForAll) {
+        table[key] = first;
+        sharedKeys.add(key);
+      }
+    }
+  }
+
+  const privateByPlayer: Record<number, Partial<PlayerViewPayload>> = {};
+  for (const id of ids) {
+    const own: Record<string, any> = {};
+    for (const [key, value] of Object.entries(views[id])) {
+      if (!sharedKeys.has(key) && value !== undefined) own[key] = value;
+    }
+    privateByPlayer[id] = own as Partial<PlayerViewPayload>;
+  }
+
+  return { table: table as Partial<PlayerViewPayload>, privateByPlayer };
+}
+
+export function mergePlayerView(
+  table: Partial<PlayerViewPayload>,
+  own: Partial<PlayerViewPayload>
+): PlayerViewPayload {
+  return { ...table, ...own } as PlayerViewPayload;
+}

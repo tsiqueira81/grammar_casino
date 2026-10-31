@@ -48,6 +48,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [selectedAvatar, setSelectedAvatar] = useState(() => AVATARS[Math.floor(Math.random() * 28)]);
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinWaitingMessage, setJoinWaitingMessage] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
@@ -215,6 +216,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
     setIsJoining(true);
     setJoinError(null);
+    setJoinWaitingMessage(null);
 
     try {
       let tokenToUse = tokenOverride || '';
@@ -243,6 +245,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           setJoinError('You were removed from the room or the room was closed.');
         },
         onConnectionChange: setIsConnected,
+        onWaitingForTeacher: setJoinWaitingMessage,
       });
 
       controllerRef.current = ctrl;
@@ -259,6 +262,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       setJoinError(err.message || 'Could not connect to room.');
     } finally {
       setIsJoining(false);
+      setJoinWaitingMessage(null);
     }
   };
 
@@ -535,6 +539,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
           )}
 
+          {isJoining && joinWaitingMessage && (
+            <div role="status" className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-900 dark:text-amber-100 text-sm font-medium text-center">
+              {joinWaitingMessage}
+            </div>
+          )}
+
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-serif uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
@@ -601,7 +611,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               onClick={() => handleJoinRoom()}
               className="w-full min-h-[52px] rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-black text-base uppercase tracking-[0.18em] shadow-lg active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
             >
-              {isJoining ? 'CONNECTING...' : 'TAKE SEAT AT TABLE →'}
+              {isJoining ? (joinWaitingMessage ? 'WAITING FOR TEACHER...' : 'CONNECTING...') : 'TAKE SEAT AT TABLE →'}
             </button>
           </div>
         </div>

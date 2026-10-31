@@ -14,7 +14,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TEACHER = 'teacher.siqueira@gmail.com';
@@ -45,7 +45,8 @@ const sentence = () => ({
   topic: 'Tenses', level: 'C1', questionType: 'binary', text: 'She has lived here for years.',
   isCorrect: true, correction: 'She has lived here for years.', explanation: 'Present perfect with for.', createdAt: now(),
 });
-const room = (code, uid, extra = {}) => ({ code, locked: false, viewsJson: '{}', joinResponsesJson: '{}', kickedPlayerIds: [], updatedAt: now(), hostUid: uid, ...extra });
+const room = (code, uid, extra = {}) => ({ code, locked: false, rev: 1, tableJson: '{"round":1}', seatRevs: {}, kickedPlayerIds: [], updatedAt: now(), hostUid: uid, ...extra });
+const seat = (clientId, uid, extra = {}) => ({ clientId, uid, playerId: 101, viewJson: '{"myBet":{"bet":120}}', joinJson: '', kicked: false, rev: 1, updatedAt: now(), ...extra });
 const intent = (clientId, uid) => ({ clientId, uid, type: 'STUDENT_INTENT', payloadJson: '{"bet":100}', updatedAt: now() });
 
 let passed = 0;
@@ -109,7 +110,8 @@ await check('host can update the room', () => assertSucceeds(setDoc(doc(hostAnon
 await check('student cannot take over or update the room', () => assertFails(setDoc(doc(studentA, 'rooms/ABCD'), room('ABCD', 'student-a'))));
 await check('teacher (Google) can take over the room', () => assertSucceeds(setDoc(doc(teacher, 'rooms/ABCD'), room('ABCD', 'teacher-uid'))));
 await check('original anonymous host can no longer write after the teacher took over', () => assertFails(setDoc(doc(hostAnon, 'rooms/ABCD'), room('ABCD', 'host-anon'))));
-await check('anyone can read a room (views have no answers)', async () => {
+await check('room cannot carry extra fields such as everyone\'s views', () => assertFails(setDoc(doc(teacher, 'rooms/ABCD'), room('ABCD', 'teacher-uid', { viewsJson: '{}' }))));
+await check('anyone can read a room (the shared table only)', async () => {
   await assertSucceeds(getDoc(doc(nobody, 'rooms/ABCD')));
   await assertSucceeds(getDoc(doc(studentB, 'rooms/ABCD')));
 });
@@ -148,6 +150,47 @@ await check('student can read their own intent', () => assertSucceeds(getDoc(doc
 await check('old intent without uid can be claimed by the next write', async () => {
   await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'rooms/PLAY/intents/stu_old'), { clientId: 'stu_old', type: 'JOIN_REQUEST', payloadJson: '{}', updatedAt: now() }));
   await assertSucceeds(setDoc(doc(studentB, 'rooms/PLAY/intents/stu_old'), intent('stu_old', 'student-b')));
+});
+
+console.log('Private seat records');
+await assertSucceeds(setDoc(doc(hostAnon, 'rooms/SEAT'), room('SEAT', 'host-anon')));
+await check('host can write a seat record for a student', () => assertSucceeds(setDoc(doc(hostAnon, 'rooms/SEAT/seats/stu_a'), seat('stu_a', 'student-a'))));
+await check('host can create the room and its seats in one batch', async () => {
+  const batch = writeBatch(hostAnon);
+  batch.set(doc(hostAnon, 'rooms/NEW1'), room('NEW1', 'host-anon'));
+  batch.set(doc(hostAnon, 'rooms/NEW1/seats/stu_a'), seat('stu_a', 'student-a'));
+  await assertSucceeds(batch.commit());
+});
+await check('the student it is addressed to can read it', () => assertSucceeds(getDoc(doc(studentA, 'rooms/SEAT/seats/stu_a'))));
+await check('a student can wait on a seat record that does not exist yet', () => assertSucceeds(getDoc(doc(studentB, 'rooms/SEAT/seats/stu_b'))));
+await check('a student can listen to their own seat record', () => assertSucceeds(new Promise((resolve, reject) => {
+  const unsub = onSnapshot(doc(studentA, 'rooms/SEAT/seats/stu_a'), (snap) => { unsub(); resolve(snap); }, reject);
+})));
+await check('classmates cannot read it (no peeking at bets)', async () => {
+  await assertFails(getDoc(doc(studentB, 'rooms/SEAT/seats/stu_a')));
+  await assertFails(getDoc(doc(nobody, 'rooms/SEAT/seats/stu_a')));
+  await assertFails(getDoc(doc(otherGoogle, 'rooms/SEAT/seats/stu_a')));
+});
+await check('nobody can list the seat records', async () => {
+  await assertFails(getDocs(collection(studentA, 'rooms/SEAT/seats')));
+  await assertFails(getDocs(collection(nobody, 'rooms/SEAT/seats')));
+});
+await check('host and teacher can read a seat record', async () => {
+  await assertSucceeds(getDoc(doc(hostAnon, 'rooms/SEAT/seats/stu_a')));
+  await assertSucceeds(getDoc(doc(teacher, 'rooms/SEAT/seats/stu_a')));
+});
+await check('students cannot write seat records, even their own', async () => {
+  await assertFails(setDoc(doc(studentA, 'rooms/SEAT/seats/stu_a'), seat('stu_a', 'student-a', { viewJson: '{"me":{"money":99999}}' })));
+  await assertFails(setDoc(doc(studentB, 'rooms/SEAT/seats/stu_b'), seat('stu_b', 'student-b')));
+});
+await check('seat records must not carry extra fields', () => assertFails(setDoc(doc(hostAnon, 'rooms/SEAT/seats/stu_x'), seat('stu_x', 'student-a', { extra: 1 }))));
+await check('host cannot write seats in a room it does not run', () => assertFails(setDoc(doc(hostAnon, 'rooms/LIVE/seats/stu_a'), seat('stu_a', 'student-a'))));
+await check('students cannot delete seat records', () => assertFails(deleteDoc(doc(studentA, 'rooms/SEAT/seats/stu_a'))));
+await check('host can delete seat records and then the room in one go', async () => {
+  const batch = writeBatch(hostAnon);
+  batch.delete(doc(hostAnon, 'rooms/NEW1/seats/stu_a'));
+  batch.delete(doc(hostAnon, 'rooms/NEW1'));
+  await assertSucceeds(batch.commit());
 });
 
 console.log('Everything else');

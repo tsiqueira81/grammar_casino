@@ -35,7 +35,7 @@ import {
   buildAudiencePollSummary,
   isPlayerUnderdog,
 } from './utils/multiplayerProtocol';
-import { HostRoomController, HostEventPayload } from './services/multiplayerService';
+import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { settleRound, buildAcceptedAnswerSet } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
@@ -435,6 +435,11 @@ export function App() {
   const [mpRoomLocked, setMpRoomLocked] = useState<boolean>(false);
   const [mpHostConnected, setMpHostConnected] = useState<boolean>(false);
   const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
+  // Phones asking to play as a name that is already seated on another device (teacher decides).
+  const [mpTakeoverRequests, setMpTakeoverRequests] = useState<SeatTakeoverRequest[]>([]);
+  useEffect(() => {
+    setMpTakeoverRequests([]);
+  }, [mpRoomCode]);
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
   const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
   // Single-screen table layout: null = automatic (compact grid from 4 players up).
@@ -3071,6 +3076,13 @@ export function App() {
             lastSeen: Date.now(),
           },
         }));
+      } else if (event.type === 'SEAT_TAKEOVER_REQUEST' && event.takeover) {
+        const request = event.takeover;
+        playSound('hint');
+        setMpTakeoverRequests(prev => [...prev.filter(r => r.clientId !== request.clientId), request]);
+      } else if (event.type === 'SEAT_TAKEOVER_CLOSED' && event.takeover) {
+        const closedClientId = event.takeover.clientId;
+        setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== closedClientId));
       } else if (event.type === 'STUDENT_DISCONNECTED' && event.playerId !== undefined) {
         const playerId = event.playerId;
         setMpSeats(prev => {
@@ -7261,6 +7273,56 @@ export function App() {
           playSound={playSound}
         />
       )}
+      {mpRoomCode && mpTakeoverRequests.length > 0 && (() => {
+        const request = mpTakeoverRequests[0];
+        return (
+          <div
+            role="alertdialog"
+            aria-live="assertive"
+            aria-label={`New phone wants to play as ${request.name}`}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] rounded-2xl border-2 border-[#d4af37] bg-amber-50 dark:bg-[#051c10] text-amber-950 dark:text-amber-50 shadow-[0_10px_40px_rgba(0,0,0,0.55)] p-4"
+          >
+            <div className="flex items-start gap-3">
+              <span className="text-3xl leading-none" aria-hidden="true">{request.avatar || '📱'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="font-serif font-extrabold text-base">
+                  A new phone wants to play as {request.name}.
+                </p>
+                <p className="text-sm mt-1 text-amber-900 dark:text-amber-100">
+                  {request.name}'s seat is already on another phone. Only say yes if {request.name} really changed phones: the new phone sees and controls their bet, and the old one is signed out.
+                </p>
+                {mpTakeoverRequests.length > 1 && (
+                  <p className="text-sm mt-1 font-semibold">+{mpTakeoverRequests.length - 1} more waiting</p>
+                )}
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      mpControllerRef.current?.answerSeatTakeover(request.clientId, true);
+                      setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== request.clientId));
+                    }}
+                    className="px-4 py-2 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm"
+                  >
+                    Yes, it's {request.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      mpControllerRef.current?.answerSeatTakeover(request.clientId, false);
+                      setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== request.clientId));
+                    }}
+                    className="px-4 py-2 rounded-full bg-rose-700 hover:bg-rose-600 text-white font-bold text-sm"
+                  >
+                    No, keep the seat
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {showMpLobbyModal && (
         <MultiplayerLobbyModal
           isOpen={showMpLobbyModal}

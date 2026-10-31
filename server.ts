@@ -1938,6 +1938,10 @@ function pushEventToHost(room: RelayRoom, event: RelayHostEvent) {
   }
 }
 
+function relayIntentId(intentId: unknown): string {
+  return typeof intentId === "string" && /^[A-Za-z0-9_-]{4,80}$/.test(intentId) ? intentId : crypto.randomUUID();
+}
+
 function sendViewToStudent(room: RelayRoom, playerId: number, view: any) {
   room.playerViews.set(playerId, view);
   const seat = room.seats.get(playerId);
@@ -2157,7 +2161,7 @@ app.post("/api/mp/room/:code/intent", (req, res) => {
   const room = rooms.get(code);
   if (!room) return res.status(404).json({ error: "Room not found." });
 
-  const { playerId, reconnectToken, intent } = req.body || {};
+  const { playerId, reconnectToken, intent, intentId } = req.body || {};
   const seat = room.seats.get(Number(playerId));
   if (!seat || seat.reconnectToken !== reconnectToken) {
     return res.status(403).json({ error: "Invalid player session." });
@@ -2170,7 +2174,8 @@ app.post("/api/mp/room/:code/intent", (req, res) => {
   }
 
   pushEventToHost(room, {
-    id: crypto.randomUUID(),
+    // The phone's own intent id lets the host skip the copy that also arrives through Firestore.
+    id: relayIntentId(intentId),
     type: "STUDENT_INTENT",
     playerId: seat.playerId,
     seat: serializeSeat(seat),
@@ -2325,7 +2330,7 @@ async function startServer() {
             seat.lockedIn = msg.intent.locked;
           }
           pushEventToHost(room, {
-            id: crypto.randomUUID(),
+            id: relayIntentId(msg.intentId),
             type: "STUDENT_INTENT",
             playerId: seat.playerId,
             seat: serializeSeat(seat),

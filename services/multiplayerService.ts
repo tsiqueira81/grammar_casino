@@ -1,23 +1,62 @@
-import { MultiplayerSeat, PlayerViewPayload, StudentIntent } from '../utils/multiplayerProtocol';
+import {
+  MultiplayerSeat,
+  PlayerViewPayload,
+  StudentIntent,
+  splitPlayerViews,
+} from '../utils/multiplayerProtocol';
 import { getSavedTeacherPin, isDesktopApp, isTeacherPinUnlocked } from './geminiService';
 import {
-  upsertFirestoreRoomState,
+  writeFirestoreRoom,
   deleteFirestoreRoom,
   listenToFirestoreRoomIntents,
   sendFirestoreStudentIntent,
-  listenToFirestoreRoom,
+  listenToFirestoreSeat,
+  ensureFirebaseUser,
   subscribeToAuthChanges,
   FirestoreJoinResponseItem,
+  FirestoreSeatListener,
+  FirestoreSeatUpdate,
+  FirestoreSeatWrite,
 } from './firebaseService';
+
+// How phones and the teacher's screen talk:
+// - Local server (npm run dev, AI Studio): WebSocket /ws plus HTTP /api/mp/*. The server sends
+//   each phone only its own view, after checking the phone's reconnect token.
+// - Anywhere else (Netlify): Firestore. The room document holds only the shared table; each
+//   phone's own bet, hints and power-ups go to a private seat record only that phone can read
+//   (see services/firebaseService.ts and firestore.rules).
+// Earlier versions also relayed rooms over free public MQTT brokers. Anyone who knew the room
+// code could listen in there and see every bet, so that relay has been removed.
+
+/** A phone asked to play as a name that is already seated, from a different device. */
+export interface SeatTakeoverRequest {
+  clientId: string;
+  playerId: number;
+  name: string;
+  avatar: string;
+}
 
 export interface HostEventPayload {
   id: string;
-  type: 'STUDENT_JOINED' | 'STUDENT_RECONNECTED' | 'STUDENT_DISCONNECTED' | 'STUDENT_INTENT';
+  type:
+    | 'STUDENT_JOINED'
+    | 'STUDENT_RECONNECTED'
+    | 'STUDENT_DISCONNECTED'
+    | 'STUDENT_INTENT'
+    | 'SEAT_TAKEOVER_REQUEST'
+    | 'SEAT_TAKEOVER_CLOSED';
   seat?: MultiplayerSeat;
   playerId?: number;
   intent?: StudentIntent;
+  takeover?: SeatTakeoverRequest;
   timestamp: number;
 }
+
+/** How many of a phone's latest intents ride along in its intent document. */
+const MAX_RECENT_INTENTS = 20;
+
+/** How long the teacher has to answer "Let this phone take Ana's seat?" before it is refused. */
+export const SEAT_TAKEOVER_TIMEOUT_MS = 2 * 60 * 1000;
 
 const ROOM_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -29,8 +68,15 @@ function generateRoomCode(): string {
   return code;
 }
 
+// Reconnect tokens double as the phone's private seat id, so make them unguessable.
 function generateToken(prefix = 'tok'): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  try {
+    const bytes = new Uint8Array(12);
+    globalThis.crypto.getRandomValues(bytes);
+    return `${prefix}_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  } catch {
+    return `${prefix}_${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
+  }
 }
 
 function getLocalWsUrl(): string | null {
@@ -61,400 +107,33 @@ async function safeFetchJson<T = any>(
   }
 }
 
-// ============================================================================
-// Lightweight Zero-Dependency MQTT 3.1.1 over WSS + BroadcastChannel Relay
-// Enables real-time multiplayer on static hosts (Netlify, GitHub Pages, Electron)
-// and cross-domain between Host and Student devices over port 443 WSS.
-// ============================================================================
-const PUBLIC_WSS_BROKERS = [
-  'wss://broker.emqx.io:8084/mqtt',
-  'wss://broker.hivemq.com:8884/mqtt',
-  'wss://test.mosquitto.org:8081/mqtt',
-];
-
-const TOPIC_PREFIX = 'grammar-casino/v1/room';
-
-function encodeMqttString(str: string): Uint8Array {
-  const bytes = new TextEncoder().encode(str);
-  const out = new Uint8Array(2 + bytes.length);
-  out[0] = (bytes.length >> 8) & 0xff;
-  out[1] = bytes.length & 0xff;
-  out.set(bytes, 2);
-  return out;
-}
-
-function encodeRemainingLength(len: number): number[] {
-  const out: number[] = [];
-  do {
-    let digit = len % 128;
-    len = Math.floor(len / 128);
-    if (len > 0) digit |= 0x80;
-    out.push(digit);
-  } while (len > 0);
-  return out;
-}
-
-function buildMqttConnectPacket(clientId: string): Uint8Array {
-  const varHeader = new Uint8Array([
-    0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, // "MQTT"
-    0x04, // Protocol Level 4 (v3.1.1)
-    0x02, // Clean Session
-    0x00, 0x3c, // Keep Alive = 60s
-  ]);
-  const payload = encodeMqttString(clientId);
-  const remLen = encodeRemainingLength(varHeader.length + payload.length);
-  const packet = new Uint8Array(1 + remLen.length + varHeader.length + payload.length);
-  packet[0] = 0x10;
-  packet.set(remLen, 1);
-  packet.set(varHeader, 1 + remLen.length);
-  packet.set(payload, 1 + remLen.length + varHeader.length);
-  return packet;
-}
-
-function buildMqttSubscribePacket(topic: string, packetId: number): Uint8Array {
-  const varHeader = new Uint8Array([(packetId >> 8) & 0xff, packetId & 0xff]);
-  const topicBytes = encodeMqttString(topic);
-  const payload = new Uint8Array(topicBytes.length + 1);
-  payload.set(topicBytes, 0);
-  payload[topicBytes.length] = 0x00; // QoS 0
-  const remLen = encodeRemainingLength(varHeader.length + payload.length);
-  const packet = new Uint8Array(1 + remLen.length + varHeader.length + payload.length);
-  packet[0] = 0x82;
-  packet.set(remLen, 1);
-  packet.set(varHeader, 1 + remLen.length);
-  packet.set(payload, 1 + remLen.length + varHeader.length);
-  return packet;
-}
-
-function buildMqttPublishPacket(topic: string, message: string): Uint8Array {
-  const topicBytes = encodeMqttString(topic);
-  const msgBytes = new TextEncoder().encode(message);
-  const remLen = encodeRemainingLength(topicBytes.length + msgBytes.length);
-  const packet = new Uint8Array(1 + remLen.length + topicBytes.length + msgBytes.length);
-  packet[0] = 0x30; // PUBLISH, QoS 0
-  packet.set(remLen, 1);
-  packet.set(topicBytes, 1 + remLen.length);
-  packet.set(msgBytes, 1 + remLen.length + topicBytes.length);
-  return packet;
-}
-
-const MQTT_PINGREQ = new Uint8Array([0xc0, 0x00]);
-
-class SingleMqttBrokerConnection {
-  private url: string;
-  private clientId: string;
-  private ws: WebSocket | null = null;
-  private isConnected = false;
-  private destroyed = false;
-  private rxBuffer = new Uint8Array(0);
-  private subscriptions = new Set<string>();
-  private outboundQueue: { topic: string; payload: string }[] = [];
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private nextPacketId = 1;
-  private onMessage: (topic: string, payload: string) => void;
-  private onStatusChange: (connected: boolean) => void;
-
-  constructor(
-    url: string,
-    clientId: string,
-    onMessage: (topic: string, payload: string) => void,
-    onStatusChange: (connected: boolean) => void
-  ) {
-    this.url = url;
-    this.clientId = clientId;
-    this.onMessage = onMessage;
-    this.onStatusChange = onStatusChange;
-    this.connect();
-  }
-
-  private connect() {
-    if (this.destroyed || typeof WebSocket === 'undefined') return;
-    try {
-      const ws = new WebSocket(this.url, 'mqtt');
-      ws.binaryType = 'arraybuffer';
-      this.ws = ws;
-
-      ws.onopen = () => {
-        if (this.destroyed) {
-          ws.close();
-          return;
-        }
-        try {
-          ws.send(buildMqttConnectPacket(this.clientId));
-        } catch {}
-      };
-
-      ws.onmessage = (ev) => {
-        if (this.destroyed || !(ev.data instanceof ArrayBuffer)) return;
-        const incoming = new Uint8Array(ev.data);
-        const merged = new Uint8Array(this.rxBuffer.length + incoming.length);
-        merged.set(this.rxBuffer, 0);
-        merged.set(incoming, this.rxBuffer.length);
-        this.rxBuffer = merged;
-        this.parseFrames();
-      };
-
-      ws.onclose = () => {
-        this.cleanupTimers();
-        if (this.isConnected) {
-          this.isConnected = false;
-          this.onStatusChange(false);
-        }
-        if (!this.destroyed) {
-          this.reconnectTimer = setTimeout(() => this.connect(), 2500);
-        }
-      };
-
-      ws.onerror = () => {
-        // Handled by onclose
-      };
-    } catch {
-      if (!this.destroyed) {
-        this.reconnectTimer = setTimeout(() => this.connect(), 3000);
-      }
-    }
-  }
-
-  private parseFrames() {
-    while (this.rxBuffer.length >= 2) {
-      let multiplier = 1;
-      let remLen = 0;
-      let idx = 1;
-      let encodedByte = 0;
-
-      do {
-        if (idx >= this.rxBuffer.length) return; // Wait for more bytes
-        encodedByte = this.rxBuffer[idx++];
-        remLen += (encodedByte & 127) * multiplier;
-        multiplier *= 128;
-        if (multiplier > 128 * 128 * 128) {
-          // Malformed frame, reset buffer
-          this.rxBuffer = new Uint8Array(0);
-          return;
-        }
-      } while ((encodedByte & 128) !== 0);
-
-      const totalPacketLen = idx + remLen;
-      if (this.rxBuffer.length < totalPacketLen) return; // Wait for complete packet
-
-      const packet = this.rxBuffer.slice(0, totalPacketLen);
-      this.rxBuffer = this.rxBuffer.slice(totalPacketLen);
-
-      const packetType = packet[0] & 0xf0;
-      if (packetType === 0x20) {
-        // CONNACK
-        this.isConnected = true;
-        this.onStatusChange(true);
-        this.subscriptions.forEach((topic) => {
-          this.sendSubscribeFrame(topic);
-        });
-        while (this.outboundQueue.length > 0) {
-          const item = this.outboundQueue.shift()!;
-          this.sendPublishFrame(item.topic, item.payload);
-        }
-        if (this.pingTimer) clearInterval(this.pingTimer);
-        this.pingTimer = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN && this.isConnected) {
-            try {
-              this.ws.send(MQTT_PINGREQ);
-            } catch {}
-          }
-        }, 25000);
-      } else if (packetType === 0x30) {
-        // PUBLISH
-        const qos = (packet[0] >> 1) & 0x03;
-        let pos = idx;
-        if (pos + 2 > packet.length) continue;
-        const topicLen = (packet[pos] << 8) | packet[pos + 1];
-        pos += 2;
-        if (pos + topicLen > packet.length) continue;
-        const topic = new TextDecoder().decode(packet.subarray(pos, pos + topicLen));
-        pos += topicLen;
-        if (qos > 0) {
-          pos += 2; // Skip packet ID
-        }
-        if (pos <= packet.length) {
-          const payloadStr = new TextDecoder().decode(packet.subarray(pos));
-          this.onMessage(topic, payloadStr);
-        }
-      }
-    }
-  }
-
-  private sendSubscribeFrame(topic: string) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isConnected) return;
-    try {
-      const pid = (this.nextPacketId++ % 65000) + 1;
-      this.ws.send(buildMqttSubscribePacket(topic, pid));
-    } catch {}
-  }
-
-  private sendPublishFrame(topic: string, payload: string) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isConnected) return;
-    try {
-      this.ws.send(buildMqttPublishPacket(topic, payload));
-    } catch {}
-  }
-
-  public subscribe(topic: string) {
-    this.subscriptions.add(topic);
-    if (this.isConnected) {
-      this.sendSubscribeFrame(topic);
-    }
-  }
-
-  public publish(topic: string, payload: string) {
-    if (this.isConnected) {
-      this.sendPublishFrame(topic, payload);
-    } else {
-      if (this.outboundQueue.length > 50) this.outboundQueue.shift();
-      this.outboundQueue.push({ topic, payload });
-    }
-  }
-
-  public get connected(): boolean {
-    return this.isConnected;
-  }
-
-  private cleanupTimers() {
-    if (this.pingTimer) {
-      clearInterval(this.pingTimer);
-      this.pingTimer = null;
-    }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-  }
-
-  public destroy() {
-    this.destroyed = true;
-    this.cleanupTimers();
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {}
-      this.ws = null;
-    }
-  }
-}
-
-/**
- * Multi-broker Cloud Relay + BroadcastChannel bridge.
- * Connects to multiple public WSS brokers in parallel and deduplicates messages by `msgId`.
- */
-class CloudRoomRelay {
-  private brokers: SingleMqttBrokerConnection[] = [];
-  private bc: BroadcastChannel | null = null;
-  private seenMsgIds = new Set<string>();
-  private subscribedTopics = new Set<string>();
-  private onMessageCallback: (topic: string, data: any) => void;
-  private onConnectionChange?: (connected: boolean) => void;
-
-  constructor(
-    onMessage: (topic: string, data: any) => void,
-    onConnectionChange?: (connected: boolean) => void
-  ) {
-    this.onMessageCallback = onMessage;
-    this.onConnectionChange = onConnectionChange;
-
-    if (typeof BroadcastChannel !== 'undefined') {
-      try {
-        this.bc = new BroadcastChannel('grammar_casino_mp_relay_v1');
-        this.bc.onmessage = (ev) => {
-          if (ev.data && typeof ev.data.topic === 'string' && typeof ev.data.raw === 'string') {
-            if (this.subscribedTopics.has(ev.data.topic)) {
-              this.handleRawMessage(ev.data.topic, ev.data.raw);
-            }
-          }
-        };
-      } catch {}
-    }
-
-    const baseClientId = `gc_${Math.random().toString(36).slice(2, 10)}`;
-    this.brokers = PUBLIC_WSS_BROKERS.map(
-      (url, idx) =>
-        new SingleMqttBrokerConnection(
-          url,
-          `${baseClientId}_${idx}`,
-          (topic, raw) => this.handleRawMessage(topic, raw),
-          () => this.emitConnectionStatus()
-        )
-    );
-  }
-
-  private emitConnectionStatus() {
-    const anyConnected = this.brokers.some((b) => b.connected);
-    this.onConnectionChange?.(anyConnected);
-  }
-
-  private handleRawMessage(topic: string, raw: string) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed._msgId) {
-        if (this.seenMsgIds.has(parsed._msgId)) return;
-        this.seenMsgIds.add(parsed._msgId);
-        if (this.seenMsgIds.size > 2000) {
-          const first = this.seenMsgIds.values().next().value;
-          if (first) this.seenMsgIds.delete(first);
-        }
-      }
-      this.onMessageCallback(topic, parsed);
-    } catch {}
-  }
-
-  public subscribe(topic: string) {
-    this.subscribedTopics.add(topic);
-    this.brokers.forEach((b) => b.subscribe(topic));
-  }
-
-  public publish(topic: string, payload: Record<string, any>) {
-    const msgWithId = {
-      ...payload,
-      _msgId: payload._msgId || generateToken('m'),
-    };
-    const raw = JSON.stringify(msgWithId);
-    if (this.bc) {
-      try {
-        this.bc.postMessage({ topic, raw });
-      } catch {}
-    }
-    this.brokers.forEach((b) => b.publish(topic, raw));
-  }
-
-  public get isConnected(): boolean {
-    return this.brokers.some((b) => b.connected);
-  }
-
-  public destroy() {
-    this.brokers.forEach((b) => b.destroy());
-    this.brokers = [];
-    if (this.bc) {
-      try {
-        this.bc.close();
-      } catch {}
-      this.bc = null;
-    }
-  }
+function publicSeat(seat: MultiplayerSeat): NonNullable<FirestoreJoinResponseItem['seat']> {
+  return {
+    seatId: seat.seatId,
+    playerId: seat.playerId,
+    name: seat.name,
+    avatar: seat.avatar,
+    connected: seat.connected,
+    lockedIn: seat.lockedIn,
+    lastSeen: seat.lastSeen,
+  };
 }
 
 // ============================================================================
-// Teacher Host Room Controller (Firestore Relay + Cloud WSS + Local Server)
+// Teacher Host Room Controller (Firestore + Local Server)
 // ============================================================================
 export class HostRoomController {
   public code: string;
   public hostToken: string;
   private localServerAvailable: boolean;
   private ws: WebSocket | null = null;
-  private cloudRelay: CloudRoomRelay;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private firestoreFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private firestoreRetryMs = 0;
   private firestoreUnsubscribe: (() => void) | null = null;
   private authUnsubscribe: (() => void) | null = null;
   private firestoreConnected = false;
-  private firestoreJoinResponses: Record<string, FirestoreJoinResponseItem> = {};
   private kickedPlayerIds: number[] = [];
   private destroyed = false;
   private seenEventIds = new Set<string>();
@@ -463,7 +142,28 @@ export class HostRoomController {
   private onConnectionChange?: (connected: boolean) => void;
   private localWsConnected = false;
 
-  // Authoritative Host Seat Registry (supports Firestore + Cloud/Netlify + Local Server seamlessly)
+  // Firestore relay bookkeeping
+  /** Each phone's Firebase id, taken from its intent documents (the rules make it trustworthy). */
+  private clientUids = new Map<string, string>();
+  /** The answer to each phone's latest join request, by client id. */
+  private joinResponses: Record<string, FirestoreJoinResponseItem> = {};
+  /** Phones that lost their seat (kicked, or the seat moved to another phone). */
+  private kickedClientIds = new Set<string>();
+  private intentClientIds = new Set<string>();
+  /** Newest intent sequence number handled per phone, so re-read intents are not applied twice. */
+  private lastIntentSeq = new Map<string, number>();
+  private writtenSeatJson = new Map<string, string>();
+  private writtenSeatIds = new Set<string>();
+  private lastRoomJson = '';
+  private forceRoomWrite = true;
+  private rev = 0;
+  private seatRevs: Record<number, number> = {};
+  private pendingTakeovers = new Map<
+    string,
+    { playerId: number; name: string; avatar: string; requestId: string; timer: ReturnType<typeof setTimeout> }
+  >();
+
+  // Authoritative Host Seat Registry (Firestore + Local Server)
   private roomLocked = false;
   private nextPlayerId = 101;
   private seatsByPlayerId = new Map<number, MultiplayerSeat>();
@@ -481,18 +181,15 @@ export class HostRoomController {
     this.onEventCallback = onEvent;
     this.onConnectionChange = onConnectionChange;
 
-    this.cloudRelay = new CloudRoomRelay(
-      (topic, msg) => this.handleCloudMessage(topic, msg),
-      () => this.updateOverallConnectionStatus()
-    );
-    this.cloudRelay.subscribe(`${TOPIC_PREFIX}/${this.code}/to-host`);
-
     // Initialize Firestore room state. Student intents are read once the room doc exists,
     // because the Firestore rules only let the room's recorded host read them.
     this.scheduleFirestoreFlush(0);
     // If the teacher signs in or out of Google mid-class, this device's Firebase id changes:
     // rewrite the room under the new id so the intent listener can start again.
-    this.authUnsubscribe = subscribeToAuthChanges(() => this.scheduleFirestoreFlush(200));
+    this.authUnsubscribe = subscribeToAuthChanges(() => {
+      this.forceRoomWrite = true;
+      this.scheduleFirestoreFlush(200);
+    });
 
     if (this.localServerAvailable) {
       this.connectLocalWs();
@@ -507,32 +204,117 @@ export class HostRoomController {
     }
     this.firestoreFlushTimer = setTimeout(() => {
       this.firestoreFlushTimer = null;
-      if (this.destroyed) return;
-      void upsertFirestoreRoomState({
-        code: this.code,
-        locked: this.roomLocked,
-        views: this.latestViews,
-        joinResponses: this.firestoreJoinResponses,
-        kickedPlayerIds: this.kickedPlayerIds,
-      }).then((ok) => {
-        if (ok) this.ensureFirestoreIntentListener();
-        if (ok && !this.firestoreConnected) {
-          this.firestoreConnected = true;
-          this.updateOverallConnectionStatus();
-        }
-      });
+      void this.flushFirestore();
     }, delayMs);
+  }
+
+  /**
+   * Writes the shared table and every seat record that changed, in one batch.
+   * Seat records are addressed to the phone's Firebase id, so a phone we have not heard
+   * from over Firestore yet (no id) gets nothing there; the local server still serves it.
+   */
+  private async flushFirestore() {
+    if (this.destroyed) return;
+    const { table, privateByPlayer } = splitPlayerViews(this.latestViews);
+    const rev = this.rev + 1;
+    const seatRevs: Record<number, number> = {};
+    const seatWrites: FirestoreSeatWrite[] = [];
+    const seatJsonUpdates = new Map<string, string>();
+    const handled = new Set<string>();
+
+    const queue = (write: Omit<FirestoreSeatWrite, 'uid'>) => {
+      handled.add(write.clientId);
+      const uid = this.clientUids.get(write.clientId);
+      if (!uid) return;
+      const full: FirestoreSeatWrite = { ...write, uid };
+      const json = JSON.stringify(full);
+      if (this.writtenSeatJson.get(write.clientId) === json) return;
+      seatWrites.push(full);
+      seatJsonUpdates.set(write.clientId, json);
+    };
+
+    for (const seat of this.seatsByPlayerId.values()) {
+      const clientId = seat.reconnectToken;
+      if (!clientId) continue;
+      const before = seatWrites.length;
+      queue({
+        clientId,
+        playerId: seat.playerId,
+        view: privateByPlayer[seat.playerId] || null,
+        join: this.joinResponses[clientId] || null,
+        kicked: false,
+      });
+      if (seatWrites.length > before) {
+        seatRevs[seat.playerId] = rev;
+      } else if (this.seatRevs[seat.playerId] !== undefined) {
+        seatRevs[seat.playerId] = this.seatRevs[seat.playerId];
+      }
+    }
+    for (const clientId of this.kickedClientIds) {
+      if (handled.has(clientId)) continue;
+      queue({ clientId, playerId: null, view: null, join: null, kicked: true });
+    }
+    for (const [clientId, join] of Object.entries(this.joinResponses)) {
+      if (handled.has(clientId)) continue;
+      queue({ clientId, playerId: null, view: null, join, kicked: false });
+    }
+
+    const roomJson = JSON.stringify({
+      locked: this.roomLocked,
+      table,
+      seatRevs,
+      kicked: this.kickedPlayerIds,
+    });
+    if (!this.forceRoomWrite && seatWrites.length === 0 && roomJson === this.lastRoomJson) return;
+
+    // Record what we are about to write before awaiting, so an overlapping flush only sends
+    // newer changes. If the write fails, forget it all and rewrite everything on the retry.
+    this.rev = rev;
+    this.seatRevs = seatRevs;
+    this.lastRoomJson = roomJson;
+    this.forceRoomWrite = false;
+    seatJsonUpdates.forEach((json, clientId) => {
+      this.writtenSeatJson.set(clientId, json);
+      this.writtenSeatIds.add(clientId);
+    });
+
+    const ok = await writeFirestoreRoom({
+      code: this.code,
+      locked: this.roomLocked,
+      rev,
+      table,
+      seatRevs,
+      kickedPlayerIds: this.kickedPlayerIds,
+      seats: seatWrites,
+    });
+    if (this.destroyed) return;
+
+    if (ok) {
+      this.firestoreRetryMs = 0;
+      this.ensureFirestoreIntentListener();
+      if (!this.firestoreConnected) {
+        this.firestoreConnected = true;
+        this.updateOverallConnectionStatus();
+      }
+      return;
+    }
+
+    this.writtenSeatJson.clear();
+    this.lastRoomJson = '';
+    this.forceRoomWrite = true;
+    if (this.firestoreConnected) {
+      this.firestoreConnected = false;
+      this.updateOverallConnectionStatus();
+    }
+    this.firestoreRetryMs = Math.min(60_000, Math.max(5_000, this.firestoreRetryMs * 2));
+    this.scheduleFirestoreFlush(this.firestoreRetryMs);
   }
 
   private ensureFirestoreIntentListener() {
     if (this.destroyed || this.firestoreUnsubscribe) return;
     this.firestoreUnsubscribe = listenToFirestoreRoomIntents(
       this.code,
-      (clientId, msg) => {
-        if (msg && typeof msg === 'object') {
-          this.handleCloudMessage('firestore', { ...msg, clientId });
-        }
-      },
+      (clientId, msg, uid) => this.handleFirestoreIntent(clientId, msg, uid),
       (connected) => {
         this.firestoreConnected = connected;
         if (!connected && this.firestoreUnsubscribe) {
@@ -546,7 +328,7 @@ export class HostRoomController {
   }
 
   private updateOverallConnectionStatus() {
-    const isOnline = this.localWsConnected || this.firestoreConnected || this.cloudRelay.isConnected;
+    const isOnline = this.localWsConnected || this.firestoreConnected;
     this.onConnectionChange?.(isOnline);
   }
 
@@ -559,7 +341,7 @@ export class HostRoomController {
       throw new Error('Teacher PIN or Google Sign-In required to host a Live Classroom Room.');
     }
 
-    // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore + Cloud Relay
+    // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore
     if (savedPin && savedPin !== 'google_verified') {
       const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
         method: 'POST',
@@ -597,188 +379,211 @@ export class HostRoomController {
     );
   }
 
-  private handleCloudMessage(_topic: string, msg: any) {
-    if (this.destroyed || !msg || typeof msg.type !== 'string') return;
+  private handleFirestoreIntent(clientId: string, msg: any, uid: string | null) {
+    if (this.destroyed || !clientId || !msg || typeof msg.type !== 'string') return;
+    this.intentClientIds.add(clientId);
+    if (uid) this.clientUids.set(clientId, uid);
 
     if (msg.type === 'CLOUD_JOIN_REQUEST') {
-      const clientId = String(msg.clientId || '');
-      const cleanName = String(msg.name || '').trim().slice(0, 20);
-      const avatar = String(msg.avatar || '🦊');
-      const reconnectToken = String(msg.reconnectToken || clientId || '').trim();
-      const requestId = String(msg.requestId || Date.now());
-      const replyTopic = `${TOPIC_PREFIX}/${this.code}/to-client/${clientId}`;
-
-      if (!clientId || !cleanName) return;
-
-      // 1. Check reconnect by token or by existing seat name
-      let existingSeat: MultiplayerSeat | undefined;
-      if (reconnectToken) {
-        for (const s of this.seatsByPlayerId.values()) {
-          if (s.reconnectToken === reconnectToken) {
-            existingSeat = s;
-            break;
-          }
-        }
-      }
-      if (!existingSeat) {
-        for (const s of this.seatsByPlayerId.values()) {
-          if (s.name.toLowerCase() === cleanName.toLowerCase()) {
-            existingSeat = s;
-            break;
-          }
-        }
-      }
-
-      if (existingSeat) {
-        existingSeat.connected = true;
-        existingSeat.lastSeen = Date.now();
-        if (cleanName) existingSeat.name = cleanName;
-        if (avatar) existingSeat.avatar = avatar;
-        if (reconnectToken) existingSeat.reconnectToken = reconnectToken;
-        this.kickedPlayerIds = this.kickedPlayerIds.filter((id) => id !== existingSeat!.playerId);
-
-        this.handleIncomingEvent({
-          id: `cloud_reconn_${existingSeat.playerId}_${requestId}`,
-          type: 'STUDENT_RECONNECTED',
-          seat: { ...existingSeat },
-          playerId: existingSeat.playerId,
-          timestamp: Date.now(),
-        });
-
-        this.firestoreJoinResponses[clientId] = {
-          ok: true,
-          code: this.code,
-          requestId,
-          seat: {
-            seatId: existingSeat.seatId,
-            playerId: existingSeat.playerId,
-            name: existingSeat.name,
-            avatar: existingSeat.avatar,
-            connected: true,
-            lockedIn: existingSeat.lockedIn,
-            lastSeen: existingSeat.lastSeen,
-          },
-        };
-        this.scheduleFirestoreFlush(30);
-
-        this.cloudRelay.publish(replyTopic, {
-          type: 'CLOUD_JOIN_RESPONSE',
-          ok: true,
-          code: this.code,
-          seat: existingSeat,
-          view: this.latestViews[existingSeat.playerId] || null,
-        });
-        return;
-      }
-
-      if (this.roomLocked) {
-        this.firestoreJoinResponses[clientId] = {
-          ok: false,
-          code: this.code,
-          requestId,
-          error: 'This room is locked by the teacher.',
-        };
-        this.scheduleFirestoreFlush(30);
-
-        this.cloudRelay.publish(replyTopic, {
-          type: 'CLOUD_JOIN_RESPONSE',
-          ok: false,
-          error: 'This room is locked by the teacher.',
-        });
-        return;
-      }
-
-      const playerId = this.nextPlayerId++;
-      const newSeat: MultiplayerSeat = {
-        seatId: `seat_${playerId}`,
-        playerId,
-        name: cleanName,
-        avatar,
-        reconnectToken: reconnectToken || generateToken('seat'),
-        connected: true,
-        lockedIn: false,
-        lastSeen: Date.now(),
-      };
-      this.seatsByPlayerId.set(playerId, newSeat);
-
-      this.handleIncomingEvent({
-        id: `cloud_join_${playerId}_${requestId}`,
-        type: 'STUDENT_JOINED',
-        seat: { ...newSeat },
-        playerId,
-        timestamp: Date.now(),
-      });
-
-      this.firestoreJoinResponses[clientId] = {
-        ok: true,
-        code: this.code,
-        requestId,
-        seat: {
-          seatId: newSeat.seatId,
-          playerId: newSeat.playerId,
-          name: newSeat.name,
-          avatar: newSeat.avatar,
-          connected: true,
-          lockedIn: false,
-          lastSeen: newSeat.lastSeen,
-        },
-      };
-      this.scheduleFirestoreFlush(30);
-
-      this.cloudRelay.publish(replyTopic, {
-        type: 'CLOUD_JOIN_RESPONSE',
-        ok: true,
-        code: this.code,
-        seat: newSeat,
-        view: this.latestViews[playerId] || null,
-      });
+      this.handleJoinRequest(clientId, uid, msg);
+    } else if (msg.type === 'CLOUD_STUDENT_INTENTS' && Array.isArray(msg.intents)) {
+      // Each phone keeps one intent document holding its recent intents, so quick
+      // successive writes (opinion, then wager, then lock in) can't swallow each other.
+      const lastSeq = this.lastIntentSeq.get(clientId) ?? 0;
+      const fresh = msg.intents
+        .filter((entry: any) => entry && typeof entry.seq === 'number' && entry.seq > lastSeq)
+        .sort((a: any, b: any) => a.seq - b.seq);
+      if (fresh.length === 0) return;
+      this.lastIntentSeq.set(clientId, fresh[fresh.length - 1].seq);
+      fresh.forEach((entry: any) => this.applyStudentIntent(clientId, entry));
     } else if (msg.type === 'CLOUD_STUDENT_INTENT') {
-      const playerId = Number(msg.playerId);
-      const token = String(msg.reconnectToken || msg.clientId || '');
-      const intent = msg.intent as StudentIntent;
-      if (!playerId || !intent) return;
+      this.applyStudentIntent(clientId, msg);
+    }
+  }
 
-      const seat = this.seatsByPlayerId.get(playerId);
-      if (seat && seat.reconnectToken && token && seat.reconnectToken !== token) return;
-      if (seat) {
-        seat.connected = true;
-        seat.lastSeen = Date.now();
-        if (intent.type === 'LOCK_IN') {
-          seat.lockedIn = Boolean(intent.locked);
-        }
-      }
+  private applyStudentIntent(clientId: string, entry: { intentId?: string; playerId?: number; intent?: StudentIntent }) {
+    const playerId = Number(entry.playerId);
+    const intent = entry.intent;
+    if (!playerId || !intent || typeof intent.type !== 'string') return;
 
-      this.handleIncomingEvent({
-        id: msg.intentId || generateToken('ev'),
-        type: 'STUDENT_INTENT',
-        playerId,
-        intent,
-        timestamp: Date.now(),
-      });
-    } else if (msg.type === 'CLOUD_SYNC_VIEW_REQUEST') {
-      const playerId = Number(msg.playerId);
-      const token = String(msg.reconnectToken || '');
-      const seat = this.seatsByPlayerId.get(playerId);
-      if (seat && seat.reconnectToken && token && seat.reconnectToken !== token) {
-        this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${playerId}`, {
-          type: 'KICKED',
-          playerId,
-        });
+    // The intent document's id is the phone's reconnect token, and only that phone can
+    // write it, so a phone can only act for the seat it holds.
+    const seat = this.seatsByPlayerId.get(playerId);
+    if (!seat || seat.reconnectToken !== clientId) return;
+    seat.connected = true;
+    seat.lastSeen = Date.now();
+    if (intent.type === 'LOCK_IN') {
+      seat.lockedIn = Boolean(intent.locked);
+    }
+
+    this.handleIncomingEvent({
+      id: typeof entry.intentId === 'string' && entry.intentId ? entry.intentId : generateToken('ev'),
+      type: 'STUDENT_INTENT',
+      playerId,
+      intent,
+      timestamp: Date.now(),
+    });
+  }
+
+  private handleJoinRequest(clientId: string, uid: string | null, msg: any) {
+    const cleanName = String(msg.name || '').trim().slice(0, 20);
+    const avatar = String(msg.avatar || '🦊');
+    const requestId = String(msg.requestId || Date.now());
+    if (!cleanName) return;
+    // A phone asking to join again is no longer "removed"; its record now carries the answer.
+    this.kickedClientIds.delete(clientId);
+
+    // 1. The same phone coming back (its reconnect token is its client id).
+    for (const seat of this.seatsByPlayerId.values()) {
+      if (seat.reconnectToken === clientId) {
+        this.giveSeat(seat, clientId, requestId, avatar, 'reconnect');
         return;
-      }
-      if (seat) {
-        seat.connected = true;
-        seat.lastSeen = Date.now();
-      }
-      const view = this.latestViews[playerId];
-      if (view) {
-        this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${playerId}`, {
-          type: 'PLAYER_VIEW',
-          playerId,
-          view,
-        });
       }
     }
+
+    // 2. The name is already at the table, from another phone or browser.
+    const lowerName = cleanName.toLowerCase();
+    for (const seat of this.seatsByPlayerId.values()) {
+      if (seat.name.toLowerCase() !== lowerName) continue;
+      const ownerUid = this.clientUids.get(seat.reconnectToken);
+      if (uid && ownerUid && uid === ownerUid) {
+        // Same browser (same Firebase id), e.g. the student lost the tab: hand the seat back.
+        this.giveSeat(seat, clientId, requestId, avatar, 'move');
+      } else {
+        // Someone else typing a classmate's name would see and change their bet, so the
+        // teacher decides.
+        this.requestSeatTakeover(seat, clientId, requestId, cleanName, avatar);
+      }
+      return;
+    }
+
+    if (this.roomLocked) {
+      this.joinResponses[clientId] = {
+        ok: false,
+        code: this.code,
+        requestId,
+        error: 'This room is locked by the teacher.',
+      };
+      this.scheduleFirestoreFlush(30);
+      return;
+    }
+
+    const playerId = this.nextPlayerId++;
+    const newSeat: MultiplayerSeat = {
+      seatId: `seat_${playerId}`,
+      playerId,
+      name: cleanName,
+      avatar,
+      reconnectToken: clientId,
+      connected: true,
+      lockedIn: false,
+      lastSeen: Date.now(),
+    };
+    this.seatsByPlayerId.set(playerId, newSeat);
+    this.kickedClientIds.delete(clientId);
+    this.joinResponses[clientId] = { ok: true, code: this.code, requestId, seat: publicSeat(newSeat) };
+
+    this.handleIncomingEvent({
+      id: `cloud_join_${playerId}_${requestId}`,
+      type: 'STUDENT_JOINED',
+      seat: { ...newSeat },
+      playerId,
+      timestamp: Date.now(),
+    });
+    this.scheduleFirestoreFlush(30);
+  }
+
+  /** Seat a phone in an existing seat: the same phone reconnecting, or the seat moving to it. */
+  private giveSeat(
+    seat: MultiplayerSeat,
+    clientId: string,
+    requestId: string,
+    avatar: string,
+    mode: 'reconnect' | 'move'
+  ) {
+    const previousClientId = seat.reconnectToken;
+    if (mode === 'move' && previousClientId && previousClientId !== clientId) {
+      // The old phone loses the seat and is told so.
+      this.kickedClientIds.add(previousClientId);
+      delete this.joinResponses[previousClientId];
+    }
+    seat.reconnectToken = clientId;
+    seat.connected = true;
+    seat.lastSeen = Date.now();
+    if (avatar) seat.avatar = avatar;
+    this.kickedClientIds.delete(clientId);
+    this.kickedPlayerIds = this.kickedPlayerIds.filter((id) => id !== seat.playerId);
+    this.joinResponses[clientId] = { ok: true, code: this.code, requestId, seat: publicSeat(seat) };
+
+    this.handleIncomingEvent({
+      id: `cloud_reconn_${seat.playerId}_${clientId}_${requestId}`,
+      type: 'STUDENT_RECONNECTED',
+      seat: { ...seat },
+      playerId: seat.playerId,
+      timestamp: Date.now(),
+    });
+    this.scheduleFirestoreFlush(30);
+  }
+
+  private requestSeatTakeover(
+    seat: MultiplayerSeat,
+    clientId: string,
+    requestId: string,
+    name: string,
+    avatar: string
+  ) {
+    this.joinResponses[clientId] = { ok: false, pending: true, code: this.code, requestId };
+    const existing = this.pendingTakeovers.get(clientId);
+    if (existing && existing.playerId === seat.playerId) {
+      existing.requestId = requestId;
+      this.scheduleFirestoreFlush(30);
+      return;
+    }
+    if (existing) clearTimeout(existing.timer);
+    const timer = setTimeout(() => this.answerSeatTakeover(clientId, false, 'timeout'), SEAT_TAKEOVER_TIMEOUT_MS);
+    this.pendingTakeovers.set(clientId, { playerId: seat.playerId, name, avatar, requestId, timer });
+
+    this.handleIncomingEvent({
+      id: `takeover_${clientId}_${seat.playerId}_${requestId}`,
+      type: 'SEAT_TAKEOVER_REQUEST',
+      playerId: seat.playerId,
+      takeover: { clientId, playerId: seat.playerId, name: seat.name, avatar: seat.avatar },
+      timestamp: Date.now(),
+    });
+    this.scheduleFirestoreFlush(30);
+  }
+
+  /** The teacher's answer to "Let this phone take <name>'s seat?". */
+  public answerSeatTakeover(clientId: string, allow: boolean, reason: 'teacher' | 'timeout' = 'teacher') {
+    const pending = this.pendingTakeovers.get(clientId);
+    if (!pending || this.destroyed) return;
+    clearTimeout(pending.timer);
+    this.pendingTakeovers.delete(clientId);
+
+    this.handleIncomingEvent({
+      id: `takeover_closed_${clientId}_${pending.requestId}_${Date.now()}`,
+      type: 'SEAT_TAKEOVER_CLOSED',
+      playerId: pending.playerId,
+      takeover: { clientId, playerId: pending.playerId, name: pending.name, avatar: pending.avatar },
+      timestamp: Date.now(),
+    });
+
+    const seat = this.seatsByPlayerId.get(pending.playerId);
+    if (allow && seat) {
+      // Keep the seat's avatar so the class still recognises the player.
+      this.giveSeat(seat, clientId, pending.requestId, '', 'move');
+      return;
+    }
+    this.joinResponses[clientId] = {
+      ok: false,
+      code: this.code,
+      requestId: pending.requestId,
+      error:
+        reason === 'timeout'
+          ? "Your teacher didn't answer in time. Try joining again."
+          : `${pending.name} is already playing on another phone. Join with your own name.`,
+    };
+    this.scheduleFirestoreFlush(30);
   }
 
   private handleIncomingEvent(ev: HostEventPayload) {
@@ -852,7 +657,7 @@ export class HostRoomController {
       };
 
       ws.onerror = () => {
-        // Handled by onclose + HTTP/Cloud fallback
+        // Handled by onclose + HTTP/Firestore fallback
       };
     } catch {
       if (!this.destroyed && this.localServerAvailable) {
@@ -873,20 +678,10 @@ export class HostRoomController {
   public async pushViews(views: Record<number, PlayerViewPayload>) {
     this.latestViews = views;
 
-    // 1. Coalesce and push single document update to Firestore (1 write per state change)
+    // 1. Coalesce into one Firestore batch: the shared table plus the seat records that changed
     this.scheduleFirestoreFlush(80);
 
-    // 2. Broadcast each player's view over the Cloud WSS Relay
-    Object.entries(views).forEach(([pidStr, view]) => {
-      const pid = Number(pidStr);
-      this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${pid}`, {
-        type: 'PLAYER_VIEW',
-        playerId: pid,
-        view,
-      });
-    });
-
-    // 3. Also push to local server if available
+    // 2. Also push to local server if available (it sends each phone only its own view)
     if (!this.localServerAvailable) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -914,16 +709,20 @@ export class HostRoomController {
   }
 
   public async kickPlayer(playerId: number) {
+    const seat = this.seatsByPlayerId.get(playerId);
+    if (seat?.reconnectToken) {
+      this.kickedClientIds.add(seat.reconnectToken);
+      delete this.joinResponses[seat.reconnectToken];
+    }
     this.seatsByPlayerId.delete(playerId);
     delete this.latestViews[playerId];
     if (!this.kickedPlayerIds.includes(playerId)) {
       this.kickedPlayerIds.push(playerId);
     }
+    for (const [clientId, pending] of this.pendingTakeovers) {
+      if (pending.playerId === playerId) this.answerSeatTakeover(clientId, false);
+    }
     this.scheduleFirestoreFlush(20);
-    this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${playerId}`, {
-      type: 'KICKED',
-      playerId,
-    });
     if (this.localServerAvailable) {
       await this.syncHttp({ kickPlayerId: playerId });
     }
@@ -976,14 +775,18 @@ export class HostRoomController {
       clearTimeout(this.firestoreFlushTimer);
       this.firestoreFlushTimer = null;
     }
+    for (const pending of this.pendingTakeovers.values()) clearTimeout(pending.timer);
+    this.pendingTakeovers.clear();
     if (this.firestoreUnsubscribe) {
       try {
         this.firestoreUnsubscribe();
       } catch {}
       this.firestoreUnsubscribe = null;
     }
-    void deleteFirestoreRoom(this.code);
-    this.cloudRelay.destroy();
+    void deleteFirestoreRoom(this.code, {
+      seatClientIds: Array.from(this.writtenSeatIds),
+      intentClientIds: Array.from(this.intentClientIds),
+    });
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {
@@ -995,7 +798,7 @@ export class HostRoomController {
 }
 
 // ============================================================================
-// Student Device Room Controller (Firestore Relay + Cloud WSS + Local Server)
+// Student Device Room Controller (Firestore + Local Server)
 // ============================================================================
 export class StudentRoomController {
   public code: string;
@@ -1003,10 +806,11 @@ export class StudentRoomController {
   private clientId: string;
   private localServerAvailable: boolean;
   private ws: WebSocket | null = null;
-  private cloudRelay: CloudRoomRelay;
-  private firestoreUnsubscribe: (() => void) | null = null;
+  private seatListener: FirestoreSeatListener;
   private firestoreConnected = false;
   private firestoreBetDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentSeq = 0;
+  private recentIntents: { intentId: string; seq: number; playerId: number; intent: StudentIntent }[] = [];
   private lastDeliveredViewJson = '';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1022,7 +826,7 @@ export class StudentRoomController {
     clientId: string,
     initialView: PlayerViewPayload | null,
     localServerAvailable: boolean,
-    cloudRelay: CloudRoomRelay,
+    seatListener: FirestoreSeatListener | null,
     onViewUpdate: (view: PlayerViewPayload) => void,
     onKicked: () => void,
     onConnectionChange?: (connected: boolean) => void
@@ -1031,29 +835,14 @@ export class StudentRoomController {
     this.seat = seat;
     this.clientId = clientId;
     this.localServerAvailable = localServerAvailable;
-    this.cloudRelay = cloudRelay;
     this.onViewUpdate = onViewUpdate;
     this.onKicked = onKicked;
     this.onConnectionChange = onConnectionChange;
 
-    // Subscribe to per-seat Cloud Relay view updates
-    this.cloudRelay.subscribe(`${TOPIC_PREFIX}/${this.code}/view/${this.seat.playerId}`);
-
-    // Subscribe to Firestore Room onSnapshot for firewall-proof real-time updates
-    this.firestoreUnsubscribe = listenToFirestoreRoom(
-      this.code,
-      (roomSnap) => {
-        if (this.destroyed) return;
-        if (roomSnap.kickedPlayerIds.includes(this.seat.playerId)) {
-          this.onKicked();
-          this.destroy();
-          return;
-        }
-        const myView = roomSnap.views[this.seat.playerId];
-        if (myView) {
-          this.deliverViewUpdate(myView);
-        }
-      },
+    // This phone's private seat record plus the shared table, kept in step by the host.
+    this.seatListener = seatListener || listenToFirestoreSeat(this.code, this.clientId);
+    this.seatListener.setHandlers(
+      (update) => this.handleSeatUpdate(update),
       (connected) => {
         this.firestoreConnected = connected;
         this.updateOverallConnectionStatus();
@@ -1062,16 +851,25 @@ export class StudentRoomController {
 
     if (initialView) {
       setTimeout(() => this.deliverViewUpdate(initialView), 0);
-    } else {
-      // Request immediate view sync from Host over Cloud Relay
-      this.requestCloudViewSync();
     }
 
     if (this.localServerAvailable) {
       this.connectLocalWs();
+      this.startFallbackPolling();
     }
-    this.startFallbackPolling();
     setTimeout(() => this.updateOverallConnectionStatus(), 50);
+  }
+
+  private handleSeatUpdate(update: FirestoreSeatUpdate) {
+    if (this.destroyed) return;
+    if (update.kicked || update.kickedPlayerIds.includes(this.seat.playerId)) {
+      this.onKicked();
+      this.destroy();
+      return;
+    }
+    if (update.view && update.playerId === this.seat.playerId) {
+      this.deliverViewUpdate(update.view);
+    }
   }
 
   private deliverViewUpdate(view: PlayerViewPayload) {
@@ -1085,17 +883,8 @@ export class StudentRoomController {
   }
 
   private updateOverallConnectionStatus() {
-    const isOnline = this.localWsConnected || this.firestoreConnected || this.cloudRelay.isConnected;
+    const isOnline = this.localWsConnected || this.firestoreConnected;
     this.onConnectionChange?.(isOnline);
-  }
-
-  private requestCloudViewSync() {
-    if (this.destroyed) return;
-    this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/to-host`, {
-      type: 'CLOUD_SYNC_VIEW_REQUEST',
-      playerId: this.seat.playerId,
-      reconnectToken: this.seat.reconnectToken,
-    });
   }
 
   public static async joinRoom(params: {
@@ -1106,64 +895,12 @@ export class StudentRoomController {
     onViewUpdate: (view: PlayerViewPayload) => void;
     onKicked: () => void;
     onConnectionChange?: (connected: boolean) => void;
+    /** The name is already seated on another phone: the teacher has been asked to approve. */
+    onWaitingForTeacher?: (message: string) => void;
   }): Promise<StudentRoomController> {
     const cleanCode = params.code.trim().toUpperCase();
     const cleanName = params.name.trim();
     const avatar = params.avatar;
-    const clientId = params.reconnectToken?.trim() || generateToken('stu');
-    const reconnectToken = clientId;
-
-    let studentControllerRef: StudentRoomController | null = null;
-    let joinResolved = false;
-
-    const requestId = generateToken('req');
-    const replyTopic = `${TOPIC_PREFIX}/${cleanCode}/to-client/${clientId}`;
-
-    let resolveCloudJoin: ((val: { seat: MultiplayerSeat; view: PlayerViewPayload | null }) => void) | null = null;
-    let rejectCloudJoin: ((err: Error) => void) | null = null;
-
-    const cloudJoinPromise = new Promise<{ seat: MultiplayerSeat; view: PlayerViewPayload | null }>(
-      (resolve, reject) => {
-        resolveCloudJoin = resolve;
-        rejectCloudJoin = reject;
-      }
-    );
-
-    const cloudRelay = new CloudRoomRelay(
-      (topic, msg) => {
-        if (!msg || typeof msg.type !== 'string') return;
-        if (topic === replyTopic && msg.type === 'CLOUD_JOIN_RESPONSE' && !joinResolved) {
-          if (msg.ok && msg.seat) {
-            resolveCloudJoin?.({ seat: msg.seat, view: msg.view || null });
-          } else {
-            rejectCloudJoin?.(new Error(msg.error || 'Could not join room.'));
-          }
-          return;
-        }
-        if (studentControllerRef) {
-          studentControllerRef.handleCloudMessage(msg);
-        }
-      },
-      () => {
-        studentControllerRef?.updateOverallConnectionStatus();
-      }
-    );
-
-    cloudRelay.subscribe(replyTopic);
-
-    const sendCloudJoinRequest = () => {
-      if (joinResolved) return;
-      const joinPayload = {
-        type: 'CLOUD_JOIN_REQUEST',
-        clientId,
-        requestId,
-        name: cleanName,
-        avatar,
-        reconnectToken,
-      };
-      cloudRelay.publish(`${TOPIC_PREFIX}/${cleanCode}/to-host`, joinPayload);
-      void sendFirestoreStudentIntent(cleanCode, clientId, 'JOIN_REQUEST', joinPayload);
-    };
 
     // 1. Try local Express server first if we are on an Express-backed host
     const localRes = await safeFetchJson<{
@@ -1183,96 +920,110 @@ export class StudentRoomController {
     });
 
     if (localRes.isJson && localRes.ok && localRes.data?.seat) {
-      joinResolved = true;
-      studentControllerRef = new StudentRoomController(
+      const seat = localRes.data.seat;
+      return new StudentRoomController(
         localRes.data.code || cleanCode,
-        localRes.data.seat,
-        localRes.data.seat.reconnectToken || clientId,
+        seat,
+        seat.reconnectToken,
         localRes.data.view || null,
         true,
-        cloudRelay,
+        null,
         params.onViewUpdate,
         params.onKicked,
         params.onConnectionChange
       );
-      return studentControllerRef;
     }
 
     // If local server returned a specific JSON error other than 404 (e.g., 403 Room is locked), surface it immediately
     if (localRes.isJson && !localRes.ok && localRes.status !== 404 && localRes.data?.error) {
-      cloudRelay.destroy();
       throw new Error(localRes.data.error);
     }
 
-    // 2. Otherwise (e.g., hosted on Netlify, or cross-network phone join),
-    // listen to Firestore room snapshot AND MQTT Cloud Relay simultaneously!
-    const joinFirestoreUnsub = listenToFirestoreRoom(cleanCode, (roomSnap) => {
-      if (joinResolved) return;
-      const resp = roomSnap.joinResponses?.[clientId];
-      if (!resp) return;
-      if (resp.ok && resp.seat) {
-        const resolvedSeat: MultiplayerSeat = {
-          ...resp.seat,
-          reconnectToken,
-        };
-        const initialView = roomSnap.views?.[resp.seat.playerId] || null;
-        resolveCloudJoin?.({ seat: resolvedSeat, view: initialView });
-      } else if (!resp.ok && resp.error) {
-        rejectCloudJoin?.(new Error(resp.error));
-      }
-    });
+    // 2. Otherwise (Netlify, or a phone on another network): ask the host through Firestore.
+    // The phone needs a Firebase id first: the host addresses its private seat record to it.
+    const user = await ensureFirebaseUser();
+    if (!user) {
+      throw new Error(
+        "This phone couldn't connect to the game server. Check the Wi-Fi or mobile data, then try again."
+      );
+    }
 
-    sendCloudJoinRequest();
-    const retryInterval = setInterval(sendCloudJoinRequest, 1500);
+    const clientId = params.reconnectToken?.trim() || generateToken('stu');
+    const requestId = generateToken('req');
+    const seatListener = listenToFirestoreSeat(cleanCode, clientId);
+    const joinPayload = {
+      type: 'CLOUD_JOIN_REQUEST',
+      clientId,
+      requestId,
+      name: cleanName,
+      avatar,
+      reconnectToken: clientId,
+    };
+
+    let retryInterval: ReturnType<typeof setInterval> | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let waitingForTeacher = false;
 
     try {
-      const cloudResult = await Promise.race([
-        cloudJoinPromise,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Room "${cleanCode}" was not found or the Host table is offline. Please verify the 4-letter code on the projector.`
-                )
-              ),
-            8500
-          )
-        ),
-      ]);
+      const result = await new Promise<{ seat: MultiplayerSeat; view: PlayerViewPayload | null }>(
+        (resolve, reject) => {
+          const notFound = () =>
+            reject(
+              new Error(
+                `Room "${cleanCode}" was not found or the Host table is offline. Please verify the 4-letter code on the projector.`
+              )
+            );
+          timeout = setTimeout(notFound, 10_000);
 
-      clearInterval(retryInterval);
-      joinFirestoreUnsub();
-      joinResolved = true;
+          seatListener.setHandlers((update) => {
+            const resp = update.join;
+            if (!resp || resp.requestId !== requestId) return;
+            if (resp.ok && resp.seat) {
+              resolve({
+                seat: { ...resp.seat, reconnectToken: clientId },
+                view: update.playerId === resp.seat.playerId ? update.view : null,
+              });
+            } else if (resp.pending) {
+              if (waitingForTeacher) return;
+              waitingForTeacher = true;
+              // The host has the request; stop resending it and wait for the teacher.
+              if (retryInterval) clearInterval(retryInterval);
+              if (timeout) clearTimeout(timeout);
+              timeout = setTimeout(
+                () => reject(new Error("Your teacher didn't answer in time. Try joining again.")),
+                SEAT_TAKEOVER_TIMEOUT_MS + 15_000
+              );
+              params.onWaitingForTeacher?.(
+                `${cleanName} is already playing on another phone. Waiting for your teacher to let this phone take the seat…`
+              );
+            } else {
+              reject(new Error(resp.error || 'Could not join room.'));
+            }
+          });
 
-      studentControllerRef = new StudentRoomController(
+          const send = () => void sendFirestoreStudentIntent(cleanCode, clientId, 'JOIN_REQUEST', joinPayload);
+          send();
+          retryInterval = setInterval(send, 2000);
+        }
+      );
+
+      return new StudentRoomController(
         cleanCode,
-        cloudResult.seat,
-        cloudResult.seat.reconnectToken || clientId,
-        cloudResult.view,
+        result.seat,
+        clientId,
+        result.view,
         false,
-        cloudRelay,
+        seatListener,
         params.onViewUpdate,
         params.onKicked,
         params.onConnectionChange
       );
-      return studentControllerRef;
     } catch (err) {
-      clearInterval(retryInterval);
-      joinFirestoreUnsub();
-      joinResolved = true;
-      cloudRelay.destroy();
+      seatListener.unsubscribe();
       throw err;
-    }
-  }
-
-  public handleCloudMessage(msg: any) {
-    if (this.destroyed || !msg) return;
-    if (msg.type === 'PLAYER_VIEW' && msg.view) {
-      this.deliverViewUpdate(msg.view);
-    } else if (msg.type === 'KICKED') {
-      this.onKicked();
-      this.destroy();
+    } finally {
+      if (retryInterval) clearInterval(retryInterval);
+      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -1325,7 +1076,7 @@ export class StudentRoomController {
       };
 
       ws.onerror = () => {
-        // Firestore + Cloud Relay + HTTP fallback handle continuity
+        // Firestore + HTTP fallback handle continuity
       };
     } catch {
       if (!this.destroyed && this.localServerAvailable) {
@@ -1336,15 +1087,9 @@ export class StudentRoomController {
 
   private startFallbackPolling() {
     this.pollTimer = setInterval(async () => {
-      if (this.destroyed) return;
-
+      if (this.destroyed || !this.localServerAvailable) return;
       const wsOpen = this.ws && this.ws.readyState === WebSocket.OPEN;
-      // Only request MQTT view sync if neither Local WS nor Firestore onSnapshot is active
-      if (!wsOpen && !this.firestoreConnected) {
-        this.requestCloudViewSync();
-      }
-
-      if (!this.localServerAvailable || wsOpen) return;
+      if (wsOpen) return;
 
       const res = await safeFetchJson<{ view?: PlayerViewPayload }>(
         `/api/mp/room/${this.code}/view?playerId=${this.seat.playerId}&token=${encodeURIComponent(
@@ -1369,38 +1114,40 @@ export class StudentRoomController {
   public async sendIntent(intent: StudentIntent) {
     if (this.destroyed) return;
     const intentId = generateToken('int');
+    const seq = Math.max(Date.now(), this.intentSeq + 1);
+    this.intentSeq = seq;
 
-    const intentEnvelope = {
-      type: 'CLOUD_STUDENT_INTENT',
-      intentId,
-      clientId: this.clientId,
-      playerId: this.seat.playerId,
-      reconnectToken: this.seat.reconnectToken,
-      intent,
-    };
-
-    // 1. Always publish intent over Cloud WSS Relay
-    this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/to-host`, intentEnvelope);
-
-    // 2. Write intent to Firestore (debounced for draft SET_BET / SET_FULL_BET to conserve Spark free-tier writes, immediate for LOCK_IN / power-ups / hints)
-    if (intent.type === 'SET_BET' || intent.type === 'SET_FULL_BET') {
-      if (this.firestoreBetDebounceTimer) {
-        clearTimeout(this.firestoreBetDebounceTimer);
-      }
-      this.firestoreBetDebounceTimer = setTimeout(() => {
-        this.firestoreBetDebounceTimer = null;
-        if (this.destroyed) return;
-        void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', intentEnvelope);
-      }, 280);
-    } else {
-      if (this.firestoreBetDebounceTimer) {
-        clearTimeout(this.firestoreBetDebounceTimer);
-        this.firestoreBetDebounceTimer = null;
-      }
-      void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', intentEnvelope);
+    // 1. Firestore: this phone's intent document holds its recent intents (newest last), so
+    // the host still gets all of them when several writes land between two of its reads.
+    if (intent.type === 'SET_BET') {
+      // A newer value for the same field replaces the older one.
+      this.recentIntents = this.recentIntents.filter(
+        (entry) => !(entry.intent.type === 'SET_BET' && entry.intent.field === intent.field)
+      );
+    }
+    this.recentIntents.push({ intentId, seq, playerId: this.seat.playerId, intent });
+    while (
+      this.recentIntents.length > 1 &&
+      (this.recentIntents.length > MAX_RECENT_INTENTS || JSON.stringify(this.recentIntents).length > 15_000)
+    ) {
+      this.recentIntents.shift();
     }
 
-    // 3. Also send via local server if available
+    // Draft bets are debounced to conserve Spark free-tier writes; everything else goes now.
+    if (this.firestoreBetDebounceTimer) {
+      clearTimeout(this.firestoreBetDebounceTimer);
+      this.firestoreBetDebounceTimer = null;
+    }
+    if (intent.type === 'SET_BET' || intent.type === 'SET_FULL_BET') {
+      this.firestoreBetDebounceTimer = setTimeout(() => {
+        this.firestoreBetDebounceTimer = null;
+        this.writeIntentsToFirestore();
+      }, 280);
+    } else {
+      this.writeIntentsToFirestore();
+    }
+
+    // 2. Also send via local server if available
     if (!this.localServerAvailable) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -1408,6 +1155,7 @@ export class StudentRoomController {
         this.ws.send(
           JSON.stringify({
             type: 'STUDENT_INTENT',
+            intentId,
             intent,
           })
         );
@@ -1423,8 +1171,18 @@ export class StudentRoomController {
       body: JSON.stringify({
         playerId: this.seat.playerId,
         reconnectToken: this.seat.reconnectToken,
+        intentId,
         intent,
       }),
+    });
+  }
+
+  private writeIntentsToFirestore() {
+    if (this.destroyed) return;
+    void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', {
+      type: 'CLOUD_STUDENT_INTENTS',
+      clientId: this.clientId,
+      intents: this.recentIntents,
     });
   }
 
@@ -1434,13 +1192,7 @@ export class StudentRoomController {
       clearTimeout(this.firestoreBetDebounceTimer);
       this.firestoreBetDebounceTimer = null;
     }
-    if (this.firestoreUnsubscribe) {
-      try {
-        this.firestoreUnsubscribe();
-      } catch {}
-      this.firestoreUnsubscribe = null;
-    }
-    this.cloudRelay.destroy();
+    this.seatListener.unsubscribe();
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {

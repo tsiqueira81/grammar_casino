@@ -9,11 +9,15 @@ rules_version = '2';
 //   teacher can add or delete sentences.
 // - Live rooms: the teacher's screen and the students' phones sign in silently
 //   (Firebase Anonymous sign-in), so each device has its own id. Only the device that
-//   created a room can change or close it. Each student can write only their own
-//   intents (join requests, bets), and only the room's host can read them, so
-//   classmates can't forge or overwrite each other's bets. Note that the room
-//   document itself (readable by anyone with the code) still holds every player's
-//   view, including their current bet, and the public MQTT relays carry the same data.
+//   created a room can change or close it.
+//   * rooms/{code}: the shared table (round, sentence, names and money, revealed
+//     results). Anyone with the code can read it, so it never holds bets or hints.
+//   * rooms/{code}/seats/{clientId}: each phone's private record (its own bet, hints,
+//     power-ups, join answer). Only the host writes it, and only the phone it is
+//     addressed to (its Firebase id) and the host can read it.
+//   * rooms/{code}/intents/{clientId}: what each phone sends the host. Each phone can
+//     write only its own, and only the host can read them.
+//   So classmates can neither see nor forge each other's bets.
 //
 // To publish: Firebase console > Firestore Database > pick the "ai-studio-grammarcasino-..."
 // database > Rules > paste this file > Publish.
@@ -46,12 +50,15 @@ service cloud.firestore {
 
       function isValidRoomWrite() {
         let d = request.resource.data;
-        return d.code == roomCode
+        return d.keys().hasOnly(['code', 'locked', 'updatedAt', 'hostUid', 'rev', 'tableJson', 'seatRevs', 'kickedPlayerIds'])
+          && d.code == roomCode
           && d.locked is bool
           && d.updatedAt is number
           && d.hostUid == request.auth.uid
-          && (!('viewsJson' in d) || isBoundedString(d.viewsJson, 0, 600000))
-          && (!('joinResponsesJson' in d) || isBoundedString(d.joinResponsesJson, 0, 250000));
+          && d.rev is number
+          && isBoundedString(d.tableJson, 2, 600000)
+          && d.seatRevs is map
+          && d.kickedPlayerIds is list;
       }
 
       function isRoomHost() {
@@ -66,12 +73,45 @@ service cloud.firestore {
           || resource.data.updatedAt < request.time.toMillis() - 21600000;
       }
 
-      // Students read the room to see their own sanitized view. Views never contain answers.
+      // The shared table: everything in it is already on every student's phone.
       allow read: if isValidRoomCode();
       allow create: if isSignedIn() && isValidRoomCode() && isValidRoomWrite();
       allow update: if isSignedIn() && isValidRoomCode() && isValidRoomWrite()
         && (isRoomHost() || isTeacher() || isAbandonedRoom());
       allow delete: if isRoomHost() || isTeacher();
+
+      // Per-phone private records: that student's own bet, hints and power-ups.
+      match /seats/{clientId} {
+        function hostUidNow() {
+          return get(/databases/$(database)/documents/rooms/$(roomCode)).data.get('hostUid', '');
+        }
+
+        // In a batch the room may be written alongside its seats, so check the room as it will be.
+        function hostUidAfter() {
+          return getAfter(/databases/$(database)/documents/rooms/$(roomCode)).data.get('hostUid', '');
+        }
+
+        function isValidSeatWrite() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['clientId', 'uid', 'playerId', 'viewJson', 'joinJson', 'kicked', 'rev', 'updatedAt'])
+            && isBoundedString(clientId, 4, 80)
+            && d.clientId == clientId
+            && isBoundedString(d.uid, 1, 128)
+            && (d.playerId == null || d.playerId is number)
+            && isBoundedString(d.viewJson, 0, 200000)
+            && isBoundedString(d.joinJson, 0, 5000)
+            && d.kicked is bool
+            && d.rev is number
+            && d.updatedAt is number;
+        }
+
+        // A phone may also check a record that doesn't exist yet (before the host answers).
+        allow get: if isSignedIn()
+          && (resource == null || resource.data.uid == request.auth.uid || hostUidNow() == request.auth.uid || isTeacher());
+        allow list: if false;
+        allow create, update: if isSignedIn() && hostUidAfter() == request.auth.uid && isValidSeatWrite();
+        allow delete: if isSignedIn() && (hostUidNow() == request.auth.uid || isTeacher());
+      }
 
       // Per-student intents: join requests, bets and power-ups sent to the host.
       match /intents/{clientId} {
