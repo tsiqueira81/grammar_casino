@@ -475,54 +475,58 @@ export const StudentRoundTimerBar: React.FC<{
     status === 'locked' ||
     (status === 'running' && !held && remainingMs <= 0) ||
     (status === 'paused' && remainingMs <= 0);
+  const hurry = isWarning && !lockedIn && !isTimeUp;
+  const done = lockedIn || isTimeUp;
+
+  const label = isTimeUp
+    ? lockedIn
+      ? "Time's up"
+      : "Time's up · the teacher reopened betting"
+    : status === 'paused' || held
+      ? 'Timer paused'
+      : status === 'running'
+        ? hurry
+          ? 'Hurry, lock in'
+          : 'Time left'
+        : 'Round timer';
 
   return (
     <div
-      className={`p-3 rounded-2xl glass-panel border transition-all flex flex-col gap-2 ${
-        isWarning && !lockedIn && !isTimeUp
-          ? 'border-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.3)]'
-          : lockedIn || isTimeUp
-            ? 'border-emerald-500/60'
-            : 'border-[#d4af37]/50'
+      role="timer"
+      aria-live="off"
+      className={`gc-surface rounded-gc px-4 py-3 flex flex-col gap-2 transition-colors ${
+        hurry ? 'border-gc-loss/70 bg-gc-loss/[0.06]' : lockedIn && !isTimeUp ? 'border-gc-win/50' : ''
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-base">{lockedIn ? (isTimeUp ? '🔒' : '✅') : isTimeUp ? '🔒' : isWarning ? '🚨' : '⏱️'}</span>
-          <span className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
-            {isTimeUp
-              ? lockedIn
-                ? "Time's Up · Round Closed"
-                : "Time's Up · Unlocked by Teacher"
-              : status === 'paused' || held
-                ? 'Round Timer Paused'
-                : status === 'running'
-                  ? isWarning
-                    ? 'Hurry! Lock In Your Wager!'
-                    : 'Round Timer Running'
-                  : 'Round Timer Ready'}
-          </span>
-        </div>
+      <div className="flex items-center justify-between gap-3">
         <span
-          className={`font-sans tabular-nums font-black text-xl tabular-nums ${
-            isTimeUp
-              ? 'text-rose-600 dark:text-rose-400'
-              : isWarning && !lockedIn
-                ? 'text-rose-600 dark:text-rose-400 animate-pulse'
-                : 'text-amber-900 dark:text-[#fef08a]'
+          className={`inline-flex items-center gap-1.5 text-gc-small font-bold ${
+            hurry ? 'text-gc-loss' : lockedIn && !isTimeUp ? 'text-gc-win' : 'text-gc-quiet'
+          }`}
+        >
+          {isTimeUp ? (
+            <Lock className={iconCls} aria-hidden />
+          ) : status === 'paused' || held ? (
+            <Pause className={iconCls} aria-hidden />
+          ) : lockedIn ? (
+            <Check className={iconCls} aria-hidden />
+          ) : (
+            <TimerIcon className={iconCls} aria-hidden />
+          )}
+          {label}
+        </span>
+        <span
+          className={`tabular-nums font-extrabold text-gc-title ${
+            isTimeUp ? 'text-gc-quiet' : hurry ? 'text-gc-loss animate-gc-blink' : 'text-gc-ink'
           }`}
         >
           {formatClock(remainingMs)}
         </span>
       </div>
-      <div className="w-full h-1.5 rounded-full bg-black/15 dark:bg-black/50 overflow-hidden">
+      <div className="w-full h-1.5 rounded-full bg-gc-line/60 overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-200 ${
-            isWarning && !lockedIn && !isTimeUp
-              ? 'bg-rose-500 animate-pulse'
-              : lockedIn || isTimeUp
-                ? 'bg-emerald-500'
-                : 'bg-gradient-to-r from-[#fef08a] via-[#d4af37] to-emerald-500'
+          className={`h-full rounded-full transition-[width] duration-200 ${
+            hurry ? 'bg-gc-loss' : done ? 'bg-gc-win' : 'bg-gc-gold'
           }`}
           style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}
         />
@@ -530,4 +534,3 @@ export const StudentRoundTimerBar: React.FC<{
     </div>
   );
 };
-
