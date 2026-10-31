@@ -6,6 +6,7 @@ import {
   listenToFirestoreRoomIntents,
   sendFirestoreStudentIntent,
   listenToFirestoreRoom,
+  subscribeToAuthChanges,
   FirestoreJoinResponseItem,
 } from './firebaseService';
 
@@ -451,6 +452,7 @@ export class HostRoomController {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private firestoreFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private firestoreUnsubscribe: (() => void) | null = null;
+  private authUnsubscribe: (() => void) | null = null;
   private firestoreConnected = false;
   private firestoreJoinResponses: Record<string, FirestoreJoinResponseItem> = {};
   private kickedPlayerIds: number[] = [];
@@ -485,20 +487,12 @@ export class HostRoomController {
     );
     this.cloudRelay.subscribe(`${TOPIC_PREFIX}/${this.code}/to-host`);
 
-    // Initialize Firestore room state and listen to student intent docs
+    // Initialize Firestore room state. Student intents are read once the room doc exists,
+    // because the Firestore rules only let the room's recorded host read them.
     this.scheduleFirestoreFlush(0);
-    this.firestoreUnsubscribe = listenToFirestoreRoomIntents(
-      this.code,
-      (clientId, msg) => {
-        if (msg && typeof msg === 'object') {
-          this.handleCloudMessage('firestore', { ...msg, clientId });
-        }
-      },
-      (connected) => {
-        this.firestoreConnected = connected;
-        this.updateOverallConnectionStatus();
-      }
-    );
+    // If the teacher signs in or out of Google mid-class, this device's Firebase id changes:
+    // rewrite the room under the new id so the intent listener can start again.
+    this.authUnsubscribe = subscribeToAuthChanges(() => this.scheduleFirestoreFlush(200));
 
     if (this.localServerAvailable) {
       this.connectLocalWs();
@@ -521,12 +515,34 @@ export class HostRoomController {
         joinResponses: this.firestoreJoinResponses,
         kickedPlayerIds: this.kickedPlayerIds,
       }).then((ok) => {
+        if (ok) this.ensureFirestoreIntentListener();
         if (ok && !this.firestoreConnected) {
           this.firestoreConnected = true;
           this.updateOverallConnectionStatus();
         }
       });
     }, delayMs);
+  }
+
+  private ensureFirestoreIntentListener() {
+    if (this.destroyed || this.firestoreUnsubscribe) return;
+    this.firestoreUnsubscribe = listenToFirestoreRoomIntents(
+      this.code,
+      (clientId, msg) => {
+        if (msg && typeof msg === 'object') {
+          this.handleCloudMessage('firestore', { ...msg, clientId });
+        }
+      },
+      (connected) => {
+        this.firestoreConnected = connected;
+        if (!connected && this.firestoreUnsubscribe) {
+          // The listener stops after an error; the next successful room write attaches a new one.
+          this.firestoreUnsubscribe();
+          this.firestoreUnsubscribe = null;
+        }
+        this.updateOverallConnectionStatus();
+      }
+    );
   }
 
   private updateOverallConnectionStatus() {
@@ -952,6 +968,10 @@ export class HostRoomController {
 
   public destroy() {
     this.destroyed = true;
+    if (this.authUnsubscribe) {
+      this.authUnsubscribe();
+      this.authUnsubscribe = null;
+    }
     if (this.firestoreFlushTimer) {
       clearTimeout(this.firestoreFlushTimer);
       this.firestoreFlushTimer = null;

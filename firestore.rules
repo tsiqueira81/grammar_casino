@@ -1,4 +1,21 @@
 rules_version = '2';
+
+// Grammar Casino Firestore rules.
+//
+// Who can do what:
+// - Class rosters and session reports (student names and scores): only the teacher's
+//   Google account, signed in through the game's "Sign in with Google" button.
+// - Cloud sentence bank: anyone can read it (it holds no personal data); only the
+//   teacher can add or delete sentences.
+// - Live rooms: the teacher's screen and the students' phones sign in silently
+//   (Firebase Anonymous sign-in), so each device has its own id. Only the device that
+//   created a room can change or close it. Each student can write only their own
+//   answers, and only the room's host can read them, so classmates can't see or
+//   overwrite each other's bets.
+//
+// To publish: Firebase console > Firestore Database > pick the "ai-studio-grammarcasino-..."
+// database > Rules > paste this file > Publish.
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -7,33 +24,88 @@ service cloud.firestore {
       return val is string && val.size() >= minLen && val.size() <= maxLen;
     }
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // The one Google account that may see class data. Keep in sync with
+    // VERIFIED_TEACHER_EMAIL in services/firebaseService.ts.
+    function isTeacher() {
+      return request.auth != null
+        && request.auth.token.get('email', '') == 'teacher.siqueira@gmail.com'
+        && request.auth.token.get('email_verified', false) == true;
+    }
+
     // 1. Live Classroom Multiplayer Rooms (QR Code Join & Real-Time Sync)
     match /rooms/{roomCode} {
-      allow read: if roomCode.size() >= 3 && roomCode.size() <= 12;
-      allow create, update: if roomCode.size() >= 3 && roomCode.size() <= 12
-        && request.resource.data.code == roomCode
-        && request.resource.data.locked is bool
-        && request.resource.data.updatedAt is number
-        && (!('viewsJson' in request.resource.data) || isBoundedString(request.resource.data.viewsJson, 0, 600000))
-        && (!('joinResponsesJson' in request.resource.data) || isBoundedString(request.resource.data.joinResponsesJson, 0, 250000));
-      allow delete: if roomCode.size() >= 3 && roomCode.size() <= 12;
+      function isValidRoomCode() {
+        return roomCode.size() >= 3 && roomCode.size() <= 12;
+      }
 
-      // Per-student intents (unauthenticated student phones write to their own clientId doc)
+      function isValidRoomWrite() {
+        let d = request.resource.data;
+        return d.code == roomCode
+          && d.locked is bool
+          && d.updatedAt is number
+          && d.hostUid == request.auth.uid
+          && (!('viewsJson' in d) || isBoundedString(d.viewsJson, 0, 600000))
+          && (!('joinResponsesJson' in d) || isBoundedString(d.joinResponsesJson, 0, 250000));
+      }
+
+      function isRoomHost() {
+        return isSignedIn() && resource.data.get('hostUid', '') == request.auth.uid;
+      }
+
+      // A room left over from an earlier class (no host recorded, or untouched for
+      // 6 hours) can be taken over by a new host that happens to draw the same code.
+      function isAbandonedRoom() {
+        return !('hostUid' in resource.data)
+          || !(resource.data.updatedAt is number)
+          || resource.data.updatedAt < request.time.toMillis() - 21600000;
+      }
+
+      // Students read the room to see their own sanitized view. Views never contain answers.
+      allow read: if isValidRoomCode();
+      allow create: if isSignedIn() && isValidRoomCode() && isValidRoomWrite();
+      allow update: if isSignedIn() && isValidRoomCode() && isValidRoomWrite()
+        && (isRoomHost() || isTeacher() || isAbandonedRoom());
+      allow delete: if isRoomHost() || isTeacher();
+
+      // Per-student intents: join requests, bets and power-ups sent to the host.
       match /intents/{clientId} {
-        allow read: if true;
-        allow create, update: if isBoundedString(clientId, 4, 80)
-          && request.resource.data.clientId == clientId
-          && isBoundedString(request.resource.data.type, 2, 40)
-          && isBoundedString(request.resource.data.payloadJson, 2, 20000)
-          && request.resource.data.updatedAt is number;
-        allow delete: if isBoundedString(clientId, 4, 80);
+        function isHostOfThisRoom() {
+          return isSignedIn()
+            && get(/databases/$(database)/documents/rooms/$(roomCode)).data.get('hostUid', '') == request.auth.uid;
+        }
+
+        function isIntentAuthor() {
+          return isSignedIn() && resource.data.get('uid', '') == request.auth.uid;
+        }
+
+        function isValidIntentWrite() {
+          let d = request.resource.data;
+          return isBoundedString(clientId, 4, 80)
+            && d.clientId == clientId
+            && d.uid == request.auth.uid
+            && isBoundedString(d.type, 2, 40)
+            && isBoundedString(d.payloadJson, 2, 20000)
+            && d.updatedAt is number;
+        }
+
+        allow read: if isHostOfThisRoom() || isTeacher() || isIntentAuthor();
+        allow create: if isSignedIn() && isValidIntentWrite();
+        // Intents written before this rule change have no uid; the first new write claims them.
+        allow update: if isSignedIn() && isValidIntentWrite()
+          && (isIntentAuthor() || !('uid' in resource.data));
+        allow delete: if isIntentAuthor() || isHostOfThisRoom() || isTeacher();
       }
     }
 
-    // 2. Cloud Classroom Rosters (Supports both Google Sign-In and Teacher PIN workflows)
+    // 2. Cloud Classroom Rosters (student names): teacher only
     match /rosters/{rosterId} {
-      allow read: if true;
-      allow create, update: if isBoundedString(rosterId, 3, 100)
+      allow read, delete: if isTeacher();
+      allow create, update: if isTeacher()
+        && isBoundedString(rosterId, 3, 100)
         && isBoundedString(request.resource.data.name, 1, 100)
         && request.resource.data.startingCash is number
         && request.resource.data.startingCash >= 1
@@ -42,13 +114,13 @@ service cloud.firestore {
         && request.resource.data.playerCount is number
         && request.resource.data.createdAt is number
         && request.resource.data.updatedAt is number;
-      allow delete: if isBoundedString(rosterId, 3, 100);
     }
 
-    // 3. Cloud Session Reports & Resumable Saves
+    // 3. Cloud Session Reports & Resumable Saves (student names and scores): teacher only
     match /session_reports/{reportId} {
-      allow read: if true;
-      allow create, update: if isBoundedString(reportId, 3, 100)
+      allow read, delete: if isTeacher();
+      allow create, update: if isTeacher()
+        && isBoundedString(reportId, 3, 100)
         && isBoundedString(request.resource.data.title, 1, 160)
         && isBoundedString(request.resource.data.topic, 1, 100)
         && isBoundedString(request.resource.data.level, 1, 20)
@@ -58,13 +130,14 @@ service cloud.firestore {
         && isBoundedString(request.resource.data.roundHistoryJson, 2, 700000)
         && (!('fullGameStateJson' in request.resource.data) || isBoundedString(request.resource.data.fullGameStateJson, 0, 800000))
         && request.resource.data.createdAt is number;
-      allow delete: if isBoundedString(reportId, 3, 100);
     }
 
-    // 4. Auto-Growing Cloud Sentence Bank
+    // 4. Cloud Sentence Bank: public read, teacher-only changes
     match /curated_sentences/{sentenceId} {
       allow read: if true;
-      allow create, update: if isBoundedString(sentenceId, 3, 120)
+      allow delete: if isTeacher();
+      allow create, update: if isTeacher()
+        && isBoundedString(sentenceId, 3, 120)
         && isBoundedString(request.resource.data.topic, 1, 100)
         && isBoundedString(request.resource.data.level, 1, 10)
         && isBoundedString(request.resource.data.questionType, 1, 30)
@@ -73,7 +146,6 @@ service cloud.firestore {
         && isBoundedString(request.resource.data.correction, 1, 1000)
         && isBoundedString(request.resource.data.explanation, 5, 2500)
         && request.resource.data.createdAt is number;
-      allow delete: if isBoundedString(sentenceId, 3, 120);
     }
   }
 }

@@ -23,7 +23,9 @@ import {
   listCloudSessionReports,
   saveCloudRoster,
   saveCloudSessionReport,
+  signInTeacherWithGoogle,
   syncCloudSentenceBank,
+  VERIFIED_TEACHER_EMAIL,
 } from '../services/firebaseService';
 
 export type CloudManagerTab = 'rosters' | 'reports' | 'sentences';
@@ -51,6 +53,10 @@ interface CloudManagerModalProps {
   onLoadFullGameState: (gameState: any) => void;
   buildCurrentFullGameState: () => any;
   playSound: (sound: SoundEffect) => void;
+  /** Email of the Google account signed in on this device, or null. */
+  teacherEmail: string | null;
+  /** The desktop app can't show Google's sign-in window. */
+  isDesktopApp: boolean;
 }
 
 export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
@@ -72,7 +78,13 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   onLoadFullGameState,
   buildCurrentFullGameState,
   playSound,
+  teacherEmail,
+  isDesktopApp,
 }) => {
+  // Rosters and reports hold student names, so the Firestore rules only open them to the
+  // teacher's Google account. The vault asks for that sign-in instead of failing quietly.
+  const isTeacherSignedIn = (teacherEmail || '').trim().toLowerCase() === VERIFIED_TEACHER_EMAIL;
+  const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<CloudManagerTab>(initialTab);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -107,9 +119,36 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
       setActiveTab(initialTab);
       setNotice(null);
       setViewingReport(null);
-      void refreshAllCloudData();
     }
   }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    if (isOpen && isTeacherSignedIn) {
+      void refreshAllCloudData();
+    }
+  }, [isOpen, isTeacherSignedIn]);
+
+  const handleCloudSignIn = async () => {
+    if (isSigningIn) return;
+    playSound('click');
+    setIsSigningIn(true);
+    setNotice(null);
+    const res = await signInTeacherWithGoogle();
+    setIsSigningIn(false);
+    if (!res.ok) {
+      if (res.error) setNotice({ type: 'error', text: res.error });
+      return;
+    }
+    if (!res.isVerifiedTeacher) {
+      playSound('error');
+      setNotice({
+        type: 'error',
+        text: `Signed in as ${res.user?.email || 'another account'}. Class rosters and reports open only for ${VERIFIED_TEACHER_EMAIL}.`,
+      });
+      return;
+    }
+    playSound('success');
+  };
 
   const refreshAllCloudData = async () => {
     setIsLoading(true);
@@ -299,6 +338,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {isTeacherSignedIn && (
             <button
               type="button"
               onClick={() => {
@@ -312,6 +352,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               <span className={isLoading ? 'animate-spin inline-block' : ''}>🔄</span>
               <span>{isLoading ? 'Syncing...' : 'Sync'}</span>
             </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -326,6 +367,58 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
           </div>
         </div>
 
+        {!isTeacherSignedIn ? (
+          <div className="p-5 sm:p-8 overflow-y-auto flex-1 modal-content-scroll">
+            <div className="max-w-xl mx-auto text-center space-y-4">
+              <div className="text-4xl select-none" aria-hidden="true">🔐</div>
+              <h3 className="text-lg font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                Teacher sign-in required
+              </h3>
+              <p className="text-sm leading-relaxed text-slate-700 dark:text-amber-100">
+                Class rosters and session reports contain your students' names, so they open only for the
+                teacher's Google account ({VERIFIED_TEACHER_EMAIL}). The Teacher PIN still unlocks Live AI and
+                room hosting, but not the Cloud Vault.
+              </p>
+              {notice && (
+                <div
+                  className={`p-3 rounded-xl border text-xs sm:text-sm font-semibold text-left ${
+                    notice.type === 'success'
+                      ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-900 dark:text-emerald-200'
+                      : 'bg-rose-500/15 border-rose-400/50 text-rose-900 dark:text-rose-200'
+                  }`}
+                >
+                  {notice.type === 'success' ? '✓ ' : '⚠️ '}
+                  {notice.text}
+                </div>
+              )}
+              {isDesktopApp ? (
+                <p className="text-sm leading-relaxed p-3 rounded-xl felt-well border border-[#d4af37]/40 text-slate-800 dark:text-amber-100">
+                  Google sign-in doesn't work inside the desktop app. Open the web version of Grammar Casino in your
+                  browser to use the Cloud Vault.
+                </p>
+              ) : (
+                <>
+                  {teacherEmail && (
+                    <p className="text-xs text-slate-600 dark:text-amber-200">
+                      This device is signed in as <strong>{teacherEmail}</strong>. Choose the teacher account instead.
+                    </p>
+                  )}
+                  <ActionButton
+                    type="button"
+                    onClick={handleCloudSignIn}
+                    playSound={playSound}
+                    variant="gold"
+                    disabled={isSigningIn}
+                    className="py-2.5 px-6 text-sm"
+                  >
+                    {isSigningIn ? 'Signing in...' : teacherEmail ? '🔐 Switch Google account' : '🔐 Sign in with Google'}
+                  </ActionButton>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+        <>
         {/* Navigation Tabs */}
         <div className="px-5 pt-3 bg-amber-50/60 dark:bg-[#03130b] border-b border-[#d4af37]/30 flex flex-wrap gap-2">
           <button
@@ -1031,11 +1124,13 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
             </div>
           )}
         </div>
+        </>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-3 bg-amber-50/70 dark:bg-[#04180e] border-t border-[#d4af37]/30 flex items-center justify-between">
           <div className="text-[11px] font-serif text-slate-500 dark:text-amber-200/60">
-            Connected to Firestore &middot; Spark Free Tier Quota Optimized
+            {isTeacherSignedIn ? <>Signed in as {teacherEmail} &middot; Connected to Firestore</> : 'Teacher not signed in'}
           </div>
           <ActionButton onClick={onClose} playSound={playSound} variant="outline-gold" className="py-2 px-5 text-xs">
             Close Vault

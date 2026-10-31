@@ -1,13 +1,16 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  connectAuthEmulator,
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
 import {
+  connectFirestoreEmulator,
   getFirestore,
   doc,
   getDoc,
@@ -36,6 +39,13 @@ import { PlayerViewPayload } from '../utils/multiplayerProtocol';
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Local testing only: start the dev server with VITE_FIREBASE_EMULATORS=1 to use the Firebase
+// Auth and Firestore emulators (ports 9099 and 8080) instead of the real project.
+if ((import.meta as any).env?.VITE_FIREBASE_EMULATORS === '1') {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -148,6 +158,36 @@ export function subscribeToAuthChanges(callback: (user: User | null) => void): U
   return onAuthStateChanged(auth, callback);
 }
 
+// Live rooms need every device to have a Firebase identity, so the Firestore rules can tell
+// the host apart from the students. The teacher keeps their Google sign-in; everyone else
+// gets a silent anonymous one (no account, no prompt). If that fails (offline, or Anonymous
+// sign-in is switched off in the Firebase console) we return null and the room carries on
+// over its other relays.
+const ANON_SIGN_IN_RETRY_MS = 60_000;
+let pendingAnonSignIn: Promise<User | null> | null = null;
+let lastAnonSignInFailureAt = 0;
+
+export async function ensureFirebaseUser(): Promise<User | null> {
+  try {
+    await auth.authStateReady();
+  } catch {}
+  if (auth.currentUser) return auth.currentUser;
+  if (Date.now() - lastAnonSignInFailureAt < ANON_SIGN_IN_RETRY_MS) return null;
+  if (!pendingAnonSignIn) {
+    pendingAnonSignIn = signInAnonymously(auth)
+      .then((cred) => cred.user)
+      .catch((err) => {
+        lastAnonSignInFailureAt = Date.now();
+        console.warn('Firebase anonymous sign-in failed; live rooms will use the other relays.', err?.code || err);
+        return null;
+      })
+      .finally(() => {
+        pendingAnonSignIn = null;
+      });
+  }
+  return pendingAnonSignIn;
+}
+
 // ============================================================================
 // 2. Feature A — Firestore Live Classroom Relay (Bulletproof QR Multiplayer)
 // ============================================================================
@@ -187,6 +227,7 @@ export async function upsertFirestoreRoomState(params: {
   const cleanCode = params.code.trim().toUpperCase();
   const path = `rooms/${cleanCode}`;
   try {
+    const user = await ensureFirebaseUser();
     const viewsJson = JSON.stringify(params.views || {});
     const joinResponsesJson = JSON.stringify(params.joinResponses || {});
     await setDoc(doc(db, 'rooms', cleanCode), {
@@ -196,6 +237,8 @@ export async function upsertFirestoreRoomState(params: {
       joinResponsesJson,
       kickedPlayerIds: params.kickedPlayerIds || [],
       updatedAt: Date.now(),
+      // The rules only let this device change the room again later.
+      ...(user ? { hostUid: user.uid } : {}),
     });
     return true;
   } catch (err) {
@@ -209,6 +252,7 @@ export async function deleteFirestoreRoom(code: string): Promise<void> {
   if (!cleanCode) return;
   const path = `rooms/${cleanCode}`;
   try {
+    await ensureFirebaseUser();
     await deleteDoc(doc(db, 'rooms', cleanCode));
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
@@ -224,27 +268,41 @@ export function listenToFirestoreRoomIntents(
   const path = `rooms/${cleanCode}/intents`;
   const intentsCol = collection(db, 'rooms', cleanCode, 'intents');
 
-  return onSnapshot(
-    intentsCol,
-    (snapshot) => {
-      onConnectionState?.(true);
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added' || change.type === 'modified') {
-          const data = change.doc.data();
-          if (data && typeof data.payloadJson === 'string') {
-            try {
-              const parsed = JSON.parse(data.payloadJson);
-              onIntentMessage(change.doc.id, parsed);
-            } catch {}
+  // Only the room's host may read intents, so sign in before listening.
+  let unsubscribe: Unsubscribe | null = null;
+  let cancelled = false;
+  void ensureFirebaseUser().then(() => {
+    if (cancelled) return;
+    unsubscribe = attach();
+  });
+  return () => {
+    cancelled = true;
+    unsubscribe?.();
+  };
+
+  function attach(): Unsubscribe {
+    return onSnapshot(
+      intentsCol,
+      (snapshot) => {
+        onConnectionState?.(true);
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added' || change.type === 'modified') {
+            const data = change.doc.data();
+            if (data && typeof data.payloadJson === 'string') {
+              try {
+                const parsed = JSON.parse(data.payloadJson);
+                onIntentMessage(change.doc.id, parsed);
+              } catch {}
+            }
           }
-        }
-      });
-    },
-    (err) => {
-      handleFirestoreError(err, OperationType.LIST, path);
-      onConnectionState?.(false);
-    }
-  );
+        });
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, path);
+        onConnectionState?.(false);
+      }
+    );
+  }
 }
 
 export async function sendFirestoreStudentIntent(
@@ -256,8 +314,11 @@ export async function sendFirestoreStudentIntent(
   const cleanCode = code.trim().toUpperCase();
   const path = `rooms/${cleanCode}/intents/${clientId}`;
   try {
+    const user = await ensureFirebaseUser();
     await setDoc(doc(db, 'rooms', cleanCode, 'intents', clientId), {
       clientId,
+      // The rules only let this device overwrite this intent, and only the host can read it.
+      ...(user ? { uid: user.uid } : {}),
       type,
       payloadJson: JSON.stringify(payload),
       updatedAt: Date.now(),
@@ -706,6 +767,8 @@ export async function archiveSentenceToCloudBank(
   subtype?: string | null
 ): Promise<CloudCuratedSentence | null> {
   if (!sentence || !sentence.text || !sentence.explanation) return null;
+  // Only the teacher's Google account may add to the shared bank (see firestore.rules).
+  if (!isVerifiedTeacherUser(auth.currentUser)) return null;
   const qType: QuestionType = sentence.questionType || 'binary';
   const sentenceId = computeSentenceFingerprintId(sentence.text, qType);
   const path = `curated_sentences/${sentenceId}`;

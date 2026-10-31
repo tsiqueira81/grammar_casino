@@ -523,20 +523,12 @@ export function App() {
     setShowTeacherPinModal(true);
   };
 
+  // The vault asks for the teacher's Google sign-in itself (the Firestore rules require it),
+  // so it opens straight away instead of going through the Teacher PIN.
   const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
     playSound('click');
-    if (isTeacherAiUnlocked || desktopStatus.isDesktop) {
-      setCloudModalTab(tab);
-      setShowCloudModal(true);
-      return;
-    }
-    pendingOpenCloudTabAfterPinRef.current = tab;
-    pendingCreateRoomAfterPinRef.current = false;
-    setTeacherPinInput('');
-    setNewTeacherPinInput('');
-    setShowChangePinForm(false);
-    setTeacherPinNotice(null);
-    setShowTeacherPinModal(true);
+    setCloudModalTab(tab);
+    setShowCloudModal(true);
   };
 
   const startHostMultiplayerRoom = async () => {
@@ -637,7 +629,7 @@ export function App() {
       }
       setTeacherPinNotice({
         type: 'success',
-        text: 'Teacher PIN verified! Live Gemini AI, Cloud Vault & Live Room Hosting are unlocked for this session.',
+        text: 'Teacher PIN verified! Live Gemini AI & Live Room Hosting are unlocked for this session. The Cloud Vault needs your Google sign-in.',
       });
     } else {
       playSound('error');
@@ -7500,18 +7492,17 @@ export function App() {
           gameMode={gameMode}
           totalRounds={totalRounds}
           targetAmount={targetAmount}
-          currentRound={currentRound}
           roundHistory={roundHistory}
           winner={winner}
-          fullGameState={buildCurrentFullGameState()}
+          buildCurrentFullGameState={buildCurrentFullGameState}
           activeRosterId={activeCloudRoster?.id || null}
           activeRosterName={activeCloudRoster?.className || ''}
           onLoadRoster={handleLoadCloudRoster}
           onLoadFullGameState={handleApplyCloudFullGameState}
-          onActiveRosterUpdated={(id, name) => setActiveCloudRoster({ id, className: name })}
+          onActiveRosterUpdated={(roster: CloudRoster) => setActiveCloudRoster({ id: roster.id, className: roster.name })}
           playSound={playSound}
           teacherEmail={teacherGoogleEmail}
-          onSignInGoogle={handleSignInWithGoogle}
+          isDesktopApp={desktopStatus.isDesktop}
         />
       )}
     </>
