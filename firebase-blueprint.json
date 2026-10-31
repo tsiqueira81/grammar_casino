@@ -2,17 +2,35 @@
   "entities": {
     "Room": {
       "title": "Multiplayer Classroom Room",
-      "description": "Real-time state and sanitized per-student views for a 4-letter QR multiplayer classroom room.",
+      "description": "The shared table of a 4-letter QR multiplayer classroom room: only what every student's phone shows anyway (never bets or hints).",
       "type": "object",
       "properties": {
         "code": { "type": "string", "description": "4-character uppercase room code" },
         "locked": { "type": "boolean", "description": "Whether new student joins are locked" },
-        "viewsJson": { "type": "string", "description": "JSON-encoded map of playerId to sanitized PlayerViewPayload" },
-        "joinResponsesJson": { "type": "string", "description": "JSON-encoded map of clientId to join response metadata" },
+        "hostUid": { "type": "string", "description": "Firebase id of the device hosting the room" },
+        "rev": { "type": "number", "description": "Revision of the latest host update" },
+        "tableJson": { "type": "string", "description": "JSON-encoded shared part of the player views (round, sentence, peers, revealed results)" },
+        "seatRevs": { "type": "object", "description": "Map of playerId to the revision of that player's latest seat record" },
         "kickedPlayerIds": { "type": "array", "items": { "type": "number" }, "description": "List of kicked player IDs" },
         "updatedAt": { "type": "number", "description": "Epoch timestamp in ms" }
       },
-      "required": ["code", "locked", "updatedAt"]
+      "required": ["code", "locked", "hostUid", "rev", "tableJson", "updatedAt"]
+    },
+    "RoomSeat": {
+      "title": "Private Student Seat Record",
+      "description": "One student's private part of the view (their bet, hints, power-ups) and the answer to their join request. Readable only by that phone's Firebase id and the host.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "The student's device token" },
+        "uid": { "type": "string", "description": "Firebase id of the student's phone" },
+        "playerId": { "type": ["number", "null"], "description": "Player id of the seat, once given" },
+        "viewJson": { "type": "string", "description": "JSON-encoded private part of the player's view" },
+        "joinJson": { "type": "string", "description": "JSON-encoded answer to the latest join request" },
+        "kicked": { "type": "boolean", "description": "The phone lost the seat" },
+        "rev": { "type": "number", "description": "Revision of the host update that wrote this record" },
+        "updatedAt": { "type": "number", "description": "Epoch timestamp in ms" }
+      },
+      "required": ["clientId", "uid", "viewJson", "joinJson", "kicked", "rev", "updatedAt"]
     },
     "RoomIntent": {
       "title": "Student Room Intent",
@@ -20,6 +38,7 @@
       "type": "object",
       "properties": {
         "clientId": { "type": "string", "description": "Unique student device token" },
+        "uid": { "type": "string", "description": "Firebase id of the student's phone" },
         "type": { "type": "string", "description": "JOIN_REQUEST or STUDENT_INTENT" },
         "payloadJson": { "type": "string", "description": "JSON-encoded join or intent payload" },
         "updatedAt": { "type": "number", "description": "Epoch timestamp in ms" }
@@ -92,6 +111,10 @@
     "/rooms/{roomCode}": {
       "schema": { "$ref": "#/entities/Room" },
       "description": "Active multiplayer classroom rooms indexed by 4-letter room code"
+    },
+    "/rooms/{roomCode}/seats/{clientId}": {
+      "schema": { "$ref": "#/entities/RoomSeat" },
+      "description": "Each student's private seat record (own bet, hints, join answer)"
     },
     "/rooms/{roomCode}/intents/{clientId}": {
       "schema": { "$ref": "#/entities/RoomIntent" },

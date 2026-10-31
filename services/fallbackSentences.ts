@@ -542,12 +542,12 @@ export const CURATED_SENTENCE_BANK: CuratedEntry[] = [
     topic: 'Collocations',
     level: 'C1',
     subtype: 'Adverb + Adjective collocations',
-    text: 'The lead investigator remained Utterly aware of the political risks involved in the probe.',
+    text: 'The lead investigator remained utterly aware of the political risks involved in the probe.',
     isCorrect: false,
     correction: 'The lead investigator remained acutely aware of the political risks involved in the probe.',
-    explanation: '"Aware" collocates naturally with "acutely", "fully", or " painfully" ("acutely aware"), whereas "utterly" collocates with extreme negative/absolute adjectives like "impossible" or "exhausted".',
-    grammarPhrase: 'remained Utterly aware of',
-    errorPhrase: 'Utterly aware',
+    explanation: '"Aware" collocates naturally with "acutely", "fully", or "painfully" ("acutely aware"), whereas "utterly" collocates with extreme negative/absolute adjectives like "impossible" or "exhausted".',
+    grammarPhrase: 'remained utterly aware of',
+    errorPhrase: 'utterly aware',
     mistakeType: 'adverb + adjective collocation mismatch'
   },
   {
@@ -588,7 +588,7 @@ interface CuratedClozeEntry {
   options: [string, string, string, string];
 }
 
-const CURATED_CLOZE_BANK: CuratedClozeEntry[] = [
+export const CURATED_CLOZE_BANK: CuratedClozeEntry[] = [
   {
     topic: 'Tenses',
     level: 'A2',
@@ -1328,7 +1328,7 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     explanation: 'Past criticism or regret with "ought" uses "ought not to have + past participle" ("ought not to have lent").',
     grammarPhrase: 'ought not to have lent',
     correctAnswer: 'ought not to have lent',
-    acceptedAnswers: ['ought not to have lent', "oughtn't to have lent"],
+    acceptedAnswers: ['ought not to have lent'],
     mark1Parts: ['ought not to', "oughtn't to"],
     mark2Parts: ['have lent'],
   },
@@ -1481,24 +1481,24 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
   {
     topic: 'Collocations',
     level: 'C1',
-    leadInSentence: 'The new director has no intention of resigning before her contract expires.',
+    leadInSentence: "The new director doesn't plan to resign before her contract expires.",
     baseWord: 'INTENTION',
-    text: 'The new director has _____ before her contract expires.',
-    correction: 'The new director has no intention of stepping down before her contract expires.',
-    explanation: '"Have no intention of + -ing" pairs the noun collocation "no intention" with the preposition "of" and a gerund.',
-    grammarPhrase: 'no intention of resigning',
-    correctAnswer: 'no intention of resigning',
-    acceptedAnswers: ['no intention of resigning', 'no intention of stepping down', 'no intention of quitting'],
-    mark1Parts: ['no intention'],
+    text: 'The new director _____ before her contract expires.',
+    correction: 'The new director has no intention of resigning before her contract expires.',
+    explanation: '"Not plan to do something" becomes "have no intention of + -ing": the noun "intention" takes the preposition "of" followed by a gerund.',
+    grammarPhrase: 'has no intention of resigning',
+    correctAnswer: 'has no intention of resigning',
+    acceptedAnswers: ['has no intention of resigning', 'has no intention of stepping down', 'has no intention of quitting'],
+    mark1Parts: ['has no intention'],
     mark2Parts: ['of resigning', 'of stepping down', 'of quitting'],
   },
   {
     topic: 'Articles',
     level: 'B1',
-    leadInSentence: 'As you practice more, playing the violin becomes easier.',
+    leadInSentence: 'As you practice more, playing scales becomes easier.',
     baseWord: 'THE',
-    text: 'The more you practice, _____ playing the violin becomes.',
-    correction: 'The more you practice, the easier playing the violin becomes.',
+    text: 'The more you practice, _____ playing scales becomes.',
+    correction: 'The more you practice, the easier playing scales becomes.',
     explanation: 'Double comparatives ("The more..., the easier...") require the definite article "the" before both comparative clauses.',
     grammarPhrase: 'the easier',
     correctAnswer: 'the easier',
@@ -1526,6 +1526,59 @@ export function getStaticBankCounts(): {
       CURATED_WORD_FORMATION_BANK.length +
       CURATED_KEY_WORD_TRANSFORMATION_BANK.length,
   };
+}
+
+interface BankEntryBase {
+  topic: string;
+  level: CEFRLevel;
+  text: string;
+}
+
+/**
+ * Picks a random entry from the first non-empty tier.
+ *
+ * Fallback order when the bank runs dry (the level is kept for as long as possible):
+ *   1. same level + same topic + any extra filters (e.g. valid/flawed balance), not yet played
+ *   2. same level + same topic, not yet played
+ *   3. same level + any topic, not yet played
+ *   4. same level + same topic, repeats allowed
+ *   5. same level + any topic, repeats allowed
+ *   6. same topic at any level, not yet played (only if the level has no items at all)
+ *   7. anything
+ * Returns the entry plus whether the topic had to be switched, so the UI can say so.
+ */
+function pickKeepingLevel<T extends BankEntryBase>(
+  bank: T[],
+  settings: Pick<Settings, 'topic' | 'level'>,
+  pastTextSet: Set<string>,
+  extraFilters: ((entry: T) => boolean)[] = []
+): { entry: T | undefined; topicSwitched: boolean } {
+  const { topic, level } = settings;
+  const hasTopic = Boolean(topic) && topic !== 'My own choice';
+  const sameTopic = (e: T) => !hasTopic || e.topic.toLowerCase() === topic.toLowerCase();
+  const sameLevel = (e: T) => !level || e.level === level;
+  const unplayed = (e: T) => !pastTextSet.has(e.text.trim().toLowerCase());
+  const extras = (e: T) => extraFilters.every(f => f(e));
+
+  const tiers: { filter: (e: T) => boolean; keepsTopic: boolean }[] = [
+    { filter: e => sameLevel(e) && sameTopic(e) && unplayed(e) && extras(e), keepsTopic: true },
+    { filter: e => sameLevel(e) && sameTopic(e) && unplayed(e), keepsTopic: true },
+    { filter: e => sameLevel(e) && unplayed(e) && extras(e), keepsTopic: false },
+    { filter: e => sameLevel(e) && unplayed(e), keepsTopic: false },
+    { filter: e => sameLevel(e) && sameTopic(e), keepsTopic: true },
+    { filter: e => sameLevel(e), keepsTopic: false },
+    { filter: e => sameTopic(e) && unplayed(e), keepsTopic: true },
+    { filter: () => true, keepsTopic: false },
+  ];
+
+  for (const tier of tiers) {
+    const candidates = bank.filter(tier.filter);
+    if (candidates.length > 0) {
+      const entry = candidates[Math.floor(Math.random() * candidates.length)];
+      return { entry, topicSwitched: hasTopic && !tier.keepsTopic && !sameTopic(entry) };
+    }
+  }
+  return { entry: undefined, topicSwitched: false };
 }
 
 export function getCuratedSentence(
@@ -1580,35 +1633,8 @@ export function getCuratedSentence(
 
     const combinedKwtBank = [...cloudKwt, ...CURATED_KEY_WORD_TRANSFORMATION_BANK];
 
-    let kwtCandidates = combinedKwtBank.filter(entry => {
-      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-        return false;
-      }
-      if (level && entry.level !== level) {
-        return false;
-      }
-      return !pastTextSet.has(entry.text.trim().toLowerCase());
-    });
-
-    if (kwtCandidates.length === 0) {
-      kwtCandidates = combinedKwtBank.filter(entry => {
-        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-          return false;
-        }
-        return !pastTextSet.has(entry.text.trim().toLowerCase());
-      });
-    }
-
-    if (kwtCandidates.length === 0) {
-      kwtCandidates = combinedKwtBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
-    }
-
-    if (kwtCandidates.length === 0) {
-      kwtCandidates = combinedKwtBank;
-    }
-
-    const picked =
-      kwtCandidates[Math.floor(Math.random() * kwtCandidates.length)] || CURATED_KEY_WORD_TRANSFORMATION_BANK[0];
+    const kwtPick = pickKeepingLevel(combinedKwtBank, settings, pastTextSet);
+    const picked = kwtPick.entry || CURATED_KEY_WORD_TRANSFORMATION_BANK[0];
     return {
       text: picked.text,
       leadInSentence: picked.leadInSentence,
@@ -1619,6 +1645,7 @@ export function getCuratedSentence(
       errorPhrase: '',
       mistakeType: '',
       questionType: 'keyWordTransformation',
+      bankTopic: kwtPick.topicSwitched ? picked.topic : undefined,
       baseWord: picked.baseWord,
       correctAnswer: picked.correctAnswer,
       acceptedAnswers: picked.acceptedAnswers,
@@ -1645,34 +1672,8 @@ export function getCuratedSentence(
 
     const combinedWfBank = [...cloudWf, ...CURATED_WORD_FORMATION_BANK];
 
-    let wfCandidates = combinedWfBank.filter(entry => {
-      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-        return false;
-      }
-      if (level && entry.level !== level) {
-        return false;
-      }
-      return !pastTextSet.has(entry.text.trim().toLowerCase());
-    });
-
-    if (wfCandidates.length === 0) {
-      wfCandidates = combinedWfBank.filter(entry => {
-        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-          return false;
-        }
-        return !pastTextSet.has(entry.text.trim().toLowerCase());
-      });
-    }
-
-    if (wfCandidates.length === 0) {
-      wfCandidates = combinedWfBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
-    }
-
-    if (wfCandidates.length === 0) {
-      wfCandidates = combinedWfBank;
-    }
-
-    const picked = wfCandidates[Math.floor(Math.random() * wfCandidates.length)] || CURATED_WORD_FORMATION_BANK[0];
+    const wfPick = pickKeepingLevel(combinedWfBank, settings, pastTextSet);
+    const picked = wfPick.entry || CURATED_WORD_FORMATION_BANK[0];
     return {
       text: picked.text,
       isCorrect: true,
@@ -1682,6 +1683,7 @@ export function getCuratedSentence(
       errorPhrase: '',
       mistakeType: '',
       questionType: 'wordFormation',
+      bankTopic: wfPick.topicSwitched ? picked.topic : undefined,
       baseWord: picked.baseWord,
       correctAnswer: picked.correctAnswer,
       acceptedAnswers: picked.acceptedAnswers,
@@ -1711,34 +1713,8 @@ export function getCuratedSentence(
 
     const combinedClozeBank = [...cloudCloze, ...CURATED_CLOZE_BANK];
 
-    let clozeCandidates = combinedClozeBank.filter(entry => {
-      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-        return false;
-      }
-      if (level && entry.level !== level) {
-        return false;
-      }
-      return !pastTextSet.has(entry.text.trim().toLowerCase());
-    });
-
-    if (clozeCandidates.length === 0) {
-      clozeCandidates = combinedClozeBank.filter(entry => {
-        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-          return false;
-        }
-        return !pastTextSet.has(entry.text.trim().toLowerCase());
-      });
-    }
-
-    if (clozeCandidates.length === 0) {
-      clozeCandidates = combinedClozeBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
-    }
-
-    if (clozeCandidates.length === 0) {
-      clozeCandidates = combinedClozeBank;
-    }
-
-    const picked = clozeCandidates[Math.floor(Math.random() * clozeCandidates.length)] || CURATED_CLOZE_BANK[0];
+    const clozePick = pickKeepingLevel(combinedClozeBank, settings, pastTextSet);
+    const picked = clozePick.entry || CURATED_CLOZE_BANK[0];
     return {
       text: picked.text,
       isCorrect: true,
@@ -1748,6 +1724,7 @@ export function getCuratedSentence(
       errorPhrase: '',
       mistakeType: '',
       questionType: resolvedType,
+      bankTopic: clozePick.topicSwitched ? picked.topic : undefined,
       correctAnswer: picked.correctAnswer,
       acceptedAnswers: picked.acceptedAnswers,
       options: resolvedType === 'multipleChoice' ? shuffleArray(picked.options) : undefined,
@@ -1772,61 +1749,13 @@ export function getCuratedSentence(
   const combinedBinaryBank = [...cloudBinary, ...CURATED_SENTENCE_BANK];
   const pastMistakesSet = new Set(pastMistakes.map(m => m.trim().toLowerCase()));
 
-  // 1. Try matching both topic and level
-  let candidates = combinedBinaryBank.filter(entry => {
-    if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-      return false;
-    }
-    if (level && entry.level !== level) {
-      return false;
-    }
-    if (forceCorrect !== null && entry.isCorrect !== forceCorrect) {
-      return false;
-    }
-    if (subtype && entry.subtype && entry.subtype.toLowerCase() !== subtype.toLowerCase()) {
-      return false;
-    }
-    if (pastTextSet.has(entry.text.trim().toLowerCase())) {
-      return false;
-    }
-    if (!entry.isCorrect && entry.errorPhrase && pastMistakesSet.has(entry.errorPhrase.trim().toLowerCase())) {
-      return false;
-    }
-    return true;
-  });
-
-  // 2. If no exact match, broaden to match topic regardless of level
-  if (candidates.length === 0) {
-    candidates = combinedBinaryBank.filter(entry => {
-      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
-        return false;
-      }
-      if (forceCorrect !== null && entry.isCorrect !== forceCorrect) {
-        return false;
-      }
-      return !pastTextSet.has(entry.text.trim().toLowerCase());
-    });
-  }
-
-  // 3. If still empty, broaden to any unplayed sentence matching correctness
-  if (candidates.length === 0) {
-    candidates = combinedBinaryBank.filter(entry => {
-      if (forceCorrect !== null && entry.isCorrect !== forceCorrect) {
-        return false;
-      }
-      return !pastTextSet.has(entry.text.trim().toLowerCase());
-    });
-  }
-
-  // 4. Final fallback if everything has been played
-  if (candidates.length === 0) {
-    candidates = combinedBinaryBank.filter(entry => {
-      if (forceCorrect !== null) return entry.isCorrect === forceCorrect;
-      return true;
-    });
-  }
-
-  const selected = candidates[Math.floor(Math.random() * candidates.length)] || CURATED_SENTENCE_BANK[0];
+  const binaryPick = pickKeepingLevel(combinedBinaryBank, settings, pastTextSet, [
+    entry => forceCorrect === null || entry.isCorrect === forceCorrect,
+    entry => !subtype || !entry.subtype || entry.subtype.toLowerCase() === subtype.toLowerCase(),
+    entry =>
+      entry.isCorrect || !entry.errorPhrase || !pastMistakesSet.has(entry.errorPhrase.trim().toLowerCase()),
+  ]);
+  const selected = binaryPick.entry || CURATED_SENTENCE_BANK[0];
 
   return {
     text: selected.text,
@@ -1837,5 +1766,6 @@ export function getCuratedSentence(
     errorPhrase: selected.errorPhrase,
     mistakeType: selected.mistakeType,
     questionType: 'binary',
+    bankTopic: binaryPick.topicSwitched ? selected.topic : undefined,
   };
 }

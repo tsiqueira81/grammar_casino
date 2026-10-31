@@ -182,8 +182,12 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                     <span className="text-xs font-serif uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
                       Room Code
                     </span>
-                    <span className="text-xs font-mono-casino text-emerald-700 dark:text-emerald-300 font-semibold">
-                      {hostConnected ? 'Relay Online' : 'HTTP Sync Active'} &middot; {seatList.filter(s => s.connected).length} Connected
+                    <span
+                      className={`text-xs font-mono-casino font-semibold ${
+                        hostConnected ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'
+                      }`}
+                    >
+                      {hostConnected ? 'Room online' : "Not connected: phones can't join yet"} &middot; {seatList.filter(s => s.connected).length} Connected
                     </span>
                   </div>
 

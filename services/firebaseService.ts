@@ -1,13 +1,16 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  connectAuthEmulator,
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
 import {
+  connectFirestoreEmulator,
   getFirestore,
   doc,
   getDoc,
@@ -19,6 +22,7 @@ import {
   query,
   orderBy,
   limit,
+  writeBatch,
   Unsubscribe,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -30,12 +34,19 @@ import {
   RoundHistoryRecord,
   Settings,
 } from '../types';
-import { PlayerViewPayload } from '../utils/multiplayerProtocol';
+import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
 
 // Initialize Firebase App singleton
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Local testing only: start the dev server with VITE_FIREBASE_EMULATORS=1 to use the Firebase
+// Auth and Firestore emulators (ports 9099 and 8080) instead of the real project.
+if ((import.meta as any).env?.VITE_FIREBASE_EMULATORS === '1') {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -148,14 +159,59 @@ export function subscribeToAuthChanges(callback: (user: User | null) => void): U
   return onAuthStateChanged(auth, callback);
 }
 
+// Live rooms need every device to have a Firebase identity, so the Firestore rules can tell
+// the host apart from the students. The teacher keeps their Google sign-in; everyone else
+// gets a silent anonymous one (no account, no prompt). If that fails (offline, or Anonymous
+// sign-in is switched off in the Firebase console) we return null and the room carries on
+// over its other relays.
+const ANON_SIGN_IN_RETRY_MS = 60_000;
+let pendingAnonSignIn: Promise<User | null> | null = null;
+let lastAnonSignInFailureAt = 0;
+
+export async function ensureFirebaseUser(): Promise<User | null> {
+  try {
+    await auth.authStateReady();
+  } catch {}
+  if (auth.currentUser) return auth.currentUser;
+  if (Date.now() - lastAnonSignInFailureAt < ANON_SIGN_IN_RETRY_MS) return null;
+  if (!pendingAnonSignIn) {
+    pendingAnonSignIn = signInAnonymously(auth)
+      .then((cred) => cred.user)
+      .catch((err) => {
+        lastAnonSignInFailureAt = Date.now();
+        console.warn('Firebase anonymous sign-in failed; live rooms will use the other relays.', err?.code || err);
+        return null;
+      })
+      .finally(() => {
+        pendingAnonSignIn = null;
+      });
+  }
+  return pendingAnonSignIn;
+}
+
 // ============================================================================
-// 2. Feature A — Firestore Live Classroom Relay (Bulletproof QR Multiplayer)
+// 2. Feature A — Firestore Live Classroom Relay (QR multiplayer on any host)
 // ============================================================================
+//
+// rooms/{code}                    The shared table: what every student's phone shows anyway
+//                                 (round, sentence, names and money, revealed results).
+//                                 Never bets, hints or power-ups. Anyone with the code can read it.
+// rooms/{code}/seats/{clientId}   One private record per phone: that student's own part of the
+//                                 view (their bet, hints, power-ups) and the answer to their join
+//                                 request. Only that phone's Firebase id and the host can read it.
+// rooms/{code}/intents/{clientId} What each phone sends the host (join requests, bets).
+//                                 Only the host can read them.
+//
+// The host writes the table and every changed seat record in one batch, and stamps them with
+// a revision number (`rev`). The table lists the revision of each player's latest seat record
+// (`seatRevs`), so a phone only shows a view once both halves come from the same update.
 
 export interface FirestoreJoinResponseItem {
   ok: boolean;
   code: string;
   requestId: string;
+  /** The teacher has to approve this phone before it gets the seat. */
+  pending?: boolean;
   seat?: {
     seatId: string;
     playerId: number;
@@ -168,35 +224,60 @@ export interface FirestoreJoinResponseItem {
   error?: string;
 }
 
-export interface FirestoreRoomSnapshot {
-  code: string;
-  locked: boolean;
-  views: Record<number, PlayerViewPayload>;
-  joinResponses: Record<string, FirestoreJoinResponseItem>;
-  kickedPlayerIds: number[];
-  updatedAt: number;
+export interface FirestoreSeatWrite {
+  clientId: string;
+  uid: string;
+  playerId: number | null;
+  view: Partial<PlayerViewPayload> | null;
+  join: FirestoreJoinResponseItem | null;
+  kicked: boolean;
 }
 
-export async function upsertFirestoreRoomState(params: {
+export async function writeFirestoreRoom(params: {
   code: string;
   locked: boolean;
-  views: Record<number, PlayerViewPayload>;
-  joinResponses: Record<string, FirestoreJoinResponseItem>;
+  rev: number;
+  table: Partial<PlayerViewPayload>;
+  seatRevs: Record<number, number>;
   kickedPlayerIds: number[];
+  seats: FirestoreSeatWrite[];
 }): Promise<boolean> {
   const cleanCode = params.code.trim().toUpperCase();
   const path = `rooms/${cleanCode}`;
   try {
-    const viewsJson = JSON.stringify(params.views || {});
-    const joinResponsesJson = JSON.stringify(params.joinResponses || {});
-    await setDoc(doc(db, 'rooms', cleanCode), {
+    const user = await ensureFirebaseUser();
+    const now = Date.now();
+    const seatRevs: Record<string, number> = {};
+    Object.entries(params.seatRevs || {}).forEach(([pid, rev]) => {
+      seatRevs[String(pid)] = rev;
+    });
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'rooms', cleanCode), {
       code: cleanCode,
       locked: Boolean(params.locked),
-      viewsJson,
-      joinResponsesJson,
+      rev: params.rev,
+      tableJson: JSON.stringify(params.table || {}),
+      seatRevs,
       kickedPlayerIds: params.kickedPlayerIds || [],
-      updatedAt: Date.now(),
+      updatedAt: now,
+      // The rules only let this device change the room (and write its seats) again later.
+      ...(user ? { hostUid: user.uid } : {}),
     });
+    for (const seat of params.seats) {
+      batch.set(doc(db, 'rooms', cleanCode, 'seats', seat.clientId), {
+        clientId: seat.clientId,
+        // Only the phone signed in with this Firebase id (and the host) can read the record.
+        uid: seat.uid,
+        playerId: seat.playerId ?? null,
+        viewJson: seat.view ? JSON.stringify(seat.view) : '',
+        joinJson: seat.join ? JSON.stringify(seat.join) : '',
+        kicked: Boolean(seat.kicked),
+        rev: params.rev,
+        updatedAt: now,
+      });
+    }
+    await batch.commit();
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -204,11 +285,25 @@ export async function upsertFirestoreRoomState(params: {
   }
 }
 
-export async function deleteFirestoreRoom(code: string): Promise<void> {
+export async function deleteFirestoreRoom(
+  code: string,
+  extra: { seatClientIds?: string[]; intentClientIds?: string[] } = {}
+): Promise<void> {
   const cleanCode = code.trim().toUpperCase();
   if (!cleanCode) return;
   const path = `rooms/${cleanCode}`;
   try {
+    await ensureFirebaseUser();
+    // Seats and intents first, while the room (and its host id) still exists for the rules.
+    const childRefs = [
+      ...(extra.seatClientIds || []).map((id) => doc(db, 'rooms', cleanCode, 'seats', id)),
+      ...(extra.intentClientIds || []).map((id) => doc(db, 'rooms', cleanCode, 'intents', id)),
+    ];
+    for (let i = 0; i < childRefs.length; i += 400) {
+      const batch = writeBatch(db);
+      childRefs.slice(i, i + 400).forEach((ref) => batch.delete(ref));
+      await batch.commit();
+    }
     await deleteDoc(doc(db, 'rooms', cleanCode));
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
@@ -217,34 +312,50 @@ export async function deleteFirestoreRoom(code: string): Promise<void> {
 
 export function listenToFirestoreRoomIntents(
   code: string,
-  onIntentMessage: (clientId: string, payload: any) => void,
+  onIntentMessage: (clientId: string, payload: any, uid: string | null) => void,
   onConnectionState?: (connected: boolean) => void
 ): Unsubscribe {
   const cleanCode = code.trim().toUpperCase();
   const path = `rooms/${cleanCode}/intents`;
   const intentsCol = collection(db, 'rooms', cleanCode, 'intents');
 
-  return onSnapshot(
-    intentsCol,
-    (snapshot) => {
-      onConnectionState?.(true);
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added' || change.type === 'modified') {
-          const data = change.doc.data();
-          if (data && typeof data.payloadJson === 'string') {
-            try {
-              const parsed = JSON.parse(data.payloadJson);
-              onIntentMessage(change.doc.id, parsed);
-            } catch {}
+  // Only the room's host may read intents, so sign in before listening.
+  let unsubscribe: Unsubscribe | null = null;
+  let cancelled = false;
+  void ensureFirebaseUser().then(() => {
+    if (cancelled) return;
+    unsubscribe = attach();
+  });
+  return () => {
+    cancelled = true;
+    unsubscribe?.();
+  };
+
+  function attach(): Unsubscribe {
+    return onSnapshot(
+      intentsCol,
+      (snapshot) => {
+        onConnectionState?.(true);
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added' || change.type === 'modified') {
+            const data = change.doc.data();
+            if (data && typeof data.payloadJson === 'string') {
+              try {
+                const parsed = JSON.parse(data.payloadJson);
+                // The rules make `uid` the writer's own Firebase id, so the host can trust it.
+                const uid = typeof data.uid === 'string' && data.uid ? data.uid : null;
+                onIntentMessage(change.doc.id, parsed, uid);
+              } catch {}
+            }
           }
-        }
-      });
-    },
-    (err) => {
-      handleFirestoreError(err, OperationType.LIST, path);
-      onConnectionState?.(false);
-    }
-  );
+        });
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, path);
+        onConnectionState?.(false);
+      }
+    );
+  }
 }
 
 export async function sendFirestoreStudentIntent(
@@ -256,8 +367,11 @@ export async function sendFirestoreStudentIntent(
   const cleanCode = code.trim().toUpperCase();
   const path = `rooms/${cleanCode}/intents/${clientId}`;
   try {
+    const user = await ensureFirebaseUser();
     await setDoc(doc(db, 'rooms', cleanCode, 'intents', clientId), {
       clientId,
+      // The rules only let this device overwrite this intent, and only the host can read it.
+      ...(user ? { uid: user.uid } : {}),
       type,
       payloadJson: JSON.stringify(payload),
       updatedAt: Date.now(),
@@ -269,48 +383,158 @@ export async function sendFirestoreStudentIntent(
   }
 }
 
-export function listenToFirestoreRoom(
-  code: string,
-  onRoomUpdate: (room: FirestoreRoomSnapshot) => void,
-  onConnectionState?: (connected: boolean) => void
-): Unsubscribe {
-  const cleanCode = code.trim().toUpperCase();
-  const path = `rooms/${cleanCode}`;
-  const roomRef = doc(db, 'rooms', cleanCode);
+export interface FirestoreSeatUpdate {
+  /** The host's answer to this phone's join request, if any. */
+  join: FirestoreJoinResponseItem | null;
+  /** The player this seat record belongs to, once the host has given it one. */
+  playerId: number | null;
+  /** The full view (shared table + this phone's private part), only when both halves match. */
+  view: PlayerViewPayload | null;
+  /** The host removed this phone (kicked, or the seat moved to another phone). */
+  kicked: boolean;
+  kickedPlayerIds: number[];
+}
 
-  return onSnapshot(
-    roomRef,
-    (docSnap) => {
-      onConnectionState?.(true);
-      if (!docSnap.exists()) return;
-      const data = docSnap.data();
-      if (!data) return;
-      let views: Record<number, PlayerViewPayload> = {};
-      let joinResponses: Record<string, FirestoreJoinResponseItem> = {};
+export interface FirestoreSeatListener {
+  /** Route updates to new handlers; the latest update (if any) is replayed straight away. */
+  setHandlers(
+    onUpdate: (update: FirestoreSeatUpdate) => void,
+    onConnectionState?: (connected: boolean) => void
+  ): void;
+  unsubscribe(): void;
+}
+
+/**
+ * A student phone's view of the room: the shared table plus its own private seat record.
+ * Signs the phone in (anonymously) first, because the seat record is readable only by the
+ * Firebase id the host addressed it to.
+ */
+export function listenToFirestoreSeat(code: string, clientId: string): FirestoreSeatListener {
+  const cleanCode = code.trim().toUpperCase();
+  const roomRef = doc(db, 'rooms', cleanCode);
+  const seatRef = doc(db, 'rooms', cleanCode, 'seats', clientId);
+
+  let onUpdate: ((update: FirestoreSeatUpdate) => void) | null = null;
+  let onConnection: ((connected: boolean) => void) | null = null;
+  let lastUpdate: FirestoreSeatUpdate | null = null;
+  let lastConnected: boolean | null = null;
+
+  let room: any = null;
+  let seat: any = null;
+  let tableJson = '';
+  let table: Partial<PlayerViewPayload> = {};
+  let ownViewJson = '';
+  let ownView: Partial<PlayerViewPayload> | null = null;
+  let roomOk = false;
+  let seatOk = false;
+
+  const unsubs: Unsubscribe[] = [];
+  let cancelled = false;
+
+  const setConnected = (connected: boolean) => {
+    lastConnected = connected;
+    onConnection?.(connected);
+  };
+
+  const emit = () => {
+    if (cancelled) return;
+    if (room && typeof room.tableJson === 'string' && room.tableJson !== tableJson) {
+      tableJson = room.tableJson;
       try {
-        if (typeof data.viewsJson === 'string' && data.viewsJson) {
-          views = JSON.parse(data.viewsJson);
-        }
-      } catch {}
+        table = JSON.parse(tableJson) || {};
+      } catch {
+        table = {};
+      }
+    }
+    const seatViewJson = seat && typeof seat.viewJson === 'string' ? seat.viewJson : '';
+    if (seatViewJson !== ownViewJson) {
+      ownViewJson = seatViewJson;
       try {
-        if (typeof data.joinResponsesJson === 'string' && data.joinResponsesJson) {
-          joinResponses = JSON.parse(data.joinResponsesJson);
-        }
+        ownView = seatViewJson ? JSON.parse(seatViewJson) : null;
+      } catch {
+        ownView = null;
+      }
+    }
+    let join: FirestoreJoinResponseItem | null = null;
+    if (seat && typeof seat.joinJson === 'string' && seat.joinJson) {
+      try {
+        join = JSON.parse(seat.joinJson);
       } catch {}
-      onRoomUpdate({
-        code: data.code || cleanCode,
-        locked: Boolean(data.locked),
-        views,
-        joinResponses,
-        kickedPlayerIds: Array.isArray(data.kickedPlayerIds) ? data.kickedPlayerIds : [],
-        updatedAt: Number(data.updatedAt || Date.now()),
+    }
+    const playerId = seat && typeof seat.playerId === 'number' ? seat.playerId : null;
+    const seatRev = seat && typeof seat.rev === 'number' ? seat.rev : null;
+    const tableSeatRev =
+      room && room.seatRevs && playerId !== null ? room.seatRevs[String(playerId)] : undefined;
+    const inStep = room && ownView && playerId !== null && seatRev !== null && tableSeatRev === seatRev;
+
+    lastUpdate = {
+      join,
+      playerId,
+      view: inStep ? mergePlayerView(table, ownView as Partial<PlayerViewPayload>) : null,
+      kicked: Boolean(seat?.kicked),
+      kickedPlayerIds: room && Array.isArray(room.kickedPlayerIds) ? room.kickedPlayerIds : [],
+    };
+    onUpdate?.(lastUpdate);
+  };
+
+  void ensureFirebaseUser().then((user) => {
+    if (cancelled) return;
+    if (!user) {
+      setConnected(false);
+      return;
+    }
+    unsubs.push(
+      onSnapshot(
+        roomRef,
+        (snap) => {
+          room = snap.exists() ? snap.data() : null;
+          roomOk = true;
+          if (seatOk) setConnected(true);
+          emit();
+        },
+        (err) => {
+          roomOk = false;
+          handleFirestoreError(err, OperationType.GET, `rooms/${cleanCode}`);
+          setConnected(false);
+        }
+      )
+    );
+    unsubs.push(
+      onSnapshot(
+        seatRef,
+        (snap) => {
+          seat = snap.exists() ? snap.data() : null;
+          seatOk = true;
+          if (roomOk) setConnected(true);
+          emit();
+        },
+        (err) => {
+          seatOk = false;
+          handleFirestoreError(err, OperationType.GET, `rooms/${cleanCode}/seats/${clientId}`);
+          setConnected(false);
+        }
+      )
+    );
+  });
+
+  return {
+    setHandlers(nextOnUpdate, nextOnConnection) {
+      onUpdate = nextOnUpdate;
+      onConnection = nextOnConnection || null;
+      if (lastConnected !== null) onConnection?.(lastConnected);
+      if (lastUpdate) onUpdate(lastUpdate);
+    },
+    unsubscribe() {
+      cancelled = true;
+      onUpdate = null;
+      onConnection = null;
+      unsubs.forEach((u) => {
+        try {
+          u();
+        } catch {}
       });
     },
-    (err) => {
-      handleFirestoreError(err, OperationType.GET, path);
-      onConnectionState?.(false);
-    }
-  );
+  };
 }
 
 // ============================================================================
@@ -706,6 +930,8 @@ export async function archiveSentenceToCloudBank(
   subtype?: string | null
 ): Promise<CloudCuratedSentence | null> {
   if (!sentence || !sentence.text || !sentence.explanation) return null;
+  // Only the teacher's Google account may add to the shared bank (see firestore.rules).
+  if (!isVerifiedTeacherUser(auth.currentUser)) return null;
   const qType: QuestionType = sentence.questionType || 'binary';
   const sentenceId = computeSentenceFingerprintId(sentence.text, qType);
   const path = `curated_sentences/${sentenceId}`;

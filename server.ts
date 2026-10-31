@@ -15,7 +15,9 @@ app.use(express.json({ limit: '10mb' }));
 
 // --- Teacher PIN Gate for Live Gemini AI (Offline-Only Fallback for Students) ---
 const TEACHER_PIN_FILE = path.resolve(__dirname, '.teacher-pin.json');
-let activeTeacherPin = (process.env.TEACHER_PIN || '7777').trim();
+// No default PIN: if TEACHER_PIN is not set (and no saved PIN file exists), Live AI stays locked
+// and the game runs on the free Offline Curated Bank.
+let activeTeacherPin = (process.env.TEACHER_PIN || '').trim();
 
 try {
   if (fs.existsSync(TEACHER_PIN_FILE)) {
@@ -25,8 +27,15 @@ try {
     }
   }
 } catch (err) {
-  console.warn('Could not read .teacher-pin.json, using default/env TEACHER_PIN.');
+  console.warn('Could not read .teacher-pin.json, using env TEACHER_PIN (if set).');
 }
+
+function isPinConfigured(): boolean {
+  return activeTeacherPin.length > 0;
+}
+
+const PIN_NOT_CONFIGURED_ERROR =
+  'No Teacher PIN is set on this server. Add TEACHER_PIN to the server environment (.env) to enable Live AI.';
 
 function verifyPinMatch(candidate: string): boolean {
   const cleanCandidate = String(candidate || '').trim();
@@ -1698,10 +1707,14 @@ app.get("/api/teacher-auth/status", (req, res) => {
   res.json({
     unlocked: isTeacherAuthorized(req),
     pinRequired: true,
+    pinConfigured: isPinConfigured(),
   });
 });
 
 app.post("/api/teacher-auth/verify", (req, res) => {
+  if (!isPinConfigured()) {
+    return res.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+  }
   const clientIp = getClientIp(req);
   const lockout = checkPinLockout(clientIp);
   if (lockout.locked) {
@@ -1727,6 +1740,9 @@ app.post("/api/teacher-auth/verify", (req, res) => {
 });
 
 app.post("/api/teacher-auth/change-pin", (req, res) => {
+  if (!isPinConfigured()) {
+    return res.status(503).json({ ok: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+  }
   const clientIp = getClientIp(req);
   const lockout = checkPinLockout(clientIp);
   if (lockout.locked) {
@@ -1826,6 +1842,10 @@ app.post("/api/teacher-auth/google-verify", async (req, res) => {
       });
     }
 
+    if (!isPinConfigured()) {
+      return res.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+    }
+
     const clientIp = getClientIp(req);
     recordPinOutcome(clientIp, true);
     return res.json({ valid: true, sessionPin: activeTeacherPin });
@@ -1916,6 +1936,10 @@ function pushEventToHost(room: RelayRoom, event: RelayHostEvent) {
   if (room.pendingHostEvents.length > 300) {
     room.pendingHostEvents.shift();
   }
+}
+
+function relayIntentId(intentId: unknown): string {
+  return typeof intentId === "string" && /^[A-Za-z0-9_-]{4,80}$/.test(intentId) ? intentId : crypto.randomUUID();
 }
 
 function sendViewToStudent(room: RelayRoom, playerId: number, view: any) {
@@ -2137,7 +2161,7 @@ app.post("/api/mp/room/:code/intent", (req, res) => {
   const room = rooms.get(code);
   if (!room) return res.status(404).json({ error: "Room not found." });
 
-  const { playerId, reconnectToken, intent } = req.body || {};
+  const { playerId, reconnectToken, intent, intentId } = req.body || {};
   const seat = room.seats.get(Number(playerId));
   if (!seat || seat.reconnectToken !== reconnectToken) {
     return res.status(403).json({ error: "Invalid player session." });
@@ -2150,7 +2174,8 @@ app.post("/api/mp/room/:code/intent", (req, res) => {
   }
 
   pushEventToHost(room, {
-    id: crypto.randomUUID(),
+    // The phone's own intent id lets the host skip the copy that also arrives through Firestore.
+    id: relayIntentId(intentId),
     type: "STUDENT_INTENT",
     playerId: seat.playerId,
     seat: serializeSeat(seat),
@@ -2305,7 +2330,7 @@ async function startServer() {
             seat.lockedIn = msg.intent.locked;
           }
           pushEventToHost(room, {
-            id: crypto.randomUUID(),
+            id: relayIntentId(msg.intentId),
             type: "STUDENT_INTENT",
             playerId: seat.playerId,
             seat: serializeSeat(seat),
