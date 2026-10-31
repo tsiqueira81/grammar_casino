@@ -110,7 +110,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 pb-4 mb-6 border-b border-[#d4af37]/30">
           <div>
-            <div className="text-xs font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
+            <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
               Live Classroom Controller · Host Relay
             </div>
             <h2 className="text-2xl sm:text-3xl font-display font-black text-gold uppercase tracking-wider mt-0.5">
@@ -134,7 +134,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
           <div className="felt-well rounded-2xl p-8 text-center space-y-5">
             <div className="text-5xl select-none">📱</div>
             <div className="max-w-md mx-auto space-y-2">
-              <h3 className="text-xl font-serif font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider">
+              <h3 className="text-xl font-sans font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider">
                 Host a Live Classroom Table
               </h3>
               <p className="text-sm text-slate-600 dark:text-amber-100/75 leading-relaxed">
@@ -166,11 +166,11 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                     className="w-48 h-48 sm:w-52 sm:h-52 rounded-xl border-2 border-[#d4af37] shadow-lg bg-white p-1.5"
                   />
                 ) : (
-                  <div className="w-48 h-48 rounded-xl border-2 border-[#d4af37]/40 flex items-center justify-center text-xs font-mono-casino text-amber-300">
+                  <div className="w-48 h-48 rounded-xl border-2 border-[#d4af37]/40 flex items-center justify-center text-xs font-sans tabular-nums text-amber-300">
                     Generating QR...
                   </div>
                 )}
-                <div className="mt-3 text-xs font-serif uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
+                <div className="mt-3 text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
                   Scan with Phone Camera to Join
                 </div>
               </div>
@@ -179,11 +179,11 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
               <div className="md:col-span-7 felt-well rounded-2xl p-5 flex flex-col justify-between border border-[#d4af37]/40 space-y-4">
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-xs font-serif uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
+                    <span className="text-xs font-sans uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
                       Room Code
                     </span>
                     <span
-                      className={`text-xs font-mono-casino font-semibold ${
+                      className={`text-xs font-sans tabular-nums font-semibold ${
                         hostConnected ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'
                       }`}
                     >
@@ -202,12 +202,12 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       type="text"
                       readOnly
                       value={joinUrl}
-                      className="flex-1 text-xs font-mono-casino px-3 py-2.5 rounded-lg bg-white/80 dark:bg-black/40 border border-[#d4af37]/40 text-slate-800 dark:text-amber-100 focus:outline-none"
+                      className="flex-1 text-xs font-sans tabular-nums px-3 py-2.5 rounded-lg bg-white/80 dark:bg-black/40 border border-[#d4af37]/40 text-slate-800 dark:text-amber-100 focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={handleCopyJoinLink}
-                      className="px-4 py-2.5 rounded-lg bg-[#d4af37] hover:bg-amber-400 text-black font-serif font-extrabold text-xs uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                      className="px-4 py-2.5 rounded-lg bg-[#d4af37] hover:bg-amber-400 text-black font-sans font-extrabold text-xs uppercase tracking-wider transition-colors cursor-pointer shrink-0"
                     >
                       {copiedLink ? 'Copied ✓' : 'Copy Link'}
                     </button>
@@ -223,7 +223,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                             playSound('click');
                             setUseNetlifyUrl((prev) => !prev);
                           }}
-                          className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-mono-casino text-[10px] cursor-pointer transition-colors"
+                          className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-sans tabular-nums text-[10px] cursor-pointer transition-colors"
                         >
                           {useNetlifyUrl
                             ? '🌐 Public Web (siqueiragrammarcasino.netlify.app) · Switch to Shared Host'
@@ -235,14 +235,14 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                           {useNetlifyUrl ? (
                             <span>
                               <strong>Public Mode (Recommended):</strong> Students join via{' '}
-                              <span className="font-mono-casino">siqueiragrammarcasino.netlify.app</span> with{' '}
+                              <span className="font-sans tabular-nums">siqueiragrammarcasino.netlify.app</span> with{' '}
                               <strong>no Google login required</strong>.
                             </span>
                           ) : (
                             <span>
                               <strong>AI Studio Shared Mode:</strong> Uses{' '}
-                              <span className="font-mono-casino">ais-pre-...</span> instead of your private{' '}
-                              <span className="font-mono-casino">ais-dev-...</span> link. To avoid{' '}
+                              <span className="font-sans tabular-nums">ais-pre-...</span> instead of your private{' '}
+                              <span className="font-sans tabular-nums">ais-dev-...</span> link. To avoid{' '}
                               <strong>403 Access Denied</strong> on other people&apos;s phones, click{' '}
                               <strong>Share</strong> in the top-right of AI Studio and enable public sharing first.
                             </span>
@@ -261,7 +261,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       playSound('click');
                       onToggleLockRoom();
                     }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-serif font-extrabold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
+                    className={`px-4 py-2.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
                       roomLocked
                         ? 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
                         : 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
@@ -277,7 +277,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                         playSound('powerUp');
                         onBailoutBankruptPlayers();
                       }}
-                      className="px-4 py-2.5 rounded-xl text-xs font-serif font-extrabold uppercase tracking-wider border border-amber-400 bg-amber-500/20 text-amber-900 dark:text-[#fef08a] hover:bg-amber-500/30 transition-all cursor-pointer"
+                      className="px-4 py-2.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider border border-amber-400 bg-amber-500/20 text-amber-900 dark:text-[#fef08a] hover:bg-amber-500/30 transition-all cursor-pointer"
                     >
                       +$150 Bailout ({bankruptCount} Broke)
                     </button>
@@ -289,7 +289,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       playSound('lose', 0);
                       onCloseRoom();
                     }}
-                    className="ml-auto px-3.5 py-2.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider border border-rose-500/40 hover:border-rose-500 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    className="ml-auto px-3.5 py-2.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border border-rose-500/40 hover:border-rose-500 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                   >
                     Close Room
                   </button>
@@ -300,7 +300,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
             {/* Connected Student Seats List */}
             <div>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
+                <h3 className="text-sm font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
                   Seated Players ({players.length})
                 </h3>
                 <span className="text-xs text-slate-500 dark:text-amber-200/70">
@@ -310,7 +310,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
 
               {players.length === 0 ? (
                 <div className="felt-well rounded-xl p-6 text-center text-sm text-slate-600 dark:text-amber-100/70 italic font-editorial">
-                  Waiting for students to scan the QR code or enter code <strong className="font-mono-casino not-italic text-amber-700 dark:text-[#fef08a]">{roomCode}</strong>...
+                  Waiting for students to scan the QR code or enter code <strong className="font-sans tabular-nums not-italic text-amber-700 dark:text-[#fef08a]">{roomCode}</strong>...
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1 modal-content-scroll">
@@ -326,10 +326,10 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                         <div className="flex items-center gap-2.5 min-w-0">
                           <span className="text-2xl shrink-0">{p.avatar}</span>
                           <div className="min-w-0">
-                            <div className="font-serif font-extrabold text-sm text-slate-900 dark:text-amber-50 truncate">
+                            <div className="font-sans font-extrabold text-sm text-slate-900 dark:text-amber-50 truncate">
                               {p.name}
                             </div>
-                            <div className="text-[11px] font-mono-casino text-slate-500 dark:text-amber-200/75 flex items-center gap-1.5">
+                            <div className="text-[11px] font-sans tabular-nums text-slate-500 dark:text-amber-200/75 flex items-center gap-1.5">
                               <span className="tabular-nums">${p.money.toLocaleString()}</span>
                               <span>&middot;</span>
                               <span>

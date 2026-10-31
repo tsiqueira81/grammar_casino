@@ -59,7 +59,7 @@ const Modal: React.FC<ModalProps> = ({ title, onClose, children, playSound, clos
           <div className="absolute inset-x-0 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#fef08a] to-transparent opacity-70"></div>
           <div className="flex items-center gap-2.5">
             <span className="text-[#d4af37] text-sm select-none">♦</span>
-            <h2 className="text-xl sm:text-2xl font-serif font-extrabold text-gold uppercase tracking-widest">{title}</h2>
+            <h2 className="text-xl sm:text-2xl font-sans font-extrabold text-gold uppercase tracking-widest">{title}</h2>
           </div>
           {closable && !hideCloseButton && (
             <button onClick={handleClose} className="w-8 h-8 rounded-full border border-[#d4af37]/30 hover:border-[#d4af37] bg-black/5 dark:bg-black/40 text-amber-800 dark:text-[#fef08a] flex items-center justify-center text-xl transition-all hover:scale-105 cursor-pointer leading-none">&times;</button>

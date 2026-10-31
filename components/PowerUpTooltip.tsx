@@ -76,7 +76,7 @@ export const PowerUpTooltip: React.FC<PowerUpTooltipProps> = ({
         <div className="w-56 max-w-[85vw] p-2.5 rounded-lg bg-slate-900/95 dark:bg-black/95 text-slate-100 border border-amber-400/50 shadow-2xl backdrop-blur-md text-left">
           <div className="flex items-center gap-1.5 border-b border-amber-500/30 pb-1.5 mb-1.5">
             <span className="text-base">{icon}</span>
-            <span className="font-serif font-bold text-xs text-amber-400 tracking-wide truncate">
+            <span className="font-sans font-bold text-xs text-amber-400 tracking-wide truncate">
               {name}
             </span>
           </div>

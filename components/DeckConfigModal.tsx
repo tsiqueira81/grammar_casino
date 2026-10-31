@@ -79,14 +79,14 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
               <span className="text-3xl filter drop-shadow">🎴</span>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-xl sm:text-2xl font-serif text-[#ca8a04] dark:text-[#fef08a] font-black uppercase tracking-wider">
+                  <h2 className="text-xl sm:text-2xl font-sans text-[#ca8a04] dark:text-[#fef08a] font-black uppercase tracking-wider">
                     Configure Deck
                   </h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 border border-purple-300 dark:border-purple-600">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-sans tabular-nums font-bold bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 border border-purple-300 dark:border-purple-600">
                     {activeCount} / {totalCount} Active
                   </span>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 font-serif">
+                <p className="text-xs text-slate-600 dark:text-slate-400 font-sans">
                   Select which power-ups can be purchased in the in-game store
                 </p>
               </div>
@@ -120,7 +120,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
               <button
                 type="button"
                 onClick={() => { if (playSound) playSound('click'); setFilterType('all'); }}
-                className={`px-3 py-1 rounded-full font-serif font-bold transition-all ${
+                className={`px-3 py-1 rounded-full font-sans font-bold transition-all ${
                   filterType === 'all'
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white dark:bg-[#0a1f14] text-slate-600 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border border-slate-200 dark:border-slate-700'
@@ -131,7 +131,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
               <button
                 type="button"
                 onClick={() => { if (playSound) playSound('click'); setFilterType('targeted'); }}
-                className={`px-3 py-1 rounded-full font-serif font-bold transition-all ${
+                className={`px-3 py-1 rounded-full font-sans font-bold transition-all ${
                   filterType === 'targeted'
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white dark:bg-[#0a1f14] text-slate-600 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border border-slate-200 dark:border-slate-700'
@@ -142,7 +142,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
               <button
                 type="button"
                 onClick={() => { if (playSound) playSound('click'); setFilterType('solo'); }}
-                className={`px-3 py-1 rounded-full font-serif font-bold transition-all ${
+                className={`px-3 py-1 rounded-full font-sans font-bold transition-all ${
                   filterType === 'solo'
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white dark:bg-[#0a1f14] text-slate-600 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border border-slate-200 dark:border-slate-700'
@@ -153,7 +153,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
             </div>
 
             {/* Quick Mass Actions */}
-            <div className="flex items-center gap-2 justify-end font-serif">
+            <div className="flex items-center gap-2 justify-end font-sans">
               <button
                 type="button"
                 onClick={() => { if (playSound) playSound('click'); onSelectAll(); }}
@@ -175,7 +175,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
           {/* Cards Grid */}
           <div className="p-4 sm:p-5 overflow-y-auto flex-1 modal-content-scroll max-h-[62vh]">
             {filteredKeys.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 dark:text-slate-400 font-serif">
+              <div className="text-center py-12 text-slate-500 dark:text-slate-400 font-sans">
                 <span className="text-3xl block mb-2">🔍</span>
                 <p>No power-ups matching "{searchQuery}"</p>
               </div>
@@ -204,7 +204,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
                                 {p.icon}
                               </span>
                             </PowerUpTooltip>
-                            <span className="font-serif font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                            <span className="font-sans font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
                               {p.name}
                             </span>
                           </div>
@@ -229,7 +229,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
 
                       {/* Bottom status indicator */}
                       <div className="mt-2.5 pt-1.5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[10px]">
-                        <span className={`font-mono font-semibold ${p.requiresTarget ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                        <span className={`font-sans tabular-nums font-semibold ${p.requiresTarget ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
                           {p.requiresTarget ? '🎯 Targeted' : '⚡ Self / Passive'}
                         </span>
                         <span className={`font-bold ${isSelected ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
@@ -245,7 +245,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
 
           {/* Footer */}
           <div className="p-4 bg-amber-50/70 dark:bg-[#0a1f14] border-t border-amber-200/60 dark:border-[#14532d] flex items-center justify-between gap-3">
-            <div className="text-xs text-slate-600 dark:text-slate-300 font-serif">
+            <div className="text-xs text-slate-600 dark:text-slate-300 font-sans">
               <span className="font-bold text-slate-900 dark:text-white">{activeCount}</span> of {totalCount} power-ups will appear in the store.
             </div>
 

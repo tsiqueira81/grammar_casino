@@ -240,12 +240,12 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
           <div className="bg-amber-50/80 dark:bg-[#0a1f14] p-5 border-b border-[#ca8a04]/30 relative flex justify-between items-center select-none">
             <div className="absolute inset-x-0 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#fef08a] to-transparent"></div>
             <div>
-              <div className="text-[11px] font-mono tracking-widest text-[#ca8a04] uppercase font-bold">
+              <div className="text-[11px] font-sans tabular-nums tracking-widest text-[#ca8a04] uppercase font-bold">
                 Table Dealer Settings
               </div>
-              <h2 className="text-2xl font-serif font-bold text-slate-900 dark:text-amber-100 flex items-center gap-2">
+              <h2 className="text-2xl font-sans font-bold text-slate-900 dark:text-amber-100 flex items-center gap-2">
                 <span>Configure Round Options</span>
-                <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-900 dark:text-amber-300 border border-amber-500/30">
+                <span className="text-xs font-sans tabular-nums font-normal px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-900 dark:text-amber-300 border border-amber-500/30">
                   Target: Round {currentRound + 1}
                 </span>
               </h2>
@@ -263,7 +263,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
           <div className="flex border-b border-amber-200/60 dark:border-amber-900/40 bg-amber-100/30 dark:bg-black/20 p-2 gap-2 select-none overflow-x-auto">
             <button
               onClick={() => { playSound('click'); setActiveTab('topic'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'topic'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -278,7 +278,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('level'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'level'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -293,7 +293,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('theme'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'theme'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -308,7 +308,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
             <button
               onClick={() => { playSound('click'); setActiveTab('format'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'format'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -324,7 +324,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
             {/* AI & Offline Tab */}
             <button
               onClick={() => { playSound('click'); setActiveTab('ai'); }}
-              className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-serif font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'ai'
                   ? 'bg-amber-500 text-black shadow-md'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
@@ -346,7 +346,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
             {/* TOPIC / LANGUAGE DOMAIN TAB */}
             {activeTab === 'topic' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
                   Select a Language Domain (grammar or collocations) for subsequent rounds, or enter a custom lexical/grammar topic:
                 </p>
 
@@ -370,7 +370,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                       >
                         <span className="text-xl mt-0.5 select-none">{top.icon}</span>
                         <div className="flex-1 min-w-0">
-                          <div className="font-serif font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
+                          <div className="font-sans font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
                             <span className="truncate">{top.name}</span>
                             {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
                           </div>
@@ -399,11 +399,11 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <div className="flex items-center gap-2">
                         <span className="text-base">✍️</span>
-                        <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
+                        <span className="text-xs font-sans font-bold text-slate-900 dark:text-amber-200">
                           Custom Lexical or Grammar Preference:
                         </span>
                       </div>
-                      <span className="text-[10px] text-slate-500 dark:text-amber-200/60 font-serif">
+                      <span className="text-[10px] text-slate-500 dark:text-amber-200/60 font-sans">
                         Vocabulary or Grammar
                       </span>
                     </div>
@@ -419,7 +419,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                       className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/60 mr-1">
+                      <span className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/60 mr-1">
                         Quick Lexis:
                       </span>
                       {QUICK_LEXICAL_TOPICS.map((lex) => {
@@ -434,7 +434,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                               setIsCustomTopicMode(true);
                               setCustomTopicInput(lex);
                             }}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-serif transition-all cursor-pointer border ${
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-sans transition-all cursor-pointer border ${
                               isQuickActive
                                 ? 'bg-amber-500 text-black border-amber-400 font-bold'
                                 : 'bg-amber-50/60 dark:bg-black/30 text-slate-700 dark:text-amber-100/80 border-amber-300/60 dark:border-amber-800/50 hover:border-amber-400'
@@ -453,7 +453,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
             {/* LEVEL TAB */}
             {activeTab === 'level' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
                   Select CEFR linguistic complexity profile:
                 </p>
 
@@ -475,12 +475,12 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                             : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
                         }`}
                       >
-                        <span className="text-xl font-mono font-black text-amber-600 dark:text-amber-400 select-none">
+                        <span className="text-xl font-sans tabular-nums font-black text-amber-600 dark:text-amber-400 select-none">
                           {lvl}
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
-                            <span className="font-serif font-bold text-xs text-slate-900 dark:text-white">
+                            <span className="font-sans font-bold text-xs text-slate-900 dark:text-white">
                               {profile?.title || lvl}
                             </span>
                             {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
@@ -499,7 +499,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
             {/* THEME TAB */}
             {activeTab === 'theme' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
                   Choose a contextual scenario or real-world theme:
                 </p>
 
@@ -521,7 +521,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                             : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
                         }`}
                       >
-                        <span className="font-serif font-bold text-xs text-slate-900 dark:text-white">
+                        <span className="font-sans font-bold text-xs text-slate-900 dark:text-white">
                           {th}
                         </span>
                       </button>
@@ -544,7 +544,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   >
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className="text-base">✍️</span>
-                      <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
+                      <span className="text-xs font-sans font-bold text-slate-900 dark:text-amber-200">
                         Custom Scenario Theme:
                       </span>
                     </div>
@@ -567,7 +567,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
             {/* FORMAT TAB */}
             {activeTab === 'format' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
+                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
                   Choose challenge structure:
                 </p>
 
@@ -591,7 +591,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                           <span className="text-2xl mt-0.5 select-none">{fmt.icon}</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
-                              <span className={`font-serif font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
+                              <span className={`font-sans font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
                                 {fmt.label}
                               </span>
                               {isSelected && (
@@ -609,10 +609,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                           <div className="p-3.5 rounded-xl border border-amber-400/50 dark:border-amber-700/60 bg-amber-50/60 dark:bg-black/35 space-y-2.5 animate-fade-in">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
-                                <div className="text-xs font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                                <div className="text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                                   <span>🎛️</span>
                                   <span>Customize Mixed Shoe Rotation</span>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 border border-amber-500/40 text-amber-900 dark:text-amber-300">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums bg-amber-500/20 border border-amber-500/40 text-amber-900 dark:text-amber-300">
                                     {effectiveMixedFormats.length} of 5 Active
                                   </span>
                                 </div>
@@ -628,7 +628,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                                     setMixedFormatWarning(null);
                                     setSelectedMixedFormats(ALL_QUESTION_TYPES);
                                   }}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-serif font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-sans font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
                                 >
                                   Select All 5
                                 </button>
@@ -651,7 +651,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
                                       <span className="text-lg select-none">{subFmt.icon}</span>
-                                      <span className="font-serif font-bold text-xs truncate">
+                                      <span className="font-sans font-bold text-xs truncate">
                                         {subFmt.shortLabel}
                                       </span>
                                     </div>
@@ -670,13 +670,13 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                             </div>
 
                             {mixedFormatWarning && (
-                              <div className="text-[11px] font-serif text-amber-800 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                              <div className="text-[11px] font-sans text-amber-800 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
                                 <span>⚠️</span>
                                 <span>{mixedFormatWarning}</span>
                               </div>
                             )}
 
-                            <div className="text-[11px] font-serif text-slate-600 dark:text-amber-200/80 flex items-center gap-1.5 pt-0.5">
+                            <div className="text-[11px] font-sans text-slate-600 dark:text-amber-200/80 flex items-center gap-1.5 pt-0.5">
                               <span className="font-bold text-amber-900 dark:text-amber-300">Active Cycle:</span>
                               <span>
                                 {effectiveMixedFormats
@@ -705,10 +705,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="text-2xl">⚡</span>
                       <div>
-                        <h3 className="font-serif font-bold text-sm text-slate-900 dark:text-amber-100">
+                        <h3 className="font-sans font-bold text-sm text-slate-900 dark:text-amber-100">
                           Casino Intelligence Engine
                         </h3>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans tabular-nums">
                           {desktopStatus.isDesktop
                             ? 'Windows Desktop Edition (Self-Contained)'
                             : 'Web Edition (Serverless Backend)'}
@@ -718,7 +718,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
                     <div className="flex flex-col items-end gap-1">
                       <span
-                        className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${
+                        className={`text-[10px] font-sans tabular-nums font-bold px-2.5 py-0.5 rounded-full border ${
                           desktopStatus.isOnline
                             ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
                             : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40'
@@ -727,7 +727,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         {desktopStatus.isOnline ? '● Online' : '○ Offline Mode'}
                       </span>
                       {desktopStatus.isDesktop && (
-                        <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400">
+                        <span className="text-[9px] font-sans tabular-nums text-slate-500 dark:text-slate-400">
                           {desktopStatus.isEncrypted ? '🛡️ Windows DPAPI Ready' : 'Key Protection'}
                         </span>
                       )}
@@ -736,11 +736,11 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
                   {/* Active Generator Badge */}
                   <div className="p-2.5 rounded-lg bg-amber-100/60 dark:bg-amber-950/40 border border-amber-300/40 dark:border-amber-800/40 flex items-center justify-between text-xs">
-                    <span className="font-serif font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                    <span className="font-sans font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                       <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '🚀' : '💾'}</span>
                       <span>Active Engine:</span>
                     </span>
-                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                    <span className="font-sans tabular-nums font-bold text-slate-900 dark:text-white">
                       {desktopStatus.hasKey && desktopStatus.isOnline
                         ? 'Gemini Live Generative AI'
                         : 'Curated Sentence Bank (Offline)'}
@@ -750,11 +750,11 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   {/* Portable Edition Badge */}
                   {desktopStatus.isPortable && (
                     <div className="mt-2.5 p-2 rounded-lg bg-purple-500/10 border border-purple-400/40 dark:border-purple-800/40 flex items-center justify-between text-xs">
-                      <span className="font-serif font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                      <span className="font-sans font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
                         <span>🎒</span>
                         <span>Portable Edition:</span>
                       </span>
-                      <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300 truncate max-w-[280px]" title={desktopStatus.dataPath}>
+                      <span className="font-sans tabular-nums text-[11px] text-slate-700 dark:text-slate-300 truncate max-w-[280px]" title={desktopStatus.dataPath}>
                         📁 {desktopStatus.dataPath ? desktopStatus.dataPath.split(/[\\/]/).slice(-2).join('/') : 'Grammar Casino Data'}
                       </span>
                     </div>
@@ -766,7 +766,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   <div className="p-3.5 rounded-xl border-2 border-red-500/80 bg-red-500/15 text-red-950 dark:text-red-100 flex items-start gap-3 animate-fade-in shadow-md">
                     <span className="text-2xl mt-0.5 select-none">🔒</span>
                     <div className="flex-1 min-w-0">
-                      <h5 className="font-serif font-bold text-xs uppercase tracking-wide text-red-700 dark:text-red-300">
+                      <h5 className="font-sans font-bold text-xs uppercase tracking-wide text-red-700 dark:text-red-300">
                         Read-Only Location Detected
                       </h5>
                       <p className="text-xs mt-1 leading-relaxed">
@@ -781,7 +781,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   <div className="p-3.5 rounded-xl border-2 border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100 flex items-start gap-3 animate-fade-in shadow-md">
                     <span className="text-2xl mt-0.5 select-none">🔑</span>
                     <div className="flex-1 min-w-0">
-                      <h5 className="font-serif font-bold text-xs uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                      <h5 className="font-sans font-bold text-xs uppercase tracking-wide text-amber-800 dark:text-amber-300">
                         Key Re-entry Needed (New PC or User Account)
                       </h5>
                       <p className="text-xs mt-1 leading-relaxed">
@@ -793,7 +793,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
                 {/* Feature Availability Matrix */}
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-black/20">
-                  <h4 className="font-serif font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200/90 mb-2.5">
+                  <h4 className="font-sans font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200/90 mb-2.5">
                     Feature Availability (Offline vs Live AI)
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -862,11 +862,11 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                 {/* Optional API Key Configuration */}
                 <div className="p-4 rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-white dark:bg-black/20">
                   <div className="flex items-center justify-between gap-2 mb-2">
-                    <h4 className="font-serif font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200">
+                    <h4 className="font-sans font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200">
                       Custom Gemini API Key (Optional)
                     </h4>
                     {desktopStatus.hasKey && (
-                      <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-bold border border-emerald-500/40">
+                      <span className="text-[10px] font-sans tabular-nums bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-bold border border-emerald-500/40">
                         Configured: {desktopStatus.maskedKey || 'Saved'}
                       </span>
                     )}
@@ -883,12 +883,12 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
                         placeholder={desktopStatus.hasKey ? 'Enter new key to replace existing...' : 'AIzaSy...'}
-                        className="w-full px-3 py-2 pr-16 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-black/50 text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        className="w-full px-3 py-2 pr-16 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-black/50 text-slate-900 dark:text-white font-sans tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
                       />
                       <button
                         type="button"
                         onClick={() => setShowKeyText(!showKeyText)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-amber-700 dark:text-amber-300 hover:underline px-1 cursor-pointer"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-sans tabular-nums text-amber-700 dark:text-amber-300 hover:underline px-1 cursor-pointer"
                       >
                         {showKeyText ? 'Hide' : 'Show'}
                       </button>
@@ -913,7 +913,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                       <button
                         type="button"
                         onClick={handleSaveKey}
-                        className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold bg-amber-500 hover:bg-amber-600 text-black shadow transition-all cursor-pointer flex items-center gap-1"
+                        className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold bg-amber-500 hover:bg-amber-600 text-black shadow transition-all cursor-pointer flex items-center gap-1"
                       >
                         <span>💾</span>
                         <span>Save Encrypted Key (DPAPI)</span>
@@ -923,7 +923,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         type="button"
                         onClick={handleTestConnection}
                         disabled={isTesting || (!apiKeyInput.trim() && !desktopStatus.hasKey)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold border border-amber-400 dark:border-amber-700 hover:bg-amber-100/50 dark:hover:bg-amber-950/30 text-amber-900 dark:text-amber-200 transition-all cursor-pointer disabled:opacity-40"
+                        className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold border border-amber-400 dark:border-amber-700 hover:bg-amber-100/50 dark:hover:bg-amber-950/30 text-amber-900 dark:text-amber-200 transition-all cursor-pointer disabled:opacity-40"
                       >
                         <span>{isTesting ? '⏳ Testing...' : '🔍 Test Connection'}</span>
                       </button>
@@ -932,7 +932,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         <button
                           type="button"
                           onClick={handleRemoveKey}
-                          className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-300/60 dark:border-red-900/40 transition-all cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-300/60 dark:border-red-900/40 transition-all cursor-pointer"
                         >
                           <span>🗑️ Remove Key</span>
                         </button>
@@ -950,7 +950,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
           {/* Pending Configuration Summary Banner */}
           <div className="px-5 py-3 bg-amber-50/90 dark:bg-black/40 border-t border-amber-300/40 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 flex-wrap text-slate-600 dark:text-slate-400 font-serif">
+            <div className="flex items-center gap-2 flex-wrap text-slate-600 dark:text-slate-400 font-sans">
               <span className="font-bold text-amber-800 dark:text-amber-400">Next Deal Summary:</span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 truncate max-w-[140px]" title={resolvedTopic}>
                 📚 {resolvedTopic}
@@ -982,7 +982,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               <button
                 type="button"
                 onClick={handleApplyNow}
-                className="px-3.5 py-2 rounded-lg text-xs font-serif font-bold text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 border border-amber-400/50 hover:border-amber-500 hover:bg-amber-100/50 dark:hover:bg-amber-950/40 transition-colors flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 rounded-lg text-xs font-sans font-bold text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 border border-amber-400/50 hover:border-amber-500 hover:bg-amber-100/50 dark:hover:bg-amber-950/40 transition-colors flex items-center gap-1.5 cursor-pointer"
                 title="Immediately apply and deal a new card right now for the current round"
               >
                 <span>🔄</span>
@@ -994,7 +994,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => { playSound('click'); onClose(); }}
-                className="px-4 py-2 rounded-lg text-xs font-serif font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-lg text-xs font-sans font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
               >
                 Close
               </button>

@@ -131,7 +131,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
               {player.avatar}
             </span>
             <div className="text-left">
-              <h2 className="text-xl md:text-2xl font-serif font-black text-amber-900 dark:text-amber-400 uppercase tracking-wide">
+              <h2 className="text-xl md:text-2xl font-sans font-black text-amber-900 dark:text-amber-400 uppercase tracking-wide">
                 The Wheel of Fortune
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
@@ -142,7 +142,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
           
           <button
             onClick={() => setShowOddsList(!showOddsList)}
-            className="text-xs font-serif font-bold text-amber-700 dark:text-amber-400 hover:underline px-2.5 py-1 rounded bg-amber-50 dark:bg-slate-800 border border-amber-200 dark:border-slate-700"
+            className="text-xs font-sans font-bold text-amber-700 dark:text-amber-400 hover:underline px-2.5 py-1 rounded bg-amber-50 dark:bg-slate-800 border border-amber-200 dark:border-slate-700"
             title="Toggle odds breakdown"
           >
             {showOddsList ? 'Hide Odds' : 'View 10 Odds'}
@@ -357,7 +357,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
                 fill="#ca8a04"
                 textAnchor="middle"
                 letterSpacing="1"
-                className="pointer-events-none select-none font-serif"
+                className="pointer-events-none select-none font-sans"
               >
                 WHEEL
               </text>
@@ -387,11 +387,11 @@ export const WheelModal: React.FC<WheelModalProps> = ({
               <PowerUpTooltip icon={selectedItem.icon} name={selectedItem.name} description={selectedItem.description} placement="top">
                 <span className="text-3xl cursor-help hover:scale-125 transition-transform inline-block">{selectedItem.icon}</span>
               </PowerUpTooltip>
-              <span className="text-lg font-serif font-black uppercase tracking-wider">
+              <span className="text-lg font-sans font-black uppercase tracking-wider">
                 {selectedItem.type === 'positive' ? 'Fortune Smiles!' : 'Misfortune Strikes!'}
               </span>
             </div>
-            <div className="text-xl font-bold font-serif mb-1 text-slate-900 dark:text-white">
+            <div className="text-xl font-bold font-sans mb-1 text-slate-900 dark:text-white">
               {selectedItem.name} ({selectedItem.shortDesc})
             </div>
             <p className="text-sm text-slate-700 dark:text-slate-300 max-w-md mx-auto leading-relaxed">
@@ -406,7 +406,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
             <button
               onClick={handleSpin}
               disabled={isSpinning}
-              className={`px-8 py-3.5 rounded-xl font-serif text-lg font-black uppercase tracking-widest transition-all duration-200 transform shadow-xl flex items-center gap-3 ${
+              className={`px-8 py-3.5 rounded-xl font-sans text-lg font-black uppercase tracking-widest transition-all duration-200 transform shadow-xl flex items-center gap-3 ${
                 isSpinning
                   ? 'bg-slate-400 text-slate-200 cursor-not-allowed opacity-75'
                   : 'cursor-pointer bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 hover:scale-105 active:scale-95 border-2 border-amber-300'

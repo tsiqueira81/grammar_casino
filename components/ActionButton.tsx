@@ -57,7 +57,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
   if (className?.includes('bg-purple')) gradientClasses = "bg-gradient-to-b from-purple-500 via-purple-700 to-indigo-950 text-white border border-purple-300/80 shadow-md";
 
   const baseClasses = `
-    relative px-6 py-2.5 rounded-lg font-serif uppercase tracking-wider font-bold
+    relative px-6 py-2.5 rounded-lg font-sans uppercase tracking-wider font-bold
     transition-all duration-200 ease-out cursor-pointer select-none
     disabled:opacity-45 disabled:cursor-not-allowed disabled:grayscale disabled:shadow-none
   `;

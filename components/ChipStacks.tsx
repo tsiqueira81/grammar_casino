@@ -219,7 +219,7 @@ export const PokerChip: React.FC<PokerChipProps> = ({
       >
         <span
           style={{ color: config.inlayTextHex }}
-          className={`font-mono-casino font-extrabold tracking-tighter leading-none ${dimensions.text} drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]`}
+          className={`font-sans tabular-nums font-extrabold tracking-tighter leading-none ${dimensions.text} drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]`}
         >
           {denomination >= 1000 ? `${denomination / 1000}k` : denomination}
         </span>
@@ -308,7 +308,7 @@ export const ChipStack: React.FC<ChipStackProps> = ({
       </div>
 
       {/* Chip count badge */}
-      <div className="mt-1.5 flex items-center gap-1 bg-black/80 px-2 py-0.5 rounded-full border border-[#d4af37]/50 text-[10px] font-mono-casino text-amber-300 shadow-md">
+      <div className="mt-1.5 flex items-center gap-1 bg-black/80 px-2 py-0.5 rounded-full border border-[#d4af37]/50 text-[10px] font-sans tabular-nums text-amber-300 shadow-md">
         <span className="opacity-80">{count}×</span>
         <span className="font-bold text-white">${(count * denomination).toLocaleString()}</span>
       </div>
@@ -393,7 +393,7 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
 
   return (
     <div className={twMerge('p-3 rounded-xl felt-well space-y-2', className)}>
-      <div className="flex items-center justify-between text-[11px] font-serif uppercase tracking-widest text-amber-900 dark:text-amber-200/90">
+      <div className="flex items-center justify-between text-[11px] font-sans uppercase tracking-widest text-amber-900 dark:text-amber-200/90">
         <span className="flex items-center gap-1.5 font-bold">
           <span className="text-[#d4af37]">◈</span>
           <span>Chip Rack</span>
@@ -437,7 +437,7 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
                 onClick={() => handleChipClick(denom)}
                 disabled={disabled || !canAfford}
               />
-              <span className="text-[10px] font-mono-casino font-semibold text-amber-900/70 dark:text-amber-200/70 mt-1 group-hover/chip:text-amber-600 dark:group-hover/chip:text-[#fef08a] transition-colors">
+              <span className="text-[10px] font-sans tabular-nums font-semibold text-amber-900/70 dark:text-amber-200/70 mt-1 group-hover/chip:text-amber-600 dark:group-hover/chip:text-[#fef08a] transition-colors">
                 +${denom}
               </span>
             </div>
@@ -470,13 +470,13 @@ export const WagerChipsDisplay: React.FC<WagerChipsDisplayProps> = ({
     <div
       className={`px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/15 dark:from-[#082c19] dark:via-[#0d3b22] dark:to-[#082c19] border border-[#d4af37]/50 shadow-[inset_0_1px_0_rgba(254,240,138,0.2),0_4px_12px_rgba(0,0,0,0.2)] flex items-center justify-between gap-3 ${className}`}
     >
-      <div className="flex items-center gap-2 text-xs font-serif font-bold text-amber-950 dark:text-amber-200">
+      <div className="flex items-center gap-2 text-xs font-sans font-bold text-amber-950 dark:text-amber-200">
         <span className="w-6 h-6 rounded-full bg-[#d4af37]/20 border border-[#d4af37]/60 flex items-center justify-center text-xs text-amber-700 dark:text-[#fef08a]">
           ♠
         </span>
         <div>
           <div className="text-[10px] uppercase tracking-widest opacity-75">{label}</div>
-          <div className="font-mono-casino text-sm sm:text-base text-slate-900 dark:text-[#fef08a] font-extrabold">
+          <div className="font-sans tabular-nums text-sm sm:text-base text-slate-900 dark:text-[#fef08a] font-extrabold">
             ${amount.toLocaleString()}
           </div>
         </div>
@@ -487,7 +487,7 @@ export const WagerChipsDisplay: React.FC<WagerChipsDisplayProps> = ({
           <div key={denom} className="flex items-center bg-black/15 dark:bg-black/40 pl-1 pr-2 py-0.5 rounded-full border border-[#d4af37]/30">
             <PokerChip denomination={denom} size="xs" />
             {count > 1 && (
-              <span className="text-[10px] font-mono-casino font-bold text-amber-900 dark:text-amber-300 ml-1">
+              <span className="text-[10px] font-sans tabular-nums font-bold text-amber-900 dark:text-amber-300 ml-1">
                 ×{count}
               </span>
             )}

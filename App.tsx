@@ -4237,7 +4237,7 @@ export function App() {
             <div className="flex flex-col items-center mb-8">
               <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/40 mb-4 shadow-sm">
                 <span className="text-[#d4af37] text-xs tracking-widest">♠ ♥</span>
-                <span className="text-[11px] font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#fef08a] font-bold">
+                <span className="text-[11px] font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#fef08a] font-bold">
                   Salon Privé · Est. Monte Carlo
                 </span>
                 <span className="text-[#d4af37] text-xs tracking-widest">♦ ♣</span>
@@ -4253,7 +4253,7 @@ export function App() {
                 <div className="h-[1px] bg-gradient-to-l from-transparent via-[#d4af37] to-[#d4af37] flex-1 opacity-70"></div>
               </div>
 
-              <p className="text-xs sm:text-sm md:text-base text-amber-900/80 dark:text-amber-200/85 mt-2 font-serif uppercase tracking-[0.25em] font-semibold">
+              <p className="text-xs sm:text-sm md:text-base text-amber-900/80 dark:text-amber-200/85 mt-2 font-sans uppercase tracking-[0.25em] font-semibold">
                 Bet Your Knowledge &middot; Risk Your Stack &middot; Master English
               </p>
             </div>
@@ -4269,16 +4269,16 @@ export function App() {
               {/* Registry Header */}
               <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-6 border-b border-[#d4af37]/30">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-lg bg-[#d4af37]/15 border border-[#d4af37]/40 flex items-center justify-center text-amber-700 dark:text-[#fef08a] text-sm font-serif font-bold">
+                  <span className="w-8 h-8 rounded-lg bg-[#d4af37]/15 border border-[#d4af37]/40 flex items-center justify-center text-amber-700 dark:text-[#fef08a] text-sm font-sans font-bold">
                     ♠
                   </span>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-lg sm:text-xl font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
+                      <h2 className="text-lg sm:text-xl font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
                         VIP Table Registry
                       </h2>
                       {activeCloudRoster && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-extrabold bg-amber-500/20 text-amber-800 dark:text-[#fef08a] border border-[#d4af37]/50">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-extrabold bg-amber-500/20 text-amber-800 dark:text-[#fef08a] border border-[#d4af37]/50">
                           ☁️ {activeCloudRoster.className}
                         </span>
                       )}
@@ -4293,9 +4293,9 @@ export function App() {
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well border-[#d4af37]">
                     <PokerChip denomination={100} size="xs" />
                     <div className="text-left">
-                      <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60">Starting Stack</div>
+                      <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60">Starting Stack</div>
                       <div className="flex items-center gap-1">
-                        <span className="text-xs font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">$</span>
+                        <span className="text-xs font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">$</span>
                         <input
                           type="number"
                           min={1}
@@ -4311,7 +4311,7 @@ export function App() {
                             }
                           }}
                           autoFocus
-                          className="w-20 text-xs font-mono-casino font-extrabold text-amber-900 dark:text-[#fef08a] bg-transparent border-b border-[#d4af37] focus:outline-none"
+                          className="w-20 text-xs font-sans tabular-nums font-extrabold text-amber-900 dark:text-[#fef08a] bg-transparent border-b border-[#d4af37] focus:outline-none"
                         />
                         <button
                           type="button"
@@ -4340,11 +4340,11 @@ export function App() {
                   >
                     <PokerChip denomination={100} size="xs" as="div" />
                     <div className="text-left">
-                      <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60 flex items-center gap-1">
+                      <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60 flex items-center gap-1">
                         <span>Starting Stack</span>
                         <span className="opacity-0 group-hover/stack:opacity-100 transition-opacity text-amber-600 dark:text-amber-400">✏️</span>
                       </div>
-                      <div className="text-xs font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">
+                      <div className="text-xs font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">
                         ${startingCash.toLocaleString()}
                       </div>
                     </div>
@@ -4360,11 +4360,11 @@ export function App() {
                   </span>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                      <span className="text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
                         Live Classroom Multiplayer
                       </span>
                       {mpRoomCode && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-extrabold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-extrabold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40">
                           ROOM {mpRoomCode} · {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length} ONLINE
                         </span>
                       )}
@@ -4385,7 +4385,7 @@ export function App() {
                         playSound('click');
                         setShowMpLobbyModal(true);
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                     >
                       <span>📡</span>
                       <span>Show QR &amp; Room ({mpRoomCode})</span>
@@ -4394,7 +4394,7 @@ export function App() {
                     <button
                       type="button"
                       onClick={handleCreateMpRoom}
-                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                       title={
                         isTeacherAiUnlocked || desktopStatus.isDesktop
                           ? 'Open a Live Classroom Room with QR Code'
@@ -4412,7 +4412,7 @@ export function App() {
                       playSound('click');
                       setIsStudentControllerMode(true);
                     }}
-                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
+                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
                     title="Join an existing room as a student controller"
                   >
                     <span>🎮</span>
@@ -4422,7 +4422,7 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => handleOpenCloudModal('rosters')}
-                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
+                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
                     title="Open Cloud Classroom Rosters, Session Reports & Cloud Sentence Bank"
                   >
                     <span>☁️</span>
@@ -4487,7 +4487,7 @@ export function App() {
                             )}
                           </button> 
                           <div className="min-w-0">
-                            <div className="text-[9px] font-mono-casino uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80 flex items-center gap-1">
+                            <div className="text-[9px] font-sans tabular-nums uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80 flex items-center gap-1">
                               <span>Seat #{index + 1} &middot; ${player.money.toLocaleString()}</span>
                               {mpSeat && (
                                 <span className="text-[8px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
@@ -4518,7 +4518,7 @@ export function App() {
                                 }}
                                 autoFocus
                                 maxLength={20}
-                                className="text-slate-900 dark:text-white font-serif uppercase tracking-wider text-sm font-bold bg-transparent border-b border-[#d4af37] focus:outline-none w-28"
+                                className="text-slate-900 dark:text-white font-sans uppercase tracking-wider text-sm font-bold bg-transparent border-b border-[#d4af37] focus:outline-none w-28"
                               />
                             ) : (
                               <div 
@@ -4526,7 +4526,7 @@ export function App() {
                                   setEditingPlayerIdInSetup(player.id);
                                   setEditingPlayerNameInSetup(player.name);
                                 }}
-                                className="text-slate-900 dark:text-amber-50 font-serif uppercase tracking-wider text-sm font-extrabold cursor-pointer hover:text-amber-700 dark:hover:text-[#fef08a] flex items-center gap-1.5 group/name truncate"
+                                className="text-slate-900 dark:text-amber-50 font-sans uppercase tracking-wider text-sm font-extrabold cursor-pointer hover:text-amber-700 dark:hover:text-[#fef08a] flex items-center gap-1.5 group/name truncate"
                                 title="Click to edit name"
                               >
                                 <span className="truncate">{player.name}</span>
@@ -4592,7 +4592,7 @@ export function App() {
           return ( 
           <div className="w-full max-w-4xl text-center animate-fade-in p-4"> 
             <div className="flex flex-col items-center mb-6">
-              <div className="text-xs font-serif uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] mb-1 font-bold">
+              <div className="text-xs font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] mb-1 font-bold">
                 Croupier's Charter · Step {settingsPart} of 2
               </div>
               <h2 className="text-3xl sm:text-5xl font-black text-gold tracking-widest uppercase title-glow font-display">
@@ -4610,16 +4610,16 @@ export function App() {
                       setSettingsPart(1);
                     }
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                     settingsPart === 1
                       ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
                       : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
                   }`}
                 >
-                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-mono-casino">1</span>
+                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-sans tabular-nums">1</span>
                   <span>Linguistic Setup</span>
                 </button>
-                <span className="text-[#d4af37]/60 font-serif text-sm select-none">&rarr;</span>
+                <span className="text-[#d4af37]/60 font-sans text-sm select-none">&rarr;</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -4627,13 +4627,13 @@ export function App() {
                       handleAdvanceToSettingsPart2();
                     }
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                     settingsPart === 2
                       ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
                       : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
                   }`}
                 >
-                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-mono-casino">2</span>
+                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-sans tabular-nums">2</span>
                   <span>House Rules &amp; Power-Ups</span>
                 </button>
               </div>
@@ -4649,7 +4649,7 @@ export function App() {
                   ].map(section => (
                     <div key={section.title} className="text-left">
                       <div className="mb-3.5 border-l-4 border-[#d4af37] pl-3.5">
-                        <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                        <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
                           {section.title}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
@@ -4662,7 +4662,7 @@ export function App() {
                             <button
                               key={item}
                               onClick={() => { playSound('click'); setSettings(s => ({...s, [section.settingKey]: item})); }} 
-                              className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-serif border cursor-pointer relative overflow-hidden ${
+                              className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-sans border cursor-pointer relative overflow-hidden ${
                                 isActive
                                   ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
                                   : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
@@ -4677,10 +4677,10 @@ export function App() {
                       {section.settingKey === 'level' && CEFR_DIFFICULTY_PROFILES[settings.level] && (
                         <div className="mt-3.5 p-4 rounded-xl felt-well text-xs space-y-1.5 animate-fade-in">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="font-mono-casino font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
+                            <span className="font-sans tabular-nums font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
                               {settings.level} — {CEFR_DIFFICULTY_PROFILES[settings.level]?.title}
                             </span>
-                            <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-serif uppercase tracking-widest">
+                            <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-sans uppercase tracking-widest">
                               Croupier's Briefing
                             </span>
                           </div>
@@ -4700,7 +4700,7 @@ export function App() {
                           <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} />
                           {section.settingKey === 'topic' && (
                             <div className="p-3 rounded-xl felt-well flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] font-serif uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mr-1">
+                              <span className="text-[11px] font-sans uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mr-1">
                                 Quick Lexical Topics:
                               </span>
                               {QUICK_LEXICAL_TOPICS.map(lex => {
@@ -4713,7 +4713,7 @@ export function App() {
                                       playSound('click');
                                       section.setCustomValue!(lex);
                                     }}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-serif transition-all cursor-pointer border ${
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-sans transition-all cursor-pointer border ${
                                       isPicked
                                         ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] font-extrabold shadow-sm'
                                         : 'bg-white/70 dark:bg-black/30 text-slate-800 dark:text-amber-100/85 border-[#d4af37]/40 hover:border-[#d4af37]'
@@ -4733,7 +4733,7 @@ export function App() {
                   {/* IV. Challenge Format Selector */}
                   <div className="text-left border-t border-[#d4af37]/25 pt-6">
                     <div className="mb-3.5 border-l-4 border-emerald-400 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
                         IV. Challenge Format
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-amber-200/60">
@@ -4767,11 +4767,11 @@ export function App() {
                             <span className="text-2xl sm:text-3xl select-none shrink-0 mt-0.5">{fmt.icon}</span>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2">
-                                <span className="font-serif font-extrabold text-sm sm:text-base uppercase tracking-wider">
+                                <span className="font-sans font-extrabold text-sm sm:text-base uppercase tracking-wider">
                                   {fmt.label}
                                 </span>
                                 {isSelected && (
-                                  <span className="text-[10px] font-mono-casino font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
+                                  <span className="text-[10px] font-sans tabular-nums font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
                                     Active
                                   </span>
                                 )}
@@ -4816,10 +4816,10 @@ export function App() {
                         <div className="mt-4 p-4 sm:p-5 rounded-xl felt-well border-2 border-[#d4af37]/60 space-y-3 animate-fade-in">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <div className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] flex items-center gap-2">
+                              <div className="text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] flex items-center gap-2">
                                 <span>🎛️</span>
                                 <span>Customize Mixed Shoe Challenges</span>
-                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono-casino font-bold bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-sans tabular-nums font-bold bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
                                   {activeMixed.length} of 5 Selected
                                 </span>
                               </div>
@@ -4835,7 +4835,7 @@ export function App() {
                                   setMixedFormatSetupWarning(null);
                                   setSettings(s => ({ ...s, mixedFormats: ALL_QUESTION_TYPES }));
                                 }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider bg-amber-500/20 hover:bg-amber-500/30 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] transition-all cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider bg-amber-500/20 hover:bg-amber-500/30 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] transition-all cursor-pointer"
                               >
                                 Select All 5
                               </button>
@@ -4858,7 +4858,7 @@ export function App() {
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
                                     <span className="text-xl select-none shrink-0">{subFmt.icon}</span>
-                                    <span className="font-serif font-bold text-xs uppercase tracking-wider truncate">
+                                    <span className="font-sans font-bold text-xs uppercase tracking-wider truncate">
                                       {subFmt.shortLabel}
                                     </span>
                                   </div>
@@ -4877,13 +4877,13 @@ export function App() {
                           </div>
 
                           {mixedFormatSetupWarning && (
-                            <div className="text-xs font-serif text-amber-900 dark:text-amber-200 bg-amber-500/15 border border-[#d4af37]/50 rounded-lg px-3 py-1.5 flex items-center gap-2">
+                            <div className="text-xs font-sans text-amber-900 dark:text-amber-200 bg-amber-500/15 border border-[#d4af37]/50 rounded-lg px-3 py-1.5 flex items-center gap-2">
                               <span>⚠️</span>
                               <span>{mixedFormatSetupWarning}</span>
                             </div>
                           )}
 
-                          <div className="text-xs font-serif text-slate-700 dark:text-amber-100/85 flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#d4af37]/20">
+                          <div className="text-xs font-sans text-slate-700 dark:text-amber-100/85 flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#d4af37]/20">
                             <span className="font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">Rotation Order:</span>
                             <span>
                               {activeMixed
@@ -4899,7 +4899,7 @@ export function App() {
                     })()}
 
                     {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'wordFormation' || settings.challengeFormat === 'keyWordTransformation' || settings.challengeFormat === 'mixed') && (
-                      <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-serif text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
+                      <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-sans text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
                         <span>ℹ️</span>
                         <span>
                           <strong>Cloze &amp; Transformation House Rules:</strong> Clean 1:1 base payouts on Cloze &amp; Word Formation; <strong>Key Word Transformation</strong> awards <strong>1× Wager</strong> for 1/2 mark (partial) and <strong>2× Wager</strong> for 2/2 marks (full transformation)! <em>Split Bet</em> lets you hedge 2 options/phrases (50% each) or stack 1 for full payout. <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
@@ -4932,19 +4932,19 @@ export function App() {
                   {/* Locked-in Linguistic Setup Summary Bar */}
                   <div className="p-3.5 sm:p-4 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3 text-left">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-serif uppercase tracking-wider text-amber-800 dark:text-[#d4af37] font-bold mr-1">
+                      <span className="font-sans uppercase tracking-wider text-amber-800 dark:text-[#d4af37] font-bold mr-1">
                         Charter Locked:
                       </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-serif font-bold text-slate-900 dark:text-[#fef08a]">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans font-bold text-slate-900 dark:text-[#fef08a]">
                         📚 {resolvedTopicPreview}
                       </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-mono-casino font-bold text-slate-900 dark:text-[#fef08a]">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans tabular-nums font-bold text-slate-900 dark:text-[#fef08a]">
                         🎯 {settings.level}
                       </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-serif font-bold text-slate-900 dark:text-[#fef08a]">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans font-bold text-slate-900 dark:text-[#fef08a]">
                         🎭 {resolvedThemePreview}
                       </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 font-serif font-bold text-emerald-900 dark:text-emerald-200">
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 font-sans font-bold text-emerald-900 dark:text-emerald-200">
                         {currentFormatObj.icon} {currentFormatObj.label}
                         {settings.challengeFormat === 'mixed' && (
                           <span className="ml-1 opacity-90">
@@ -4959,7 +4959,7 @@ export function App() {
                         playSound('click');
                         setSettingsPart(1);
                       }}
-                      className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer shrink-0"
+                      className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer shrink-0"
                     >
                       &larr; Edit Setup
                     </button>
@@ -4968,7 +4968,7 @@ export function App() {
                   {/* V. Configure Power-Up Shoe */}
                   <div className="text-left">
                     <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
                         V. House Power-Up Shoe
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
@@ -4978,10 +4978,10 @@ export function App() {
                       <div className="space-y-1.5 flex-1 min-w-0 w-full">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="text-2xl filter drop-shadow select-none">🎴</span>
-                          <span className="font-serif font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
+                          <span className="font-sans font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
                             Active Shoe Deck
                           </span>
-                          <span className="px-2.5 py-0.5 rounded-full text-xs font-mono-casino font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-sans tabular-nums font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
                             {selectedPowerUps.length} / {(Object.keys(POWER_UPS) as PowerUpKey[]).length} Cards
                           </span>
                         </div>
@@ -4995,7 +4995,7 @@ export function App() {
                             </span>
                           ))}
                           {selectedPowerUps.length > 12 && (
-                            <span className="text-[11px] font-mono-casino text-purple-700 dark:text-purple-300 font-bold ml-1">
+                            <span className="text-[11px] font-sans tabular-nums text-purple-700 dark:text-purple-300 font-bold ml-1">
                               +{selectedPowerUps.length - 12} more
                             </span>
                           )}
@@ -5021,7 +5021,7 @@ export function App() {
                   {/* VI. Win Condition */}
                   <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
                     <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
                         VI. Table Rules &amp; Victory Condition
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
@@ -5039,7 +5039,7 @@ export function App() {
                         }`}
                       >
                         <div className="text-3xl mb-2">👑</div>
-                        <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
+                        <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
                         <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Play until only one solvent player remains.</div>
                       </button> 
 
@@ -5055,13 +5055,13 @@ export function App() {
                           className="w-full text-center cursor-pointer"
                         >
                             <div className="text-3xl mb-2">⏳</div>
-                            <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
+                            <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
                             <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Richest vault after a set number of hands.</div>
                         </button> 
                         {gameMode === 'rounds' && (
                           <div className="flex flex-col items-center gap-2 pt-2 border-t border-sky-400/30 w-full">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
+                              <span className="text-xs font-sans uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
                               <TextInput 
                                 type="number" 
                                 min={1}
@@ -5071,7 +5071,7 @@ export function App() {
                                   const val = e.target.value; 
                                   setTotalRounds(val === '' ? '' : parseInt(val, 10));
                                 }} 
-                                className="w-20 text-center !py-1 font-mono-casino font-bold"
+                                className="w-20 text-center !py-1 font-sans tabular-nums font-bold"
                               />
                             </div>
                             <div className="flex items-center gap-1.5 text-[11px]">
@@ -5080,7 +5080,7 @@ export function App() {
                                   key={r}
                                   type="button"
                                   onClick={() => { playSound('click'); setTotalRounds(r); }}
-                                  className={`px-2 py-0.5 rounded border text-xs font-mono-casino transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
+                                  className={`px-2 py-0.5 rounded border text-xs font-sans tabular-nums transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
                                 >
                                   {r}
                                 </button>
@@ -5102,13 +5102,13 @@ export function App() {
                           className="w-full text-center cursor-pointer"
                         >
                             <div className="text-3xl mb-2">🎯</div>
-                            <div className="font-serif text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
+                            <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
                             <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">First high-roller to hit the vault target wins.</div>
                         </button> 
                         {gameMode === 'targetAmount' && (
                           <div className="flex flex-col items-center gap-2 pt-2 border-t border-emerald-400/30 w-full">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-serif uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
+                              <span className="text-xs font-sans uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
                               <TextInput 
                                 type="number" 
                                 min={MIN_TARGET_AMOUNT}
@@ -5118,7 +5118,7 @@ export function App() {
                                   const val = e.target.value; 
                                   setTargetAmount(val === '' ? '' : parseInt(val, 10));
                                 }} 
-                                className="w-24 text-center !py-1 font-mono-casino font-bold"
+                                className="w-24 text-center !py-1 font-sans tabular-nums font-bold"
                               />
                             </div>
                             <div className="flex flex-wrap justify-center items-center gap-1 text-[11px]">
@@ -5127,7 +5127,7 @@ export function App() {
                                   key={amt}
                                   type="button"
                                   onClick={() => { playSound('click'); setTargetAmount(amt); }}
-                                  className={`px-2 py-0.5 rounded border text-[11px] font-mono-casino transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
+                                  className={`px-2 py-0.5 rounded border text-[11px] font-sans tabular-nums transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
                                 >
                                   ${amt >= 1000 ? `${amt / 1000}k` : amt}
                                 </button>
@@ -5143,7 +5143,7 @@ export function App() {
                   <div className="text-left border-t border-[#d4af37]/25 pt-6">
                     <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-lg sm:text-xl font-serif text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
+                        <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
                           {mpRoomCode ? 'VII. Shared Round Clock' : 'VII. Betting Turn Clock'}
                         </h3>
                         <p className="text-xs text-slate-500 dark:text-amber-200/60">
@@ -5156,7 +5156,7 @@ export function App() {
                         <button
                           type="button"
                           onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
-                          className={`px-3 py-1.5 rounded-full text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                          className={`px-3 py-1.5 rounded-full text-xs font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
                             autoStartNextTimer
                               ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
                               : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
@@ -5188,7 +5188,7 @@ export function App() {
                               setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
                               mpAutoStartedRoundRef.current = 0;
                             }}
-                            className={`p-3.5 rounded-xl transition-all duration-200 font-serif border cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                            className={`p-3.5 rounded-xl transition-all duration-200 font-sans border cursor-pointer flex flex-col items-center justify-center gap-1 ${
                               isSelected
                                 ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
                                 : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
@@ -5309,11 +5309,11 @@ export function App() {
             if (isClozeRound && sentenceHtml) {
               const inlineBaseWordBadge =
                 currentQuestionType === 'wordFormation' && currentSentence?.baseWord
-                  ? ` <span class="inline-block px-2.5 py-0.5 mx-1 rounded-md bg-amber-500/25 dark:bg-amber-400/20 border border-[#d4af37]/70 text-amber-950 dark:text-[#fef08a] font-mono-casino font-black not-italic tracking-wider text-[0.78em] align-middle select-none shadow-sm">(${currentSentence.baseWord.toUpperCase()})</span>`
+                  ? ` <span class="inline-block px-2.5 py-0.5 mx-1 rounded-md bg-amber-500/25 dark:bg-amber-400/20 border border-[#d4af37]/70 text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black not-italic tracking-wider text-[0.78em] align-middle select-none shadow-sm">(${currentSentence.baseWord.toUpperCase()})</span>`
                   : '';
               sentenceHtml = sentenceHtml.replace(
                 /_{3,}/g,
-                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic tracking-widest text-center select-none">_____</span>${inlineBaseWordBadge}`
+                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans tabular-nums font-bold not-italic tracking-widest text-center select-none">_____</span>${inlineBaseWordBadge}`
               );
             }
 
@@ -5398,7 +5398,7 @@ export function App() {
                         <div key={player.id} className="space-y-2">
                           {mpRoomCode && mpSeat?.lockedIn && !isFrozen && player.money > 0 && (
                             <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/50 text-emerald-900 dark:text-emerald-200">
-                              <span className="text-xs font-serif font-extrabold uppercase tracking-wider flex items-center gap-2">
+                              <span className="text-xs font-sans font-extrabold uppercase tracking-wider flex items-center gap-2">
                                 <span>🔒</span>
                                 <span>{player.name} Locked In Wager on Device</span>
                               </span>
@@ -5406,7 +5406,7 @@ export function App() {
                                 type="button"
                                 onClick={() => handleMpUnlockPlayer(player.id)}
                                 title="Teacher Only: Unlock this player's wager so they can change their bet"
-                                className="px-3 py-1 rounded-lg font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
+                                className="px-3 py-1 rounded-lg font-sans font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
                               >
                                 <span>🔓</span>
                                 <span>Unlock Player</span>
@@ -5519,11 +5519,11 @@ export function App() {
                           <div className="w-16 h-16 rounded-full border-2 border-[#d4af37]/70 bg-black/40 flex items-center justify-center text-3xl text-[#fef08a] mb-3 shadow-[0_0_20px_rgba(212,175,55,0.3)] select-none">
                             ♠
                           </div>
-                          <h2 className="text-xl sm:text-2xl font-serif font-extrabold text-[#fef08a] uppercase tracking-[0.35em] select-none drop-shadow">
+                          <h2 className="text-xl sm:text-2xl font-sans font-extrabold text-[#fef08a] uppercase tracking-[0.35em] select-none drop-shadow">
                             DEALING FROM THE SHOE
                           </h2>
                           {isLoading && (
-                            <div className="mt-2 text-amber-300/80 font-mono-casino text-xs uppercase tracking-[0.25em] animate-bounce">
+                            <div className="mt-2 text-amber-300/80 font-sans tabular-nums text-xs uppercase tracking-[0.25em] animate-bounce">
                               Croupier is Shuffling...
                             </div>
                           )}
@@ -5546,20 +5546,20 @@ export function App() {
 
                             {/* Playing Card Top-Left Index */}
                             <div className="pointer-events-none absolute top-3.5 left-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 select-none">
-                              <span className="font-serif font-black text-xs">R{currentRound}</span>
+                              <span className="font-sans font-black text-xs">R{currentRound}</span>
                               <span className="text-sm mt-0.5">♠</span>
                             </div>
 
                             {/* Playing Card Bottom-Right Index (Inverted) */}
                             {!isSentenceHeaderStuck && (
                               <div className="pointer-events-none absolute bottom-3.5 right-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 rotate-180 select-none">
-                                <span className="font-serif font-black text-xs">R{currentRound}</span>
+                                <span className="font-sans font-black text-xs">R{currentRound}</span>
                                 <span className="text-sm mt-0.5">♠</span>
                               </div>
                             )}
 
                             {/* Bullion Plaque Overlapping Top Border */}
-                            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif uppercase tracking-[0.2em] text-[11px] sm:text-xs font-extrabold px-6 py-1 rounded-full border border-[#fef9c3] shadow-[0_4px_15px_rgba(202,138,4,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] z-10 whitespace-nowrap flex items-center gap-2">
+                            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans uppercase tracking-[0.2em] text-[11px] sm:text-xs font-extrabold px-6 py-1 rounded-full border border-[#fef9c3] shadow-[0_4px_15px_rgba(202,138,4,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] z-10 whitespace-nowrap flex items-center gap-2">
                                 <span>♦</span>
                                 <span>Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''}{gameMode === 'targetAmount' ? ` · Target: $${Number(targetAmount).toLocaleString()}` : ''} · {currentHandFormatBadge}</span>
                                 <span>♦</span>
@@ -5574,7 +5574,7 @@ export function App() {
                                       title="Copy sentence to clipboard"
                                     >
                                       <span>{isCopied ? '✓' : '📋'}</span>
-                                      <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
+                                      <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
                                     </button>
                                     <button 
                                       onClick={() =>
@@ -5591,13 +5591,13 @@ export function App() {
                                       title="Read sentence aloud"
                                     >
                                       <span>🔊</span>
-                                      <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
+                                      <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
                                     </button>
                                 </div>
 
                                 {currentQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence && (
                                   <div className="w-full max-w-3xl mx-auto mb-3 px-4 py-2.5 rounded-xl bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/45 text-center space-y-2">
-                                    <div className="text-[10px] sm:text-xs font-serif font-bold uppercase tracking-[0.2em] text-amber-800 dark:text-amber-300/85">
+                                    <div className="text-[10px] sm:text-xs font-sans font-bold uppercase tracking-[0.2em] text-amber-800 dark:text-amber-300/85">
                                       Lead-In Sentence (Keep Similar Meaning)
                                     </div>
                                     <p className="text-base sm:text-xl md:text-2xl font-editorial text-slate-800 dark:text-amber-100">
@@ -5605,10 +5605,10 @@ export function App() {
                                     </p>
                                     {currentSentence.baseWord && (
                                       <div className="pt-1 flex items-center justify-center gap-2 flex-wrap">
-                                        <span className="px-3.5 py-1 rounded-lg bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-mono-casino font-black text-sm sm:text-base tracking-[0.2em] uppercase shadow-md border border-[#fef9c3]">
+                                        <span className="px-3.5 py-1 rounded-lg bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans tabular-nums font-black text-sm sm:text-base tracking-[0.2em] uppercase shadow-md border border-[#fef9c3]">
                                           🔑 KEY WORD: {currentSentence.baseWord.toUpperCase()}
                                         </span>
-                                        <span className="text-[11px] font-serif font-semibold text-amber-900 dark:text-amber-200/80">
+                                        <span className="text-[11px] font-sans font-semibold text-amber-900 dark:text-amber-200/80">
                                           (Use 2–6 words including this exact word · 1 Mark = 1× · 2 Marks = 2×)
                                         </span>
                                       </div>
@@ -5629,7 +5629,7 @@ export function App() {
                                   <button
                                     type="button"
                                     onClick={handleToggleSettingsDeckExpanded}
-                                    className="group px-4 py-1.5 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none"
+                                    className="group px-4 py-1.5 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none"
                                     title={isSettingsDeckExpanded ? "Click to collapse Round Settings & Deck" : "Click to expand Round Settings & Deck"}
                                     aria-expanded={isSettingsDeckExpanded}
                                   >
@@ -5638,11 +5638,11 @@ export function App() {
                                         <span>📚</span>
                                         <span className="font-bold">{settings.topic}</span>
                                         {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.topic}</span>
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.topic}</span>
                                         )}
                                         {currentSentence?.bankTopic && (
                                           <span
-                                            className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-mono-casino font-bold"
+                                            className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-sans tabular-nums font-bold"
                                             title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
                                           >
                                             This hand: {currentSentence.bankTopic}
@@ -5654,7 +5654,7 @@ export function App() {
                                         <span>📊</span>
                                         <span className="font-bold">{settings.level}</span>
                                         {nextRoundSettings && nextRoundSettings.level !== settings.level && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.level}</span>
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.level}</span>
                                         )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
@@ -5662,7 +5662,7 @@ export function App() {
                                         <span>🎭</span>
                                         <span className="font-bold">{settings.theme}</span>
                                         {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.theme}</span>
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.theme}</span>
                                         )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
@@ -5682,31 +5682,31 @@ export function App() {
                                             getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
                                               getEffectiveMixedFormats(settings.mixedFormats).join(','))
                                         ) && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">
                                             Next: {nextFormatConfig.shortLabel}
                                             {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
                                           </span>
                                         )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 text-purple-700 dark:text-purple-300 font-mono-casino font-bold">
+                                      <span className="inline-flex items-center gap-1 text-purple-700 dark:text-purple-300 font-sans tabular-nums font-bold">
                                         <span>🃏</span>
                                         <span>{selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}</span>
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 text-amber-800 dark:text-[#fef08a] font-mono-casino font-bold">
+                                      <span className="inline-flex items-center gap-1 text-amber-800 dark:text-[#fef08a] font-sans tabular-nums font-bold">
                                         <span>⏱️</span>
                                         <span>{turnTimerSeconds === 0 ? 'Off' : `${turnTimerSeconds}s`}</span>
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 font-mono-casino text-[10px] font-bold text-amber-800 dark:text-[#fef08a]">
+                                      <span className="inline-flex items-center gap-1 font-sans tabular-nums text-[10px] font-bold text-amber-800 dark:text-[#fef08a]">
                                         <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
                                         <span>{desktopStatus.decryptionFailed ? 'Re-enter Key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI' : 'Offline Bank'}</span>
                                         {desktopStatus.isPortable && <span className="opacity-75" title="Portable Edition">🎒</span>}
                                         {desktopStatus.isReadOnly && <span className="text-red-500" title="Read-Only Media">🔒</span>}
                                       </span>
                                     </span>
-                                    <span className="text-[10px] font-mono-casino font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
+                                    <span className="text-[10px] font-sans tabular-nums font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
                                       <span>{isSettingsDeckExpanded ? '▲ Hide Charter' : '▼ Table Charter'}</span>
                                     </span>
                                   </button>
@@ -5721,7 +5721,7 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('topic')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
                                         title="Click to change Topic for next round"
                                       >
                                         <span className="flex items-center gap-1">
@@ -5729,7 +5729,7 @@ export function App() {
                                           <span className="font-bold">{settings.topic}</span>
                                           {currentSentence?.bankTopic && (
                                             <span
-                                              className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-mono-casino font-bold"
+                                              className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-sans tabular-nums font-bold"
                                               title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
                                             >
                                               This hand: {currentSentence.bankTopic}
@@ -5737,7 +5737,7 @@ export function App() {
                                           )}
                                         </span>
                                         {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
                                             <span>Next:</span>
                                             <span className="truncate max-w-[100px]">{nextRoundSettings.topic}</span>
                                           </span>
@@ -5749,7 +5749,7 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('level')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
                                         title="Click to change CEFR Level for next round"
                                       >
                                         <span className="flex items-center gap-1">
@@ -5757,7 +5757,7 @@ export function App() {
                                           <span className="font-bold">{settings.level}</span>
                                         </span>
                                         {nextRoundSettings && nextRoundSettings.level !== settings.level && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
                                             <span>Next:</span>
                                             <span>{nextRoundSettings.level}</span>
                                           </span>
@@ -5769,7 +5769,7 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('theme')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
                                         title="Click to change Theme for next round"
                                       >
                                         <span className="flex items-center gap-1">
@@ -5777,7 +5777,7 @@ export function App() {
                                           <span className="font-bold">{settings.theme}</span>
                                         </span>
                                         {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
                                             <span>Next:</span>
                                             <span className="truncate max-w-[100px]">{nextRoundSettings.theme}</span>
                                           </span>
@@ -5789,7 +5789,7 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('format')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
                                         title="Click to change Challenge Format (Valid/Flawed, Multiple-Choice Cloze, Open Cloze, Word Formation, Mixed Shoe)"
                                       >
                                         <span className="flex items-center gap-1">
@@ -5809,7 +5809,7 @@ export function App() {
                                             getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
                                               getEffectiveMixedFormats(settings.mixedFormats).join(','))
                                         ) && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
+                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
                                             <span>Next:</span>
                                             <span>
                                               {nextFormatConfig.shortLabel}
@@ -5824,20 +5824,20 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('ai')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
+                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
                                         title="Click to view AI & Offline Settings"
                                       >
                                         <span className="flex items-center gap-1">
                                           <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
                                           <span className="font-bold">{desktopStatus.decryptionFailed ? 'Key Re-entry Needed' : desktopStatus.hasKey && desktopStatus.isOnline ? 'Gemini AI' : 'Offline Bank'}</span>
-                                          {desktopStatus.isPortable && <span className="text-purple-600 dark:text-purple-300 font-mono-casino font-bold text-[10px]">🎒 Portable</span>}
-                                          {desktopStatus.isReadOnly && <span className="text-red-500 font-mono-casino font-bold text-[10px]">🔒 Read-Only</span>}
+                                          {desktopStatus.isPortable && <span className="text-purple-600 dark:text-purple-300 font-sans tabular-nums font-bold text-[10px]">🎒 Portable</span>}
+                                          {desktopStatus.isReadOnly && <span className="text-red-500 font-sans tabular-nums font-bold text-[10px]">🔒 Read-Only</span>}
                                         </span>
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">⚙️</span>
                                       </button>
 
 {/* Turn / Round Clock Quick Selector Pill */}
-                                      <div className="px-3 py-1 felt-well rounded-full text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
+                                      <div className="px-3 py-1 felt-well rounded-full text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
                                         <span>⏱️ {mpRoomCode ? 'Round Clock:' : 'Turn Clock:'}</span>
                                         {TURN_TIMER_OPTIONS.map(secs => (
                                           <button
@@ -5850,7 +5850,7 @@ export function App() {
                                               setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
                                               mpAutoStartedRoundRef.current = 0;
                                             }}
-                                            className={`px-2 py-0.5 rounded-full font-mono-casino text-[10px] font-bold transition-all cursor-pointer ${
+                                            className={`px-2 py-0.5 rounded-full font-sans tabular-nums text-[10px] font-bold transition-all cursor-pointer ${
                                               turnTimerSeconds === secs
                                                 ? 'bg-[#d4af37] text-black shadow-sm'
                                                 : 'hover:bg-amber-500/20 text-slate-700 dark:text-amber-200/80'
@@ -5863,7 +5863,7 @@ export function App() {
                                     </div>
 
                                     {/* Interactive Deck Power-ups Bar */}
-                                    <div className="px-4 py-1.5 felt-well border-purple-400/40 rounded-full text-xs font-serif text-purple-900 dark:text-purple-200 flex flex-wrap items-center gap-2 max-w-full justify-center">
+                                    <div className="px-4 py-1.5 felt-well border-purple-400/40 rounded-full text-xs font-sans text-purple-900 dark:text-purple-200 flex flex-wrap items-center gap-2 max-w-full justify-center">
                                       <button 
                                         type="button"
                                         onClick={() => {
@@ -5874,7 +5874,7 @@ export function App() {
                                         title="Configure Power-Up Deck"
                                       >
                                         <span>🃏 Shoe:</span>
-                                        <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-purple-500/20 font-semibold" title={`${selectedPowerUps.length} of ${(Object.keys(POWER_UPS) as PowerUpKey[]).length} power-ups active`}>
+                                        <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-purple-500/20 font-semibold" title={`${selectedPowerUps.length} of ${(Object.keys(POWER_UPS) as PowerUpKey[]).length} power-ups active`}>
                                           {selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}
                                         </span>
                                         <span className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity">✏️</span>
@@ -6014,7 +6014,7 @@ export function App() {
                 {isTurnTimerEnabled && !mpRoomCode && (
                   <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="text-xs font-serif font-extrabold uppercase tracking-[0.2em] text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
+                      <span className="text-xs font-sans font-extrabold uppercase tracking-[0.2em] text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
                         <span>⏱️</span>
                         <span>Turn Sequence ({turnTimerSeconds}s):</span>
                       </span>
@@ -6034,7 +6034,7 @@ export function App() {
                           return (
                             <React.Fragment key={p.id}>
                               {idx > 0 && <span className="text-[#d4af37]/50 text-xs select-none">&rarr;</span>}
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-serif border flex items-center gap-1.5 ${badgeClass}`}>
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-sans border flex items-center gap-1.5 ${badgeClass}`}>
                                 <span>{p.avatar}</span>
                                 <span>{p.name}</span>
                                 <span className="text-[10px]">
@@ -6052,7 +6052,7 @@ export function App() {
                         <button
                           type="button"
                           onClick={() => handleTimerStart(nextIdlePlayer.id)}
-                          className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-extrabold uppercase tracking-wider bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border border-emerald-300/80 shadow-[0_2px_0_#064e3b] hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border border-emerald-300/80 shadow-[0_2px_0_#064e3b] hover:brightness-110 active:scale-95 transition-all cursor-pointer"
                         >
                           ▶ Start {nextIdlePlayer.name}'s Turn
                         </button>
@@ -6060,7 +6060,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
-                        className={`px-3 py-1.5 rounded-xl text-[11px] font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
                           autoStartNextTimer
                             ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
                             : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
@@ -6072,7 +6072,7 @@ export function App() {
                                           <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('ai')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                         title="Click to view AI & Offline Settings"
                       >
                         <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡ Gemini AI' : '💾 Offline Bank'}</span>
@@ -6091,15 +6091,15 @@ export function App() {
                           playSound('click');
                           setShowMpLobbyModal(true);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-mono-casino font-extrabold text-xs uppercase tracking-widest border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans tabular-nums font-extrabold text-xs uppercase tracking-widest border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                       >
                         <span>📱 Room {mpRoomCode}</span>
                         <span className="text-[10px]">QR</span>
                       </button>
 
-                      <div className="text-xs font-serif text-slate-800 dark:text-amber-100 flex items-center gap-2">
+                      <div className="text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-2">
                         <span>🔒 Wagers Locked:</span>
-                        <span className="px-2.5 py-0.5 rounded-full felt-well font-mono-casino font-extrabold text-amber-800 dark:text-[#fef08a]">
+                        <span className="px-2.5 py-0.5 rounded-full felt-well font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">
                           {mpLockedCount} / {unfrozenActivePlayers.length}
                         </span>
                       </div>
@@ -6112,7 +6112,7 @@ export function App() {
                           playSound('click');
                           setMpHideProjectorBets(v => !v);
                         }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
                           mpHideProjectorBets
                             ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-900 dark:text-emerald-200'
                             : 'felt-well border-[#d4af37]/50 text-slate-700 dark:text-amber-100'
@@ -6166,20 +6166,20 @@ export function App() {
                                 )}
                               </div>
                               <div className="min-w-0">
-                                <div className="text-[10px] font-mono-casino uppercase tracking-widest text-amber-800/75 dark:text-[#d4af37]/80">
+                                <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-amber-800/75 dark:text-[#d4af37]/80">
                                   Seat #{idx + 1} {mpSeat ? '· 📱 Mobile' : '· 🖥️ Table'}
                                 </div>
-                                <div className="font-serif font-extrabold uppercase tracking-wider text-base text-slate-900 dark:text-amber-50 truncate">
+                                <div className="font-sans font-extrabold uppercase tracking-wider text-base text-slate-900 dark:text-amber-50 truncate">
                                   {player.name}
                                 </div>
                               </div>
                             </div>
 
                             <div className="text-right shrink-0">
-                              <div className="text-[9px] font-serif uppercase tracking-widest text-slate-500 dark:text-amber-200/60">
+                              <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60">
                                 Bankroll
                               </div>
-                              <div className="font-mono-casino font-black text-base text-emerald-700 dark:text-[#fef08a]">
+                              <div className="font-sans tabular-nums font-black text-base text-emerald-700 dark:text-[#fef08a]">
                                 ${player.money.toLocaleString()}
                               </div>
                             </div>
@@ -6191,7 +6191,7 @@ export function App() {
                               {playerActive.map((pu, i) => (
                                 <span
                                   key={i}
-                                  className="px-2 py-0.5 rounded-full text-[10px] font-serif font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]"
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-sans font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]"
                                 >
                                   {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
                                 </span>
@@ -6199,7 +6199,7 @@ export function App() {
                               {player.effects.map((ef, i) => (
                                 <span
                                   key={`ef-${i}`}
-                                  className="px-2 py-0.5 rounded-full text-[10px] font-serif font-bold bg-purple-500/15 border border-purple-400/40 text-purple-900 dark:text-purple-200"
+                                  className="px-2 py-0.5 rounded-full text-[10px] font-sans font-bold bg-purple-500/15 border border-purple-400/40 text-purple-900 dark:text-purple-200"
                                 >
                                   {POWER_UPS[ef.type as PowerUpKey]?.icon || '✨'} {ef.type}
                                 </span>
@@ -6210,7 +6210,7 @@ export function App() {
                           {/* Status Pill */}
                           <div className="flex items-center gap-2">
                             <div
-                              className={`flex-1 py-2.5 px-3 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
+                              className={`flex-1 py-2.5 px-3 rounded-xl font-sans font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
                                 isBankrupt
                                   ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
                                   : isFrozen
@@ -6247,7 +6247,7 @@ export function App() {
                                 type="button"
                                 onClick={() => handleMpUnlockPlayer(player.id)}
                                 title="Teacher Only: Unlock this player's wager so they can change their bet"
-                                className="px-3 py-2.5 rounded-xl font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/60 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
+                                className="px-3 py-2.5 rounded-xl font-sans font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/60 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
                               >
                                 <span>🔓</span>
                                 <span>Unlock</span>
@@ -6262,7 +6262,7 @@ export function App() {
                   <div className="space-y-4">
                     {!mpRoomCode && (
                       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                        <div className="text-sm font-serif text-slate-700 dark:text-amber-100/90">
+                        <div className="text-sm font-sans text-slate-700 dark:text-amber-100/90">
                           {effectiveTableLayout === 'grid'
                             ? 'Tap a player to open their betting card. Picks stay hidden until the reveal.'
                             : 'All betting cards are open. Everyone can see each pick.'}
@@ -6274,7 +6274,7 @@ export function App() {
                               type="button"
                               onClick={() => { playSound('click'); setTableLayoutPref(layout); }}
                               aria-pressed={effectiveTableLayout === layout}
-                              className={`px-3.5 py-1.5 text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                              className={`px-3.5 py-1.5 text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
                                 effectiveTableLayout === layout
                                   ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04]'
                                   : 'felt-well text-slate-800 dark:text-amber-100'
@@ -6297,7 +6297,7 @@ export function App() {
                         {openSeatPlayer && (
                           <div ref={openSeatRef} className="space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                              <div className="text-sm font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+                              <div className="text-sm font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
                                 {openSeatPlayer.avatar} {openSeatPlayer.name}'s betting card
                               </div>
                               <div className="flex items-center gap-2">
@@ -6305,7 +6305,7 @@ export function App() {
                                   <button
                                     type="button"
                                     onClick={() => { playSound('click'); setOpenSeatPlayerId(nextSeatPlayer.id); }}
-                                    className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider border border-[#d4af37]/60 felt-well text-slate-800 dark:text-amber-100 hover:border-[#d4af37] cursor-pointer"
+                                    className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border border-[#d4af37]/60 felt-well text-slate-800 dark:text-amber-100 hover:border-[#d4af37] cursor-pointer"
                                   >
                                     Next: {nextSeatPlayer.name} →
                                   </button>
@@ -6313,7 +6313,7 @@ export function App() {
                                 <button
                                   type="button"
                                   onClick={() => { playSound('click'); setOpenSeatPlayerId(null); }}
-                                  className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer"
+                                  className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer"
                                 >
                                   Done · hide card
                                 </button>
@@ -6342,9 +6342,9 @@ export function App() {
                   </ActionButton>
 
                   {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
-                    <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-serif text-slate-600 dark:text-amber-200/75">
+                    <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-sans text-slate-600 dark:text-amber-200/75">
                       <span>
-                        🔒 Locked Players: <strong className="font-mono-casino">{mpRoomCode ? mpLockedCount : lockedCount}/{unfrozenActivePlayers.length}</strong>
+                        🔒 Locked Players: <strong className="font-sans tabular-nums">{mpRoomCode ? mpLockedCount : lockedCount}/{unfrozenActivePlayers.length}</strong>
                       </span>
                       <button
                         type="button"
@@ -6392,7 +6392,7 @@ export function App() {
             <div className="w-full max-w-5xl animate-fade-in p-4">
                 <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-[#d4af37]/35 pb-4"> 
                   <div>
-                    <div className="text-xs font-serif uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
+                    <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
                       Croupier's Settlement
                     </div>
                     <h2 className="text-3xl sm:text-4xl font-black text-gold uppercase tracking-wider font-display">
@@ -6401,14 +6401,14 @@ export function App() {
                   </div>
                   <div className="flex items-center gap-3">
                     {gameMode === 'rounds' && (
-                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-serif text-slate-700 dark:text-amber-200 font-bold">
+                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-sans text-slate-700 dark:text-amber-200 font-bold">
                         Hand {currentRound} of {totalRounds}
                       </div>
                     )} 
                     {gameMode === 'targetAmount' && (
-                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-serif text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1.5">
+                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-sans text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1.5">
                         <span>🎯 Target:</span>
-                        <span className="font-mono-casino">${numTargetAmount.toLocaleString()}</span>
+                        <span className="font-sans tabular-nums">${numTargetAmount.toLocaleString()}</span>
                       </div>
                     )}
                     <ActionButton onClick={handleSaveGameClick} playSound={playSound} variant="outline-gold" className="text-sm py-2 px-4 flex items-center gap-1.5" title="Save Table State">
@@ -6419,7 +6419,7 @@ export function App() {
                 </div>
 
                 {hasTargetWinner && (
-                  <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/20 via-emerald-500/30 to-emerald-500/20 border-2 border-emerald-400 text-emerald-950 dark:text-emerald-100 text-center font-serif text-lg font-extrabold shadow-lg flex items-center justify-center gap-2 animate-bounce">
+                  <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/20 via-emerald-500/30 to-emerald-500/20 border-2 border-emerald-400 text-emerald-950 dark:text-emerald-100 text-center font-sans text-lg font-extrabold shadow-lg flex items-center justify-center gap-2 animate-bounce">
                     <span className="text-2xl">🎯</span>
                     <span>Target Bankroll of ${numTargetAmount.toLocaleString()} Reached! Champion Crowned!</span>
                   </div>
@@ -6431,15 +6431,15 @@ export function App() {
                     <div className="pl-3 sm:pl-5">
                       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
                           <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full border bg-black/5 dark:bg-black/40 border-[#d4af37]/50 flex-wrap">
-                            <span className="text-xs font-serif uppercase tracking-[0.2em] text-slate-600 dark:text-amber-200/80 font-bold">
+                            <span className="text-xs font-sans uppercase tracking-[0.2em] text-slate-600 dark:text-amber-200/80 font-bold">
                               The House Ruling:
                             </span>
                             {isResultCloze ? (
-                              <span className="text-sm sm:text-base font-serif font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                              <span className="text-sm sm:text-base font-sans font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
                                 ✓ OFFICIAL ANSWER: &ldquo;{currentSentence?.correctAnswer}&rdquo;
                               </span>
                             ) : (
-                              <span className={`text-sm sm:text-base font-serif font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              <span className={`text-sm sm:text-base font-sans font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                 {currentSentence?.isCorrect ? '✓ VALID SENTENCE' : '✕ FLAWED SENTENCE'}
                               </span>
                             )}
@@ -6468,7 +6468,7 @@ export function App() {
                               }
                               }} 
                               disabled={isSpeaking}
-                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-serif uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-sans uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                               title="Read full completed sentence and analysis"
                           >
                               {isSpeaking ? '🔊 Speaking...' : '🔊 Listen to Ruling'}
@@ -6477,7 +6477,7 @@ export function App() {
 
                       {resultQuestionType === 'keyWordTransformation' && currentSentence?.leadInSentence && (
                         <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-[#d4af37]/40">
-                          <div className="text-[10px] font-serif font-bold uppercase tracking-widest text-amber-800 dark:text-amber-300/80 mb-0.5">
+                          <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-amber-800 dark:text-amber-300/80 mb-0.5">
                             Lead-In Sentence {currentSentence.baseWord ? `· 🔑 Key Word: ${currentSentence.baseWord.toUpperCase()}` : ''}
                           </div>
                           <div className="text-base sm:text-lg font-editorial text-slate-800 dark:text-amber-100">
@@ -6491,7 +6491,7 @@ export function App() {
                           ? renderTextSegments(revealHighlight.sentence, 'bg-transparent text-rose-700 dark:text-rose-300 underline decoration-wavy decoration-rose-500 decoration-2 underline-offset-[6px]')
                           : currentSentence?.text}&rdquo;
                         {resultQuestionType === 'wordFormation' && currentSentence?.baseWord && (
-                          <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] font-mono-casino font-black not-italic tracking-wider text-base sm:text-lg align-middle">
+                          <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black not-italic tracking-wider text-base sm:text-lg align-middle">
                             ({currentSentence.baseWord.toUpperCase()})
                           </span>
                         )}
@@ -6499,10 +6499,10 @@ export function App() {
                       
                       {isResultCloze && currentSentence?.correction && (
                           <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-emerald-500 mb-4">
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase text-xs tracking-widest mb-1.5">
                                   <span>✦ Completed Sentence</span>
                                   {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
-                                      <span className="font-mono-casino text-emerald-800 dark:text-emerald-300 font-semibold normal-case bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-xs">
+                                      <span className="font-sans tabular-nums text-emerald-800 dark:text-emerald-300 font-semibold normal-case bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-xs">
                                           Accepted {resultQuestionType === 'wordFormation' ? 'Forms' : resultQuestionType === 'keyWordTransformation' ? 'Phrases' : 'Words'}: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
                                       </span>
                                   )}
@@ -6515,10 +6515,10 @@ export function App() {
 
                       {!isResultCloze && !currentSentence?.isCorrect && (
                           <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-[#d4af37] mb-4">
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase text-xs tracking-widest mb-1.5">
                                   <span>✦ Official House Revision</span>
                                   {currentSentence?.errorPhrase && (
-                                      <span className="font-mono-casino text-rose-700 dark:text-rose-300 font-semibold normal-case bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/30 text-xs">
+                                      <span className="font-sans tabular-nums text-rose-700 dark:text-rose-300 font-semibold normal-case bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/30 text-xs">
                                           Flaw: &ldquo;{currentSentence.errorPhrase}&rdquo; {currentSentence.mistakeType ? `· ${currentSentence.mistakeType}` : ''}
                                       </span>
                                   )}
@@ -6540,7 +6540,7 @@ export function App() {
                             <button 
                                 onClick={handleSimplifyExplanation} 
                                 disabled={simplifiedExplanation.loading || !!simplifiedExplanation.text} 
-                                className="shrink-0 text-xs text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider border border-[#d4af37]/50 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                                className="shrink-0 text-xs text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider border border-[#d4af37]/50 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
                             >
                                 {simplifiedExplanation.loading ? 'Loading Details...' : simplifiedExplanation.text ? 'Detailed ✓' : 'Detailed Explanation'}
                             </button>
@@ -6558,7 +6558,7 @@ export function App() {
                 <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-amber-100/80 dark:bg-black/50 text-amber-950 dark:text-[#d4af37] uppercase text-xs font-serif tracking-[0.2em] font-bold border-b border-[#d4af37]/30">
+                        <thead className="bg-amber-100/80 dark:bg-black/50 text-amber-950 dark:text-[#d4af37] uppercase text-xs font-sans tracking-[0.2em] font-bold border-b border-[#d4af37]/30">
                         <tr>
                             <th className="p-4 sm:p-5">Rank</th>
                             <th className="p-4 sm:p-5">High-Roller</th>
@@ -6573,7 +6573,7 @@ export function App() {
                             const isWinner = result.outcomeText.includes('Win') || result.outcomeText.includes('Hit') || (result.marksAwarded !== undefined && result.marksAwarded >= 1);
                             return (
                             <tr key={result.name} className={`hover:bg-amber-500/10 transition-colors ${isWinner ? 'bg-emerald-500/10' : ''}`}>
-                              <td className="p-4 sm:p-5 font-mono-casino text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
+                              <td className="p-4 sm:p-5 font-sans tabular-nums text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
                                 #{index + 1}
                               </td>
                               <td className="p-4 sm:p-5 font-bold flex items-center gap-3">
@@ -6589,17 +6589,17 @@ export function App() {
                                   ) : (
                                     <span className="text-2xl filter drop-shadow-md">{player?.avatar || '👤'}</span>
                                   )}
-                                  <span className="text-base sm:text-lg font-serif uppercase tracking-wider text-slate-900 dark:text-amber-50 font-extrabold">
+                                  <span className="text-base sm:text-lg font-sans uppercase tracking-wider text-slate-900 dark:text-amber-50 font-extrabold">
                                     {result.name}
                                   </span>
                               </td>
                               <td className="p-4 sm:p-5">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <div className={`font-serif text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                    <div className={`font-sans text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                       {result.outcomeText}
                                     </div>
                                     {result.marksAwarded !== undefined && (
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-black uppercase tracking-wider border ${
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-black uppercase tracking-wider border ${
                                         result.marksAwarded === 2
                                           ? 'bg-emerald-500/20 border-emerald-400 text-emerald-800 dark:text-emerald-200'
                                           : result.marksAwarded === 1
@@ -6611,7 +6611,7 @@ export function App() {
                                     )}
                                   </div>
                                   {result.playerAnswerDisplay && result.playerAnswerDisplay !== result.outcomeText && (
-                                    <div className="text-xs font-mono-casino text-slate-600 dark:text-amber-100/80 mt-0.5">
+                                    <div className="text-xs font-sans tabular-nums text-slate-600 dark:text-amber-100/80 mt-0.5">
                                       Pick: <strong>{result.playerAnswerDisplay}</strong> {result.bet > 0 ? `(Wager: $${result.bet.toLocaleString()})` : ''}
                                     </div>
                                   )}
@@ -6621,10 +6621,10 @@ export function App() {
                                     </div>
                                   )}
                               </td>
-                              <td className={`p-4 sm:p-5 text-right font-mono-casino font-extrabold text-base sm:text-lg ${result.amountChanged > 0 ? 'text-emerald-600 dark:text-emerald-400' : result.amountChanged < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                              <td className={`p-4 sm:p-5 text-right font-sans tabular-nums font-extrabold text-base sm:text-lg ${result.amountChanged > 0 ? 'text-emerald-600 dark:text-emerald-400' : result.amountChanged < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
                                   {result.amountChanged > 0 ? `+$${result.amountChanged.toLocaleString()}` : result.amountChanged < 0 ? `-$${Math.abs(result.amountChanged).toLocaleString()}` : '$0'}
                               </td>
-                              <td className="p-4 sm:p-5 text-right font-mono-casino font-extrabold text-lg sm:text-xl text-gold-flat">
+                              <td className="p-4 sm:p-5 text-right font-sans tabular-nums font-extrabold text-lg sm:text-xl text-gold-flat">
                                   ${result.newTotal.toLocaleString()}
                               </td>
                             </tr>
@@ -6637,7 +6637,7 @@ export function App() {
                 {!isGameOver && (
                   <div className="mt-6 p-4 felt-well rounded-xl flex flex-wrap items-center justify-between gap-3 select-none">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-serif font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
+                      <span className="text-xs font-sans font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
                         ✦ Next Hand Charter:
                       </span>
                       <span className="text-[11px] text-slate-500 dark:text-amber-200/60">
@@ -6649,7 +6649,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('topic')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                         title="Click to change Topic for next round"
                       >
                         <span>📚 {nextRoundSettings?.topic || settings.topic}</span>
@@ -6659,7 +6659,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('level')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                         title="Click to change CEFR Level for next round"
                       >
                         <span>📊 {nextRoundSettings?.level || settings.level}</span>
@@ -6669,7 +6669,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('theme')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                         title="Click to change Theme for next round"
                       >
                         <span>🎭 {nextRoundSettings?.theme || settings.theme}</span>
@@ -6679,7 +6679,7 @@ export function App() {
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('format')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
+                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
                         title="Click to switch Challenge Format before dealing next hand"
                       >
                         <span>{nextFormatObj.icon} {nextFormatObj.shortLabel}</span>
@@ -6733,7 +6733,7 @@ export function App() {
         }
         case 'GAME_OVER': return (
           <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in p-4 w-full max-w-4xl mx-auto">
-            <div className="text-xs font-serif uppercase tracking-[0.35em] text-amber-800 dark:text-[#d4af37] mb-2 font-bold">
+            <div className="text-xs font-sans uppercase tracking-[0.35em] text-amber-800 dark:text-[#d4af37] mb-2 font-bold">
               Salon Privé · Final Settlement
             </div>
             <h1 className="text-5xl sm:text-7xl font-black text-gold mb-3 tracking-wider font-display title-glow">
@@ -6751,24 +6751,24 @@ export function App() {
                         <div className="w-28 h-28 mx-auto mb-4 rounded-full border-4 border-[#d4af37] bg-gradient-to-b from-amber-50 to-amber-100 dark:from-[#0d3520] dark:to-[#04150c] flex items-center justify-center text-7xl shadow-2xl">
                           {winner.avatar}
                         </div>
-                        <h2 className="text-4xl sm:text-5xl font-serif font-extrabold text-slate-900 dark:text-amber-50 mb-2 uppercase tracking-wider">
+                        <h2 className="text-4xl sm:text-5xl font-sans font-extrabold text-slate-900 dark:text-amber-50 mb-2 uppercase tracking-wider">
                           {winner.name}
                         </h2>
                         <div className="text-amber-800 dark:text-[#fef08a] text-xs uppercase tracking-[0.3em] font-bold">
                           {gameMode === 'targetAmount' ? 'Target Bankroll Champion' : gameMode === 'rounds' ? 'Highest Bankroll Champion' : 'Grand Salon Champion'}
                         </div>
                         {gameMode === 'targetAmount' && (
-                          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1.5 font-mono-casino">
+                          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1.5 font-sans tabular-nums">
                             🎯 Surpassed the ${Number(targetAmount).toLocaleString()} Vault Goal!
                           </div>
                         )}
                     </div>
                     
                     <div className="felt-well rounded-xl p-6 mt-6">
-                        <div className="text-slate-600 dark:text-amber-200/70 text-xs font-serif uppercase tracking-[0.25em] mb-1 font-bold">
+                        <div className="text-slate-600 dark:text-amber-200/70 text-xs font-sans uppercase tracking-[0.25em] mb-1 font-bold">
                           Final Vault Balance
                         </div>
-                        <div className="text-5xl sm:text-6xl font-mono-casino font-black text-gold-flat mb-4">
+                        <div className="text-5xl sm:text-6xl font-sans tabular-nums font-black text-gold-flat mb-4">
                           ${winner.money.toLocaleString()}
                         </div>
                         <div className="flex justify-center pt-3 border-t border-[#d4af37]/20">
@@ -6780,7 +6780,7 @@ export function App() {
             ) : (
                <div className="luxury-card rounded-2xl p-12 text-center border-2 border-[#d4af37]/40 max-w-lg shadow-2xl mb-8">
                  <div className="text-7xl mb-5 opacity-70">🏛️</div>
-                 <h2 className="text-3xl sm:text-4xl font-serif font-extrabold text-slate-800 dark:text-amber-100 mb-2 uppercase tracking-wider">
+                 <h2 className="text-3xl sm:text-4xl font-sans font-extrabold text-slate-800 dark:text-amber-100 mb-2 uppercase tracking-wider">
                    The House Prevails
                  </h2>
                  <p className="text-slate-600 dark:text-amber-200/60 font-editorial italic text-lg">
@@ -6815,7 +6815,7 @@ export function App() {
             </div>
           </div>
         );
-        default: return <div className="p-20 text-center text-gold font-serif text-2xl animate-pulse">Initializing Table...</div>;
+        default: return <div className="p-20 text-center text-gold font-sans text-2xl animate-pulse">Initializing Table...</div>;
     }
   };
 
@@ -6870,7 +6870,7 @@ export function App() {
                 playSound('click');
                 setShowMpLobbyModal(true);
               }}
-              className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/80 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-mono-casino text-xs font-extrabold uppercase tracking-wider"
+              className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/80 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans tabular-nums text-xs font-extrabold uppercase tracking-wider"
               title="Open Live Classroom Multiplayer Room Manager & QR Code"
             >
               <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
@@ -6884,7 +6884,7 @@ export function App() {
           <button
             type="button"
             onClick={() => handleOpenCloudModal(step === 'PLAYER_SETUP' ? 'rosters' : 'reports')}
-            className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-serif text-xs font-extrabold uppercase tracking-wider"
+            className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans text-xs font-extrabold uppercase tracking-wider"
             title="Open Teacher Cloud Vault (Class Rosters, Session Reports & Cloud Sentence Bank)"
           >
             <span>☁️</span>
@@ -6895,7 +6895,7 @@ export function App() {
             <button
               type="button"
               onClick={handleOpenTeacherPinModal}
-              className={`h-11 px-3.5 flex items-center gap-2 rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-serif text-xs font-extrabold uppercase tracking-wider ${
+              className={`h-11 px-3.5 flex items-center gap-2 rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans text-xs font-extrabold uppercase tracking-wider ${
                 isTeacherAiUnlocked
                   ? 'bg-emerald-950/90 border-emerald-400/70 hover:border-emerald-300 text-emerald-200'
                   : 'bg-amber-50/95 dark:bg-[#051c10]/95 border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a]'
@@ -6978,11 +6978,11 @@ export function App() {
                 <div key={index} className="bg-amber-50/70 dark:bg-slate-900/50 border border-amber-200 dark:border-slate-700 p-4 rounded-lg shadow-sm"> 
                   <div className="flex justify-between mb-2">
                     <span className="font-bold text-amber-700 dark:text-amber-500 text-sm uppercase tracking-wide">Round {item.round}</span> 
-                    <span className={`font-mono font-bold ${item.amount >= 0 ? 'text-emerald-600 dark:text-green-400' : 'text-rose-600 dark:text-red-400'}`}> 
+                    <span className={`font-sans tabular-nums font-bold ${item.amount >= 0 ? 'text-emerald-600 dark:text-green-400' : 'text-rose-600 dark:text-red-400'}`}> 
                         {item.amount >= 0 ? '+' : ''}{item.amount}
                     </span> 
                   </div>
-                  <p className="text-sm text-slate-700 dark:text-slate-400 italic mb-3 font-serif">"{item.sentence}"</p> 
+                  <p className="text-sm text-slate-700 dark:text-slate-400 italic mb-3 font-editorial">"{item.sentence}"</p> 
                   <div className="flex justify-between text-xs text-slate-500 border-t border-amber-200/60 dark:border-slate-800 pt-2">
                     <span>Spent: ${item.spent}</span>
                     <span className="text-slate-700 dark:text-slate-300 font-bold">Total: ${item.endTotal}</span>
@@ -7038,15 +7038,15 @@ export function App() {
                       </span>
                     </PowerUpTooltip>
                   </div>
-                  <p className="text-center mb-4 text-lg text-slate-600 dark:text-slate-400 font-serif italic border-b border-slate-200 dark:border-slate-700 pb-3">
+                  <p className="text-center mb-4 text-lg text-slate-600 dark:text-slate-400 font-editorial italic border-b border-slate-200 dark:border-slate-700 pb-3">
                     "{powerUpInfo.description}"
                   </p> 
 
                   {isSwap && buyerPlayer && (
-                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 text-center text-xs font-serif text-amber-900 dark:text-amber-200 shadow-sm">
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 text-center text-xs font-sans text-amber-900 dark:text-amber-200 shadow-sm">
                       <div className="flex items-center justify-center gap-1.5 font-sans mb-1">
                         <span className="font-semibold text-slate-700 dark:text-slate-300">Your Current Vault:</span>
-                        <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                        <span className="font-sans tabular-nums font-bold text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
                           ${buyerPlayer.money.toLocaleString()}
                         </span>
                       </div>
@@ -7090,7 +7090,7 @@ export function App() {
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5 font-mono font-bold text-emerald-400 dark:text-emerald-300 bg-black/40 px-3 py-1 rounded-lg border border-emerald-500/30 text-base shadow-inner shrink-0">
+                            <div className="flex items-center gap-1.5 font-sans tabular-nums font-bold text-emerald-400 dark:text-emerald-300 bg-black/40 px-3 py-1 rounded-lg border border-emerald-500/30 text-base shadow-inner shrink-0">
                               <span className="text-xs opacity-75">💰</span>
                               <span>${p.money.toLocaleString()}</span>
                             </div>
@@ -7129,7 +7129,7 @@ export function App() {
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Current:</span>
                     <span className="text-2xl">{modalPlayer.avatar || '👤'}</span>
-                    <span className="font-serif font-bold text-slate-900 dark:text-white uppercase">{modalPlayer.name}</span>
+                    <span className="font-sans font-bold text-slate-900 dark:text-white uppercase">{modalPlayer.name}</span>
                   </div>
                   <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Choose below:</span>
                 </div>
@@ -7197,7 +7197,7 @@ export function App() {
                       <span className="text-xl">{p.avatar || '👤'}</span>
                       <span className="text-slate-800 dark:text-white font-bold">{p.name}</span>
                     </div>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">${p.money}</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-sans tabular-nums font-bold">${p.money}</span>
                   </div>
                 ))}
               </div>
@@ -7285,7 +7285,7 @@ export function App() {
             <div className="flex items-start gap-3">
               <span className="text-3xl leading-none" aria-hidden="true">{request.avatar || '📱'}</span>
               <div className="flex-1 min-w-0">
-                <p className="font-serif font-extrabold text-base">
+                <p className="font-sans font-extrabold text-base">
                   A new phone wants to play as {request.name}.
                 </p>
                 <p className="text-sm mt-1 text-amber-900 dark:text-amber-100">
@@ -7359,14 +7359,14 @@ export function App() {
               <div className="text-xs sm:text-sm leading-relaxed">
                 {isTeacherAiUnlocked ? (
                   <>
-                    <strong className="font-serif uppercase tracking-wider block text-emerald-800 dark:text-emerald-300 mb-0.5">
+                    <strong className="font-sans uppercase tracking-wider block text-emerald-800 dark:text-emerald-300 mb-0.5">
                       Live Gemini AI &amp; Live Room Hosting Active (Current Game Only)
                     </strong>
                     This session is authorized to host a Live Classroom Room (QR) and generate dynamic AI sentences, AI Judge verifications, AI hints, and neural speech. For security, Live Mode is never saved in browser storage and automatically locks when the game finishes, when you return to the lobby, or if the URL is edited/reloaded.
                   </>
                 ) : (
                   <>
-                    <strong className="font-serif uppercase tracking-wider block text-amber-900 dark:text-[#fef08a] mb-0.5">
+                    <strong className="font-sans uppercase tracking-wider block text-amber-900 dark:text-[#fef08a] mb-0.5">
                       Playing in Free Offline Curated Mode (0 API Usage)
                     </strong>
                     Students and visitors without the Teacher PIN play in 100% free Offline Curated Mode (0 Gemini API calls) and cannot host a Live Classroom Room. Enter your Teacher PIN below to unlock Live Gemini AI and Live Room Hosting for the current game session.
@@ -7393,7 +7393,7 @@ export function App() {
                 {/* Option 1: Google Sign-In */}
                 <div className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs font-serif font-bold uppercase tracking-wider text-slate-800 dark:text-[#fef08a]">
+                    <div className="text-xs font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-[#fef08a]">
                       Option 1 · Verified Teacher Google Account
                     </div>
                     <div className="text-[11px] text-slate-600 dark:text-amber-200/70">
@@ -7415,7 +7415,7 @@ export function App() {
                 {/* Option 2: Teacher PIN */}
                 <form onSubmit={handleUnlockTeacherPin} className="space-y-3 pt-1">
                   <div>
-                    <label className="block text-xs font-serif font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
+                    <label className="block text-xs font-sans font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
                       Option 2 · Enter Teacher PIN to Unlock Live AI
                     </label>
                     <input
@@ -7424,7 +7424,7 @@ export function App() {
                       onChange={(e) => setTeacherPinInput(e.target.value)}
                       placeholder="Enter Teacher PIN..."
                       autoFocus
-                      className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-mono-casino text-base tracking-widest"
+                      className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-sans tabular-nums text-base tracking-widest"
                     />
                   </div>
                   <div className="flex items-center justify-end gap-2.5 pt-2">
@@ -7454,7 +7454,7 @@ export function App() {
                 {teacherGoogleEmail && (
                   <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
                     <span>Signed in as <strong>{teacherGoogleEmail}</strong></span>
-                    <span className="text-[10px] uppercase tracking-wider font-mono-casino px-2 py-0.5 rounded bg-emerald-500/20">Google Verified</span>
+                    <span className="text-[10px] uppercase tracking-wider font-sans tabular-nums px-2 py-0.5 rounded bg-emerald-500/20">Google Verified</span>
                   </div>
                 )}
                 <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -7488,7 +7488,7 @@ export function App() {
                         setShowChangePinForm((prev) => !prev);
                         setTeacherPinNotice(null);
                       }}
-                      className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
+                      className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
                     >
                       {showChangePinForm ? 'Cancel PIN Change' : '⚙️ Change PIN'}
                     </button>
@@ -7500,7 +7500,7 @@ export function App() {
                     onSubmit={handleChangeTeacherPin}
                     className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3"
                   >
-                    <div className="text-xs font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+                    <div className="text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
                       Update Server Teacher PIN
                     </div>
                     <div>
@@ -7512,7 +7512,7 @@ export function App() {
                         value={newTeacherPinInput}
                         onChange={(e) => setNewTeacherPinInput(e.target.value)}
                         placeholder="Enter new PIN..."
-                        className="w-full px-3 py-2 rounded-lg bg-white/80 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white font-mono-casino text-sm focus:outline-none"
+                        className="w-full px-3 py-2 rounded-lg bg-white/80 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white font-sans tabular-nums text-sm focus:outline-none"
                       />
                     </div>
                     <div className="flex justify-end">

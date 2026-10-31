@@ -307,7 +307,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     <div className="w-full max-w-5xl mx-auto my-8 animate-fade-in print:my-0 print:max-w-none relative">
       {/* Toast Notification for PDF Generation */}
       {pdfToast && (
-        <div className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl bg-slate-900/95 dark:bg-[#071e12]/95 text-amber-200 border-2 border-amber-400 shadow-2xl font-serif text-sm font-bold flex items-center gap-2.5 animate-bounce">
+        <div className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl bg-slate-900/95 dark:bg-[#071e12]/95 text-amber-200 border-2 border-amber-400 shadow-2xl font-sans text-sm font-bold flex items-center gap-2.5 animate-bounce">
           <span>{pdfToast}</span>
         </div>
       )}
@@ -319,7 +319,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             <div className="flex items-center gap-3">
               <span className="text-4xl filter drop-shadow">📜</span>
               <div>
-                <h2 className="text-2xl md:text-3xl font-serif font-black text-slate-900 dark:text-amber-100 uppercase tracking-wide">
+                <h2 className="text-2xl md:text-3xl font-sans font-black text-slate-900 dark:text-amber-100 uppercase tracking-wide">
                   Grammar Report Card
                 </h2>
                 <p className="text-sm text-slate-600 dark:text-emerald-300/80 font-medium">
@@ -333,7 +333,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
           <div className="flex items-center gap-2 flex-wrap justify-end print:hidden relative">
             <button
               onClick={copyReportToClipboard}
-              className="px-3.5 py-2 text-xs font-serif font-bold uppercase tracking-wider rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-600/60 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+              className="px-3.5 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-600/60 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
               title="Copy formatted summary to clipboard"
             >
               <span>{copiedToast ? '✅' : '📋'}</span>
@@ -345,7 +345,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
               <button
                 onClick={() => handleGeneratePDF(false)}
                 disabled={isGeneratingPDF}
-                className="px-4 py-2 text-xs font-serif font-bold uppercase tracking-wider rounded-l-lg bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 border border-amber-400 dark:border-amber-300 transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-60"
+                className="px-4 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-l-lg bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 border border-amber-400 dark:border-amber-300 transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-60"
                 title="Generate and download complete pedagogical PDF report"
               >
                 {isGeneratingPDF ? (
@@ -373,8 +373,8 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
               {/* PDF Dropdown Menu */}
               {showPdfOptions && (
-                <div className="absolute right-0 top-full mt-1.5 w-64 rounded-xl bg-white dark:bg-[#0a2316] border border-amber-300 dark:border-amber-600/60 shadow-2xl z-50 p-2 text-xs font-serif animate-fade-in">
-                  <div className="text-[10px] font-mono uppercase tracking-widest text-slate-400 dark:text-slate-500 px-2.5 py-1 font-bold">
+                <div className="absolute right-0 top-full mt-1.5 w-64 rounded-xl bg-white dark:bg-[#0a2316] border border-amber-300 dark:border-amber-600/60 shadow-2xl z-50 p-2 text-xs font-sans animate-fade-in">
+                  <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-slate-400 dark:text-slate-500 px-2.5 py-1 font-bold">
                     Export PDF Options
                   </div>
                   <button
@@ -384,7 +384,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                     <span className="font-bold flex items-center gap-1.5">
                       <span>📄</span> Full Report ({history.length} Rounds)
                     </span>
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono">Recommended</span>
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-sans tabular-nums">Recommended</span>
                   </button>
                   
                   {activeTab !== 'all' && (
@@ -395,7 +395,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                       <span className="font-bold flex items-center gap-1.5">
                         <span>📑</span> Filtered ({filteredHistory.length} Rounds)
                       </span>
-                      <span className="text-[10px] text-slate-400 font-mono capitalize">{activeTab}</span>
+                      <span className="text-[10px] text-slate-400 font-sans tabular-nums capitalize">{activeTab}</span>
                     </button>
                   )}
 
@@ -413,7 +413,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
             <button
               onClick={handlePrint}
-              className="px-3.5 py-2 text-xs font-serif font-bold uppercase tracking-wider rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+              className="px-3.5 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
               title="Print report card directly"
             >
               <span>🖨️</span>
@@ -428,10 +428,10 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
               Table Accuracy
             </div>
-            <div className="text-3xl font-black font-serif text-emerald-600 dark:text-emerald-400">
+            <div className="text-3xl font-black font-sans text-emerald-600 dark:text-emerald-400">
               {stats.accuracyPct}%
             </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
               {stats.correctVotes} of {stats.totalVotes} bets correct
             </div>
           </div>
@@ -440,10 +440,10 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
               Sentences Played
             </div>
-            <div className="text-3xl font-black font-serif text-amber-600 dark:text-amber-400">
+            <div className="text-3xl font-black font-sans text-amber-600 dark:text-amber-400">
               {stats.totalRounds}
             </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
               {stats.errorSentencesCount} errors / {stats.cleanSentencesCount} clean
             </div>
           </div>
@@ -452,10 +452,10 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
               Tricky Rounds
             </div>
-            <div className="text-3xl font-black font-serif text-rose-600 dark:text-rose-400">
+            <div className="text-3xl font-black font-sans text-rose-600 dark:text-rose-400">
               {stats.missedSentencesCount}
             </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
               had at least 1 miss
             </div>
           </div>
@@ -466,11 +466,11 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             </div>
             {stats.topGrammarian ? (
               <>
-                <div className="text-xl font-bold font-serif text-slate-900 dark:text-white truncate flex items-center justify-center gap-1.5">
+                <div className="text-xl font-bold font-sans text-slate-900 dark:text-white truncate flex items-center justify-center gap-1.5">
                   <span>{stats.topGrammarian.avatar}</span>
                   <span className="truncate">{stats.topGrammarian.name}</span>
                 </div>
-                <div className="text-[10px] text-amber-600 dark:text-amber-400 font-mono font-bold mt-0.5">
+                <div className="text-[10px] text-amber-600 dark:text-amber-400 font-sans tabular-nums font-bold mt-0.5">
                   {stats.topGrammarian.accuracy}% win rate
                 </div>
               </>
@@ -485,7 +485,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
           <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => { playSound?.('click'); setActiveTab('all'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 activeTab === 'all'
                   ? 'bg-amber-500 text-black shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -496,7 +496,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
             <button
               onClick={() => { playSound?.('click'); setActiveTab('errors'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 activeTab === 'errors'
                   ? 'bg-rose-500 text-white shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -507,7 +507,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
             <button
               onClick={() => { playSound?.('click'); setActiveTab('missed'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 activeTab === 'missed'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -518,7 +518,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
             <button
               onClick={() => { playSound?.('click'); setActiveTab('perfect'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 activeTab === 'perfect'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -548,7 +548,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
         {/* Sentences List */}
         <div className="space-y-4 mt-6">
           {filteredHistory.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400 font-serif italic bg-slate-50 dark:bg-black/20 rounded-xl border border-dashed border-slate-300 dark:border-slate-800">
+            <div className="text-center py-12 text-slate-500 dark:text-slate-400 font-editorial italic bg-slate-50 dark:bg-black/20 rounded-xl border border-dashed border-slate-300 dark:border-slate-800">
               No sentences matched the selected filter tab.
             </div>
           ) : (
@@ -576,7 +576,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                     className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors select-none"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="px-2.5 py-1 rounded-md text-xs font-serif font-black uppercase tracking-wider bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                      <span className="px-2.5 py-1 rounded-md text-xs font-sans font-black uppercase tracking-wider bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
                         R{record.round}
                       </span>
 
@@ -616,13 +616,13 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                         </span>
                       )}
 
-                      <p className="text-sm md:text-base font-serif font-medium text-slate-900 dark:text-slate-100 truncate flex-1">
+                      <p className="text-sm md:text-base font-sans font-medium text-slate-900 dark:text-slate-100 truncate flex-1">
                         "{record.sentence.text}"
                       </p>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400 hidden md:inline-block">
+                      <span className="text-xs font-sans tabular-nums text-slate-500 dark:text-slate-400 hidden md:inline-block">
                         {record.topic} ({record.level})
                       </span>
                       <span className="text-lg text-slate-400 group-hover:text-amber-500 transition-transform">
@@ -648,25 +648,25 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                     : 'Original Sentence'}
                             </span>
                             {qType === 'wordFormation' && record.sentence.baseWord && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-mono">
+                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-sans tabular-nums">
                                 Base Word: ({record.sentence.baseWord})
                               </span>
                             )}
                             {qType === 'keyWordTransformation' && record.sentence.baseWord && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-mono">
+                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-sans tabular-nums">
                                 🔑 KEY WORD: {record.sentence.baseWord}
                               </span>
                             )}
                           </div>
                           {qType === 'keyWordTransformation' && record.sentence.leadInSentence && (
-                            <div className="mb-2 p-2.5 rounded-md bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-sm md:text-base font-serif italic text-slate-800 dark:text-amber-100">
+                            <div className="mb-2 p-2.5 rounded-md bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-sm md:text-base font-editorial italic text-slate-800 dark:text-amber-100">
                               <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 block not-italic mb-0.5">
                                 Lead-in Sentence:
                               </span>
                               "{record.sentence.leadInSentence}"
                             </div>
                           )}
-                          <div className="text-base md:text-lg font-serif text-slate-900 dark:text-slate-100 leading-relaxed">
+                          <div className="text-base md:text-lg font-sans text-slate-900 dark:text-slate-100 leading-relaxed">
                             "{record.sentence.text}"
                           </div>
                           {qType === 'multipleChoice' && record.sentence.options && (
@@ -676,7 +676,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                 return (
                                   <span
                                     key={idx}
-                                    className={`px-2.5 py-1 rounded-md text-xs font-serif font-semibold border ${
+                                    className={`px-2.5 py-1 rounded-md text-xs font-sans font-semibold border ${
                                       isOfficial
                                         ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
                                         : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
@@ -698,13 +698,13 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                 <span>Official Answer: "{record.sentence.correctAnswer}"</span>
                               </span>
                               {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
-                                <span className="font-mono text-emerald-800 dark:text-emerald-300 font-medium normal-case bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 text-[11px]">
+                                <span className="font-sans tabular-nums text-emerald-800 dark:text-emerald-300 font-medium normal-case bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 text-[11px]">
                                   Accepted Forms: {record.sentence.acceptedAnswers.join(' | ')}
                                 </span>
                               )}
                             </div>
                             {record.sentence.correction && (
-                              <div className="text-base md:text-lg font-serif font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                              <div className="text-base md:text-lg font-sans font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
                                 "{record.sentence.correction}"
                               </div>
                             )}
@@ -719,12 +719,12 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                 <span>Corrected Version</span>
                               </span>
                               {record.sentence.errorPhrase && (
-                                <span className="font-mono text-rose-700 dark:text-rose-300 font-medium normal-case bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800 text-[11px]">
+                                <span className="font-sans tabular-nums text-rose-700 dark:text-rose-300 font-medium normal-case bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800 text-[11px]">
                                   Mistake: "{record.sentence.errorPhrase}" {record.sentence.mistakeType ? `(${record.sentence.mistakeType})` : ''}
                                 </span>
                               )}
                             </div>
-                            <div className="text-base md:text-lg font-serif font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
+                            <div className="text-base md:text-lg font-sans font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
                               "{record.sentence.correction}"
                             </div>
                           </div>
@@ -743,7 +743,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                         {record.sentence.grammarPhrase && (
                           <div className="mt-2 text-xs font-medium text-amber-900 dark:text-amber-200/90">
                             <span className="font-bold">Key Target Phrase:</span>{' '}
-                            <code className="px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 font-mono text-[11px]">
+                            <code className="px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 font-sans tabular-nums text-[11px]">
                               {record.sentence.grammarPhrase}
                             </code>
                           </div>
@@ -768,14 +768,14 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                               }`}
                             >
                               <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <div className="flex items-center gap-1.5 truncate font-serif font-bold">
+                                <div className="flex items-center gap-1.5 truncate font-sans font-bold">
                                   <span>{pr.playerAvatar}</span>
                                   <span className="truncate">{pr.playerName}</span>
                                 </div>
                                 <div className="flex items-center gap-1">
                                   {qType === 'keyWordTransformation' && pr.marksAwarded !== undefined && (
                                     <span
-                                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-sans tabular-nums font-bold ${
                                         pr.marksAwarded === 2
                                           ? 'bg-amber-200 dark:bg-amber-800 text-amber-950 dark:text-amber-100'
                                           : pr.marksAwarded === 1
@@ -801,11 +801,11 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                               <div className="flex items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
                                 <span className="truncate">
                                   {isCloze ? 'Answer:' : 'Voted:'}{' '}
-                                  <strong className={isCloze ? 'font-serif text-slate-900 dark:text-slate-100' : 'uppercase'}>
+                                  <strong className={isCloze ? 'font-sans text-slate-900 dark:text-slate-100' : 'uppercase'}>
                                     {pr.playerAnswerDisplay || pr.opinion}
                                   </strong>
                                 </span>
-                                <span className="font-mono font-bold shrink-0">
+                                <span className="font-sans tabular-nums font-bold shrink-0">
                                   {pr.amountChanged >= 0 ? `+$${pr.amountChanged}` : `-$${Math.abs(pr.amountChanged)}`}
                                 </span>
                               </div>
@@ -813,7 +813,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                               {!isCloze && pr.userCorrection && (
                                 <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px]">
                                   <div className="font-semibold text-slate-500 dark:text-slate-400">Correction submitted:</div>
-                                  <div className="italic font-serif">"{pr.userCorrection}"</div>
+                                  <div className="italic font-editorial">"{pr.userCorrection}"</div>
                                   {pr.correctionFeedback && (
                                     <div className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5 font-medium">
                                       {pr.correctionFeedback}

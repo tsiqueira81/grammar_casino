@@ -328,7 +328,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               ☁️
             </span>
             <div>
-              <h2 className="text-lg sm:text-xl font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-[#fef08a]">
+              <h2 className="text-lg sm:text-xl font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-[#fef08a]">
                 Salon Privé Cloud Vault
               </h2>
               <p className="text-xs text-slate-600 dark:text-amber-200/70">
@@ -346,7 +346,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                 void refreshAllCloudData();
               }}
               disabled={isLoading}
-              className="px-3 py-1.5 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-xs font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] cursor-pointer transition-all flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] cursor-pointer transition-all flex items-center gap-1.5"
               title="Refresh Cloud Data from Firestore"
             >
               <span className={isLoading ? 'animate-spin inline-block' : ''}>🔄</span>
@@ -371,7 +371,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
           <div className="p-5 sm:p-8 overflow-y-auto flex-1 modal-content-scroll">
             <div className="max-w-xl mx-auto text-center space-y-4">
               <div className="text-4xl select-none" aria-hidden="true">🔐</div>
-              <h3 className="text-lg font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+              <h3 className="text-lg font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
                 Teacher sign-in required
               </h3>
               <p className="text-sm leading-relaxed text-slate-700 dark:text-amber-100">
@@ -428,7 +428,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               setActiveTab('rosters');
               setViewingReport(null);
             }}
-            className={`px-4 py-2.5 rounded-t-xl font-serif text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'rosters'
                 ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
                 : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
@@ -445,7 +445,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               setActiveTab('reports');
               setViewingReport(null);
             }}
-            className={`px-4 py-2.5 rounded-t-xl font-serif text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'reports'
                 ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
                 : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
@@ -462,7 +462,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               setActiveTab('sentences');
               setViewingReport(null);
             }}
-            className={`px-4 py-2.5 rounded-t-xl font-serif text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'sentences'
                 ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
                 : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
@@ -504,10 +504,10 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               {activeRosterObj && players.length > 0 && (
                 <div className="p-4 rounded-xl bg-emerald-500/15 border-2 border-emerald-400/50 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-[11px] font-mono-casino uppercase tracking-widest text-emerald-800 dark:text-emerald-300 font-bold">
+                    <div className="text-[11px] font-sans tabular-nums uppercase tracking-widest text-emerald-800 dark:text-emerald-300 font-bold">
                       Active Classroom Roster Loaded
                     </div>
-                    <div className="text-base font-serif font-extrabold text-slate-900 dark:text-amber-50">
+                    <div className="text-base font-sans font-extrabold text-slate-900 dark:text-amber-50">
                       {activeRosterObj.name} ({players.length} Students Seated)
                     </div>
                   </div>
@@ -527,14 +527,14 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               <div className="p-4 sm:p-5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm sm:text-base font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                    <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
                       💾 Save Seated Table as Cloud Roster
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-amber-200/70">
                       Save your current {players.length} seated student{players.length === 1 ? '' : 's'} (names, avatars, and current bankrolls) for future classes.
                     </p>
                   </div>
-                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-[#d4af37]/40 font-mono-casino text-xs font-bold text-amber-900 dark:text-[#fef08a]">
+                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-[#d4af37]/40 font-sans tabular-nums text-xs font-bold text-amber-900 dark:text-[#fef08a]">
                     {players.length} Seated
                   </span>
                 </div>
@@ -578,7 +578,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
 
               {/* Resume Mode Option Toggle */}
               <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                <div className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+                <div className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
                   Saved Classroom Rosters ({rosters.length})
                 </div>
                 <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-amber-100 cursor-pointer select-none">
@@ -596,7 +596,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               {rosters.length === 0 ? (
                 <div className="p-8 rounded-2xl felt-well text-center space-y-2">
                   <div className="text-3xl opacity-60">👥</div>
-                  <div className="text-sm font-serif font-bold text-slate-700 dark:text-amber-100">
+                  <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
                     No Cloud Rosters Saved Yet
                   </div>
                   <p className="text-xs text-slate-500 dark:text-amber-200/60 max-w-md mx-auto">
@@ -619,22 +619,22 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-serif font-extrabold text-base text-slate-900 dark:text-amber-50 uppercase tracking-wide">
+                              <h4 className="font-sans font-extrabold text-base text-slate-900 dark:text-amber-50 uppercase tracking-wide">
                                 {roster.name}
                               </h4>
                               {isActive && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50">
                                   ACTIVE TABLE ROSTER
                                 </span>
                               )}
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-amber-500/15 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/15 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
                                 {roster.playerCount} Students
                               </span>
                             </div>
                             {roster.notes && (
                               <p className="text-xs text-slate-600 dark:text-amber-200/75 mt-0.5">{roster.notes}</p>
                             )}
-                            <div className="text-[10px] font-mono-casino text-slate-500 dark:text-amber-200/50 mt-1">
+                            <div className="text-[10px] font-sans tabular-nums text-slate-500 dark:text-amber-200/50 mt-1">
                               Updated {new Date(roster.updatedAt).toLocaleString()} &middot; Default Fresh Stack: $
                               {roster.startingCash.toLocaleString()}
                             </div>
@@ -649,7 +649,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                 onLoadRoster(roster, 'fresh', bailoutZeroOnResume);
                                 onClose();
                               }}
-                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-serif font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
+                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
                               title={`Load ${roster.name} with everyone reset to $${startingCash.toLocaleString()}`}
                             >
                               <span>🌱</span>
@@ -663,7 +663,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                 onLoadRoster(roster, 'saved', bailoutZeroOnResume);
                                 onClose();
                               }}
-                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                               title="Load students with their exact saved bankrolls and win streaks from their last session"
                             >
                               <span>🏆</span>
@@ -675,7 +675,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                 type="button"
                                 onClick={() => handleUpdateExistingRoster(roster)}
                                 disabled={isSavingRoster}
-                                className="px-2.5 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider text-[11px] cursor-pointer transition-all"
+                                className="px-2.5 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-[11px] cursor-pointer transition-all"
                                 title="Overwrite this roster with the current table's players and bankrolls"
                               >
                                 💾 Update
@@ -720,8 +720,8 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/75 dark:bg-black/40 border border-[#d4af37]/30 text-xs"
                             >
                               <span>{p.avatar}</span>
-                              <span className="font-serif font-bold text-slate-800 dark:text-amber-50">{p.name}</span>
-                              <span className="font-mono-casino font-bold text-emerald-700 dark:text-emerald-400">
+                              <span className="font-sans font-bold text-slate-800 dark:text-amber-50">{p.name}</span>
+                              <span className="font-sans tabular-nums font-bold text-emerald-700 dark:text-emerald-400">
                                 ${p.money.toLocaleString()}
                               </span>
                             </span>
@@ -742,10 +742,10 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#d4af37]/30">
                     <div>
-                      <div className="text-[10px] font-mono-casino uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
+                      <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
                         Archived Session Report Card &middot; {new Date(viewingReport.createdAt).toLocaleString()}
                       </div>
-                      <h3 className="text-lg font-serif font-extrabold text-slate-900 dark:text-amber-50">
+                      <h3 className="text-lg font-sans font-extrabold text-slate-900 dark:text-amber-50">
                         {viewingReport.title}
                       </h3>
                     </div>
@@ -801,7 +801,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                   <div className="p-4 sm:p-5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <h3 className="text-sm sm:text-base font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                        <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
                           ☁️ Save Current Session Report &amp; Table State
                         </h3>
                         <p className="text-xs text-slate-600 dark:text-amber-200/70">
@@ -841,7 +841,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                   {reports.length === 0 ? (
                     <div className="p-8 rounded-2xl felt-well text-center space-y-2">
                       <div className="text-3xl opacity-60">📜</div>
-                      <div className="text-sm font-serif font-bold text-slate-700 dark:text-amber-100">
+                      <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
                         No Cloud Session Reports Yet
                       </div>
                       <p className="text-xs text-slate-500 dark:text-amber-200/60 max-w-md mx-auto">
@@ -857,13 +857,13 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                         >
                           <div className="space-y-1">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-serif font-extrabold text-base text-slate-900 dark:text-amber-50">
+                              <h4 className="font-sans font-extrabold text-base text-slate-900 dark:text-amber-50">
                                 {report.title}
                               </h4>
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
                                 {report.topic} &middot; {report.level}
                               </span>
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-bold bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40">
                                 {report.roundsPlayed} Hands &middot; {report.playerCount} Players
                               </span>
                             </div>
@@ -873,7 +873,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                 {report.winnerMoney.toLocaleString()})
                               </span>
                               <span>&middot;</span>
-                              <span className="font-mono-casino text-[11px] opacity-75">
+                              <span className="font-sans tabular-nums text-[11px] opacity-75">
                                 {new Date(report.createdAt).toLocaleString()}
                               </span>
                             </div>
@@ -886,7 +886,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                 playSound('click');
                                 setViewingReport(report);
                               }}
-                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-serif font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                             >
                               <span>📊</span>
                               <span>Report Card</span>
@@ -900,7 +900,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                   onLoadFullGameState(report.fullGameState);
                                   onClose();
                                 }}
-                                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-serif font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
+                                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
                                 title="Resume this saved game table state"
                               >
                                 <span>▶️</span>
@@ -951,7 +951,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               {/* Summary Banner */}
               <div className="p-4 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm sm:text-base font-serif font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
+                  <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
                     🧠 Auto-Growing Cloud Sentence Bank
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-amber-200/70">
@@ -959,10 +959,10 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-[#d4af37]/40 font-mono-casino text-xs font-bold text-amber-900 dark:text-[#fef08a]">
+                  <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-[#d4af37]/40 font-sans tabular-nums text-xs font-bold text-amber-900 dark:text-[#fef08a]">
                     📚 Built-In: {staticCounts.totalCount}
                   </span>
-                  <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 font-mono-casino text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 font-sans tabular-nums text-xs font-bold text-emerald-800 dark:text-emerald-300">
                     ☁️ Cloud AI: {sentences.length}
                   </span>
                 </div>
@@ -1018,7 +1018,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               {filteredSentences.length === 0 ? (
                 <div className="p-8 rounded-2xl felt-well text-center space-y-2">
                   <div className="text-3xl opacity-60">🧠</div>
-                  <div className="text-sm font-serif font-bold text-slate-700 dark:text-amber-100">
+                  <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
                     {sentences.length === 0
                       ? 'No Cloud AI Sentences Archived Yet'
                       : 'No Sentences Match Your Filter'}
@@ -1042,7 +1042,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                         className="p-3.5 rounded-xl felt-well border border-[#d4af37]/30 hover:border-[#d4af37]/60 transition-all flex items-start justify-between gap-3"
                       >
                         <div className="space-y-1.5 min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono-casino font-bold">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-sans tabular-nums font-bold">
                             <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
                               {item.topic} &middot; {item.level}
                             </span>
@@ -1129,7 +1129,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
 
         {/* Footer */}
         <div className="px-5 py-3 bg-amber-50/70 dark:bg-[#04180e] border-t border-[#d4af37]/30 flex items-center justify-between">
-          <div className="text-[11px] font-serif text-slate-500 dark:text-amber-200/60">
+          <div className="text-[11px] font-sans text-slate-500 dark:text-amber-200/60">
             {isTeacherSignedIn ? <>Signed in as {teacherEmail} &middot; Connected to Firestore</> : 'Teacher not signed in'}
           </div>
           <ActionButton onClick={onClose} playSound={playSound} variant="outline-gold" className="py-2 px-5 text-xs">

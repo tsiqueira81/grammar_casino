@@ -5,6 +5,73 @@
    then Tailwind's base, components and utilities, so a utility class still
    wins over a custom class of equal specificity. */
 
+/* ===== Design tokens =====
+   One shared set of colours, corners, shadows and fonts for every screen.
+   Dark theme = style A, "Modern Monte Carlo" (deep green, warm white text, gold for money).
+   Light theme = style C's ivory paper and navy ink.
+   Colours are written as R G B so Tailwind's opacity modifiers work: bg-gc-card/80.
+   Tailwind names: bg-gc-bg, bg-gc-card, bg-gc-raised, text-gc-ink, text-gc-quiet,
+   border-gc-line/15, text-gc-gold, text-gc-on-gold, text-gc-money, text-gc-win,
+   text-gc-loss, text-gc-info, ring-gc-turn, text-gc-danger, rounded-gc-sm / gc / gc-lg,
+   shadow-gc-1 / gc-2, font-sans (Inter), font-sentence (Playfair), font-logo (Cinzel),
+   text-gc-cap / small / body / lead / title / display / sentence. */
+:root {
+  --gc-bg: 248 244 234;          /* page: ivory */
+  --gc-card: 255 253 247;        /* card */
+  --gc-raised: 255 255 255;      /* raised card, menus */
+  --gc-ink: 22 35 63;            /* main text: navy */
+  --gc-quiet: 79 91 115;         /* secondary text */
+  --gc-line: 22 35 63;           /* hairlines, used at low opacity: border-gc-line/15 */
+  --gc-gold: 154 117 55;         /* brass: money and the one main button */
+  --gc-on-gold: 255 253 247;     /* text on the main button */
+  --gc-money: 122 90 31;
+  --gc-win: 31 107 68;
+  --gc-loss: 163 36 59;
+  --gc-info: 36 69 122;
+  --gc-turn: 176 141 87;         /* outline on the current player's tile */
+  --gc-danger: 192 38 63;
+  --gc-shadow-1: 0 8px 22px -14px rgba(22, 35, 63, 0.4);
+  --gc-shadow-2: 0 24px 50px -24px rgba(22, 35, 63, 0.4);
+  --gc-felt: linear-gradient(180deg, #f8f4ea 0%, #efe7d6 100%);
+  --gc-radius-sm: 12px;
+  --gc-radius: 18px;
+  --gc-radius-lg: 26px;
+  --gc-font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --gc-font-sentence: 'Playfair Display Variable', 'Playfair Display', Georgia, serif;
+  --gc-font-logo: 'Cinzel Variable', 'Cinzel', Georgia, serif;
+}
+
+html.dark {
+  --gc-bg: 6 34 26;
+  --gc-card: 14 55 39;
+  --gc-raised: 20 72 52;
+  --gc-ink: 244 239 228;
+  --gc-quiet: 184 199 189;
+  --gc-line: 255 255 255;
+  --gc-gold: 241 207 114;
+  --gc-on-gold: 35 24 3;
+  --gc-money: 241 207 114;
+  --gc-win: 134 239 172;
+  --gc-loss: 253 164 175;
+  --gc-info: 165 227 255;
+  --gc-turn: 241 207 114;
+  --gc-danger: 251 113 133;
+  --gc-shadow-1: 0 12px 28px -14px rgba(0, 0, 0, 0.55);
+  --gc-shadow-2: 0 30px 60px -22px rgba(0, 0, 0, 0.6);
+  --gc-felt: radial-gradient(1200px 700px at 50% -10%, #145a40 0%, #0b3a2a 45%, #06221a 100%);
+}
+
+/* Devices that ask for less motion get (almost) none. The Calm mode switch comes later. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===== Older named colours, still used by the custom classes below ===== */
 :root {
   --gold-bright: #fffbeb;
   --gold-light: #fef08a;
@@ -21,7 +88,7 @@
 }
 
 body {
-  font-family: 'Lato', sans-serif;
+  font-family: var(--gc-font-sans);
   background-color: #f5f0e6;
   color: #1c1917;
   transition: background-color 0.35s ease, color 0.35s ease;
@@ -33,20 +100,12 @@ html.dark body {
   color: #f8fafc;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: 'Cinzel', serif;
-}
-
 .font-display {
-  font-family: 'Cinzel Decorative', 'Cinzel', serif;
+  font-family: var(--gc-font-logo);
 }
 
 .font-editorial {
-  font-family: 'Playfair Display', Georgia, serif;
-}
-
-.font-mono-casino {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--gc-font-sentence);
 }
 
 /* Subtle SVG noise pattern for realistic felt & paper micro-texture */
@@ -328,7 +387,7 @@ html.dark .casino-back-pattern {
   border: 6px double #dc2626;
   padding: 10px 38px;
   color: #dc2626;
-  font-family: 'Cinzel', serif;
+  font-family: var(--gc-font-logo);
   font-size: 2.75rem;
   font-weight: 900;
   text-transform: uppercase;
