@@ -10,8 +10,10 @@ rules_version = '2';
 // - Live rooms: the teacher's screen and the students' phones sign in silently
 //   (Firebase Anonymous sign-in), so each device has its own id. Only the device that
 //   created a room can change or close it. Each student can write only their own
-//   answers, and only the room's host can read them, so classmates can't see or
-//   overwrite each other's bets.
+//   intents (join requests, bets), and only the room's host can read them, so
+//   classmates can't forge or overwrite each other's bets. Note that the room
+//   document itself (readable by anyone with the code) still holds every player's
+//   view, including their current bet, and the public MQTT relays carry the same data.
 //
 // To publish: Firebase console > Firestore Database > pick the "ai-studio-grammarcasino-..."
 // database > Rules > paste this file > Publish.
