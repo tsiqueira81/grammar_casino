@@ -55,6 +55,55 @@ export default {
         sentence: ['"Playfair Display Variable"', '"Playfair Display"', 'Georgia', 'serif'],
         logo: ['"Cinzel Variable"', 'Cinzel', 'Georgia', 'serif'],
       },
+      // Motion for the table (style A). Each one is short; devices that ask for
+      // less motion skip them (see the prefers-reduced-motion rule in index.css).
+      keyframes: {
+        'gc-deal': {
+          from: { opacity: '0', transform: 'translateY(-18px) scale(0.985)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        'gc-slide-up': {
+          from: { opacity: '0', transform: 'translateY(14px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        'gc-fade': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'gc-pop': {
+          '0%': { transform: 'scale(0.7)' },
+          '60%': { transform: 'scale(1.12)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        'gc-pulse': {
+          '0%': { transform: 'scale(1)' },
+          '40%': { transform: 'scale(1.03)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        'gc-breathe': {
+          '0%, 100%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.035)' },
+        },
+        'gc-stamp': {
+          '0%': { opacity: '0', transform: 'scale(2.2) rotate(-16deg)' },
+          '65%': { opacity: '1', transform: 'scale(0.94) rotate(-8deg)' },
+          '100%': { opacity: '1', transform: 'scale(1) rotate(-8deg)' },
+        },
+        'gc-blink': {
+          '0%, 100%': { opacity: '0.25' },
+          '50%': { opacity: '1' },
+        },
+      },
+      animation: {
+        'gc-deal': 'gc-deal 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both',
+        'gc-slide-up': 'gc-slide-up 0.4s ease both',
+        'gc-fade': 'gc-fade 0.5s ease both',
+        'gc-pop': 'gc-pop 0.4s ease both',
+        'gc-pulse': 'gc-pulse 0.3s ease-out',
+        'gc-breathe': 'gc-breathe 2.2s ease-in-out infinite',
+        'gc-stamp': 'gc-stamp 0.55s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both',
+        'gc-blink': 'gc-blink 1.2s ease-in-out infinite both',
+      },
       // Seven text steps. Nothing smaller than 12 px on the projector or 14 px on phones.
       fontSize: {
         'gc-cap': ['12px', { lineHeight: '16px' }],

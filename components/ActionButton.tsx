@@ -1,12 +1,13 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { twMerge } from 'tailwind-merge';
+import { twMerge } from '../utils/twMerge';
 import { SoundEffect } from '../types';
 
 interface ActionButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   playSound?: (sound: SoundEffect, ...args: any[]) => void;
   sound?: SoundEffect;
-  variant?: 'gold' | 'red' | 'blue' | 'green' | 'purple' | 'outline-gold' | 'outline-green' | 'outline-red' | 'secondary';
+  /** 'primary' is style A's one main button per screen: navy (light theme) or gold (dark), sentence case, pill-shaped. */
+  variant?: 'primary' | 'ghost' | 'gold' | 'red' | 'blue' | 'green' | 'purple' | 'outline-gold' | 'outline-green' | 'outline-red' | 'secondary';
 }
 
 const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound = 'click', children, className, variant = 'gold', ...rest }) => {
@@ -21,6 +22,12 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
 
   let gradientClasses = "";
   switch(variant) {
+      case 'primary':
+        gradientClasses = "gc-btn-primary border-0 rounded-full normal-case tracking-normal font-extrabold hover:brightness-105 disabled:opacity-100 disabled:grayscale-0";
+        break;
+      case 'ghost':
+        gradientClasses = "bg-gc-line/[0.06] border border-gc-line/[0.16] text-gc-ink rounded-gc-sm normal-case tracking-normal hover:bg-gc-line/[0.1] hover:border-gc-line/30 disabled:grayscale-0";
+        break;
       case 'gold': 
         gradientClasses = "bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-extrabold border border-[#fef9c3] shadow-[0_6px_20px_-3px_rgba(202,138,4,0.45),0_2px_4px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.85),inset_0_-2px_0_rgba(113,63,18,0.6)] hover:brightness-105 hover:shadow-[0_8px_28px_-2px_rgba(234,179,8,0.65),inset_0_1px_0_rgba(255,255,255,0.95)]";
         break;
@@ -70,7 +77,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
       className={twMerge(baseClasses, gradientClasses, className)} 
       {...rest}
     >
-      <span className={`block w-full ${variant === 'gold' ? 'drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]' : 'drop-shadow-sm'}`}>{children}</span>
+      <span className={`block w-full ${(variant === 'primary' || variant === 'ghost') ? '' : variant === 'gold' ? 'drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]' : 'drop-shadow-sm'}`}>{children}</span>
     </motion.button>
   );
 };

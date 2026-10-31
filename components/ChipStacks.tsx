@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { twMerge } from 'tailwind-merge';
+import { twMerge } from '../utils/twMerge';
 import { SoundEffect } from '../types';
 
 export type ChipDenomination = 10 | 25 | 50 | 100 | 500;
@@ -392,12 +392,9 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
   };
 
   return (
-    <div className={twMerge('p-3 rounded-xl felt-well space-y-2', className)}>
-      <div className="flex items-center justify-between text-[11px] font-sans uppercase tracking-widest text-amber-900 dark:text-amber-200/90">
-        <span className="flex items-center gap-1.5 font-bold">
-          <span className="text-[#d4af37]">◈</span>
-          <span>Chip Rack</span>
-        </span>
+    <div className={twMerge('p-3.5 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] space-y-2', className)}>
+      <div className="flex items-center justify-between text-gc-small font-sans text-gc-quiet">
+        <span className="font-bold">Add chips</span>
         <div className="flex items-center gap-3">
           {currentBet > 0 && (
             <button
@@ -407,9 +404,9 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
                 onClear();
               }}
               disabled={disabled}
-              className="text-rose-600 dark:text-rose-400 hover:text-rose-500 font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/30 transition-colors cursor-pointer disabled:opacity-50"
+              className="text-gc-loss font-semibold text-gc-small px-2.5 py-1 rounded-full bg-gc-loss/10 hover:bg-gc-loss/20 transition-colors cursor-pointer disabled:opacity-50"
             >
-              Clear Table
+              Clear
             </button>
           )}
           <button
@@ -419,9 +416,9 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
               onAllIn();
             }}
             disabled={disabled || playerMoney === 0 || currentBet >= maxAllowed}
-            className="text-amber-800 dark:text-[#fef08a] font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded bg-amber-500/15 border border-[#d4af37]/40 hover:bg-amber-500/25 transition-colors cursor-pointer disabled:opacity-40"
+            className="text-gc-money font-semibold text-gc-small tabular-nums px-2.5 py-1 rounded-full bg-gc-gold/15 hover:bg-gc-gold/25 transition-colors cursor-pointer disabled:opacity-40"
           >
-            {maxBet !== undefined && maxBet < playerMoney ? `Max Cap ($${maxAllowed})` : `All-In ($${playerMoney.toLocaleString()})`}
+            {maxBet !== undefined && maxBet < playerMoney ? `Up to $${maxAllowed}` : `All in ($${playerMoney.toLocaleString()})`}
           </button>
         </div>
       </div>
@@ -433,11 +430,11 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
             <div key={denom} className="flex flex-col items-center group/chip">
               <PokerChip
                 denomination={denom}
-                size="sm"
+                size="md"
                 onClick={() => handleChipClick(denom)}
                 disabled={disabled || !canAfford}
               />
-              <span className="text-[10px] font-sans tabular-nums font-semibold text-amber-900/70 dark:text-amber-200/70 mt-1 group-hover/chip:text-amber-600 dark:group-hover/chip:text-[#fef08a] transition-colors">
+              <span className="text-gc-cap font-sans tabular-nums font-semibold text-gc-quiet mt-1 group-hover/chip:text-gc-ink transition-colors">
                 +${denom}
               </span>
             </div>
@@ -459,7 +456,7 @@ export interface WagerChipsDisplayProps {
 
 export const WagerChipsDisplay: React.FC<WagerChipsDisplayProps> = ({
   amount,
-  label = 'Wager on Felt',
+  label = 'On the table',
   className = '',
 }) => {
   const stacks = useMemo(() => decomposeAmountToChips(amount, 5), [amount]);
@@ -468,15 +465,12 @@ export const WagerChipsDisplay: React.FC<WagerChipsDisplayProps> = ({
 
   return (
     <div
-      className={`px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/15 dark:from-[#082c19] dark:via-[#0d3b22] dark:to-[#082c19] border border-[#d4af37]/50 shadow-[inset_0_1px_0_rgba(254,240,138,0.2),0_4px_12px_rgba(0,0,0,0.2)] flex items-center justify-between gap-3 ${className}`}
+      className={`px-3.5 py-2.5 rounded-gc bg-gc-gold/10 border border-gc-gold/30 flex items-center justify-between gap-3 animate-gc-slide-up ${className}`}
     >
-      <div className="flex items-center gap-2 text-xs font-sans font-bold text-amber-950 dark:text-amber-200">
-        <span className="w-6 h-6 rounded-full bg-[#d4af37]/20 border border-[#d4af37]/60 flex items-center justify-center text-xs text-amber-700 dark:text-[#fef08a]">
-          ♠
-        </span>
+      <div className="flex items-center gap-2 font-sans">
         <div>
-          <div className="text-[10px] uppercase tracking-widest opacity-75">{label}</div>
-          <div className="font-sans tabular-nums text-sm sm:text-base text-slate-900 dark:text-[#fef08a] font-extrabold">
+          <div className="text-gc-cap font-semibold text-gc-quiet">{label}</div>
+          <div className="font-sans tabular-nums text-gc-lead text-gc-money font-extrabold">
             ${amount.toLocaleString()}
           </div>
         </div>
@@ -484,10 +478,10 @@ export const WagerChipsDisplay: React.FC<WagerChipsDisplayProps> = ({
 
       <div className="flex items-center gap-2 flex-wrap justify-end">
         {stacks.slice(0, 4).map(({ denom, count }) => (
-          <div key={denom} className="flex items-center bg-black/15 dark:bg-black/40 pl-1 pr-2 py-0.5 rounded-full border border-[#d4af37]/30">
+          <div key={denom} className="flex items-center bg-gc-line/[0.06] pl-1 pr-2 py-0.5 rounded-full border border-gc-line/[0.12] animate-gc-pop">
             <PokerChip denomination={denom} size="xs" />
             {count > 1 && (
-              <span className="text-[10px] font-sans tabular-nums font-bold text-amber-900 dark:text-amber-300 ml-1">
+              <span className="text-gc-cap font-sans tabular-nums font-bold text-gc-ink ml-1">
                 ×{count}
               </span>
             )}
