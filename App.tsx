@@ -5331,8 +5331,8 @@ export function App() {
                   ? ` <span class="inline-block mx-1 px-3 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.55em] align-middle select-none">(${currentSentence.baseWord.toUpperCase()})</span>`
                   : '';
               sentenceHtml = sentenceHtml.replace(
-                /_{3,}/g,
-                `<span class="inline-block min-w-[4.5em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.6em] align-baseline select-none">_____</span>${inlineBaseWordBadge}`
+                /_{3,}([,.;:!?)]*)/g,
+                `<span class="whitespace-nowrap"><span class="inline-block min-w-[4.5em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.6em] align-baseline select-none">_____</span>${inlineBaseWordBadge}$1</span>`
               );
             }
 

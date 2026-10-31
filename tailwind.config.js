@@ -93,6 +93,11 @@ export default {
           '0%, 100%': { opacity: '0.25' },
           '50%': { opacity: '1' },
         },
+        // The "locked in" badge on phones: a soft green ring that spreads out.
+        'gc-ring': {
+          '0%': { boxShadow: '0 0 0 0 rgb(74 222 128 / 0.45)' },
+          '100%': { boxShadow: '0 0 0 26px rgb(74 222 128 / 0)' },
+        },
       },
       animation: {
         'gc-deal': 'gc-deal 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both',
@@ -103,6 +108,7 @@ export default {
         'gc-breathe': 'gc-breathe 2.2s ease-in-out infinite',
         'gc-stamp': 'gc-stamp 0.55s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both',
         'gc-blink': 'gc-blink 1.2s ease-in-out infinite both',
+        'gc-ring': 'gc-ring 1.8s ease-out infinite',
       },
       // Seven text steps. Nothing smaller than 12 px on the projector or 14 px on phones.
       fontSize: {

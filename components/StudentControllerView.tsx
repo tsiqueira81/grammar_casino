@@ -17,6 +17,22 @@ import WheelModal from './WheelModal';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
+import { diffWords } from '../utils/errorHighlight';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  Download,
+  Lightbulb,
+  Lock,
+  LockOpen,
+  LogOut,
+  Moon,
+  Snowflake,
+  Sparkles,
+  Sun,
+  X,
+} from 'lucide-react';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
 
@@ -503,115 +519,108 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // Screen 1: Join Form (Not yet seated in a room)
   // ============================================================================
   if (!view) {
+    const fieldClass =
+      'w-full rounded-gc border-2 border-gc-line/[0.14] bg-gc-line/[0.06] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold transition-colors';
     return (
-      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md glass-panel rounded-3xl p-6 sm:p-8 border-2 border-[#d4af37] shadow-2xl space-y-6 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={onExitStudentMode}
-              className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer min-h-[44px] flex items-center"
-            >
-              &larr; Solo Offline Table
-            </button>
+      <div className="game-container min-h-screen text-gc-ink flex justify-center">
+        <div className="w-full max-w-md min-h-screen flex flex-col px-[22px] pt-5 pb-7 animate-gc-slide-up">
+          <div className="flex items-center justify-between mb-6">
+            <p className="font-logo font-bold text-[17px] tracking-[0.08em] text-gc-gold m-0">Grammar Casino</p>
             <button
               type="button"
               onClick={onToggleTheme}
-              className="w-11 h-11 rounded-full felt-well border border-[#d4af37]/50 flex items-center justify-center text-base cursor-pointer"
-              title="Toggle Theme"
+              className="w-11 h-11 rounded-gc-sm grid place-items-center bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-quiet cursor-pointer"
+              aria-label={isDarkMode ? 'Switch to the light theme' : 'Switch to the dark theme'}
             >
-              {isDarkMode ? '☀️' : '🌙'}
+              {isDarkMode ? <Sun className="w-[18px] h-[18px]" aria-hidden="true" /> : <Moon className="w-[18px] h-[18px]" aria-hidden="true" />}
             </button>
           </div>
 
-          <div className="text-center space-y-1">
-            <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
-              Student Controller
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-display font-black text-gold tracking-wider">
-              JOIN SALON
-            </h1>
-          </div>
+          <h1 className="text-[30px] leading-tight font-extrabold tracking-tight m-0">Join the table</h1>
+          <p className="mt-1.5 mb-5 text-gc-body text-gc-quiet">Type the code shown on the projector.</p>
 
           {joinError && (
-            <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-700 dark:text-rose-200 text-xs font-medium text-center">
+            <div role="alert" className="mb-4 px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/40 text-gc-small font-semibold text-gc-ink">
               {joinError}
             </div>
           )}
-
           {isJoining && joinWaitingMessage && (
-            <div role="status" className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-900 dark:text-amber-100 text-sm font-medium text-center">
+            <div role="status" className="mb-4 px-4 py-3 rounded-gc bg-gc-info/10 border border-gc-info/35 text-gc-small font-semibold text-gc-ink">
               {joinWaitingMessage}
             </div>
           )}
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
-                4-Letter Room Code
-              </label>
-              <input
-                type="text"
-                maxLength={4}
-                value={roomCodeInput}
-                onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                placeholder="E.G. K7XM"
-                className="w-full h-14 text-center text-2xl font-display font-black tracking-[0.35em] uppercase rounded-xl bg-white/90 dark:bg-black/50 border-2 border-[#d4af37]/60 focus:border-[#d4af37] text-slate-900 dark:text-[#fef08a] focus:outline-none"
-              />
-            </div>
+          <label htmlFor="gc-join-code" className="block mb-2 text-gc-small font-bold text-gc-quiet">Room code</label>
+          <input
+            id="gc-join-code"
+            type="text"
+            maxLength={4}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            value={roomCodeInput}
+            onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
+            placeholder="K7XM"
+            aria-label="Room code"
+            className={`${fieldClass} h-[68px] mb-5 text-center text-[30px] font-extrabold tracking-[0.5em] pl-[0.5em] uppercase tabular-nums`}
+          />
 
-            <div>
-              <label className="block text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold mb-1.5">
-                Your High-Roller Name
-              </label>
-              <input
-                type="text"
-                maxLength={20}
-                value={playerNameInput}
-                onChange={(e) => setPlayerNameInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleJoinRoom();
+          <label htmlFor="gc-join-name" className="block mb-2 text-gc-small font-bold text-gc-quiet">Your name</label>
+          <input
+            id="gc-join-name"
+            type="text"
+            maxLength={20}
+            autoComplete="off"
+            value={playerNameInput}
+            onChange={(e) => setPlayerNameInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleJoinRoom();
+            }}
+            placeholder="First name"
+            className={`${fieldClass} h-14 mb-5 px-4 text-lg font-semibold`}
+          />
+
+          <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Pick an avatar</span>
+          <div className="grid grid-cols-6 gap-2" role="group" aria-labelledby="gc-join-avatar">
+            {AVATARS.slice(0, 24).map((av, i) => (
+              <button
+                key={av}
+                type="button"
+                onClick={() => {
+                  playSound('click');
+                  setSelectedAvatar(av);
                 }}
-                placeholder="Enter your name..."
-                className="w-full h-12 px-4 text-base font-semibold rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 focus:border-[#d4af37] text-slate-900 dark:text-white focus:outline-none"
-              />
-            </div>
+                aria-label={`Avatar ${i + 1}`}
+                aria-pressed={selectedAvatar === av}
+                className={`h-[50px] rounded-[14px] border-2 grid place-items-center text-[26px] leading-none cursor-pointer transition-colors ${
+                  selectedAvatar === av ? 'border-gc-gold bg-gc-gold/15' : 'border-transparent bg-gc-line/[0.07]'
+                }`}
+              >
+                {av}
+              </button>
+            ))}
+          </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
-                  Choose Avatar
-                </label>
-                <span className="text-2xl">{selectedAvatar}</span>
-              </div>
-              <div className="grid grid-cols-6 gap-2 max-h-40 overflow-y-auto p-2 rounded-xl felt-well modal-content-scroll">
-                {AVATARS.slice(0, 48).map((av) => (
-                  <button
-                    key={av}
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setSelectedAvatar(av);
-                    }}
-                    className={`min-h-[44px] rounded-xl text-2xl flex items-center justify-center transition-transform cursor-pointer ${
-                      selectedAvatar === av
-                        ? 'bg-amber-500/30 border-2 border-[#d4af37] scale-105'
-                        : 'hover:bg-white/10'
-                    }`}
-                  >
-                    {av}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+          <div className="mt-auto pt-6 space-y-2">
             <button
               type="button"
               disabled={isJoining}
               onClick={() => handleJoinRoom()}
-              className="w-full min-h-[52px] rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-black text-base uppercase tracking-[0.18em] shadow-lg active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              className="gc-btn-primary w-full h-[58px] rounded-full text-lg font-extrabold flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99] transition-transform"
             >
-              {isJoining ? (joinWaitingMessage ? 'WAITING FOR TEACHER...' : 'CONNECTING...') : 'TAKE SEAT AT TABLE →'}
+              {isJoining ? (joinWaitingMessage ? 'Waiting for the teacher…' : 'Connecting…') : (
+                <>
+                  Join the table
+                  <ArrowRight className="w-[18px] h-[18px]" aria-hidden="true" />
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={onExitStudentMode}
+              className="w-full min-h-[44px] text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer"
+            >
+              Back to the main screen
             </button>
           </div>
         </div>
@@ -635,89 +644,147 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     const escaped = view.sentence.grammarPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     sentenceHtml = sentenceHtml.replace(
       new RegExp(`(${escaped})`, 'gi'),
-      `<span class="bg-amber-300/80 dark:bg-amber-500/30 text-amber-950 dark:text-[#fef08a] border-b-2 border-[#d4af37] px-1.5 py-0.5 rounded font-bold">$1</span>`
+      `<span class="bg-gc-gold/20 text-gc-ink border-b-2 border-gc-gold px-1 rounded-sm">$1</span>`
     );
   }
   if (isClozeRound && sentenceHtml) {
     const inlineBaseBadge =
       qType === 'wordFormation' && view.sentence?.baseWord
-        ? ` <span class="inline-block px-2 py-0.5 rounded bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black text-xs sm:text-sm tracking-widest not-italic align-middle">(${view.sentence.baseWord.toUpperCase()})</span>`
+        ? ` <span class="inline-block mx-0.5 px-2.5 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.6em] align-middle select-none">(${view.sentence.baseWord.toUpperCase()})</span>`
         : '';
     sentenceHtml = sentenceHtml.replace(
-      /_{3,}/g,
-      `<span class="inline-block min-w-[3.2rem] px-2 py-0.5 mx-1 rounded bg-amber-500/20 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans tabular-nums font-bold not-italic">_____</span>${inlineBaseBadge}`
+      /_{3,}([,.;:!?)]*)/g,
+      `<span class="whitespace-nowrap"><span class="inline-block min-w-[4em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.65em] align-baseline select-none">_____</span>${inlineBaseBadge}$1</span>`
     );
   }
 
+  // Plain names for the answer types, as on the projector.
+  const formatLabel =
+    qType === 'multipleChoice'
+      ? 'Multiple choice'
+      : qType === 'openCloze'
+        ? 'Open cloze'
+        : qType === 'wordFormation'
+          ? 'Word formation'
+          : qType === 'keyWordTransformation'
+            ? 'Key word transformation'
+            : 'Valid or flawed?';
+
+  // A true minus sign: a hyphen leaves a gap before the $ at large sizes.
+  const money = (n: number) => `${n < 0 ? '\u2212' : ''}$${Math.abs(Math.round(n)).toLocaleString()}`;
+  const betAmountNum = Number(localBet.bet) || 0;
+
+  // What the player has picked so far, in words (for the lock button and the locked-in screen).
+  const pickText = (() => {
+    if (qType === 'binary') {
+      if (hasSplitBet) {
+        const p = localBet.splitCorrectPercent ?? 50;
+        return `${p}% Valid, ${100 - p}% Flawed`;
+      }
+      return localBet.opinion === 'correct' ? 'Valid' : localBet.opinion === 'incorrect' ? 'Flawed' : '';
+    }
+    if (qType === 'multipleChoice') {
+      if (hasSplitBet) {
+        const list = localBet.splitOptions || [];
+        return list.length === 2 && list[0] === list[1] ? `${list[0]} (2×)` : list.join(' / ');
+      }
+      return localBet.selectedOption || '';
+    }
+    if (hasSplitBet) {
+      return (localBet.splitClozeAnswers || []).map((w) => (w || '').trim()).filter(Boolean).join(' / ');
+    }
+    return (localBet.clozeAnswer || '').trim();
+  })();
+  const isReadyToLock = Boolean(pickText) && betAmountNum > 0;
+  const lockLabel = isReadyToLock
+    ? `Lock in ${money(betAmountNum)} on ${pickText}`
+    : !pickText
+      ? qType === 'binary'
+        ? 'Choose Valid or Flawed'
+        : qType === 'multipleChoice'
+          ? 'Choose an answer'
+          : 'Type your answer'
+      : 'Now choose your bet';
+
+  const sectionTitle = 'text-gc-small font-bold text-gc-quiet';
+  const requiredChip = 'text-gc-cap font-bold px-2.5 py-0.5 rounded-full bg-gc-loss/15 text-gc-loss';
+  const textField =
+    'w-full rounded-gc-sm border-2 bg-gc-line/[0.05] text-gc-ink placeholder:text-gc-quiet/70 placeholder:font-sans placeholder:not-italic placeholder:text-gc-body focus:outline-none transition-colors';
+  const fieldOk = 'border-gc-line/[0.16] focus:border-gc-gold';
+  const fieldBad = 'border-gc-loss ring-2 ring-gc-loss/25';
+
   return (
-    <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-between pb-24">
-      {/* Compact Sticky Top App Bar (<= 56px height to honor 15% mobile sticky cap) */}
-      <header className="sticky top-0 z-30 h-14 px-3 sm:px-5 bg-amber-50/90 dark:bg-[#051a0f]/90 backdrop-blur-md border-b border-[#d4af37]/40 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+    <div className="game-container min-h-screen text-gc-ink flex flex-col pb-28">
+      {/* Top bar: who you are, the room and hand, your balance */}
+      <header className="sticky top-0 z-30 h-16 px-4 bg-gc-bg/85 backdrop-blur-md border-b border-gc-line/[0.1] flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             type="button"
             onClick={() => setShowAvatarPicker((v) => !v)}
-            className="w-10 h-10 rounded-full border border-[#d4af37] bg-black/20 flex items-center justify-center text-xl shrink-0 cursor-pointer"
-            title="Change Avatar"
+            className="w-10 h-10 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-[22px] shrink-0 cursor-pointer"
+            aria-label="Change your avatar"
+            aria-expanded={showAvatarPicker}
           >
             {view.me.avatar}
           </button>
           <div className="min-w-0">
-            <div className="text-xs sm:text-sm font-sans font-extrabold text-slate-900 dark:text-amber-50 truncate">
-              {view.me.name}
-            </div>
-            <div className="text-[10px] font-sans tabular-nums text-slate-500 dark:text-amber-200/70 flex items-center gap-1.5">
+            <div className="text-[15px] font-bold text-gc-ink truncate leading-tight">{view.me.name}</div>
+            <div className="text-[12.5px] font-semibold text-gc-quiet tabular-nums flex items-center gap-1.5 leading-tight">
               <span>Room {view.roomCode}</span>
-              <span>&middot;</span>
-              <span>{isConnected ? 'Live' : 'Syncing'}</span>
+              {view.step === 'IN_GAME' || view.step === 'RESULTS' ? <span>· Hand {view.round}</span> : null}
+              {!isConnected && <span>· Reconnecting</span>}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          {view.me.winStreak > 0 && (
-            <span className="text-xs font-sans tabular-nums font-bold text-amber-700 dark:text-amber-300 tabular-nums">
+        <div className="flex items-center gap-2 shrink-0">
+          {view.me.winStreak > 1 && (
+            <span className="h-8 px-2.5 rounded-full bg-gc-gold/15 text-gc-money text-gc-small font-bold tabular-nums inline-flex items-center" title={`${view.me.winStreak} wins in a row`}>
               🔥 {view.me.winStreak}
             </span>
           )}
-          <div className="px-3 py-1 rounded-xl felt-well border border-[#d4af37]/60 font-sans tabular-nums font-black text-sm sm:text-base text-amber-900 dark:text-[#fef08a] tabular-nums">
-            ${view.me.money.toLocaleString()}
+          <div className="h-9 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] inline-flex items-center text-gc-body font-extrabold text-gc-money tabular-nums">
+            {money(view.me.money)}
           </div>
           <button
             type="button"
             onClick={handleLeaveRoom}
-            className="min-h-[40px] px-2.5 rounded-lg border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-sans font-bold uppercase cursor-pointer"
-            title="Leave Room"
+            className="w-9 h-9 rounded-full grid place-items-center text-gc-quiet hover:text-gc-danger cursor-pointer"
+            aria-label="Leave the room"
+            title="Leave the room"
           >
-            Exit
+            <LogOut className="w-[18px] h-[18px]" aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      {/* Optional Quick Avatar Switcher Drawer */}
+      {/* Avatar picker */}
       {showAvatarPicker && (
-        <div className="w-full max-w-xl mx-auto px-4 pt-3">
-          <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/50">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-sans font-bold uppercase tracking-wider">Tap New Avatar</span>
+        <div className="w-full max-w-xl mx-auto px-4 pt-3 animate-gc-slide-up">
+          <div className="gc-surface rounded-gc-lg p-4">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-gc-small font-bold text-gc-ink">Pick a new avatar</span>
               <button
                 type="button"
                 onClick={() => setShowAvatarPicker(false)}
-                className="text-xs text-amber-500 font-bold"
+                className="h-8 px-3 rounded-full text-gc-small font-semibold text-gc-quiet bg-gc-line/[0.07] cursor-pointer"
               >
                 Close
               </button>
             </div>
-            <div className="grid grid-cols-7 gap-1.5 max-h-36 overflow-y-auto">
-              {AVATARS.slice(0, 42).map((av) => (
+            <div className="grid grid-cols-6 gap-2 max-h-44 overflow-y-auto">
+              {AVATARS.slice(0, 42).map((av, i) => (
                 <button
                   key={av}
                   type="button"
+                  aria-label={`Avatar ${i + 1}`}
                   onClick={() => {
                     sendIntent({ type: 'UPDATE_PROFILE', avatar: av });
                     setShowAvatarPicker(false);
                   }}
-                  className="min-h-[42px] text-2xl rounded-lg hover:bg-amber-500/20 flex items-center justify-center"
+                  className={`h-11 rounded-[12px] text-2xl grid place-items-center cursor-pointer ${
+                    view.me.avatar === av ? 'bg-gc-gold/15 ring-2 ring-inset ring-gc-gold' : 'bg-gc-line/[0.06]'
+                  }`}
                 >
                   {av}
                 </button>
@@ -727,40 +794,32 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         </div>
       )}
 
-      {/* Main Content Container */}
-      <main className="w-full max-w-xl mx-auto px-3 sm:px-4 pt-4 space-y-4 flex-1">
+      <main className="w-full max-w-xl mx-auto px-4 pt-4 space-y-4 flex-1">
 
         {/* ================================================================
             WAITING IN LOBBY (PLAYER_SETUP or SETTINGS)
            ================================================================ */}
         {(view.step === 'PLAYER_SETUP' || view.step === 'SETTINGS') && (
-          <div className="glass-panel rounded-3xl p-6 text-center space-y-5 border border-[#d4af37]/50">
-            <div className="w-20 h-20 mx-auto rounded-full border-2 border-[#d4af37] felt-well flex items-center justify-center text-5xl shadow-lg">
+          <div className="pt-8 pb-4 text-center animate-gc-slide-up">
+            <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-[52px] leading-none">
               {view.me.avatar}
             </div>
-            <div className="space-y-1">
-              <div className="text-xs font-sans uppercase tracking-[0.25em] text-emerald-600 dark:text-emerald-400 font-bold">
-                Seat Confirmed · Ready to Deal
-              </div>
-              <h2 className="text-2xl font-sans font-black text-slate-900 dark:text-amber-50 uppercase">
-                Welcome, {view.me.name}!
-              </h2>
-              <p className="text-xs text-slate-600 dark:text-amber-200/75">
-                Watch the main projector. Your betting pad will unlock automatically as soon as the teacher deals Hand #1.
-              </p>
-            </div>
+            <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">You're in, {view.me.name}!</h1>
+            <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">
+              Watch the projector. Your betting card opens here when the teacher deals the first hand.
+            </p>
 
-            <div className="felt-well rounded-2xl p-4 text-left space-y-2">
-              <div className="text-xs font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
-                Players at the Table ({view.peers.length})
-              </div>
+            <div className="mt-8 gc-surface rounded-gc-lg p-4 text-left">
+              <h2 className={`${sectionTitle} mb-2.5`}>At the table ({view.peers.length})</h2>
               <div className="flex flex-wrap gap-2">
                 {view.peers.map((p) => (
                   <span
                     key={p.id}
-                    className="px-3 py-1.5 rounded-xl bg-white/70 dark:bg-black/40 border border-[#d4af37]/30 text-xs font-sans font-bold flex items-center gap-1.5"
+                    className={`h-9 px-3 rounded-full text-gc-small font-semibold inline-flex items-center gap-1.5 ${
+                      p.id === view.me.id ? 'bg-gc-gold/15 text-gc-ink ring-1 ring-inset ring-gc-gold/50' : 'bg-gc-line/[0.07] text-gc-ink'
+                    }`}
                   >
-                    <span>{p.avatar}</span>
+                    <span aria-hidden="true">{p.avatar}</span>
                     <span>{p.name}</span>
                   </span>
                 ))}
@@ -770,795 +829,763 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         )}
 
         {/* ================================================================
-            ACTIVE ROUND BETTING PAD (IN_GAME)
+            BETTING (IN_GAME)
            ================================================================ */}
         {view.step === 'IN_GAME' && (
           <>
-            {/* Shared Multiplayer Round Timer Bar (when enabled by Teacher) */}
-            {view.turnDurationMs && view.turnDurationMs > 0 && (
+            {/* Shared round timer, when the teacher turned it on */}
+            {(view.turnDurationMs ?? 0) > 0 && (
               <StudentRoundTimerBar
                 timer={view.roundTimer}
-                turnDurationMs={view.turnDurationMs}
+                turnDurationMs={view.turnDurationMs || 0}
                 lockedIn={isPlayerLocked}
               />
             )}
 
-            {/* Status Banner if Frozen or Bankrupt */}
+            {/* Out of money, or frozen */}
             {view.me.money <= 0 ? (
-              <div className="p-4 rounded-2xl bg-rose-500/20 border-2 border-rose-400 text-center space-y-1">
-                <div className="text-2xl">💸</div>
-                <div className="text-sm font-sans font-extrabold uppercase tracking-wider text-rose-900 dark:text-rose-200">
-                  {view.gameMode === 'lastPlayer' ? 'Eliminated (Bankrupt)!' : 'Bankrupt This Hand!'}
+              <div role="status" className="p-5 rounded-gc-lg bg-gc-loss/10 border border-gc-loss/40 text-center space-y-1">
+                <div className="text-3xl" aria-hidden="true">💸</div>
+                <div className="text-gc-lead font-extrabold text-gc-loss">
+                  {view.gameMode === 'lastPlayer' ? "You're out of the game" : "You're out of money this hand"}
                 </div>
-                <div className="text-xs text-rose-800 dark:text-rose-100/80">
+                <p className="m-0 text-gc-small text-gc-quiet">
                   {view.gameMode === 'lastPlayer'
-                    ? 'You are out of funds in High-Roller Survival. Watch the remaining contenders battle it out!'
-                    : 'You are out of funds for this hand and will receive a $150 House Bailout next round.'}
-                </div>
+                    ? 'Watch the projector to see who wins.'
+                    : 'You get $150 from the house at the start of the next hand.'}
+                </p>
               </div>
             ) : view.isFrozen ? (
-              <div className="p-4 rounded-2xl bg-cyan-500/20 border-2 border-cyan-400 text-center space-y-1">
-                <div className="text-2xl">❄️</div>
-                <div className="text-sm font-sans font-extrabold uppercase tracking-wider text-cyan-900 dark:text-cyan-200">
-                  Frozen This Round!
-                </div>
-                <div className="text-xs text-cyan-800 dark:text-cyan-100/80">
-                  You were hit by a freeze effect and must sit out Hand #{view.round}.
-                </div>
+              <div role="status" className="p-5 rounded-gc-lg bg-gc-info/10 border border-gc-info/40 text-center space-y-1">
+                <Snowflake className="w-8 h-8 mx-auto text-gc-info" aria-hidden="true" />
+                <div className="text-gc-lead font-extrabold text-gc-info">You're frozen this hand</div>
+                <p className="m-0 text-gc-small text-gc-quiet">Another player froze you. You can bet again on the next hand.</p>
               </div>
             ) : null}
 
-            {/* Sentence Card */}
-            <div className="glass-panel rounded-2xl p-4 sm:p-5 border-2 border-[#d4af37] shadow-xl space-y-3">
-              <div className="flex items-center justify-between text-[11px] font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
-                <span>
-                  Hand #{view.round} &middot; {view.settings.topic} ({view.settings.level})
-                </span>
-                <span>
-                  {qType === 'multipleChoice'
-                    ? '🔠 MC Cloze'
-                    : qType === 'openCloze'
-                      ? '✍️ Open Cloze'
-                      : qType === 'wordFormation'
-                        ? '🧬 Word Form'
-                        : qType === 'keyWordTransformation'
-                          ? '🔑 Key Word (Part 4)'
-                          : '⚖️ Valid / Flawed'}
-                </span>
-              </div>
-
-              {view.isLoadingSentence || !view.sentence ? (
-                <div className="py-8 text-center space-y-2">
-                  <div className="text-3xl animate-bounce">♠️</div>
-                  <div className="text-sm font-sans font-bold uppercase tracking-widest text-amber-700 dark:text-[#fef08a]">
-                    Croupier is Dealing Hand #{view.round}...
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2.5 py-1">
-                  {qType === 'keyWordTransformation' && view.sentence.leadInSentence && (
-                    <div className="p-3 rounded-xl felt-well border border-[#d4af37]/40 text-center space-y-1">
-                      <div className="text-[10px] font-sans uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
-                        Lead-In Sentence
-                      </div>
-                      <p className="text-base sm:text-lg font-editorial italic text-slate-900 dark:text-amber-50 leading-snug">
-                        &ldquo;{view.sentence.leadInSentence}&rdquo;
-                      </p>
-                      {view.sentence.baseWord && (
-                        <div className="pt-1 flex items-center justify-center gap-2">
-                          <span className="text-[10px] font-sans font-extrabold uppercase tracking-widest text-amber-900 dark:text-amber-200">
-                            🔑 Key Word:
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-sans tabular-nums font-black text-xs sm:text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
-                            {view.sentence.baseWord.toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <p
-                    className="text-lg sm:text-xl font-editorial italic text-slate-900 dark:text-amber-50 leading-relaxed text-center py-1"
-                    dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
-                  />
-                </div>
-              )}
-
-              {/* Active Power-Ups & Effects Row */}
-              {(view.myActivePowerUps.length > 0 || view.me.effects.length > 0 || view.isBetCapped || view.isHighRoller) && (
-                <div className="pt-2 border-t border-[#d4af37]/20 flex flex-wrap items-center gap-1.5 text-xs">
-                  {view.myActivePowerUps.map((pu, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2.5 py-0.5 rounded-lg bg-purple-500/20 border border-purple-400/40 text-purple-900 dark:text-purple-200 font-semibold"
-                    >
-                      {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
-                    </span>
-                  ))}
-                  {view.isBetCapped && (
-                    <span className="px-2.5 py-0.5 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-800 dark:text-rose-200 font-semibold">
-                      🧢 Max Bet ${view.betCapAmount}
-                    </span>
-                  )}
-                  {view.isHighRoller && (
-                    <span className="px-2.5 py-0.5 rounded-lg bg-orange-500/25 border border-orange-400/60 text-orange-900 dark:text-orange-200 font-semibold">
-                      🔥 High Roller: Min Bet ${view.minBetAmount}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* 50/50 Scalpel Open Cloze Clue */}
-              {view.scalpelHint?.clozeMask && (
-                <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs text-cyan-950 dark:text-cyan-100">
-                  <strong className="font-sans uppercase tracking-wider flex items-center gap-1.5">
-                    <span>✂️</span>
-                    <span>50/50 Scalpel Clue:</span>
-                  </strong>
-                  <span className="font-sans tabular-nums font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/25 border border-cyan-400/50 tracking-wider">
-                    {view.scalpelHint.clozeMask}
-                  </span>
-                </div>
-              )}
-
-              {/* Peekaboo Live Spy Feed */}
-              {view.peekabooSpyFeed && view.peekabooSpyFeed.length > 0 && (
-                <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 space-y-1.5 text-xs text-indigo-950 dark:text-indigo-100">
-                  <div className="font-sans font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
-                    <span>🕵️ Peekaboo Live Spyglass</span>
-                    <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-indigo-500/25">
-                      LIVE FEED
-                    </span>
-                  </div>
-                  {view.peekabooSpyFeed.map(spy => (
-                    <div
-                      key={spy.targetId}
-                      className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-indigo-400/25"
-                    >
-                      <div className="flex items-center gap-1.5 font-bold">
-                        <span>{spy.targetAvatar}</span>
-                        <span>{spy.targetName}</span>
-                        <span className="text-[10px] font-sans tabular-nums opacity-80">
-                          {spy.lockedIn ? '🔒 Locked' : '✏️ Drafting'}
-                        </span>
-                      </div>
-                      <div className="font-sans tabular-nums font-bold text-right">
-                        <span className="text-amber-700 dark:text-[#fef08a] mr-2">
-                          {spy.answerSummary}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-black/20 border border-indigo-400/40">
-                          {spy.betAmount !== '' ? `$${Number(spy.betAmount).toLocaleString()}` : '$0'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Ask the Table Live Anonymized Poll Feed */}
-              {view.audiencePollFeed && (
-                <div className="p-3 rounded-xl bg-sky-500/15 border border-sky-400/50 space-y-2 text-xs text-sky-950 dark:text-sky-100">
-                  <div className="font-sans font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300 flex items-center justify-between gap-2">
-                    <span>📊 Ask the Table · Live Poll</span>
-                    <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-sky-500/25">
-                      {view.audiencePollFeed.summaryText}
-                    </span>
-                  </div>
-                  {view.audiencePollFeed.breakdown.length > 0 && (
-                    <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-sky-400/25">
-                      {view.audiencePollFeed.breakdown.map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="p-2 rounded-lg bg-black/15 border border-sky-400/30 flex flex-col gap-1"
-                        >
-                          <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
-                            <span className="truncate">{item.label}</span>
-                            <span className="font-sans tabular-nums text-amber-700 dark:text-[#fef08a] shrink-0">
-                              {item.percent}%
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 rounded-full bg-black/25 overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 rounded-full transition-all duration-300"
-                              style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Private AI Hint Display */}
-              {view.myHint && (
-                <div className="p-3 rounded-xl felt-well border border-amber-400/50 text-xs text-slate-800 dark:text-amber-100">
-                  <strong className="font-sans uppercase tracking-wider text-amber-700 dark:text-[#fef08a]">
-                    💡 Private Croupier Hint:{' '}
-                  </strong>
-                  {view.myHint.isLoading ? 'Consulting the Croupier...' : view.myHint.text}
-                </div>
-              )}
-            </div>
-
-            {/* Answer Selection Controls */}
-            {!view.isFrozen && view.me.money > 0 && view.sentence && (() => {
-              const highlightAnswerMissing =
-                lockWarning?.missingField === 'answer' || lockWarning?.missingField === 'both';
-              const highlightWagerMissing =
-                lockWarning?.missingField === 'wager' || lockWarning?.missingField === 'both';
-
-              return (
+            {isPlayerLocked && !view.isFrozen && view.me.money > 0 && view.sentence ? (
+              /* Locked in: a calm screen until the reveal */
+              <div className="pt-6 pb-2 flex flex-col items-center text-center animate-gc-slide-up">
                 <div
-                  className={`glass-panel rounded-2xl p-4 sm:p-5 space-y-4 border border-[#d4af37]/40 transition-opacity ${
-                    isPlayerLocked ? 'opacity-70 pointer-events-none' : ''
+                  className={`w-[120px] h-[120px] rounded-full grid place-items-center ${
+                    isRoundTimeUp && !view.lockedIn ? 'bg-gc-loss/15 text-gc-loss' : 'bg-gc-win/15 text-gc-win animate-gc-ring'
                   }`}
+                  aria-hidden="true"
                 >
-                  {lockWarning && (
-                    <div
-                      role="alert"
-                      className="px-3.5 py-2.5 rounded-xl bg-rose-500/15 dark:bg-rose-950/75 border-2 border-rose-500 text-rose-900 dark:text-rose-100 text-xs sm:text-sm font-sans font-bold flex items-center justify-between gap-2 shadow-[0_0_20px_rgba(244,63,94,0.35)] animate-fade-in"
-                    >
-                      <div className="flex items-center gap-2 text-left">
-                        <span className="text-base select-none shrink-0">⚠️</span>
-                        <span>{lockWarning.message}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setLockWarning(null)}
-                        className="text-xs px-2 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-rose-900 dark:text-rose-100 font-sans font-bold cursor-pointer shrink-0"
-                      >
-                        OK
-                      </button>
+                  {isRoundTimeUp && !view.lockedIn ? <Lock className="w-14 h-14" strokeWidth={2.2} /> : <Check className="w-14 h-14" strokeWidth={2.4} />}
+                </div>
+                <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">
+                  {isRoundTimeUp && !view.lockedIn ? "Time's up" : "You're locked in"}
+                </h1>
+                <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">Watch the projector for the reveal.</p>
+                <span className="mt-4 max-w-full min-h-10 px-4 py-1.5 rounded-full inline-flex items-center gap-1.5 text-[17px] font-extrabold bg-gc-line/[0.07] border border-gc-line/[0.12]">
+                  {pickText ? (
+                    <>
+                      <span className="truncate">{pickText}</span>
+                      <span className="text-gc-money tabular-nums shrink-0">· {money(betAmountNum)}</span>
+                    </>
+                  ) : (
+                    'No bet placed'
+                  )}
+                </span>
+                {canStudentUnlock ? (
+                  <button
+                    type="button"
+                    onClick={handleToggleLockIn}
+                    className="mt-6 min-h-[44px] px-4 inline-flex items-center gap-2 text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer"
+                  >
+                    <LockOpen className="w-4 h-4" aria-hidden="true" />
+                    Change my answer
+                  </button>
+                ) : (
+                  <p className="mt-6 text-gc-small text-gc-quiet">
+                    {isRoundTimeUp ? 'Only the teacher can reopen your bet now.' : 'The teacher is revealing the answer.'}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* The sentence */}
+                <section className="gc-surface rounded-[20px] px-[18px] py-4 text-center animate-gc-deal" aria-label="The sentence">
+                  <span className="inline-flex items-center h-[26px] px-[11px] rounded-full bg-gc-gold text-gc-on-gold text-[12.5px] font-bold">
+                    Hand {view.round} · {formatLabel}
+                  </span>
+                  <div className="mt-1.5 text-gc-cap font-semibold text-gc-quiet">
+                    {view.settings.topic} · {view.settings.level}
+                  </div>
+
+                  {view.isLoadingSentence || !view.sentence ? (
+                    <div className="py-7 space-y-2">
+                      <div className="text-3xl animate-pulse" aria-hidden="true">♠</div>
+                      <div className="text-gc-body font-semibold text-gc-quiet">Dealing the next sentence…</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 pt-2">
+                      {qType === 'keyWordTransformation' && view.sentence.leadInSentence && (
+                        <div className="px-3.5 py-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] space-y-1.5">
+                          <div className="text-gc-cap font-bold text-gc-quiet">First sentence (keep the meaning)</div>
+                          <p className="m-0 text-gc-lead font-sentence italic text-gc-ink leading-snug">
+                            &ldquo;{view.sentence.leadInSentence}&rdquo;
+                          </p>
+                          {view.sentence.baseWord && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-small tracking-wider">
+                              <span aria-hidden="true">🔑</span>
+                              Key word: {view.sentence.baseWord.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <p
+                        className="m-0 font-sentence italic font-medium text-[23px] leading-[1.3] text-gc-ink text-balance"
+                        dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
+                      />
                     </div>
                   )}
 
-                  <div
-                    ref={answerSectionRef}
-                    className={`space-y-3 rounded-xl transition-all ${
-                      highlightAnswerMissing
-                        ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
-                        : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
-                        1. Choose Your Ruling {hasSplitBet ? '(⚖️ Split Bet Active)' : ''}
-                      </div>
-                      {highlightAnswerMissing && (
-                        <span className="text-[10px] font-sans font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
-                          Required
+                  {/* Power-ups and effects on this player */}
+                  {(view.myActivePowerUps.length > 0 || view.isBetCapped || view.isHighRoller) && (
+                    <div className="mt-3 pt-3 border-t border-gc-line/[0.1] flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
+                      {view.myActivePowerUps.map((pu, idx) => (
+                        <span key={idx} className="px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-800 dark:text-purple-200">
+                          {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
+                        </span>
+                      ))}
+                      {view.isBetCapped && (
+                        <span className="px-2.5 py-1 rounded-full bg-gc-loss/15 text-gc-loss">
+                          🧢 Bets up to ${view.betCapAmount}
+                        </span>
+                      )}
+                      {view.isHighRoller && (
+                        <span className="px-2.5 py-1 rounded-full bg-gc-gold/15 text-gc-money">
+                          🔥 Bet at least ${view.minBetAmount}
                         </span>
                       )}
                     </div>
+                  )}
+                </section>
 
-                    {/* Format A: Binary (Valid / Flawed) */}
-                    {qType === 'binary' && (
-                      <div className="space-y-3">
-                        {hasSplitBet ? (
-                          <div className="space-y-2 felt-well p-3.5 rounded-xl">
-                            <div className="flex justify-between text-xs font-sans tabular-nums font-bold">
-                              <span className="text-emerald-600 dark:text-emerald-400">
-                                ✓ Valid: {localBet.splitCorrectPercent ?? 50}%
-                              </span>
-                              <span className="text-rose-600 dark:text-rose-400">
-                                ✕ Flawed: {100 - (localBet.splitCorrectPercent ?? 50)}%
-                              </span>
+                {/* Scalpel clue */}
+                {view.scalpelHint?.clozeMask && (
+                  <div className="px-4 py-3 rounded-gc bg-gc-info/10 border border-gc-info/35 flex items-center justify-between gap-2 text-gc-small">
+                    <span className="font-bold text-gc-ink flex items-center gap-1.5">
+                      <span aria-hidden="true">✂️</span>
+                      Scalpel clue
+                    </span>
+                    <span className="tabular-nums font-extrabold text-gc-body px-3 py-0.5 rounded-full bg-gc-info/15 text-gc-info tracking-wider">
+                      {view.scalpelHint.clozeMask}
+                    </span>
+                  </div>
+                )}
+
+                {/* Peekaboo: what the spied-on players are doing */}
+                {view.peekabooSpyFeed && view.peekabooSpyFeed.length > 0 && (
+                  <div className="p-4 rounded-gc bg-indigo-500/10 border border-indigo-500/30 dark:border-indigo-300/30 space-y-2 text-gc-small">
+                    <div className="font-bold text-gc-ink flex items-center justify-between">
+                      <span>🕵️ Peekaboo</span>
+                      <span className="text-gc-cap font-semibold text-gc-quiet">Live</span>
+                    </div>
+                    {view.peekabooSpyFeed.map((spy) => (
+                      <div key={spy.targetId} className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gc-line/[0.1]">
+                        <div className="flex items-center gap-1.5 font-semibold">
+                          <span aria-hidden="true">{spy.targetAvatar}</span>
+                          <span>{spy.targetName}</span>
+                          <span className="text-gc-cap text-gc-quiet">{spy.lockedIn ? 'Locked in' : 'Deciding'}</span>
+                        </div>
+                        <div className="tabular-nums font-bold text-right">
+                          <span className="mr-2">{spy.answerSummary}</span>
+                          <span className="px-2 py-0.5 rounded-full bg-gc-gold/15 text-gc-money">
+                            {spy.betAmount !== '' ? `$${Number(spy.betAmount).toLocaleString()}` : '$0'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Ask the table: anonymous poll */}
+                {view.audiencePollFeed && (
+                  <div className="p-4 rounded-gc bg-gc-info/10 border border-gc-info/35 space-y-2.5 text-gc-small">
+                    <div className="font-bold text-gc-info flex items-center justify-between gap-2">
+                      <span>📊 Ask the table (no names)</span>
+                      <span className="text-gc-cap font-semibold px-2.5 py-0.5 rounded-full bg-gc-info/15">{view.audiencePollFeed.summaryText}</span>
+                    </div>
+                    {view.audiencePollFeed.breakdown.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {view.audiencePollFeed.breakdown.map((item, idx) => (
+                          <div key={idx} className="p-2.5 rounded-gc-sm bg-gc-card/70 border border-gc-line/[0.12] flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between gap-1 font-semibold">
+                              <span className="truncate">{item.label}</span>
+                              <span className="tabular-nums text-gc-info shrink-0">{item.percent}%</span>
                             </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              step={10}
-                              value={localBet.splitCorrectPercent ?? 50}
-                              onChange={(e) => updateBetField('splitCorrectPercent', Number(e.target.value))}
-                              className="w-full accent-amber-500 h-6 cursor-pointer"
-                            />
+                            <div className="w-full h-1.5 rounded-full bg-gc-line/[0.1] overflow-hidden">
+                              <div className="h-full bg-gc-info rounded-full transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} />
+                            </div>
                           </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-3">
-                            <button
-                              ref={firstOpinionBtnRef}
-                              type="button"
-                              onClick={() => updateBetField('opinion', 'correct')}
-                              className={`min-h-[54px] rounded-xl font-sans font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
-                                localBet.opinion === 'correct'
-                                  ? 'bg-emerald-600 text-white border-emerald-300 shadow-lg scale-[1.01]'
-                                  : highlightAnswerMissing
-                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
-                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                              }`}
-                            >
-                              <span>✓</span>
-                              <span>Valid</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateBetField('opinion', 'incorrect')}
-                              className={`min-h-[54px] rounded-xl font-sans font-extrabold text-sm uppercase tracking-wider border-2 transition-all cursor-pointer flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
-                                localBet.opinion === 'incorrect'
-                                  ? 'bg-rose-600 text-white border-rose-300 shadow-lg scale-[1.01]'
-                                  : highlightAnswerMissing
-                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
-                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                              }`}
-                            >
-                              <span>✕</span>
-                              <span>Flawed</span>
-                            </button>
-                          </div>
-                        )}
-
-                        {(localBet.opinion === 'incorrect' ||
-                          (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
-                          <div>
-                            <label className="block text-[11px] font-sans uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mb-1">
-                              Optional Bonus Correction (+100% Payout if Flawed):
-                            </label>
-                            <input
-                              type="text"
-                              value={localBet.userCorrection || ''}
-                              onChange={(e) => updateBetField('userCorrection', e.target.value)}
-                              placeholder="Type the corrected sentence or phrase..."
-                              className="w-full min-h-[46px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4af37]"
-                            />
-                          </div>
-                        )}
+                        ))}
                       </div>
                     )}
+                  </div>
+                )}
 
-                    {/* Format B: Multiple Choice Cloze */}
-                    {qType === 'multipleChoice' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {(() => {
-                          const eliminatedSet = new Set(
-                            (view.scalpelHint?.eliminatedOptions || []).map((o) =>
-                              o.trim().toLowerCase()
-                            )
-                          );
-                          return (view.sentence.options || []).map((opt, idx) => {
-                            const letter = ['A', 'B', 'C', 'D'][idx] || '';
-                            const isEliminatedOpt = eliminatedSet.has(opt.trim().toLowerCase());
-                            const splitList = localBet.splitOptions || [];
-                            const isSelected = hasSplitBet
-                              ? splitList.includes(opt)
-                              : localBet.selectedOption === opt;
-                            const isDoubleStacked =
-                              hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
+                {/* Answer, wager, hint */}
+                {!view.isFrozen && view.me.money > 0 && view.sentence && (() => {
+                  const highlightAnswerMissing =
+                    lockWarning?.missingField === 'answer' || lockWarning?.missingField === 'both';
+                  const highlightWagerMissing =
+                    lockWarning?.missingField === 'wager' || lockWarning?.missingField === 'both';
 
-                            return (
-                              <button
-                                key={opt}
-                                ref={idx === 0 ? firstOptionBtnRef : undefined}
-                                type="button"
-                                disabled={isEliminatedOpt}
-                                onClick={() => {
-                                  if (isEliminatedOpt) return;
-                                  if (hasSplitBet) {
-                                    let next: string[];
-                                    if (splitList.length === 0) {
-                                      next = [opt];
-                                    } else if (splitList.length === 1) {
-                                      next = [splitList[0], opt];
-                                    } else if (splitList.includes(opt)) {
-                                      next = splitList.filter((o) => o !== opt);
-                                    } else {
-                                      next = [splitList[1], opt];
-                                    }
-                                    updateBetField('splitOptions', next);
-                                  } else {
-                                    updateBetField('selectedOption', opt);
-                                  }
-                                }}
-                                className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-sans font-bold text-sm transition-all flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
-                                  isEliminatedOpt
-                                    ? 'opacity-40 grayscale cursor-not-allowed bg-slate-900/30 border-rose-500/40 text-slate-400 line-through'
-                                    : isSelected
-                                      ? 'cursor-pointer bg-emerald-600 text-white border-emerald-300 shadow-md'
-                                      : highlightAnswerMissing
-                                        ? 'cursor-pointer felt-well text-slate-800 dark:text-amber-50 border-rose-400'
-                                        : 'cursor-pointer felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                                }`}
-                              >
-                                <span className={isEliminatedOpt ? 'line-through' : ''}>
-                                  <strong className="font-sans tabular-nums mr-2">{letter}.</strong>
-                                  {opt}
-                                </span>
-                                {isEliminatedOpt ? (
-                                  <span className="text-[10px] font-sans tabular-nums bg-rose-500/25 text-rose-200 px-1.5 py-0.5 rounded font-black no-underline">
-                                    ✂️ Cut
-                                  </span>
-                                ) : isDoubleStacked ? (
-                                  <span className="text-[10px] font-sans tabular-nums bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
-                                    2×
-                                  </span>
-                                ) : null}
-                              </button>
-                            );
-                          });
-                        })()}
-                      </div>
-                    )}
+                  return (
+                    <div className="space-y-5">
+                      {lockWarning && (
+                        <div
+                          role="alert"
+                          className="px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/50 text-gc-ink text-gc-small font-semibold flex items-center justify-between gap-3 animate-gc-slide-up"
+                        >
+                          <div className="flex items-center gap-2.5 text-left">
+                            <AlertTriangle className="w-5 h-5 shrink-0 text-gc-loss" aria-hidden="true" />
+                            <span>{lockWarning.message}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setLockWarning(null)}
+                            className="h-8 px-3.5 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.16] text-gc-ink text-gc-small font-bold cursor-pointer shrink-0"
+                          >
+                            OK
+                          </button>
+                        </div>
+                      )}
 
-                    {/* Format C, D & E: Open Cloze, Word Formation & Key Word Transformation */}
-                    {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
-                      const cleanBase = (view.sentence?.baseWord || '').trim().toLowerCase();
-                      const isUnchangedBase =
-                        qType === 'wordFormation' &&
-                        Boolean(cleanBase) &&
-                        (hasSplitBet
-                          ? [localBet.splitClozeAnswers?.[0], localBet.splitClozeAnswers?.[1]].some(
-                              (w) => Boolean(w?.trim()) && w!.trim().toLowerCase() === cleanBase
-                            )
-                          : Boolean(localBet.clozeAnswer?.trim()) &&
-                            localBet.clozeAnswer!.trim().toLowerCase() === cleanBase);
+                      {/* Your answer */}
+                      <section
+                        ref={answerSectionRef}
+                        aria-label="Your answer"
+                        className={`space-y-2.5 rounded-gc transition-all ${highlightAnswerMissing ? 'p-3 -mx-3 ring-2 ring-gc-loss/60 bg-gc-loss/[0.06]' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <h2 className={`${sectionTitle} m-0`}>
+                            Your answer{hasSplitBet ? ' (split bet)' : ''}
+                          </h2>
+                          {highlightAnswerMissing && <span className={requiredChip}>Needed</span>}
+                        </div>
 
-                      const kwtCheck = (() => {
-                        const raw = (localBet.clozeAnswer || '').trim();
-                        const words = raw ? raw.split(/\s+/).filter(Boolean) : [];
-                        const escaped = cleanBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const hasKeyWord = cleanBase
-                          ? new RegExp(`\\b${escaped}\\b`, 'i').test(raw)
-                          : true;
-                        const isValidCount = words.length >= 2 && words.length <= 6;
-                        return { raw, wordCount: words.length, hasKeyWord, isValidCount };
-                      })();
-
-                      return (
-                        <div className="space-y-2.5">
-                          {qType === 'wordFormation' && view.sentence?.baseWord && (
-                            <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
-                                <span>🧬</span>
-                                <span>Base Word to Transform:</span>
-                              </span>
-                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-sans tabular-nums font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
-                                ({view.sentence.baseWord.toUpperCase()})
-                              </span>
-                            </div>
-                          )}
-                          {qType === 'keyWordTransformation' && view.sentence?.baseWord && (
-                            <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
-                              <div className="text-left">
-                                <span className="text-[11px] font-sans font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
-                                  <span>🔑</span>
-                                  <span>Key Word (Do Not Change):</span>
-                                </span>
-                                <span className="text-[10px] text-slate-600 dark:text-amber-200/75 block">
-                                  2–6 words · 1 Mark (1×) or 2 Marks (2×)
-                                </span>
+                        {/* Valid or flawed */}
+                        {qType === 'binary' && (
+                          <div className="space-y-3">
+                            {hasSplitBet ? (
+                              <div className="p-4 rounded-gc bg-indigo-500/[0.07] border border-indigo-500/30 dark:border-indigo-300/30 space-y-2">
+                                <div className="flex justify-between text-gc-small font-bold tabular-nums">
+                                  <span className="text-gc-win">Valid {localBet.splitCorrectPercent ?? 50}%</span>
+                                  <span className="text-gc-loss">Flawed {100 - (localBet.splitCorrectPercent ?? 50)}%</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  step={10}
+                                  aria-label="How much goes on Valid"
+                                  value={localBet.splitCorrectPercent ?? 50}
+                                  onChange={(e) => updateBetField('splitCorrectPercent', Number(e.target.value))}
+                                  className="w-full accent-amber-500 h-6 cursor-pointer"
+                                />
                               </div>
-                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-sans tabular-nums font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
-                                {view.sentence.baseWord.toUpperCase()}
-                              </span>
-                            </div>
-                          )}
-                          {hasSplitBet ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                              <input
-                                ref={splitWord1InputRef}
-                                type="text"
-                                maxLength={qType === 'keyWordTransformation' ? 80 : 32}
-                                value={localBet.splitClozeAnswers?.[0] || ''}
-                                onChange={(e) =>
-                                  updateBetField('splitClozeAnswers', [
-                                    qType === 'keyWordTransformation'
-                                      ? e.target.value.replace(/\s{2,}/g, ' ')
-                                      : e.target.value.replace(/\s+/g, ''),
-                                    localBet.splitClozeAnswers?.[1] || '',
-                                  ])
-                                }
-                                placeholder={
-                                  qType === 'keyWordTransformation' && view.sentence?.baseWord
-                                    ? `2–6 words using ${view.sentence.baseWord.toUpperCase()} (50%)`
-                                    : qType === 'wordFormation' && view.sentence?.baseWord
-                                      ? `Derived form #1 of ${view.sentence.baseWord.toUpperCase()} (50%)`
-                                      : 'Candidate Word #1 (50%)'
-                                }
-                                className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
-                                  highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
-                                }`}
-                              />
-                              <input
-                                ref={splitWord2InputRef}
-                                type="text"
-                                maxLength={qType === 'keyWordTransformation' ? 80 : 32}
-                                value={localBet.splitClozeAnswers?.[1] || ''}
-                                onChange={(e) =>
-                                  updateBetField('splitClozeAnswers', [
-                                    localBet.splitClozeAnswers?.[0] || '',
-                                    qType === 'keyWordTransformation'
-                                      ? e.target.value.replace(/\s{2,}/g, ' ')
-                                      : e.target.value.replace(/\s+/g, ''),
-                                  ])
-                                }
-                                placeholder={
-                                  qType === 'keyWordTransformation' && view.sentence?.baseWord
-                                    ? `2nd phrase using ${view.sentence.baseWord.toUpperCase()} (50%)`
-                                    : qType === 'wordFormation' && view.sentence?.baseWord
-                                      ? `Derived form #2 of ${view.sentence.baseWord.toUpperCase()} (50%)`
-                                      : 'Candidate Word #2 (50%)'
-                                }
-                                className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
-                                  highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
-                                }`}
-                              />
-                            </div>
-                          ) : (
-                            <input
-                              ref={clozeWordInputRef}
-                              type="text"
-                              maxLength={qType === 'keyWordTransformation' ? 80 : 32}
-                              value={localBet.clozeAnswer || ''}
-                              onChange={(e) =>
-                                updateBetField(
-                                  'clozeAnswer',
-                                  qType === 'keyWordTransformation'
-                                    ? e.target.value.replace(/\s{2,}/g, ' ')
-                                    : e.target.value.replace(/\s+/g, '')
+                            ) : (
+                              <div className="grid grid-cols-2 gap-3">
+                                <button
+                                  ref={firstOpinionBtnRef}
+                                  type="button"
+                                  aria-pressed={localBet.opinion === 'correct'}
+                                  onClick={() => updateBetField('opinion', 'correct')}
+                                  className={`h-[104px] rounded-[18px] border-2 flex flex-col items-center justify-center gap-1.5 text-xl font-extrabold cursor-pointer transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-gold/50 ${
+                                    localBet.opinion === 'correct'
+                                      ? 'bg-gc-win/15 border-emerald-700 dark:border-emerald-400 text-gc-win animate-gc-pulse'
+                                      : 'bg-gc-line/[0.07] border-gc-line/[0.14] text-gc-ink'
+                                  }`}
+                                >
+                                  <Check className="w-7 h-7" strokeWidth={2.6} aria-hidden="true" />
+                                  Valid
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-pressed={localBet.opinion === 'incorrect'}
+                                  onClick={() => updateBetField('opinion', 'incorrect')}
+                                  className={`h-[104px] rounded-[18px] border-2 flex flex-col items-center justify-center gap-1.5 text-xl font-extrabold cursor-pointer transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-gold/50 ${
+                                    localBet.opinion === 'incorrect'
+                                      ? 'bg-gc-loss/15 border-rose-700 dark:border-rose-400 text-gc-loss animate-gc-pulse'
+                                      : 'bg-gc-line/[0.07] border-gc-line/[0.14] text-gc-ink'
+                                  }`}
+                                >
+                                  <X className="w-7 h-7" strokeWidth={2.6} aria-hidden="true" />
+                                  Flawed
+                                </button>
+                              </div>
+                            )}
+
+                            {(localBet.opinion === 'incorrect' ||
+                              (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
+                              <div className="animate-gc-slide-up">
+                                <label htmlFor="gc-phone-correction" className="block mb-1.5 text-gc-small font-bold text-gc-ink">
+                                  Bonus: write the corrected sentence
+                                </label>
+                                <input
+                                  id="gc-phone-correction"
+                                  type="text"
+                                  value={localBet.userCorrection || ''}
+                                  onChange={(e) => updateBetField('userCorrection', e.target.value)}
+                                  placeholder="Optional. Pays double if it's right."
+                                  className={`${textField} ${fieldOk} min-h-[52px] px-4 font-sentence italic text-gc-lead`}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Multiple choice */}
+                        {qType === 'multipleChoice' && (
+                          <div className="grid grid-cols-1 gap-2.5">
+                            {(() => {
+                              const eliminatedSet = new Set(
+                                (view.scalpelHint?.eliminatedOptions || []).map((o) => o.trim().toLowerCase())
+                              );
+                              return (view.sentence.options || []).map((opt, idx) => {
+                                const letter = ['A', 'B', 'C', 'D'][idx] || '';
+                                const isEliminatedOpt = eliminatedSet.has(opt.trim().toLowerCase());
+                                const splitList = localBet.splitOptions || [];
+                                const isSelected = hasSplitBet ? splitList.includes(opt) : localBet.selectedOption === opt;
+                                const isDoubleStacked =
+                                  hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
+
+                                return (
+                                  <button
+                                    key={opt}
+                                    ref={idx === 0 ? firstOptionBtnRef : undefined}
+                                    type="button"
+                                    disabled={isEliminatedOpt}
+                                    aria-pressed={isSelected}
+                                    onClick={() => {
+                                      if (isEliminatedOpt) return;
+                                      if (hasSplitBet) {
+                                        let next: string[];
+                                        if (splitList.length === 0) {
+                                          next = [opt];
+                                        } else if (splitList.length === 1) {
+                                          next = [splitList[0], opt];
+                                        } else if (splitList.includes(opt)) {
+                                          next = splitList.filter((o) => o !== opt);
+                                        } else {
+                                          next = [splitList[1], opt];
+                                        }
+                                        updateBetField('splitOptions', next);
+                                      } else {
+                                        updateBetField('selectedOption', opt);
+                                      }
+                                    }}
+                                    className={`min-h-[60px] px-4 py-2.5 rounded-gc border-2 text-left flex items-center justify-between gap-3 transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-gold/50 ${
+                                      isEliminatedOpt
+                                        ? 'opacity-50 cursor-not-allowed bg-gc-line/[0.04] border-gc-loss/30 text-gc-quiet'
+                                        : isSelected
+                                          ? 'cursor-pointer bg-gc-gold/15 border-gc-gold text-gc-ink animate-gc-pulse'
+                                          : 'cursor-pointer bg-gc-line/[0.07] border-gc-line/[0.14] text-gc-ink'
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-3 min-w-0">
+                                      <span
+                                        className={`w-9 h-9 rounded-full grid place-items-center text-gc-body font-extrabold shrink-0 ${
+                                          isSelected ? 'bg-gc-gold text-gc-on-gold' : 'bg-gc-line/[0.08] text-gc-quiet'
+                                        }`}
+                                      >
+                                        {letter}
+                                      </span>
+                                      <span className={`text-gc-lead font-sentence italic font-semibold truncate ${isEliminatedOpt ? 'line-through' : ''}`}>
+                                        {opt}
+                                      </span>
+                                    </span>
+                                    {isEliminatedOpt ? (
+                                      <span className="text-gc-cap font-bold px-2.5 py-1 rounded-full bg-gc-loss/15 text-gc-loss shrink-0">✂️ Cut</span>
+                                    ) : isDoubleStacked ? (
+                                      <span className="text-gc-cap font-bold px-2.5 py-1 rounded-full bg-gc-gold text-gc-on-gold shrink-0">2×</span>
+                                    ) : null}
+                                  </button>
+                                );
+                              });
+                            })()}
+                          </div>
+                        )}
+
+                        {/* Open cloze, word formation, key word transformation */}
+                        {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                          const cleanBase = (view.sentence?.baseWord || '').trim().toLowerCase();
+                          const isUnchangedBase =
+                            qType === 'wordFormation' &&
+                            Boolean(cleanBase) &&
+                            (hasSplitBet
+                              ? [localBet.splitClozeAnswers?.[0], localBet.splitClozeAnswers?.[1]].some(
+                                  (w) => Boolean(w?.trim()) && w!.trim().toLowerCase() === cleanBase
                                 )
-                              }
-                              placeholder={
-                                qType === 'keyWordTransformation' && view.sentence?.baseWord
-                                  ? `Type 2–6 words including ${view.sentence.baseWord.toUpperCase()}...`
-                                  : qType === 'wordFormation' && view.sentence?.baseWord
-                                    ? `Transform (${view.sentence.baseWord.toUpperCase()}) to fit the gap...`
-                                    : 'Type the single missing word...'
-                              }
-                              className={`w-full min-h-[50px] px-4 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-base font-bold text-slate-900 dark:text-white focus:outline-none ${
-                                highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/60 focus:border-[#d4af37]'
-                              }`}
-                            />
-                          )}
-                          {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-sans">
-                              <span
-                                className={`px-2 py-0.5 rounded font-bold border ${
-                                  kwtCheck.hasKeyWord
-                                    ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
-                                    : 'bg-rose-500/15 text-rose-800 dark:text-rose-200 border-rose-500/50'
-                                }`}
-                              >
-                                {kwtCheck.hasKeyWord
-                                  ? `✓ Key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" included`
-                                  : `⚠️ Include unchanged "${(view.sentence?.baseWord || 'KEY').toUpperCase()}"`}
-                              </span>
-                              <span
-                                className={`px-2 py-0.5 rounded font-sans tabular-nums font-bold border ${
-                                  kwtCheck.isValidCount
-                                    ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
-                                    : 'bg-amber-500/20 text-amber-900 dark:text-amber-200 border-amber-500/50'
-                                }`}
-                              >
-                                {kwtCheck.wordCount} / 2–6 words
-                              </span>
+                              : Boolean(localBet.clozeAnswer?.trim()) &&
+                                localBet.clozeAnswer!.trim().toLowerCase() === cleanBase);
+
+                          const kwtCheck = (() => {
+                            const raw = (localBet.clozeAnswer || '').trim();
+                            const words = raw ? raw.split(/\s+/).filter(Boolean) : [];
+                            const escaped = cleanBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const hasKeyWord = cleanBase ? new RegExp(`\\b${escaped}\\b`, 'i').test(raw) : true;
+                            const isValidCount = words.length >= 2 && words.length <= 6;
+                            return { raw, wordCount: words.length, hasKeyWord, isValidCount };
+                          })();
+                          const bad = highlightAnswerMissing || isUnchangedBase;
+                          const baseUpper = (view.sentence?.baseWord || '').toUpperCase();
+
+                          return (
+                            <div className="space-y-2.5">
+                              {qType === 'wordFormation' && view.sentence?.baseWord && (
+                                <div className="px-4 py-3 rounded-gc bg-gc-gold/10 border border-gc-gold/40 flex items-center justify-between gap-2">
+                                  <span className="text-gc-small font-bold text-gc-ink flex items-center gap-1.5">
+                                    <span aria-hidden="true">🧬</span>
+                                    Change the form of this word
+                                  </span>
+                                  <span className="px-3 py-0.5 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-small tracking-wider">
+                                    {baseUpper}
+                                  </span>
+                                </div>
+                              )}
+                              {qType === 'keyWordTransformation' && view.sentence?.baseWord && (
+                                <div className="text-gc-small text-gc-quiet">
+                                  Use 2 to 6 words, including <strong className="text-gc-ink">{baseUpper}</strong> unchanged. One mark pays 1×, two marks pay 2×.
+                                </div>
+                              )}
+                              {hasSplitBet ? (
+                                <div className="grid grid-cols-1 gap-2.5">
+                                  <input
+                                    ref={splitWord1InputRef}
+                                    type="text"
+                                    aria-label="First answer"
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    value={localBet.splitClozeAnswers?.[0] || ''}
+                                    onChange={(e) =>
+                                      updateBetField('splitClozeAnswers', [
+                                        qType === 'keyWordTransformation'
+                                          ? e.target.value.replace(/\s{2,}/g, ' ')
+                                          : e.target.value.replace(/\s+/g, ''),
+                                        localBet.splitClozeAnswers?.[1] || '',
+                                      ])
+                                    }
+                                    placeholder={
+                                      qType === 'keyWordTransformation' && baseUpper
+                                        ? `First answer, with ${baseUpper} (half)`
+                                        : qType === 'wordFormation' && baseUpper
+                                          ? `A new form of ${baseUpper} (half)`
+                                          : 'First word (half)'
+                                    }
+                                    className={`${textField} ${bad ? fieldBad : fieldOk} min-h-[52px] px-4 font-sentence italic font-semibold text-gc-lead`}
+                                  />
+                                  <input
+                                    ref={splitWord2InputRef}
+                                    type="text"
+                                    aria-label="Second answer"
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    value={localBet.splitClozeAnswers?.[1] || ''}
+                                    onChange={(e) =>
+                                      updateBetField('splitClozeAnswers', [
+                                        localBet.splitClozeAnswers?.[0] || '',
+                                        qType === 'keyWordTransformation'
+                                          ? e.target.value.replace(/\s{2,}/g, ' ')
+                                          : e.target.value.replace(/\s+/g, ''),
+                                      ])
+                                    }
+                                    placeholder="Second answer (optional, half)"
+                                    className={`${textField} ${bad ? fieldBad : fieldOk} min-h-[52px] px-4 font-sentence italic font-semibold text-gc-lead`}
+                                  />
+                                </div>
+                              ) : (
+                                <input
+                                  ref={clozeWordInputRef}
+                                  type="text"
+                                  aria-label="Your answer"
+                                  maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                  value={localBet.clozeAnswer || ''}
+                                  onChange={(e) =>
+                                    updateBetField(
+                                      'clozeAnswer',
+                                      qType === 'keyWordTransformation'
+                                        ? e.target.value.replace(/\s{2,}/g, ' ')
+                                        : e.target.value.replace(/\s+/g, '')
+                                    )
+                                  }
+                                  placeholder={
+                                    qType === 'keyWordTransformation' && baseUpper
+                                      ? `2 to 6 words, including ${baseUpper}`
+                                      : qType === 'wordFormation' && baseUpper
+                                        ? `A new form of ${baseUpper}`
+                                        : 'The missing word'
+                                  }
+                                  className={`${textField} ${bad ? fieldBad : fieldOk} h-14 px-4 font-sentence italic font-semibold text-gc-title`}
+                                />
+                              )}
+                              {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-gc-cap">
+                                  <span className={`px-2.5 py-1 rounded-full font-bold ${kwtCheck.hasKeyWord ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-loss/15 text-gc-loss'}`}>
+                                    {kwtCheck.hasKeyWord ? `✓ Key word ${baseUpper || 'KEY'} is in` : `Use ${baseUpper || 'KEY'} without changing it`}
+                                  </span>
+                                  <span className={`px-2.5 py-1 rounded-full tabular-nums font-bold ${kwtCheck.isValidCount ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-gold/15 text-gc-money'}`}>
+                                    {kwtCheck.wordCount} of 2 to 6 words
+                                  </span>
+                                </div>
+                              )}
+                              {isUnchangedBase && (
+                                <div className="px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/50 text-gc-ink text-gc-small font-semibold flex items-center gap-2.5">
+                                  <AlertTriangle className="w-5 h-5 shrink-0 text-gc-loss" aria-hidden="true" />
+                                  <span>
+                                    That's the base word as it is (<strong>{baseUpper}</strong>). Change its form, for example with a prefix or suffix.
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {isUnchangedBase && (
-                            <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-sans font-bold flex items-center gap-2">
-                              <span>⚠️</span>
-                              <span>
-                                You typed the unchanged base word <strong>({(view.sentence?.baseWord || '').toUpperCase()})</strong>. Transform its form (e.g. add a prefix or suffix) to lock in!
-                              </span>
-                            </div>
+                          );
+                        })()}
+                      </section>
+
+                      {/* Your bet */}
+                      <section
+                        ref={wagerSectionRef}
+                        aria-label="Your bet"
+                        className={`space-y-2.5 rounded-gc transition-all ${highlightWagerMissing ? 'p-3 -mx-3 ring-2 ring-gc-loss/60 bg-gc-loss/[0.06]' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <h2 className={`${sectionTitle} m-0`}>Your bet</h2>
+                          {highlightWagerMissing ? (
+                            <span className={requiredChip}>Needed</span>
+                          ) : (
+                            <span className="text-gc-cap font-semibold text-gc-quiet tabular-nums">
+                              {view.isHighRoller ? `At least $${view.minBetAmount.toLocaleString()} · ` : ''}Up to {money(maxAllowedBet)}
+                            </span>
                           )}
                         </div>
-                      );
-                    })()}
-                  </div>
 
-                  {/* Wager Amount Controls */}
-                  <div
-                    ref={wagerSectionRef}
-                    className={`space-y-2.5 rounded-xl transition-all ${
-                      highlightWagerMissing
-                        ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
-                        : 'pt-3 border-t border-[#d4af37]/20'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-sans font-extrabold uppercase tracking-widest text-slate-700 dark:text-amber-200">
-                          2. Set Your Wager
-                        </span>
-                        {highlightWagerMissing && (
-                          <span className="text-[10px] font-sans font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500 text-white">
-                            Required
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs font-sans tabular-nums text-amber-800 dark:text-[#fef08a] tabular-nums">
-                        {view.isHighRoller ? `Min: $${view.minBetAmount.toLocaleString()} · ` : ''}Max: ${maxAllowedBet.toLocaleString()}
-                      </span>
-                    </div>
+                        <div className="flex items-center justify-between gap-2.5">
+                          <div className="relative flex-1 min-w-0">
+                            <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[38px] font-extrabold text-gc-money pointer-events-none" aria-hidden="true">$</span>
+                            <input
+                              ref={wagerInputRef}
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              aria-label="Your bet in dollars"
+                              value={localBet.bet ?? ''}
+                              onChange={(e) => updateBetField('bet', e.target.value)}
+                              placeholder={view.isHighRoller ? String(view.minBetAmount) : '0'}
+                              className={`w-full h-14 pl-7 pr-1 bg-transparent border-0 border-b-2 rounded-none text-[38px] font-extrabold text-gc-money tabular-nums placeholder:text-gc-money/40 focus:outline-none ${
+                                highlightWagerMissing ? 'border-gc-loss' : 'border-gc-line/[0.16] focus:border-gc-gold'
+                              }`}
+                            />
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            {view.isHighRoller && (
+                              <button
+                                type="button"
+                                onClick={() => updateBetField('bet', Math.min(maxAllowedBet, view.minBetAmount))}
+                                className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                              >
+                                Least
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => updateBetField('bet', maxAllowedBet)}
+                              className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                            >
+                              All in
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateBetField('bet', '')}
+                              className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-sans tabular-nums font-bold text-amber-700 dark:text-[#fef08a]">
-                          $
-                        </span>
-                        <input
-                          ref={wagerInputRef}
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={localBet.bet ?? ''}
-                          onChange={(e) => updateBetField('bet', e.target.value)}
-                          placeholder={view.isHighRoller ? String(view.minBetAmount) : '0'}
-                          className={`w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 font-sans tabular-nums font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none ${
-                            highlightWagerMissing
-                              ? 'border-rose-500 ring-2 ring-rose-500/35'
-                              : 'border-[#d4af37]/60 focus:border-[#d4af37]'
-                          }`}
-                        />
-                      </div>
-                    </div>
+                        {/* Chips add to the bet */}
+                        <div className="grid grid-cols-4 gap-2.5 pt-1">
+                          {[
+                            { v: 10, cls: 'bg-[#2563eb]' },
+                            { v: 25, cls: 'bg-[#15803d]' },
+                            { v: 50, cls: 'bg-[#be123c]' },
+                            { v: 100, cls: 'bg-[#1f2937] dark:bg-[#111827]' },
+                          ].map((chip) => (
+                            <button
+                              key={chip.v}
+                              type="button"
+                              aria-label={`Add $${chip.v}`}
+                              onClick={() => {
+                                playSound('bet');
+                                updateBetField('bet', Math.min(maxAllowedBet, betAmountNum + chip.v));
+                              }}
+                              className={`h-[52px] rounded-full text-white text-[15px] font-extrabold shadow-[0_6px_12px_-6px_rgba(0,0,0,0.6),inset_0_-3px_0_rgba(0,0,0,0.25)] active:scale-95 transition-transform cursor-pointer ${chip.cls}`}
+                            >
+                              +${chip.v}
+                            </button>
+                          ))}
+                        </div>
+                      </section>
 
-                    {/* Quick Chip Buttons */}
-                    <div className="grid grid-cols-4 gap-2">
-                      {[
-                        {
-                          label: view.isHighRoller ? `MIN ($${view.minBetAmount})` : '$50',
-                          val: view.isHighRoller
-                            ? Math.min(maxAllowedBet, view.minBetAmount)
-                            : Math.min(50, maxAllowedBet),
-                        },
-                        {
-                          label: '25%',
-                          val: Math.max(
-                            view.isHighRoller ? view.minBetAmount : 0,
-                            Math.floor(maxAllowedBet * 0.25)
-                          ),
-                        },
-                        {
-                          label: '50%',
-                          val: Math.max(
-                            view.isHighRoller ? view.minBetAmount : 0,
-                            Math.floor(maxAllowedBet * 0.5)
-                          ),
-                        },
-                        { label: 'ALL IN', val: maxAllowedBet },
-                      ].map((preset) => (
+                      {/* Help: a hint and a power-up */}
+                      <section aria-label="Help" className="space-y-2.5">
                         <button
-                          key={preset.label}
                           type="button"
-                          onClick={() => updateBetField('bet', preset.val)}
-                          className="min-h-[44px] rounded-xl felt-well border border-[#d4af37]/40 hover:border-[#d4af37] font-sans tabular-nums font-bold text-xs text-slate-900 dark:text-[#fef08a] active:scale-95 transition-transform cursor-pointer"
+                          disabled={Boolean(view.myHint?.text || view.myHint?.isLoading) || view.me.money < HINT_COST}
+                          onClick={() => {
+                            playSound('hint');
+                            sendIntent({ type: 'BUY_HINT' });
+                          }}
+                          className="w-full h-[52px] px-3.5 rounded-[14px] border border-gc-line/[0.12] bg-gc-line/[0.07] text-gc-ink text-[15px] font-bold flex items-center gap-2.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {preset.label}
+                          <Lightbulb className="w-[18px] h-[18px] text-gc-quiet" aria-hidden="true" />
+                          {view.myHint?.text ? 'Hint bought' : 'Get a hint'}
+                          <span className="ml-auto text-gc-money tabular-nums">${HINT_COST}</span>
                         </button>
-                      ))}
+                        {view.myHint && (
+                          <div className="px-4 py-3 rounded-[14px] bg-gc-info/10 text-gc-info text-[15px] font-semibold animate-gc-slide-up" role="status">
+                            {view.myHint.isLoading ? 'Finding a hint…' : view.myHint.text}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          disabled={!view.canBuyPowerUp}
+                          onClick={() => {
+                            playSound('powerUp');
+                            sendIntent({ type: 'BUY_RANDOM_POWER_UP' });
+                          }}
+                          className="w-full h-[52px] px-3.5 rounded-[14px] border border-gc-line/[0.12] bg-gc-line/[0.07] text-gc-ink text-[15px] font-bold flex items-center gap-2.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Sparkles className="w-[18px] h-[18px] text-purple-600 dark:text-purple-300" aria-hidden="true" />
+                          Draw a power-up
+                          <span className="ml-auto text-gc-money tabular-nums">${POWERUP_COST}</span>
+                        </button>
+                      </section>
                     </div>
-                  </div>
-
-                  {/* Hint & Power-Up Row */}
-                  <div className="pt-3 border-t border-[#d4af37]/20 grid grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      disabled={
-                        Boolean(view.myHint?.text || view.myHint?.isLoading) ||
-                        view.me.money < HINT_COST
-                      }
-                      onClick={() => {
-                        playSound('hint');
-                        sendIntent({ type: 'BUY_HINT' });
-                      }}
-                      className="min-h-[46px] px-3 rounded-xl felt-well border border-amber-400/50 text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <span>💡</span>
-                      <span>{view.myHint?.text ? 'Hint Active' : `Buy Hint ($${HINT_COST})`}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={!view.canBuyPowerUp}
-                      onClick={() => {
-                        playSound('powerUp');
-                        sendIntent({ type: 'BUY_RANDOM_POWER_UP' });
-                      }}
-                      className="min-h-[46px] px-3 rounded-xl bg-purple-600/25 border border-purple-400/60 text-xs font-sans font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-100 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <span>⚡</span>
-                      <span>Power-Up (${POWERUP_COST})</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+                  );
+                })()}
+              </>
+            )}
           </>
         )}
 
         {/* ================================================================
-            ROUND RESULTS (RESULTS)
+            RESULTS
            ================================================================ */}
-        {view.step === 'RESULTS' && (
-          <div className="space-y-4 animate-fade-in">
-            {/* Personal Outcome Banner */}
-            {view.myRoundResult && (
-              <div
-                className={`p-5 rounded-3xl border-2 text-center space-y-2 shadow-xl ${
-                  view.myRoundResult.amountChanged > 0
-                    ? 'bg-emerald-950/60 border-emerald-400 text-emerald-50'
-                    : view.myRoundResult.amountChanged < 0
-                      ? 'bg-rose-950/60 border-rose-400 text-rose-50'
-                      : 'glass-panel border-[#d4af37]'
-                }`}
-              >
-                <div className="text-xs font-sans uppercase tracking-[0.25em] font-bold opacity-80 flex items-center justify-center gap-2">
-                  <span>Hand #{view.round} Settlement</span>
-                  {qType === 'keyWordTransformation' && view.myRoundResult.marksAwarded !== undefined && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums bg-amber-400/30 border border-amber-300/60 text-amber-100">
-                      {view.myRoundResult.marksAwarded}/2 Marks
-                    </span>
+        {view.step === 'RESULTS' && (() => {
+          const change = view.myRoundResult?.amountChanged ?? 0;
+          const won = change > 0;
+          const lost = change < 0;
+          const s = view.sentence;
+          const correctionSegments =
+            s && !isClozeRound && !s.isCorrect && s.correction ? diffWords(s.text, s.correction).corrected : null;
+          return (
+            <div className="space-y-4 animate-gc-fade">
+              {view.myRoundResult && (
+                <div
+                  className={`-mx-4 -mt-4 px-4 pt-8 pb-2 text-center ${
+                    won
+                      ? 'bg-gradient-to-b from-emerald-400/25 to-transparent'
+                      : lost
+                        ? 'bg-gradient-to-b from-rose-400/25 to-transparent'
+                        : ''
+                  }`}
+                >
+                  <p className="m-0 text-lg font-bold text-gc-quiet">
+                    {won ? 'You called it!' : lost ? 'Not this time' : 'No change this hand'}
+                  </p>
+                  <p
+                    role="status"
+                    className={`m-0 mt-1 text-[64px] leading-none font-extrabold tabular-nums animate-gc-pop ${
+                      won ? 'text-gc-win' : lost ? 'text-gc-loss' : 'text-gc-ink'
+                    }`}
+                  >
+                    {won ? '+' : ''}
+                    {money(change)}
+                  </p>
+                  <p className="m-0 mt-3 text-[17px] text-gc-quiet">
+                    Balance <b className="text-gc-money tabular-nums">{money(view.me.money)}</b>
+                  </p>
+                  <div className="mt-2 flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
+                    {view.myRoundResult.outcomeText && !/^(win|lose)$/i.test(view.myRoundResult.outcomeText.trim()) && (
+                      <span className="px-2.5 py-1 rounded-full bg-gc-line/[0.07] text-gc-quiet">{view.myRoundResult.outcomeText}</span>
+                    )}
+                    {qType === 'keyWordTransformation' && view.myRoundResult.marksAwarded !== undefined && (
+                      <span className="px-2.5 py-1 rounded-full bg-gc-gold/15 text-gc-money">
+                        {view.myRoundResult.marksAwarded} of 2 marks
+                      </span>
+                    )}
+                  </div>
+                  {view.myRoundResult.correctionFeedback && (
+                    <p className="m-0 mt-2 text-gc-small text-gc-quiet">{view.myRoundResult.correctionFeedback}</p>
                   )}
                 </div>
-                <div className="text-3xl font-sans tabular-nums font-black tabular-nums">
-                  {view.myRoundResult.amountChanged > 0
-                    ? `+$${view.myRoundResult.amountChanged.toLocaleString()}`
-                    : view.myRoundResult.amountChanged < 0
-                      ? `-$${Math.abs(view.myRoundResult.amountChanged).toLocaleString()}`
-                      : '$0'}
-                </div>
-                <div className="text-sm font-sans font-extrabold uppercase tracking-wider">
-                  {view.myRoundResult.outcomeText}
-                </div>
-                {view.myRoundResult.correctionFeedback && (
-                  <div className="text-xs opacity-85 italic pt-1">
-                    {view.myRoundResult.correctionFeedback}
-                  </div>
-                )}
-              </div>
-            )}
+              )}
 
-            {/* Official House Ruling */}
-            {view.sentence && (
-              <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-[#d4af37]/50 space-y-2.5 text-left">
-                <div className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">
-                  {isClozeRound
-                    ? `✓ Official Answer: "${view.sentence.correctAnswer}"`
-                    : view.sentence.isCorrect
-                      ? '✓ Valid Sentence'
-                      : `✕ Flawed — Revision: "${view.sentence.correction}"`}
+              {/* The ruling */}
+              {s && (
+                <div className="gc-surface rounded-[20px] px-[18px] py-4 animate-gc-slide-up [animation-delay:0.4s] space-y-2">
+                  <h2 className="m-0 text-gc-small font-bold text-gc-quiet">
+                    {isClozeRound ? 'The answer' : s.isCorrect ? 'It was valid, exactly as written:' : 'It was flawed. The correction:'}
+                  </h2>
+                  {isClozeRound ? (
+                    <p className="m-0 font-sentence italic text-xl leading-snug">
+                      <mark className="bg-gc-win/20 text-gc-win rounded-md px-1.5">{s.correctAnswer}</mark>
+                    </p>
+                  ) : (
+                    <p className="m-0 font-sentence italic text-xl leading-[1.35]">
+                      &ldquo;
+                      {correctionSegments
+                        ? correctionSegments.map((seg, i) =>
+                            seg.mark ? (
+                              <mark key={i} className="bg-gc-win/20 text-gc-win rounded-md px-1">{seg.text}</mark>
+                            ) : (
+                              <React.Fragment key={i}>{seg.text}</React.Fragment>
+                            )
+                          )
+                        : s.isCorrect
+                          ? s.text
+                          : s.correction || s.text}
+                      &rdquo;
+                    </p>
+                  )}
+                  {s.explanation && (
+                    <p className="m-0 pt-2 border-t border-gc-line/[0.1] text-[15px] leading-relaxed text-gc-ink">
+                      <span className="font-bold">Why: </span>
+                      {s.explanation}
+                    </p>
+                  )}
                 </div>
-                {view.sentence.explanation && (
-                  <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-                    {view.sentence.explanation}
-                  </p>
-                )}
-              </div>
-            )}
+              )}
 
-            {/* Live Standings */}
-            <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
-              <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
-                Table Standings
+              {/* Standings */}
+              <div className="gc-surface rounded-[20px] px-[18px] py-4 animate-gc-slide-up [animation-delay:0.6s]">
+                <h2 className="m-0 mb-1 text-gc-small font-bold text-gc-quiet">Standings</h2>
+                <ol className="m-0 p-0 list-none divide-y divide-gc-line/[0.1]">
+                  {[...view.peers]
+                    .sort((a, b) => b.money - a.money)
+                    .map((p, idx) => (
+                      <li key={p.id} className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold' : 'font-semibold'}`}>
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-6 text-gc-cap text-gc-quiet tabular-nums">{idx + 1}</span>
+                          <span className="text-xl" aria-hidden="true">{p.avatar}</span>
+                          <span className="truncate">{p.name}{p.id === view.me.id ? ' (you)' : ''}</span>
+                        </span>
+                        <span className="tabular-nums text-gc-money">{money(p.money)}</span>
+                      </li>
+                    ))}
+                </ol>
               </div>
-              <div className="divide-y divide-[#d4af37]/15">
-                {[...view.peers]
-                  .sort((a, b) => b.money - a.money)
-                  .map((p, idx) => (
-                    <div
-                      key={p.id}
-                      className={`py-2.5 flex items-center justify-between text-sm ${
-                        p.id === view.me.id ? 'font-extrabold text-amber-700 dark:text-[#fef08a]' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="font-sans tabular-nums text-xs opacity-70 w-5">#{idx + 1}</span>
-                        <span className="text-xl">{p.avatar}</span>
-                        <span className="truncate font-sans uppercase">{p.name}</span>
-                      </div>
-                      <span className="font-sans tabular-nums font-bold tabular-nums">
-                        ${p.money.toLocaleString()}
-                      </span>
-                    </div>
-                  ))}
-              </div>
+
+              <p className="text-center text-gc-small text-gc-quiet pt-1 text-balance">The next hand appears here when the teacher deals it.</p>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ================================================================
-            TABLE CLOSED / GAME OVER (GAME_OVER)
+            GAME OVER
            ================================================================ */}
         {view.step === 'GAME_OVER' && (() => {
           const sortedPeers = [...view.peers].sort((a, b) => b.money - a.money);
@@ -1614,11 +1641,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 const dateStamp = new Date().toISOString().slice(0, 10);
                 doc.save(`Grammar_Casino_Report_Card_${dateStamp}.pdf`);
                 playSound('success');
-                setPdfStatusToast('✨ Grammar Report Card PDF downloaded!');
+                setPdfStatusToast('Your report card is downloaded.');
                 setTimeout(() => setPdfStatusToast(null), 4000);
               } catch (err) {
                 console.error('Failed to generate PDF on student device:', err);
-                setPdfStatusToast('⚠️ Could not generate PDF. Please try again.');
+                setPdfStatusToast('The report card could not be made. Please try again.');
                 setTimeout(() => setPdfStatusToast(null), 4000);
               } finally {
                 setIsGeneratingPdf(false);
@@ -1626,204 +1653,127 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             }, 100);
           };
 
+          const statTile = 'rounded-gc bg-gc-line/[0.06] border border-gc-line/[0.1] px-2 py-3';
           return (
-            <div className="space-y-4 animate-fade-in pb-8">
-              {/* Table Closed Header Banner */}
-              <div className="text-center pt-2 pb-1">
-                <div className="text-[11px] font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] font-bold">
-                  Salon Privé · Final Settlement
-                </div>
-                <h1 className="text-3xl sm:text-4xl font-black text-gold tracking-wider font-display title-glow mt-1">
-                  TABLE CLOSED
-                </h1>
-                <div className="h-[1px] w-36 mx-auto bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mt-2" />
+            <div className="space-y-4 animate-gc-slide-up pb-6">
+              <div className="text-center pt-3">
+                <div className="text-gc-small font-bold text-gc-quiet">Final results</div>
+                <h1 className="m-0 mt-1 font-logo font-bold text-[32px] tracking-[0.06em] text-gc-gold">Table closed</h1>
               </div>
 
-              {/* Champion Card */}
               {view.winner ? (
-                <div className="luxury-card rounded-3xl p-6 text-center relative border-2 border-[#d4af37] shadow-2xl space-y-3">
-                  <div className="text-4xl filter drop-shadow">👑</div>
-                  <div className="w-20 h-20 mx-auto rounded-full border-3 border-[#d4af37] felt-well flex items-center justify-center text-5xl shadow-lg">
+                <div className="gc-surface rounded-[20px] p-6 text-center space-y-3">
+                  <div className="text-4xl" aria-hidden="true">👑</div>
+                  <div className="w-20 h-20 mx-auto rounded-full border-[3px] border-gc-gold bg-gc-line/[0.08] grid place-items-center text-5xl leading-none">
                     {view.winner.avatar}
                   </div>
                   <div>
-                    <div className="text-[11px] font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#fef08a] font-bold">
-                      {isMeChampion ? '🎉 You Are The Champion!' : 'Grand Salon Champion'}
-                    </div>
-                    <h2 className="text-2xl sm:text-3xl font-sans font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider mt-0.5">
-                      {view.winner.name}
-                    </h2>
+                    <div className="text-gc-small font-bold text-gc-money">{isMeChampion ? 'You won the game!' : 'The winner'}</div>
+                    <h2 className="m-0 mt-0.5 text-[28px] font-extrabold">{view.winner.name}</h2>
                   </div>
-                  <div className="felt-well rounded-2xl p-3.5 border border-[#d4af37]/30">
-                    <div className="text-[10px] font-sans uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
-                      Winning Vault Balance
-                    </div>
-                    <div className="text-3xl font-sans tabular-nums font-black text-gold-flat tabular-nums mt-0.5">
-                      ${view.winner.money.toLocaleString()}
-                    </div>
-                  </div>
+                  <div className="text-gc-title font-extrabold text-gc-money tabular-nums">{money(view.winner.money)}</div>
                 </div>
               ) : (
-                <div className="luxury-card rounded-3xl p-6 text-center border-2 border-[#d4af37]/50 shadow-xl space-y-2">
-                  <div className="text-5xl">🏛️</div>
-                  <h2 className="text-2xl font-sans font-extrabold text-slate-900 dark:text-amber-100 uppercase tracking-wider">
-                    The House Prevails
-                  </h2>
-                  <p className="text-xs text-slate-600 dark:text-amber-200/70 font-editorial italic">
-                    Final accounts have been settled at the table.
-                  </p>
+                <div className="gc-surface rounded-[20px] p-6 text-center space-y-1.5">
+                  <div className="text-4xl" aria-hidden="true">🏛️</div>
+                  <h2 className="m-0 text-gc-title font-extrabold">The house wins</h2>
+                  <p className="m-0 text-gc-small text-gc-quiet">Nobody reached the goal this time.</p>
                 </div>
               )}
 
-              {/* Personal Session Stats */}
-              <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/50 space-y-3">
-                <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37] flex items-center justify-between">
-                  <span>Your Final Summary</span>
-                  <span className="font-sans tabular-nums text-slate-700 dark:text-[#fef08a]">
-                    Rank #{myRank} of {sortedPeers.length}
-                  </span>
+              <div className="gc-surface rounded-[20px] px-[18px] py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="m-0 text-gc-small font-bold text-gc-quiet">Your game</h2>
+                  <span className="text-gc-small font-bold tabular-nums">Rank {myRank} of {sortedPeers.length}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2.5 text-center">
-                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
-                      Final Vault
-                    </div>
-                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-emerald-700 dark:text-[#fef08a] tabular-nums mt-0.5">
-                      ${view.me.money.toLocaleString()}
-                    </div>
+                  <div className={statTile}>
+                    <div className="text-gc-cap font-semibold text-gc-quiet">Balance</div>
+                    <div className="text-gc-lead font-extrabold text-gc-money tabular-nums">{money(view.me.money)}</div>
                   </div>
-                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
-                      Hands Won
-                    </div>
-                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-slate-900 dark:text-amber-50 tabular-nums mt-0.5">
-                      {myWins}/{myTotalHands}
-                    </div>
+                  <div className={statTile}>
+                    <div className="text-gc-cap font-semibold text-gc-quiet">Hands won</div>
+                    <div className="text-gc-lead font-extrabold tabular-nums">{myWins} of {myTotalHands}</div>
                   </div>
-                  <div className="felt-well rounded-xl p-2.5 border border-[#d4af37]/25">
-                    <div className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/70">
-                      Accuracy
-                    </div>
-                    <div className="text-base sm:text-lg font-sans tabular-nums font-black text-amber-800 dark:text-amber-300 tabular-nums mt-0.5">
-                      {myAccuracy}%
-                    </div>
+                  <div className={statTile}>
+                    <div className="text-gc-cap font-semibold text-gc-quiet">Accuracy</div>
+                    <div className="text-gc-lead font-extrabold tabular-nums">{myAccuracy}%</div>
                   </div>
                 </div>
               </div>
 
-              {/* Download PDF Report Card CTA */}
               {history.length > 0 && (
                 <div className="space-y-2">
                   <button
                     type="button"
                     onClick={handleDownloadPdf}
                     disabled={isGeneratingPdf}
-                    className="w-full min-h-[52px] px-5 py-3.5 rounded-2xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] font-sans font-black text-sm sm:text-base uppercase tracking-[0.14em] shadow-xl active:scale-98 transition-all cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2.5"
+                    className="gc-btn-primary w-full h-[58px] rounded-full text-[17px] font-extrabold flex items-center justify-center gap-2.5 cursor-pointer disabled:cursor-wait"
                   >
-                    {isGeneratingPdf ? (
-                      <>
-                        <span className="animate-spin text-base">⏳</span>
-                        <span>Generating Report Card PDF...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-lg leading-none">📄</span>
-                        <span>Download Grammar Report Card (PDF)</span>
-                      </>
-                    )}
+                    <Download className="w-5 h-5" aria-hidden="true" />
+                    {isGeneratingPdf ? 'Making your report card…' : 'Download my report card (PDF)'}
                   </button>
                   {pdfStatusToast && (
-                    <div className="text-center text-xs font-sans font-bold text-emerald-700 dark:text-emerald-300 py-1 animate-fade-in">
+                    <div role="status" className="text-center text-gc-small font-semibold text-gc-quiet animate-gc-fade">
                       {pdfStatusToast}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Final Standings Leaderboard */}
-              <div className="glass-panel rounded-2xl p-4 border border-[#d4af37]/40 space-y-2.5">
-                <div className="text-xs font-sans font-extrabold uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
-                  🏆 Final Standings
-                </div>
-                <div className="divide-y divide-[#d4af37]/15">
+              <div className="gc-surface rounded-[20px] px-[18px] py-4">
+                <h2 className="m-0 mb-1 text-gc-small font-bold text-gc-quiet">Final standings</h2>
+                <ol className="m-0 p-0 list-none divide-y divide-gc-line/[0.1]">
                   {sortedPeers.map((p, idx) => (
-                    <div
-                      key={p.id}
-                      className={`py-2.5 flex items-center justify-between text-sm ${
-                        p.id === view.me.id ? 'font-extrabold text-amber-700 dark:text-[#fef08a]' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="font-sans tabular-nums text-xs opacity-70 w-6">
-                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                    <li key={p.id} className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold' : 'font-semibold'}`}>
+                      <span className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-6 text-center text-gc-cap tabular-nums">
+                          {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                         </span>
-                        <span className="text-xl">{p.avatar}</span>
-                        <span className="truncate font-sans uppercase">{p.name}</span>
-                      </div>
-                      <span className="font-sans tabular-nums font-bold tabular-nums">
-                        ${p.money.toLocaleString()}
+                        <span className="text-xl" aria-hidden="true">{p.avatar}</span>
+                        <span className="truncate">{p.name}{p.id === view.me.id ? ' (you)' : ''}</span>
                       </span>
-                    </div>
+                      <span className="tabular-nums text-gc-money">{money(p.money)}</span>
+                    </li>
                   ))}
-                </div>
+                </ol>
               </div>
             </div>
           );
         })()}
       </main>
 
-      {/* Sticky Bottom CTA Bar during IN_GAME */}
-      {view.step === 'IN_GAME' && !view.isFrozen && view.me.money > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-30 p-3 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
+      {/* Lock-in button, pinned to the bottom while betting */}
+      {view.step === 'IN_GAME' && !view.isFrozen && view.me.money > 0 && !isPlayerLocked && view.sentence && (
+        <div className="fixed bottom-0 inset-x-0 z-30 px-4 pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-gc-bg via-gc-bg/90 to-transparent">
           <div className="max-w-xl mx-auto">
             <button
               type="button"
               onClick={handleToggleLockIn}
-              disabled={isPlayerLocked && !canStudentUnlock}
-              className={`w-full min-h-[52px] rounded-2xl font-sans font-black text-sm sm:text-base uppercase tracking-[0.18em] shadow-xl transition-all flex items-center justify-center gap-2 ${
-                isPlayerLocked
-                  ? !canStudentUnlock
-                    ? 'bg-slate-800/95 text-amber-200 border-2 border-amber-500/50 cursor-not-allowed opacity-95'
-                    : 'bg-emerald-600 text-white border-2 border-emerald-300 cursor-pointer'
-                  : 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer'
+              className={`w-full h-[58px] px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
+                isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet shadow-gc-1'
               }`}
             >
-              {isPlayerLocked ? (
-                !canStudentUnlock ? (
-                  <span>
-                    {isRoundTimeUp
-                      ? '🔒 TIME\u2019S UP · WAGER LOCKED'
-                      : '🔒 WAGER LOCKED IN'}
-                  </span>
-                ) : (
-                  <>
-                    <span>✓ WAGER LOCKED IN</span>
-                    <span className="text-[11px] font-sans font-normal opacity-90">(Tap to Unlock)</span>
-                  </>
-                )
-              ) : (
-                <span>LOCK IN WAGER 🔒</span>
-              )}
+              {isReadyToLock && <Lock className="w-5 h-5 shrink-0" aria-hidden="true" />}
+              <span className="truncate">{lockLabel}</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Target Selection Modal for Offensive Power-Ups */}
+      {/* Choosing a target for an attack power-up */}
       {view.pendingTarget && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel rounded-3xl max-w-md w-full p-6 border-2 border-[#d4af37] space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="gc-panel rounded-gc-lg max-w-md w-full p-5 space-y-4 animate-gc-slide-up" role="dialog" aria-modal="true" aria-labelledby="gc-target-title">
             <div className="text-center space-y-1">
-              <div className="text-4xl">{POWER_UPS[view.pendingTarget.powerUp]?.icon}</div>
-              <h3 className="text-xl font-sans font-black text-gold uppercase">
-                Activate {POWER_UPS[view.pendingTarget.powerUp]?.name}
+              <div className="text-4xl" aria-hidden="true">{POWER_UPS[view.pendingTarget.powerUp]?.icon}</div>
+              <h3 id="gc-target-title" className="m-0 text-gc-title font-extrabold">
+                {POWER_UPS[view.pendingTarget.powerUp]?.name}: choose a player
               </h3>
-              <p className="text-xs text-slate-600 dark:text-amber-100/80">
-                {POWER_UPS[view.pendingTarget.powerUp]?.description}
-              </p>
+              <p className="m-0 text-gc-small text-gc-quiet">{POWER_UPS[view.pendingTarget.powerUp]?.description}</p>
             </div>
 
-            <div className="space-y-2 max-h-60 overflow-y-auto">
+            <div className="space-y-2 max-h-64 overflow-y-auto">
               {view.pendingTarget.eligibleTargets.map((t) => {
                 const blocked = t.isShielded || t.targetedThisRound;
                 return (
@@ -1838,28 +1788,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         targetId: t.id,
                       })
                     }
-                    className={`w-full min-h-[52px] px-4 py-2.5 rounded-xl border flex items-center justify-between transition-all ${
+                    className={`w-full min-h-[56px] px-4 py-2.5 rounded-gc border flex items-center justify-between transition-colors ${
                       blocked
-                        ? 'opacity-45 grayscale cursor-not-allowed felt-well border-slate-500/30'
-                        : 'felt-well border-[#d4af37]/60 hover:border-[#d4af37] cursor-pointer'
+                        ? 'opacity-50 cursor-not-allowed bg-gc-line/[0.04] border-gc-line/[0.1]'
+                        : 'bg-gc-line/[0.07] border-gc-line/[0.14] hover:border-gc-gold cursor-pointer'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-2xl">{t.avatar}</span>
-                      <div className="text-left">
-                        <div className="text-sm font-sans font-bold text-slate-900 dark:text-white">
-                          {t.name}
-                        </div>
-                        {blocked && (
-                          <div className="text-[10px] text-amber-400 font-bold uppercase">
-                            🛡️ Protected This Round
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <span className="font-sans tabular-nums font-bold text-sm text-emerald-500 tabular-nums">
-                      ${t.money.toLocaleString()}
+                    <span className="flex items-center gap-2.5">
+                      <span className="text-2xl" aria-hidden="true">{t.avatar}</span>
+                      <span className="text-left">
+                        <span className="block text-gc-body font-bold text-gc-ink">{t.name}</span>
+                        {blocked && <span className="block text-gc-cap font-semibold text-gc-quiet">🛡️ Protected this hand</span>}
+                      </span>
                     </span>
+                    <span className="tabular-nums font-bold text-gc-money">{money(t.money)}</span>
                   </button>
                 );
               })}
@@ -1874,16 +1816,16 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     powerUp: view.pendingTarget!.powerUp,
                   })
                 }
-                className="w-full min-h-[46px] rounded-xl felt-well border border-slate-400/40 text-xs font-sans font-bold uppercase tracking-wider"
+                className="w-full h-12 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
               >
-                Cancel &amp; Refund ($50)
+                Cancel and get ${POWERUP_COST} back
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Wheel of Fortune Modal on Student Device */}
+      {/* Wheel of Fortune on the student's phone */}
       {view.pendingWheelSpin && (
         <WheelModal
           player={view.me}
@@ -1895,7 +1837,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         />
       )}
 
-      {/* Power-Up Activation Modal Window */}
+      {/* Power-up news for this player */}
       {activeToast && (
         <Modal
           title={activeToast.title}
@@ -1904,10 +1846,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           hideCloseButton
         >
           <div className="text-center py-4">
-            <div className="text-7xl mb-5 filter drop-shadow-lg flex justify-center">
+            <div className="text-7xl mb-5 flex justify-center" aria-hidden="true">
               <span>{activeToast.icon || '✨'}</span>
             </div>
-            <p className="text-lg sm:text-xl text-slate-800 dark:text-slate-200 font-medium leading-relaxed whitespace-pre-line">
+            <p className="text-lg sm:text-xl text-gc-ink font-medium leading-relaxed whitespace-pre-line">
               {activeToast.message}
             </p>
           </div>
