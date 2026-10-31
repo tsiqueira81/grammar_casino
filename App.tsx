@@ -11,12 +11,13 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowLeft, BookOpen, Check, Cloud as CloudIcon, Copy, Dices, Lock, LockOpen, Moon, Projector, Smartphone, Sparkles, Sun, Volume2, VolumeX } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX } from 'lucide-react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
 import Modal from './components/Modal';
 import PlayerBettingCard from './components/PlayerBettingCard';
 import PlayerTileGrid, { PlayerTile, SeatStatus } from './components/PlayerTileGrid';
+import CountUp from './components/CountUp';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
 import PowerUpTooltip from './components/PowerUpTooltip';
@@ -5293,6 +5294,20 @@ export function App() {
                 ? (allActivePlayersLocked || teacherRevealOverride)
                 : (allValidBetsFinalized || teacherRevealOverride);
 
+            // Bets bar and reveal button: how many players are in, and what the reveal waits for.
+            const betsReadyCount = mpRoomCode
+              ? mpLockedCount
+              : isTurnTimerEnabled
+                ? lockedCount
+                : unfrozenActivePlayers.filter(p => hasPlayerPlacedBet(p.id)).length;
+            const betsReadyWord = mpRoomCode || isTurnTimerEnabled ? 'locked in' : 'bets placed';
+            const everyoneIn = unfrozenActivePlayers.length > 0 && betsReadyCount === unfrozenActivePlayers.length;
+            const revealNote = !canRevealResults
+              ? `when all ${unfrozenActivePlayers.length} ${mpRoomCode || isTurnTimerEnabled ? 'are locked in' : 'have bet'}`
+              : teacherRevealOverride && !everyoneIn
+                ? 'before everyone is in'
+                : '';
+
             // Find the single player whose turn is currently active (running or paused)
             const activeTurnPlayer = isTurnTimerEnabled
               ? unfrozenActivePlayers.find(p => {
@@ -5307,17 +5322,17 @@ export function App() {
               : undefined;
 
             let sentenceHtml = highlightedPhrase && currentSentence ? 
-              currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-amber-200/80 dark:bg-amber-500/25 text-amber-950 dark:text-[#fef08a] border-b-2 border-[#d4af37] px-1.5 py-0.5 rounded font-semibold">$1</span>`) 
+              currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-gc-gold/20 text-gc-ink border-b-2 border-gc-gold px-1 rounded-sm">$1</span>`) 
               : currentSentence?.text || '';
 
             if (isClozeRound && sentenceHtml) {
               const inlineBaseWordBadge =
                 currentQuestionType === 'wordFormation' && currentSentence?.baseWord
-                  ? ` <span class="inline-block px-2.5 py-0.5 mx-1 rounded-md bg-amber-500/25 dark:bg-amber-400/20 border border-[#d4af37]/70 text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black not-italic tracking-wider text-[0.78em] align-middle select-none shadow-sm">(${currentSentence.baseWord.toUpperCase()})</span>`
+                  ? ` <span class="inline-block mx-1 px-3 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.55em] align-middle select-none">(${currentSentence.baseWord.toUpperCase()})</span>`
                   : '';
               sentenceHtml = sentenceHtml.replace(
                 /_{3,}/g,
-                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans tabular-nums font-bold not-italic tracking-widest text-center select-none">_____</span>${inlineBaseWordBadge}`
+                `<span class="inline-block min-w-[4.5em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.6em] align-baseline select-none">_____</span>${inlineBaseWordBadge}`
               );
             }
 
@@ -5492,93 +5507,71 @@ export function App() {
 
             const sentenceLength = currentSentence?.text?.length || 0;
             const sentenceTextClass = sentenceLength > 150
-              ? "text-lg sm:text-xl md:text-2xl leading-snug md:leading-normal"
+              ? "text-xl sm:text-2xl lg:text-3xl leading-[1.3]"
               : sentenceLength > 90
-                ? "text-xl sm:text-2xl md:text-3xl leading-snug md:leading-relaxed"
-                : "text-2xl sm:text-3xl md:text-4xl leading-relaxed";
+                ? "text-2xl sm:text-3xl lg:text-4xl leading-[1.25]"
+                : "text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3]";
 
             const activeFormatConfig = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
             const nextFormatConfig = nextRoundSettings?.challengeFormat
               ? CHALLENGE_FORMATS.find(f => f.id === nextRoundSettings.challengeFormat)
               : undefined;
             const currentHandFormatBadge = currentQuestionType === 'multipleChoice'
-              ? '🔠 Multiple-Choice Cloze'
+              ? 'Multiple choice'
               : currentQuestionType === 'openCloze'
-                ? '✍️ Open Cloze'
+                ? 'Open cloze'
                 : currentQuestionType === 'wordFormation'
-                  ? '🧬 Word Formation'
+                  ? 'Word formation'
                   : currentQuestionType === 'keyWordTransformation'
-                    ? '🔑 Key Word Transformation'
-                    : '⚖️ Valid or Flawed';
+                    ? 'Key word transformation'
+                    : 'Valid or flawed?';
+            // Style A chips under the sentence: quiet, no emoji; a gold "Next" tag when a change is queued.
+            const metaChip = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-small font-medium text-gc-quiet whitespace-nowrap';
+            const nextTag = 'inline-flex items-center h-5 px-1.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold';
 
             return ( 
-              <div className="w-full max-w-5xl animate-fade-in p-2 md:p-4"> 
+              <div className="w-full max-w-6xl animate-fade-in p-2 md:p-4"> 
                 {/* 3D Bespoke Casino Playing Card Container */}
                 <div ref={sentenceHeaderRef} className="card-reveal-container sticky z-30 mb-5 sm:mb-6" style={{ top: STICKY_TOP_PX }}>
                   <div className={`card-reveal-flipper ${isSentenceRevealed && !isLoading ? 'revealed' : ''}`}>
                     
-                    {/* Front of Card (Guilloché Crimson & Gold Foil Playing Card Back) */}
+                    {/* Front of the card, shown while the next sentence is dealt */}
                     <div className="card-reveal-front">
-                       <div className={`casino-back-pattern h-full w-full rounded-2xl flex flex-col items-center justify-center p-8 ${isLoading ? 'animate-pulse' : ''}`}>
-                          <div className="w-16 h-16 rounded-full border-2 border-[#d4af37]/70 bg-black/40 flex items-center justify-center text-3xl text-[#fef08a] mb-3 shadow-[0_0_20px_rgba(212,175,55,0.3)] select-none">
+                       <div className={`casino-back-pattern h-full w-full rounded-gc-lg flex flex-col items-center justify-center gap-3 p-8 ${isLoading ? 'animate-pulse' : ''}`}>
+                          <div className="w-14 h-14 rounded-full border border-[#f1cf72]/60 bg-black/25 grid place-items-center text-3xl text-[#f1cf72] select-none" aria-hidden="true">
                             ♠
                           </div>
-                          <h2 className="text-xl sm:text-2xl font-sans font-extrabold text-[#fef08a] uppercase tracking-[0.35em] select-none drop-shadow">
-                            DEALING FROM THE SHOE
-                          </h2>
-                          {isLoading && (
-                            <div className="mt-2 text-amber-300/80 font-sans tabular-nums text-xs uppercase tracking-[0.25em] animate-bounce">
-                              Croupier is Shuffling...
-                            </div>
-                          )}
+                          <p className="text-gc-lead font-semibold text-[#f8f4ea] select-none">
+                            {isLoading ? 'Dealing the next sentence…' : 'Next sentence'}
+                          </p>
                        </div>
                     </div>
 
-                    {/* Back of Card (The Revealed Dealer's Sentence Card) */}
+                    {/* Back of the card: the sentence */}
                     <div className="card-reveal-back">
-                      <div className={`sticky-sentence rounded-2xl p-4 sm:p-6 md:p-7 transition-all ${
+                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-10 transition-[padding] ${
                         isSentenceHeaderStuck
-                          ? 'stuck'
-                          : 'bg-gradient-to-b from-[#fffefb] via-[#faf5ea] to-[#f3ead8] dark:from-[#082616] dark:via-[#051a0f] dark:to-[#03120a] border-2 border-[#d4af37] shadow-[0_20px_50px_rgba(0,0,0,0.6),0_0_30px_rgba(212,175,55,0.15)] relative'
+                          ? 'stuck py-3'
+                          : 'gc-surface shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
                       }`}> 
                         {currentSentence && (
                           <>
-                            {/* Inner Playing Card Gold Hairline Frame */}
-                            {!isSentenceHeaderStuck && (
-                              <div className="pointer-events-none absolute inset-2 border border-[#d4af37]/30 rounded-xl" />
-                            )}
-
-                            {/* Playing Card Top-Left Index */}
-                            <div className="pointer-events-none absolute top-3.5 left-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 select-none">
-                              <span className="font-sans font-black text-xs">R{currentRound}</span>
-                              <span className="text-sm mt-0.5">♠</span>
-                            </div>
-
-                            {/* Playing Card Bottom-Right Index (Inverted) */}
-                            {!isSentenceHeaderStuck && (
-                              <div className="pointer-events-none absolute bottom-3.5 right-4 hidden sm:flex flex-col items-center leading-none text-[#ca8a04] dark:text-[#d4af37] opacity-75 rotate-180 select-none">
-                                <span className="font-sans font-black text-xs">R{currentRound}</span>
-                                <span className="text-sm mt-0.5">♠</span>
-                              </div>
-                            )}
-
-                            {/* Bullion Plaque Overlapping Top Border */}
-                            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans uppercase tracking-[0.2em] text-[11px] sm:text-xs font-extrabold px-6 py-1 rounded-full border border-[#fef9c3] shadow-[0_4px_15px_rgba(202,138,4,0.55),inset_0_1px_0_rgba(255,255,255,0.85)] z-10 whitespace-nowrap flex items-center gap-2">
-                                <span>♦</span>
-                                <span>Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''}{gameMode === 'targetAmount' ? ` · Target: $${Number(targetAmount).toLocaleString()}` : ''} · {currentHandFormatBadge}</span>
-                                <span>♦</span>
+                            <div className="flex justify-center">
+                              <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
+                                Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                              </span>
                             </div>
                             
                             <div className="relative flex flex-col items-center justify-center py-3 sm:py-4"> 
                                 {/* Top-right utility actions */}
-                                <div className="flex gap-2 mb-2 sm:mb-0 sm:absolute sm:top-0 sm:right-2 z-20">
+                                <div className={`flex gap-2 mb-2 sm:mb-0 sm:absolute sm:right-0 z-20 ${isSentenceHeaderStuck ? 'sm:-top-9' : 'sm:-top-10'}`}>
                                     <button 
                                       onClick={handleCopySentence}
-                                      className="text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer"
+                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer"
                                       title="Copy sentence to clipboard"
                                     >
                                       {isCopied ? <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
-                                      <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
+                                      <span>{isCopied ? 'Copied' : 'Copy'}</span>
                                     </button>
                                     <button 
                                       onClick={() =>
@@ -5591,29 +5584,30 @@ export function App() {
                                         )
                                       } 
                                       disabled={isSpeaking}
-                                      className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                       title="Read sentence aloud"
                                     >
                                       <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                                      <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
+                                      <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                     </button>
                                 </div>
 
                                 {currentQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence && (
-                                  <div className="w-full max-w-3xl mx-auto mb-3 px-4 py-2.5 rounded-xl bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/45 text-center space-y-2">
-                                    <div className="text-[10px] sm:text-xs font-sans font-bold uppercase tracking-[0.2em] text-amber-800 dark:text-amber-300/85">
-                                      Lead-In Sentence (Keep Similar Meaning)
+                                  <div className="w-full max-w-3xl mx-auto mb-3 px-4 py-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] text-center space-y-1.5">
+                                    <div className="text-gc-small font-bold text-gc-quiet">
+                                      First sentence (keep the meaning)
                                     </div>
-                                    <p className="text-base sm:text-xl md:text-2xl font-editorial text-slate-800 dark:text-amber-100">
+                                    <p className="text-gc-lead sm:text-[22px] font-sentence italic text-gc-ink">
                                       &ldquo;{currentSentence.leadInSentence}&rdquo;
                                     </p>
                                     {currentSentence.baseWord && (
-                                      <div className="pt-1 flex items-center justify-center gap-2 flex-wrap">
-                                        <span className="px-3.5 py-1 rounded-lg bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans tabular-nums font-black text-sm sm:text-base tracking-[0.2em] uppercase shadow-md border border-[#fef9c3]">
-                                          🔑 KEY WORD: {currentSentence.baseWord.toUpperCase()}
+                                      <div className="pt-1 flex items-center justify-center gap-2.5 flex-wrap">
+                                        <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-body tracking-wider">
+                                          <span aria-hidden="true">🔑</span>
+                                          <span>Key word: {currentSentence.baseWord.toUpperCase()}</span>
                                         </span>
-                                        <span className="text-[11px] font-sans font-semibold text-amber-900 dark:text-amber-200/80">
-                                          (Use 2–6 words including this exact word · 1 Mark = 1× · 2 Marks = 2×)
+                                        <span className="text-gc-small text-gc-quiet">
+                                          Use 2 to 6 words, including this word unchanged
                                         </span>
                                       </div>
                                     )}
@@ -5621,100 +5615,84 @@ export function App() {
                                 )}
 
                                 <p 
-                                  className={`${sentenceTextClass} text-slate-900 dark:text-amber-50 font-editorial italic text-center px-3 sm:px-12 md:px-16 pt-2 sm:pt-4 drop-shadow-sm`}
+                                  className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-1' : 'pt-3 sm:pt-4'}`}
                                   dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
                                 />
                             </div> 
                             
-                            {/* Collapsible Topic, Level, Theme, Format & Deck Bar */}
-                            <div className="flex flex-col items-center w-full mt-2 pt-2 border-t border-[#d4af37]/20"> 
-                                {/* Compact Summary Bar & Expansion Toggle */}
-                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                  <button
-                                    type="button"
-                                    onClick={handleToggleSettingsDeckExpanded}
-                                    className="group px-4 py-1.5 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-2.5 transition-all duration-200 cursor-pointer select-none"
-                                    title={isSettingsDeckExpanded ? "Click to collapse Round Settings & Deck" : "Click to expand Round Settings & Deck"}
-                                    aria-expanded={isSettingsDeckExpanded}
-                                  >
-                                    <span className="flex items-center gap-2 flex-wrap font-medium text-[11px] sm:text-xs">
-                                      <span className="inline-flex items-center gap-1">
-                                        <span>📚</span>
-                                        <span className="font-bold">{settings.topic}</span>
-                                        {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.topic}</span>
-                                        )}
-                                        {currentSentence?.bankTopic && (
-                                          <span
-                                            className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-sans tabular-nums font-bold"
-                                            title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
-                                          >
-                                            This hand: {currentSentence.bankTopic}
-                                          </span>
-                                        )}
+                            {/* Settings chips under the sentence; the whole row opens the full settings */}
+                            <div className={`flex flex-col items-center w-full ${isSentenceHeaderStuck ? 'mt-2' : 'mt-4'}`}> 
+                                <button
+                                  type="button"
+                                  onClick={handleToggleSettingsDeckExpanded}
+                                  className="group flex items-center justify-center gap-2 flex-wrap rounded-gc-sm p-1 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                  title={isSettingsDeckExpanded ? "Hide this round's settings" : "Show and change this round's settings"}
+                                  aria-expanded={isSettingsDeckExpanded}
+                                >
+                                  <span className={metaChip}>
+                                    {settings.topic}
+                                    {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
+                                      <span className={nextTag}>Next: {nextRoundSettings.topic}</span>
+                                    )}
+                                    {currentSentence?.bankTopic && (
+                                      <span
+                                        className="inline-flex items-center h-5 px-1.5 rounded-full bg-gc-info/15 text-gc-info text-gc-cap font-bold"
+                                        title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
+                                      >
+                                        This hand: {currentSentence.bankTopic}
                                       </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1">
-                                        <span>📊</span>
-                                        <span className="font-bold">{settings.level}</span>
-                                        {nextRoundSettings && nextRoundSettings.level !== settings.level && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.level}</span>
-                                        )}
+                                    )}
+                                  </span>
+                                  <span className={metaChip}>
+                                    {settings.level}
+                                    {nextRoundSettings && nextRoundSettings.level !== settings.level && (
+                                      <span className={nextTag}>Next: {nextRoundSettings.level}</span>
+                                    )}
+                                  </span>
+                                  <span className={metaChip}>
+                                    {settings.theme}
+                                    {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
+                                      <span className={nextTag}>Next: {nextRoundSettings.theme}</span>
+                                    )}
+                                  </span>
+                                  <span className={metaChip}>
+                                    {activeFormatConfig.shortLabel}
+                                    {activeFormatConfig.id === 'mixed' && (
+                                      <span className="text-gc-cap">
+                                        ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
                                       </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1">
-                                        <span>🎭</span>
-                                        <span className="font-bold">{settings.theme}</span>
-                                        {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">Next: {nextRoundSettings.theme}</span>
-                                        )}
+                                    )}
+                                    {nextFormatConfig && (
+                                      nextFormatConfig.id !== activeFormatConfig.id ||
+                                      (nextFormatConfig.id === 'mixed' &&
+                                        getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
+                                          getEffectiveMixedFormats(settings.mixedFormats).join(','))
+                                    ) && (
+                                      <span className={nextTag}>
+                                        Next: {nextFormatConfig.shortLabel}
+                                        {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
                                       </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 text-emerald-800 dark:text-emerald-300 font-bold">
-                                        <span>{activeFormatConfig.icon}</span>
-                                        <span>
-                                          {activeFormatConfig.shortLabel}
-                                          {activeFormatConfig.id === 'mixed' && (
-                                            <span className="ml-0.5 text-[10px] opacity-90">
-                                              ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
-                                            </span>
-                                          )}
-                                        </span>
-                                        {nextFormatConfig && (
-                                          nextFormatConfig.id !== activeFormatConfig.id ||
-                                          (nextFormatConfig.id === 'mixed' &&
-                                            getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
-                                              getEffectiveMixedFormats(settings.mixedFormats).join(','))
-                                        ) && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-sans tabular-nums font-bold">
-                                            Next: {nextFormatConfig.shortLabel}
-                                            {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
-                                          </span>
-                                        )}
-                                      </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 text-purple-700 dark:text-purple-300 font-sans tabular-nums font-bold">
-                                        <span>🃏</span>
-                                        <span>{selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}</span>
-                                      </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 text-amber-800 dark:text-[#fef08a] font-sans tabular-nums font-bold">
-                                        <span>⏱️</span>
-                                        <span>{turnTimerSeconds === 0 ? 'Off' : `${turnTimerSeconds}s`}</span>
-                                      </span>
-                                      <span className="text-[#d4af37] select-none">•</span>
-                                      <span className="inline-flex items-center gap-1 font-sans tabular-nums text-[10px] font-bold text-amber-800 dark:text-[#fef08a]">
-                                        <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
-                                        <span>{desktopStatus.decryptionFailed ? 'Re-enter Key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI' : 'Offline Bank'}</span>
-                                        {desktopStatus.isPortable && <span className="opacity-75" title="Portable Edition">🎒</span>}
-                                        {desktopStatus.isReadOnly && <span className="text-red-500" title="Read-Only Media">🔒</span>}
-                                      </span>
-                                    </span>
-                                    <span className="text-[10px] font-sans tabular-nums font-bold text-amber-900 dark:text-[#fef08a] bg-[#d4af37]/20 border border-[#d4af37]/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 group-hover:scale-105 transition-transform">
-                                      <span>{isSettingsDeckExpanded ? '▲ Hide Charter' : '▼ Table Charter'}</span>
-                                    </span>
-                                  </button>
-                                </div>
+                                    )}
+                                  </span>
+                                  {gameMode === 'targetAmount' && (
+                                    <span className={`${metaChip} tabular-nums`}>Target ${Number(targetAmount).toLocaleString()}</span>
+                                  )}
+                                  <span className={`${metaChip} tabular-nums`}>
+                                    {selectedPowerUps.length} of {(Object.keys(POWER_UPS) as PowerUpKey[]).length} power-ups
+                                  </span>
+                                  <span className={`${metaChip} tabular-nums`}>
+                                    {turnTimerSeconds === 0 ? 'No timer' : `${turnTimerSeconds} s ${mpRoomCode ? 'per round' : 'per turn'}`}
+                                  </span>
+                                  <span className={`${metaChip} ${desktopStatus.decryptionFailed ? '!text-gc-loss' : ''}`}>
+                                    {desktopStatus.decryptionFailed ? 'Re-enter the AI key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
+                                    {desktopStatus.isPortable && <span className="text-gc-cap" title="Portable edition">· Portable</span>}
+                                    {desktopStatus.isReadOnly && <span className="text-gc-cap text-gc-loss" title="Read-only media">· Read-only</span>}
+                                  </span>
+                                  <span className={`${metaChip} text-gc-ink group-hover:border-gc-line/30`}>
+                                    {isSettingsDeckExpanded ? 'Hide settings' : 'Settings'}
+                                    <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${isSettingsDeckExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                                  </span>
+                                </button>
 
                                 {/* Expanded Area: Full interactive Topic/Level/Theme/Format pills + Full Deck bar */}
                                 {isSettingsDeckExpanded && (
@@ -6009,18 +5987,17 @@ export function App() {
                     onLockNow={handleMpRoundTimerLockNow}
                     onReset={handleMpRoundTimerReset}
                     onOpenAiSettings={() => handleOpenSettingsModal('ai')}
-                    aiStatusLabel={desktopStatus.hasKey && desktopStatus.isOnline ? '⚡ Gemini AI' : '💾 Offline Bank'}
+                    aiStatusLabel={desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
                     playSound={playSound}
                   />
                 )}
 
                 {/* Croupier's Sequential Turn Bar when Turn Timer is enabled (Single-screen / Hot-Seat mode only) */}
                 {isTurnTimerEnabled && !mpRoomCode && (
-                  <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3">
+                  <div className="mb-5 p-3.5 sm:px-5 rounded-gc gc-surface flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="text-xs font-sans font-extrabold uppercase tracking-[0.2em] text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
-                        <span>⏱️</span>
-                        <span>Turn Sequence ({turnTimerSeconds}s):</span>
+                      <span className="text-gc-small font-bold text-gc-ink">
+                        Turns ({turnTimerSeconds} s each)
                       </span>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {activePlayers.map((p, idx) => {
@@ -6029,16 +6006,16 @@ export function App() {
                           const badgeClass = frozen
                             ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
                             : st === 'running'
-                              ? 'bg-emerald-500/25 border-emerald-400 text-emerald-950 dark:text-emerald-200 font-extrabold shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                              ? 'bg-gc-gold border-transparent text-gc-on-gold font-bold'
                               : st === 'paused'
-                                ? 'bg-sky-500/20 border-sky-400 text-sky-900 dark:text-sky-200'
+                                ? 'bg-gc-info/15 border-transparent text-gc-info'
                                 : st === 'locked'
-                                  ? 'bg-slate-500/20 border-slate-400/40 text-slate-600 dark:text-slate-300'
-                                  : 'felt-well text-slate-700 dark:text-amber-100/80';
+                                  ? 'bg-gc-win/15 border-transparent text-gc-win'
+                                  : 'bg-gc-line/[0.07] border-gc-line/[0.12] text-gc-quiet';
                           return (
                             <React.Fragment key={p.id}>
-                              {idx > 0 && <span className="text-[#d4af37]/50 text-xs select-none">&rarr;</span>}
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-sans border flex items-center gap-1.5 ${badgeClass}`}>
+                              {idx > 0 && <span className="text-gc-quiet/60 text-xs select-none" aria-hidden="true">&rarr;</span>}
+                              <span className={`h-8 px-3 rounded-full text-gc-small font-semibold border flex items-center gap-1.5 ${badgeClass}`}>
                                 <span>{p.avatar}</span>
                                 <span>{p.name}</span>
                                 <span className="text-[10px]">
@@ -6056,38 +6033,38 @@ export function App() {
                         <button
                           type="button"
                           onClick={() => handleTimerStart(nextIdlePlayer.id)}
-                          className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border border-emerald-300/80 shadow-[0_2px_0_#064e3b] hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                          className="h-9 px-4 rounded-full text-gc-small font-bold gc-btn-primary hover:brightness-105 active:scale-95 transition-all cursor-pointer"
                         >
-                          ▶ Start {nextIdlePlayer.name}'s Turn
+                          ▶ Start {nextIdlePlayer.name}'s turn
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
-                        className={`px-3 py-1.5 rounded-xl text-[11px] font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                        aria-pressed={autoStartNextTimer}
+                        className={`h-9 px-3.5 rounded-full text-gc-small font-semibold border transition-colors cursor-pointer ${
                           autoStartNextTimer
-                            ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
-                            : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
+                            ? 'bg-gc-gold/15 border-gc-gold/50 text-gc-money'
+                            : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-quiet'
                         }`}
                         title="Automatically start the next player's timer when the current player's timer finishes or locks"
                       >
-                        Auto-Next: {autoStartNextTimer ? 'ON' : 'OFF'}
+                        Next turn starts by itself: {autoStartNextTimer ? 'on' : 'off'}
                       </button>
                                           <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('ai')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                        title="Click to view AI & Offline Settings"
+                        className="h-9 px-3.5 bg-gc-line/[0.06] border border-gc-line/[0.14] hover:border-gc-line/30 rounded-full text-gc-small text-gc-ink flex items-center gap-1.5 font-semibold cursor-pointer transition-colors"
+                        title="AI and offline settings"
                       >
-                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '⚡ Gemini AI' : '💾 Offline Bank'}</span>
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400">⚙️</span>
+                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}</span>
                       </button>
                     </div>
                   </div>
                 )}
                 {/* Live Classroom Multiplayer Projector Bar */}
                 {mpRoomCode && (
-                  <div className="mb-5 p-3.5 sm:px-5 rounded-2xl glass-panel flex flex-wrap items-center justify-between gap-3 border border-[#d4af37]/50">
+                  <div className="mb-5 p-3.5 sm:px-5 rounded-gc gc-surface flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3 flex-wrap">
                       <button
                         type="button"
@@ -6095,16 +6072,16 @@ export function App() {
                           playSound('click');
                           setShowMpLobbyModal(true);
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans tabular-nums font-extrabold text-xs uppercase tracking-widest border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
+                        className="h-9 px-4 rounded-full bg-gc-gold text-gc-on-gold tabular-nums font-bold text-gc-small cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
                       >
-                        <span>📱 Room {mpRoomCode}</span>
-                        <span className="text-[10px]">QR</span>
+                        <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Room {mpRoomCode} · QR code</span>
                       </button>
 
-                      <div className="text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-2">
-                        <span>🔒 Wagers Locked:</span>
-                        <span className="px-2.5 py-0.5 rounded-full felt-well font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">
-                          {mpLockedCount} / {unfrozenActivePlayers.length}
+                      <div className="text-gc-small text-gc-quiet flex items-center gap-2">
+                        <span>Locked in:</span>
+                        <span className="tabular-nums font-bold text-gc-ink">
+                          {mpLockedCount} of {unfrozenActivePlayers.length}
                         </span>
                       </div>
                     </div>
@@ -6116,15 +6093,15 @@ export function App() {
                           playSound('click');
                           setMpHideProjectorBets(v => !v);
                         }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
+                        aria-pressed={mpHideProjectorBets}
+                        className={`h-9 px-3.5 rounded-full text-gc-small font-semibold border transition-colors cursor-pointer flex items-center gap-1.5 ${
                           mpHideProjectorBets
-                            ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-900 dark:text-emerald-200'
-                            : 'felt-well border-[#d4af37]/50 text-slate-700 dark:text-amber-100'
+                            ? 'bg-gc-win/15 border-transparent text-gc-win'
+                            : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink'
                         }`}
-                        title="Toggle between hiding student bets on the projector (recommended for mobile play) or showing full interactive betting cards"
+                        title="Hide students' bets on the projector (best when they bet on phones), or show every betting card"
                       >
-                        <span>{mpHideProjectorBets ? '🙈' : '👁️'}</span>
-                        <span>{mpHideProjectorBets ? 'Projector Privacy: ON' : 'Full Cards View'}</span>
+                        <span>{mpHideProjectorBets ? 'Bets hidden on the projector' : 'Showing every betting card'}</span>
                       </button>
                     </div>
                   </div>
@@ -6146,44 +6123,38 @@ export function App() {
                       return (
                         <div
                           key={player.id}
-                          className={`glass-panel rounded-2xl p-4 border-2 transition-all flex flex-col justify-between gap-3 ${
-                            isBankrupt
-                              ? 'opacity-55 border-slate-500/30'
-                              : isFrozen
-                                ? 'border-cyan-400/60 bg-cyan-950/20'
-                                : isBetReady
-                                  ? 'border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
-                                  : 'border-[#d4af37]/40'
+                          className={`gc-surface rounded-gc shadow-gc-1 p-4 transition-all flex flex-col justify-between gap-3 animate-gc-slide-up ${
+                            isBankrupt ? 'opacity-60' : ''
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-12 h-12 rounded-full border-2 border-[#d4af37] bg-black/30 flex items-center justify-center text-2xl relative shrink-0">
+                              <div className="w-12 h-12 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] flex items-center justify-center text-2xl relative shrink-0">
                                 {player.avatar}
                                 {mpSeat && (
                                   <span
-                                    className={`w-3 h-3 rounded-full border-2 border-[#04150c] absolute -bottom-0.5 -right-0.5 ${
+                                    className={`w-3.5 h-3.5 rounded-full border-2 border-gc-card absolute -bottom-0.5 -right-0.5 ${
                                       mpSeat.connected ? 'bg-emerald-500' : 'bg-amber-500'
                                     }`}
-                                    title={mpSeat.connected ? 'Online on Mobile' : 'Disconnected'}
+                                    title={mpSeat.connected ? 'Connected on a phone' : 'Disconnected'}
                                   />
                                 )}
                               </div>
                               <div className="min-w-0">
-                                <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-amber-800/75 dark:text-[#d4af37]/80">
-                                  Seat #{idx + 1} {mpSeat ? '· 📱 Mobile' : '· 🖥️ Table'}
-                                </div>
-                                <div className="font-sans font-extrabold uppercase tracking-wider text-base text-slate-900 dark:text-amber-50 truncate">
+                                <div className="text-gc-lead font-bold text-gc-ink truncate">
                                   {player.name}
+                                </div>
+                                <div className="text-gc-cap text-gc-quiet tabular-nums">
+                                  Seat {idx + 1} · {mpSeat ? 'on a phone' : 'at the table'}
                                 </div>
                               </div>
                             </div>
 
                             <div className="text-right shrink-0">
-                              <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60">
-                                Bankroll
+                              <div className="text-gc-cap text-gc-quiet">
+                                Balance
                               </div>
-                              <div className="font-sans tabular-nums font-black text-base text-emerald-700 dark:text-[#fef08a]">
+                              <div className="tabular-nums font-extrabold text-gc-lead text-gc-money">
                                 ${player.money.toLocaleString()}
                               </div>
                             </div>
@@ -6195,7 +6166,7 @@ export function App() {
                               {playerActive.map((pu, i) => (
                                 <span
                                   key={i}
-                                  className="px-2 py-0.5 rounded-full text-[10px] font-sans font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]"
+                                  className="px-2 py-0.5 rounded-full text-gc-cap font-semibold bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-ink"
                                 >
                                   {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
                                 </span>
@@ -6214,35 +6185,33 @@ export function App() {
                           {/* Status Pill */}
                           <div className="flex items-center gap-2">
                             <div
-                              className={`flex-1 py-2.5 px-3 rounded-xl font-sans font-extrabold uppercase tracking-wider text-xs text-center border flex items-center justify-center gap-2 ${
+                              className={`flex-1 h-9 px-3 rounded-full text-gc-small font-bold text-center flex items-center justify-center gap-2 ${
                                 isBankrupt
-                                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
+                                  ? 'bg-gc-loss/15 text-gc-loss'
                                   : isFrozen
-                                    ? 'bg-cyan-500/15 border-cyan-400/50 text-cyan-800 dark:text-cyan-200'
+                                    ? 'bg-gc-info/15 text-gc-info'
                                     : isBetReady
-                                      ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
-                                      : 'felt-well border-[#d4af37]/30 text-amber-900/80 dark:text-amber-200/80 animate-pulse'
+                                      ? 'bg-gc-win/15 text-gc-win animate-gc-pop'
+                                      : 'bg-gc-line/[0.07] text-gc-quiet'
                               }`}
                             >
                               {isBankrupt ? (
-                                <>
-                                  <span>💸</span>
-                                  <span>{gameMode === 'lastPlayer' ? 'Eliminated (Bankrupt)' : 'Awaiting Next-Round Bailout'}</span>
-                                </>
+                                <span>{gameMode === 'lastPlayer' ? 'Out of money' : 'Out until the next hand'}</span>
                               ) : isFrozen ? (
-                                <>
-                                  <span>❄️</span>
-                                  <span>Frozen This Hand</span>
-                                </>
+                                <span>Frozen this hand</span>
                               ) : isBetReady ? (
                                 <>
-                                  <span>🔒</span>
-                                  <span>Wager Locked In (Hidden)</span>
+                                  <Check className="w-4 h-4 shrink-0" strokeWidth={3} aria-hidden="true" />
+                                  <span>Locked in (bet hidden)</span>
                                 </>
                               ) : (
                                 <>
-                                  <span>🤔</span>
-                                  <span>Deciding on Device...</span>
+                                  <span className="inline-flex gap-[3px]" aria-hidden="true">
+                                    <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink" />
+                                    <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.2s]" />
+                                    <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.4s]" />
+                                  </span>
+                                  <span>Deciding on their phone</span>
                                 </>
                               )}
                             </div>
@@ -6250,10 +6219,10 @@ export function App() {
                               <button
                                 type="button"
                                 onClick={() => handleMpUnlockPlayer(player.id)}
-                                title="Teacher Only: Unlock this player's wager so they can change their bet"
-                                className="px-3 py-2.5 rounded-xl font-sans font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/60 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 flex items-center gap-1"
+                                title="Teacher only: unlock this player's bet so they can change it"
+                                className="h-9 px-3.5 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] bg-gc-line/[0.06] hover:border-gc-line/30 text-gc-ink transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
                               >
-                                <span>🔓</span>
+                                <LockOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
                                 <span>Unlock</span>
                               </button>
                             )}
@@ -6265,28 +6234,49 @@ export function App() {
                 ) : (
                   <div className="space-y-4">
                     {!mpRoomCode && (
-                      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                        <div className="text-sm font-sans text-slate-700 dark:text-amber-100/90">
-                          {effectiveTableLayout === 'grid'
-                            ? 'Tap a player to open their betting card. Picks stay hidden until the reveal.'
-                            : 'All betting cards are open. Everyone can see each pick.'}
+                      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 px-1">
+                        <div className="min-w-0">
+                          <h2 className="text-gc-lead font-bold text-gc-ink">Bets</h2>
+                          <p className="text-gc-small text-gc-quiet">
+                            {effectiveTableLayout === 'grid'
+                              ? 'Tap a player to open their betting card. Picks stay hidden until the reveal.'
+                              : 'All betting cards are open, so everyone can see each pick.'}
+                          </p>
                         </div>
-                        <div className="inline-flex rounded-xl border border-[#d4af37]/60 overflow-hidden" role="group" aria-label="Table layout">
-                          {(['grid', 'cards'] as const).map(layout => (
-                            <button
-                              key={layout}
-                              type="button"
-                              onClick={() => { playSound('click'); setTableLayoutPref(layout); }}
-                              aria-pressed={effectiveTableLayout === layout}
-                              className={`px-3.5 py-1.5 text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                                effectiveTableLayout === layout
-                                  ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04]'
-                                  : 'felt-well text-slate-800 dark:text-amber-100'
-                              }`}
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                          <div className="flex items-center gap-3 text-gc-small text-gc-quiet">
+                            <span className="tabular-nums whitespace-nowrap">{betsReadyCount} of {unfrozenActivePlayers.length} {betsReadyWord}</span>
+                            <span
+                              className="block h-2 w-40 sm:w-56 rounded-full bg-gc-line/[0.08] border border-gc-line/[0.12] overflow-hidden"
+                              role="progressbar"
+                              aria-label="Bets in"
+                              aria-valuemin={0}
+                              aria-valuemax={unfrozenActivePlayers.length}
+                              aria-valuenow={betsReadyCount}
                             >
-                              {layout === 'grid' ? '▦ Compact grid' : '▤ Full cards'}
-                            </button>
-                          ))}
+                              <span
+                                className="block h-full rounded-full bg-emerald-700 dark:bg-emerald-400 transition-[width] duration-500 ease-out"
+                                style={{ width: `${unfrozenActivePlayers.length ? Math.round((betsReadyCount / unfrozenActivePlayers.length) * 100) : 0}%` }}
+                              />
+                            </span>
+                          </div>
+                          <div className="inline-flex p-1 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12]" role="group" aria-label="Table layout">
+                            {(['grid', 'cards'] as const).map(layout => (
+                              <button
+                                key={layout}
+                                type="button"
+                                onClick={() => { playSound('click'); setTableLayoutPref(layout); }}
+                                aria-pressed={effectiveTableLayout === layout}
+                                className={`h-8 px-3.5 rounded-full text-gc-small font-semibold transition-colors cursor-pointer ${
+                                  effectiveTableLayout === layout
+                                    ? 'bg-gc-card text-gc-ink shadow-gc-1'
+                                    : 'text-gc-quiet hover:text-gc-ink'
+                                }`}
+                              >
+                                {layout === 'grid' ? 'Grid' : 'Full cards'}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -6299,28 +6289,30 @@ export function App() {
                           outLabel="Eliminated"
                         />
                         {openSeatPlayer && (
-                          <div ref={openSeatRef} className="space-y-2">
+                          <div ref={openSeatRef} key={openSeatPlayer.id} className="space-y-3 pt-2 animate-gc-slide-up">
                             <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                              <div className="text-sm font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
-                                {openSeatPlayer.avatar} {openSeatPlayer.name}'s betting card
-                              </div>
+                              <h2 className="text-gc-lead font-bold text-gc-ink">
+                                {openSeatPlayer.name}'s betting card
+                              </h2>
                               <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => { playSound('click'); setOpenSeatPlayerId(null); }}
+                                  className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
+                                >
+                                  <ChevronLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                  All players
+                                </button>
                                 {nextSeatPlayer && (
                                   <button
                                     type="button"
                                     onClick={() => { playSound('click'); setOpenSeatPlayerId(nextSeatPlayer.id); }}
-                                    className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border border-[#d4af37]/60 felt-well text-slate-800 dark:text-amber-100 hover:border-[#d4af37] cursor-pointer"
+                                    className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
                                   >
-                                    Next: {nextSeatPlayer.name} →
+                                    Next: {nextSeatPlayer.name}
+                                    <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
                                   </button>
                                 )}
-                                <button
-                                  type="button"
-                                  onClick={() => { playSound('click'); setOpenSeatPlayerId(null); }}
-                                  className="px-3.5 py-1.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer"
-                                >
-                                  Done · hide card
-                                </button>
                               </div>
                             </div>
                             {renderPlayerSeat(openSeatPlayer)}
@@ -6335,39 +6327,38 @@ export function App() {
                   </div>
                 )}
                 <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
-                  <ActionButton 
-                    onClick={handleRevealResults} 
-                    playSound={playSound} 
-                    variant={canRevealResults ? 'gold' : 'outline-gold'}
-                    className="w-full md:w-auto text-lg sm:text-xl py-4 px-16 tracking-[0.18em]" 
-                    disabled={isProcessing || !canRevealResults}
-                  >
-                    {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : (
-                      <span className="inline-flex items-center justify-center gap-3">CALL THE HAND & REVEAL <Dices className="w-6 h-6 shrink-0" aria-hidden="true" /></span>
-                    )}
-                  </ActionButton>
+                  <div className={`rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
+                    <ActionButton 
+                      onClick={handleRevealResults} 
+                      playSound={playSound} 
+                      variant="primary"
+                      className="w-full md:w-auto min-h-[60px] text-gc-lead py-3 px-10" 
+                      disabled={isProcessing || !canRevealResults}
+                    >
+                      {isProcessing ? processingStatus || 'Settling the bets…' : (
+                        <span className="inline-flex flex-wrap items-baseline justify-center gap-x-3 gap-y-0.5">
+                          <span>Reveal the answer</span>
+                          {revealNote && <span className="text-gc-body font-semibold opacity-80">{revealNote}</span>}
+                        </span>
+                      )}
+                    </ActionButton>
+                  </div>
 
                   {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
-                    <div className="flex flex-wrap items-center justify-center gap-3 text-xs font-sans text-slate-600 dark:text-amber-200/75">
-                      <span>
-                        🔒 Locked Players: <strong className="font-sans tabular-nums">{mpRoomCode ? mpLockedCount : lockedCount}/{unfrozenActivePlayers.length}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          playSound('click');
-                          setTeacherRevealOverride(v => !v);
-                        }}
-                        className={`px-3 py-1 rounded-full border font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                          teacherRevealOverride
-                            ? 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
-                            : 'felt-well border-[#d4af37]/50 text-amber-900 dark:text-[#fef08a] hover:border-[#d4af37]'
-                        }`}
-                        title="Teacher Override: unlock Reveal Results before every player has locked in"
-                      >
-                        {teacherRevealOverride ? '⚡ Teacher Override Active (Click to Disable)' : '🔓 Teacher Override: Unlock Reveal'}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound('click');
+                        setTeacherRevealOverride(v => !v);
+                      }}
+                      aria-pressed={teacherRevealOverride}
+                      className={`text-gc-small font-semibold underline underline-offset-4 px-2 py-1.5 rounded-md transition-colors cursor-pointer ${
+                        teacherRevealOverride ? 'text-gc-loss' : 'text-gc-quiet hover:text-gc-ink'
+                      }`}
+                      title="Teacher only: allow the reveal before every player has locked in"
+                    >
+                      {teacherRevealOverride ? 'Early reveal is on. Turn it off' : 'Let me reveal before everyone is in'}
+                    </button>
                   )}
                 </div> 
               </div> 
@@ -6394,246 +6385,269 @@ export function App() {
             })();
             const nextFormatObj = CHALLENGE_FORMATS.find(f => f.id === (nextRoundSettings?.challengeFormat || settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
 
-            return ( 
-            <div className="w-full max-w-5xl animate-fade-in p-4">
-                <div className="flex flex-wrap justify-between items-end gap-4 mb-6 border-b border-[#d4af37]/35 pb-4"> 
-                  <div>
-                    <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
-                      Croupier's Settlement
-                    </div>
-                    <h2 className="text-3xl sm:text-4xl font-black text-gold uppercase tracking-wider font-display">
-                      Round {currentRound} Payouts
-                    </h2> 
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {gameMode === 'rounds' && (
-                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-sans text-slate-700 dark:text-amber-200 font-bold">
-                        Hand {currentRound} of {totalRounds}
-                      </div>
-                    )} 
-                    {gameMode === 'targetAmount' && (
-                      <div className="px-3.5 py-1.5 rounded-full felt-well text-xs sm:text-sm font-sans text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1.5">
-                        <span>🎯 Target:</span>
-                        <span className="font-sans tabular-nums">${numTargetAmount.toLocaleString()}</span>
-                      </div>
-                    )}
-                    <ActionButton onClick={handleSaveGameClick} playSound={playSound} variant="outline-gold" className="text-sm py-2 px-4 flex items-center gap-1.5" title="Save Table State">
-                      <span>💾</span>
-                      <span className="hidden sm:inline text-xs">Save</span>
-                    </ActionButton>
-                  </div>
-                </div>
+            // Payouts: rank by balance (ties share a rank), and how far each player moved this hand.
+            const rankOf = (value: number, all: number[]) => 1 + all.filter(v => v > value).length;
+            const newTotals = roundResults.map(r => r.newTotal);
+            const prevTotals = roundResults.map(r => r.newTotal - r.amountChanged);
+            const payoutRows = [...roundResults]
+              .sort((a, b) => b.newTotal - a.newTotal)
+              .map(result => {
+                const rank = rankOf(result.newTotal, newTotals);
+                const prevRank = rankOf(result.newTotal - result.amountChanged, prevTotals);
+                return { result, rank, move: prevRank - rank };
+              });
+            const showMoves = currentRound > 1;
+            const rankBadge = (rank: number) =>
+              rank === 1
+                ? 'bg-[#f1cf72] text-[#231803]'
+                : rank === 2
+                  ? 'bg-[#d6dbe0] text-[#1f2937]'
+                  : rank === 3
+                    ? 'bg-[#d39a6a] text-[#2b1608]'
+                    : 'bg-gc-line/[0.08] text-gc-quiet';
+            const chipButton = 'inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-small font-semibold text-gc-ink hover:border-gc-line/30 transition-colors cursor-pointer';
+            const rulingWord = isResultCloze ? null : currentSentence?.isCorrect ? 'Valid' : 'Flawed';
 
+            return ( 
+            <div className="w-full max-w-6xl animate-fade-in p-2 md:p-4">
                 {hasTargetWinner && (
-                  <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-emerald-500/20 via-emerald-500/30 to-emerald-500/20 border-2 border-emerald-400 text-emerald-950 dark:text-emerald-100 text-center font-sans text-lg font-extrabold shadow-lg flex items-center justify-center gap-2 animate-bounce">
-                    <span className="text-2xl">🎯</span>
-                    <span>Target Bankroll of ${numTargetAmount.toLocaleString()} Reached! Champion Crowned!</span>
+                  <div className="mb-5 px-5 py-4 rounded-gc bg-gc-win/15 text-gc-win text-center text-gc-lead font-extrabold animate-gc-pop" role="status">
+                    Target of ${numTargetAmount.toLocaleString()} reached. We have a winner!
                   </div>
                 )}
-                
-                {/* House Ruling Card */}
-                <div className="glass-panel p-6 sm:p-8 rounded-2xl mb-8 relative overflow-hidden">
-                    <div className={`absolute top-0 left-0 w-2 h-full ${currentSentence?.isCorrect ? 'bg-gradient-to-b from-emerald-400 to-emerald-700' : 'bg-gradient-to-b from-rose-500 to-red-800'}`}></div>
-                    <div className="pl-3 sm:pl-5">
-                      <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
-                          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full border bg-black/5 dark:bg-black/40 border-[#d4af37]/50 flex-wrap">
-                            <span className="text-xs font-sans uppercase tracking-[0.2em] text-slate-600 dark:text-amber-200/80 font-bold">
-                              The House Ruling:
-                            </span>
-                            {isResultCloze ? (
-                              <span className="text-sm sm:text-base font-sans font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
-                                ✓ OFFICIAL ANSWER: &ldquo;{currentSentence?.correctAnswer}&rdquo;
-                              </span>
-                            ) : (
-                              <span className={`text-sm sm:text-base font-sans font-black uppercase tracking-widest ${currentSentence?.isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                {currentSentence?.isCorrect ? '✓ VALID SENTENCE' : '✕ FLAWED SENTENCE'}
-                              </span>
-                            )}
-                          </div>
-                          <button 
-                              onClick={() => {
-                              if (!currentSentence) return;
-                              if (isResultCloze) {
-                                // Read the full completed sentence on the Results screen!
-                                const fullCompleted = currentSentence.correction || currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer || '');
-                                const parts = [
-                                    resultQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence
-                                      ? `Lead-in sentence: ${currentSentence.leadInSentence}`
-                                      : null,
-                                    fullCompleted,
-                                    `Explanation: ${currentSentence.explanation}`
-                                ].filter(Boolean);
-                                speakText(parts.join('. '));
-                              } else {
-                                const parts = [
-                                    currentSentence.text,
-                                    !currentSentence.isCorrect ? `Correction: ${currentSentence.correction}` : null,
-                                    `Explanation: ${currentSentence.explanation}`
-                                ].filter(Boolean);
-                                speakText(parts.join('. '));
-                              }
-                              }} 
-                              disabled={isSpeaking}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-sans uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                              title="Read full completed sentence and analysis"
-                          >
-                              <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                              {isSpeaking ? 'Speaking...' : 'Listen to Ruling'}
-                          </button>
-                      </div>
 
-                      {resultQuestionType === 'keyWordTransformation' && currentSentence?.leadInSentence && (
-                        <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-[#d4af37]/40">
-                          <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-amber-800 dark:text-amber-300/80 mb-0.5">
-                            Lead-In Sentence {currentSentence.baseWord ? `· 🔑 Key Word: ${currentSentence.baseWord.toUpperCase()}` : ''}
-                          </div>
-                          <div className="text-base sm:text-lg font-editorial text-slate-800 dark:text-amber-100">
-                            &ldquo;{currentSentence.leadInSentence}&rdquo;
-                          </div>
+                {/* The ruling: the sentence again, a stamp, then the correction and why */}
+                <section className="gc-surface shadow-gc-2 rounded-gc-lg relative px-5 sm:px-14 pt-6 pb-7 text-center animate-gc-deal" aria-label="The ruling">
+                    <div className="flex justify-center">
+                      <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
+                        Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · The ruling
+                      </span>
+                    </div>
+                    {rulingWord && (
+                      <span
+                        role="status"
+                        className={`lg:absolute lg:top-6 lg:right-8 mt-4 lg:mt-0 inline-block px-4 py-1 border-4 border-current rounded-gc-sm text-gc-title sm:text-[28px] font-extrabold uppercase tracking-[0.06em] animate-gc-stamp ${
+                          currentSentence?.isCorrect ? 'text-emerald-700 dark:text-emerald-400' : 'text-gc-danger'
+                        }`}
+                      >
+                        {rulingWord}
+                      </span>
+                    )}
+
+                    {resultQuestionType === 'keyWordTransformation' && currentSentence?.leadInSentence && (
+                      <div className="mt-5 mx-auto max-w-3xl px-4 py-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12]">
+                        <div className="text-gc-small font-bold text-gc-quiet mb-0.5">
+                          First sentence{currentSentence.baseWord ? ` · Key word: ${currentSentence.baseWord.toUpperCase()}` : ''}
                         </div>
-                      )}
-
-                      <p className="text-2xl sm:text-3xl font-editorial text-slate-900 dark:text-amber-50 italic leading-relaxed mb-6">
-                        &ldquo;{revealHighlight
-                          ? renderTextSegments(revealHighlight.sentence, 'bg-transparent text-rose-700 dark:text-rose-300 underline decoration-wavy decoration-rose-500 decoration-2 underline-offset-[6px]')
-                          : currentSentence?.text}&rdquo;
-                        {resultQuestionType === 'wordFormation' && currentSentence?.baseWord && (
-                          <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] font-sans tabular-nums font-black not-italic tracking-wider text-base sm:text-lg align-middle">
-                            ({currentSentence.baseWord.toUpperCase()})
-                          </span>
-                        )}
-                      </p>
-                      
-                      {isResultCloze && currentSentence?.correction && (
-                          <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-emerald-500 mb-4">
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase text-xs tracking-widest mb-1.5">
-                                  <span>✦ Completed Sentence</span>
-                                  {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
-                                      <span className="font-sans tabular-nums text-emerald-800 dark:text-emerald-300 font-semibold normal-case bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-xs">
-                                          Accepted {resultQuestionType === 'wordFormation' ? 'Forms' : resultQuestionType === 'keyWordTransformation' ? 'Phrases' : 'Words'}: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
-                                      </span>
-                                  )}
-                              </div>
-                              <div className="text-lg sm:text-xl text-emerald-900 dark:text-emerald-300 font-editorial font-medium">
-                                &ldquo;{currentSentence.correction}&rdquo;
-                              </div>
-                          </div>
-                      )}
-
-                      {!isResultCloze && !currentSentence?.isCorrect && (
-                          <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-[#d4af37] mb-4">
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase text-xs tracking-widest mb-1.5">
-                                  <span>✦ Official House Revision</span>
-                                  {currentSentence?.errorPhrase && (
-                                      <span className="font-sans tabular-nums text-rose-700 dark:text-rose-300 font-semibold normal-case bg-rose-500/15 px-2.5 py-0.5 rounded-full border border-rose-500/30 text-xs">
-                                          Flaw: &ldquo;{currentSentence.errorPhrase}&rdquo; {currentSentence.mistakeType ? `· ${currentSentence.mistakeType}` : ''}
-                                      </span>
-                                  )}
-                              </div>
-                              <div className="text-lg sm:text-xl text-emerald-900 dark:text-emerald-300 font-editorial font-medium">
-                                &ldquo;{revealHighlight
-                                  ? renderTextSegments(revealHighlight.correction, 'bg-emerald-500/20 text-emerald-950 dark:text-emerald-100 font-bold rounded px-1')
-                                  : currentSentence?.correction}&rdquo;
-                              </div>
-                          </div>
-                      )}
-                      
-                      <div className="flex flex-col sm:flex-row gap-3.5 items-start felt-well p-4 rounded-xl">
-                          <span className="text-2xl select-none">🎓</span>
-                          <div className="text-slate-700 dark:text-slate-200 text-sm sm:text-base leading-relaxed flex-1">
-                            {currentSentence?.explanation}
-                          </div>
-                          {currentSentence?.explanation && (
-                            <button 
-                                onClick={handleSimplifyExplanation} 
-                                disabled={simplifiedExplanation.loading || !!simplifiedExplanation.text} 
-                                className="shrink-0 text-xs text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider border border-[#d4af37]/50 px-3 py-1.5 rounded-lg hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
-                            >
-                                {simplifiedExplanation.loading ? 'Loading Details...' : simplifiedExplanation.text ? 'Detailed ✓' : 'Detailed Explanation'}
-                            </button>
-                          )}
+                        <div className="text-gc-lead font-sentence italic text-gc-ink">
+                          &ldquo;{currentSentence.leadInSentence}&rdquo;
+                        </div>
                       </div>
-                      {simplifiedExplanation.text && (
-                          <div className="mt-2.5 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-xs sm:text-sm text-sky-900 dark:text-sky-200 font-sans">
-                              <strong>Detailed Grammar Breakdown:</strong> {simplifiedExplanation.text}
-                          </div>
+                    )}
+
+                    <p className={`font-sentence italic font-medium text-gc-ink text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3] text-balance mt-5 max-w-5xl mx-auto ${rulingWord ? 'lg:px-28' : ''}`}>
+                      &ldquo;{revealHighlight
+                        ? renderTextSegments(revealHighlight.sentence, 'bg-transparent text-gc-danger underline decoration-wavy decoration-2 underline-offset-[9px] animate-gc-fade [animation-delay:0.55s]')
+                        : currentSentence?.text}&rdquo;
+                      {resultQuestionType === 'wordFormation' && currentSentence?.baseWord && (
+                        <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-gc-gold/15 border border-gc-gold/40 text-gc-money font-sans tabular-nums font-black not-italic tracking-wider text-gc-lead align-middle">
+                          ({currentSentence.baseWord.toUpperCase()})
+                        </span>
+                      )}
+                    </p>
+                </section>
+
+                {isResultCloze && currentSentence?.correction && (
+                    <div className="gc-surface rounded-gc-lg mt-4 px-5 sm:px-8 py-5 animate-gc-slide-up [animation-delay:0.75s]">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                            <h3 className="text-gc-small font-bold text-gc-quiet">
+                              The answer: <span className="text-gc-win">&ldquo;{currentSentence?.correctAnswer}&rdquo;</span>
+                            </h3>
+                            {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
+                                <span className="text-gc-small font-semibold text-gc-win bg-gc-win/15 px-2.5 py-0.5 rounded-full">
+                                    Also accepted: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
+                                </span>
+                            )}
+                        </div>
+                        <p className="font-sentence italic text-gc-ink text-2xl sm:text-[30px] leading-snug">
+                          &ldquo;{currentSentence.correction}&rdquo;
+                        </p>
+                    </div>
+                )}
+
+                {!isResultCloze && !currentSentence?.isCorrect && (
+                    <div className="gc-surface rounded-gc-lg mt-4 px-5 sm:px-8 py-5 animate-gc-slide-up [animation-delay:0.75s]">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                            <h3 className="text-gc-small font-bold text-gc-quiet">Correction</h3>
+                            {currentSentence?.errorPhrase && (
+                                <span className="text-gc-small font-semibold text-gc-loss bg-gc-loss/15 px-2.5 py-0.5 rounded-full">
+                                    The mistake: &ldquo;{currentSentence.errorPhrase}&rdquo;{currentSentence.mistakeType ? ` · ${currentSentence.mistakeType}` : ''}
+                                </span>
+                            )}
+                        </div>
+                        <p className="font-sentence italic text-gc-ink text-2xl sm:text-[30px] leading-snug">
+                          &ldquo;{revealHighlight
+                            ? renderTextSegments(revealHighlight.correction, 'bg-gc-win/20 text-gc-win rounded-md px-1.5')
+                            : currentSentence?.correction}&rdquo;
+                        </p>
+                    </div>
+                )}
+
+                <div className="gc-surface rounded-gc-lg mt-3.5 px-5 sm:px-8 py-5 animate-gc-slide-up [animation-delay:1s]">
+                    <h3 className="text-gc-small font-bold text-gc-quiet mb-1.5">Why</h3>
+                    <p className="text-gc-ink text-gc-body sm:text-gc-lead leading-relaxed">
+                      {currentSentence?.explanation}
+                    </p>
+                    {simplifiedExplanation.text && (
+                        <div className="mt-3 px-4 py-3 rounded-gc-sm bg-gc-info/15 text-gc-info text-gc-body">
+                            <strong>In more detail:</strong> {simplifiedExplanation.text}
+                        </div>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      <button 
+                          onClick={() => {
+                          if (!currentSentence) return;
+                          if (isResultCloze) {
+                            // Read the full completed sentence on the Results screen!
+                            const fullCompleted = currentSentence.correction || currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer || '');
+                            const parts = [
+                                resultQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence
+                                  ? `Lead-in sentence: ${currentSentence.leadInSentence}`
+                                  : null,
+                                fullCompleted,
+                                `Explanation: ${currentSentence.explanation}`
+                            ].filter(Boolean);
+                            speakText(parts.join('. '));
+                          } else {
+                            const parts = [
+                                currentSentence.text,
+                                !currentSentence.isCorrect ? `Correction: ${currentSentence.correction}` : null,
+                                `Explanation: ${currentSentence.explanation}`
+                            ].filter(Boolean);
+                            speakText(parts.join('. '));
+                          }
+                          }} 
+                          disabled={isSpeaking}
+                          className={`${chipButton} ${isSpeaking ? 'opacity-50 !cursor-not-allowed' : ''}`}
+                          title="Read the sentence, the correction and the explanation aloud"
+                      >
+                          <Volume2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          {isSpeaking ? 'Speaking…' : 'Listen'}
+                      </button>
+                      {currentSentence?.explanation && (
+                        <button 
+                            onClick={handleSimplifyExplanation} 
+                            disabled={simplifiedExplanation.loading || !!simplifiedExplanation.text} 
+                            className={`${chipButton} disabled:opacity-50 disabled:cursor-default`}
+                        >
+                            {simplifiedExplanation.loading ? 'Loading…' : simplifiedExplanation.text ? 'More detail shown' : 'Explain in more detail'}
+                        </button>
                       )}
                     </div>
                 </div>
 
-                {/* High-Roller Payout Ledger Table */}
-                <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
+                {/* Payouts */}
+                <div className="flex flex-wrap items-end justify-between gap-4 mt-10 mb-4 animate-gc-slide-up [animation-delay:1.25s]">
+                  <div>
+                    <h2 className="text-gc-display font-extrabold text-gc-ink">Hand {currentRound} payouts</h2>
+                    <p className="text-gc-body text-gc-quiet mt-1">
+                      {gameMode === 'rounds'
+                        ? `Hand ${currentRound} of ${totalRounds}.`
+                        : gameMode === 'targetAmount'
+                          ? `The first player to reach $${numTargetAmount.toLocaleString()} wins.`
+                          : 'The last player with money wins.'}
+                    </p>
+                  </div>
+                  <ActionButton onClick={handleSaveGameClick} playSound={playSound} variant="ghost" className="h-10 px-4 text-gc-small font-semibold" title="Save the table so you can carry on later">
+                    <span className="inline-flex items-center gap-2"><Save className="w-4 h-4 shrink-0" aria-hidden="true" />Save</span>
+                  </ActionButton>
+                </div>
+
+                <div className="gc-panel rounded-gc-lg overflow-hidden animate-gc-slide-up [animation-delay:1.3s]">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-amber-100/80 dark:bg-black/50 text-amber-950 dark:text-[#d4af37] uppercase text-xs font-sans tracking-[0.2em] font-bold border-b border-[#d4af37]/30">
+                        <thead className="text-gc-small font-bold text-gc-quiet">
                         <tr>
-                            <th className="p-4 sm:p-5">Rank</th>
-                            <th className="p-4 sm:p-5">High-Roller</th>
-                            <th className="p-4 sm:p-5">Hand Outcome</th>
-                            <th className="p-4 sm:p-5 text-right">Net Delta</th>
-                            <th className="p-4 sm:p-5 text-right">Vault Balance</th>
+                            <th className="py-3 pl-5 sm:pl-6 pr-2 w-16 font-bold">Rank</th>
+                            <th className="py-3 px-3 font-bold">Player</th>
+                            <th className="py-3 px-3 font-bold">Pick</th>
+                            <th className="py-3 px-3 text-right font-bold">Change</th>
+                            <th className="py-3 px-3 text-right font-bold">Balance</th>
+                            {showMoves && <th className="py-3 pl-3 pr-5 sm:pr-6 text-right w-20 font-bold">Move</th>}
                         </tr>
                         </thead>
-                        <tbody className="text-slate-800 dark:text-slate-200 divide-y divide-[#d4af37]/15">
-                        {[...roundResults].sort((a, b) => b.newTotal - a.newTotal).map((result, index) => {
+                        <tbody className="text-gc-ink">
+                        {payoutRows.map(({ result, rank, move }, index) => {
                             const player = players.find(p => p.name === result.name);
-                            const isWinner = result.outcomeText.includes('Win') || result.outcomeText.includes('Hit') || (result.marksAwarded !== undefined && result.marksAwarded >= 1);
+                            const pickText = result.playerAnswerDisplay && result.playerAnswerDisplay !== result.outcomeText
+                              ? result.playerAnswerDisplay
+                              : '';
                             return (
-                            <tr key={result.name} className={`hover:bg-amber-500/10 transition-colors ${isWinner ? 'bg-emerald-500/10' : ''}`}>
-                              <td className="p-4 sm:p-5 font-sans tabular-nums text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
-                                #{index + 1}
+                            <tr key={result.name} className="border-t border-gc-line/[0.1] animate-gc-slide-up" style={{ animationDelay: `${1400 + Math.min(index, 12) * 80}ms` }}>
+                              <td className="py-3.5 pl-5 sm:pl-6 pr-2">
+                                <span className={`w-9 h-9 rounded-full grid place-items-center font-extrabold text-gc-small tabular-nums ${rankBadge(rank)}`}>
+                                  {rank}
+                                </span>
                               </td>
-                              <td className="p-4 sm:p-5 font-bold flex items-center gap-3">
+                              <td className="py-3.5 px-3">
+                                <div className="flex items-center gap-3">
                                   {player ? (
                                     <button
                                       type="button"
                                       onClick={() => handleOpenAvatarModal(player.id)}
-                                      className="w-10 h-10 rounded-full border border-[#d4af37] bg-amber-50 dark:bg-[#082415] flex items-center justify-center text-xl shadow hover:scale-110 transition-transform cursor-pointer"
-                                      title={`Click to change ${player.name}'s avatar`}
+                                      className="w-11 h-11 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-2xl leading-none hover:scale-110 transition-transform cursor-pointer shrink-0"
+                                      title={`Change ${player.name}'s avatar`}
                                     >
                                       {player.avatar}
                                     </button>
                                   ) : (
-                                    <span className="text-2xl filter drop-shadow-md">{player?.avatar || '👤'}</span>
+                                    <span className="text-2xl">{'👤'}</span>
                                   )}
-                                  <span className="text-base sm:text-lg font-sans uppercase tracking-wider text-slate-900 dark:text-amber-50 font-extrabold">
+                                  <span className="text-gc-lead font-bold">
                                     {result.name}
                                   </span>
+                                </div>
                               </td>
-                              <td className="p-4 sm:p-5">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <div className={`font-sans text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                      {result.outcomeText}
-                                    </div>
+                              <td className="py-3.5 px-3">
+                                  <div className="flex flex-wrap items-center gap-2 text-gc-body font-semibold">
+                                    <span>{pickText || result.outcomeText}</span>
+                                    {pickText && result.bet > 0 && (
+                                      <span className="text-gc-quiet font-normal tabular-nums">· ${result.bet.toLocaleString()} bet</span>
+                                    )}
                                     {result.marksAwarded !== undefined && (
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-black uppercase tracking-wider border ${
-                                        result.marksAwarded === 2
-                                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-800 dark:text-emerald-200'
-                                          : result.marksAwarded === 1
-                                            ? 'bg-amber-500/20 border-amber-400 text-amber-800 dark:text-amber-200'
-                                            : 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
-                                      }`}>
-                                        {result.marksAwarded}/2 Marks
+                                      <span className="px-2 py-0.5 rounded-full text-gc-cap font-bold tabular-nums bg-gc-line/[0.08] text-gc-quiet">
+                                        {result.marksAwarded}/2 marks
                                       </span>
                                     )}
                                   </div>
-                                  {result.playerAnswerDisplay && result.playerAnswerDisplay !== result.outcomeText && (
-                                    <div className="text-xs font-sans tabular-nums text-slate-600 dark:text-amber-100/80 mt-0.5">
-                                      Pick: <strong>{result.playerAnswerDisplay}</strong> {result.bet > 0 ? `(Wager: $${result.bet.toLocaleString()})` : ''}
+                                  {pickText && (
+                                    <div className="text-gc-small text-gc-quiet mt-0.5">
+                                      {result.outcomeText}
                                     </div>
                                   )}
                                   {result.correctionFeedback && (
-                                    <div className="text-xs text-slate-500 dark:text-amber-200/60 mt-1 italic max-w-xs">
+                                    <div className="text-gc-small text-gc-quiet mt-1 italic max-w-sm">
                                       {result.correctionFeedback}
                                     </div>
                                   )}
                               </td>
-                              <td className={`p-4 sm:p-5 text-right font-sans tabular-nums font-extrabold text-base sm:text-lg ${result.amountChanged > 0 ? 'text-emerald-600 dark:text-emerald-400' : result.amountChanged < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                              <td className={`py-3.5 px-3 text-right tabular-nums font-extrabold text-gc-lead whitespace-nowrap ${result.amountChanged > 0 ? 'text-gc-win' : result.amountChanged < 0 ? 'text-gc-loss' : 'text-gc-quiet'}`}>
                                   {result.amountChanged > 0 ? `+$${result.amountChanged.toLocaleString()}` : result.amountChanged < 0 ? `-$${Math.abs(result.amountChanged).toLocaleString()}` : '$0'}
                               </td>
-                              <td className="p-4 sm:p-5 text-right font-sans tabular-nums font-extrabold text-lg sm:text-xl text-gold-flat">
-                                  ${result.newTotal.toLocaleString()}
+                              <td className="py-3.5 px-3 text-right tabular-nums font-extrabold text-gc-lead text-gc-money whitespace-nowrap">
+                                  $<CountUp from={result.newTotal - result.amountChanged} to={result.newTotal} delayMs={1500 + Math.min(index, 12) * 80} />
                               </td>
+                              {showMoves && (
+                                <td className={`py-3.5 pl-3 pr-5 sm:pr-6 text-right text-gc-small font-bold whitespace-nowrap ${move > 0 ? 'text-gc-win' : move < 0 ? 'text-gc-loss' : 'text-gc-quiet'}`}>
+                                  {move > 0 ? (
+                                    <span className="inline-flex items-center gap-0.5"><ArrowUp className="w-3.5 h-3.5" aria-hidden="true" />{move}<span className="sr-only"> places up</span></span>
+                                  ) : move < 0 ? (
+                                    <span className="inline-flex items-center gap-0.5"><ArrowDown className="w-3.5 h-3.5" aria-hidden="true" />{-move}<span className="sr-only"> places down</span></span>
+                                  ) : (
+                                    <span aria-label="No change">–</span>
+                                  )}
+                                </td>
+                              )}
                             </tr>
                         )})}
                         </tbody>
@@ -6642,55 +6656,47 @@ export function App() {
                 </div>
 
                 {!isGameOver && (
-                  <div className="mt-6 p-4 felt-well rounded-xl flex flex-wrap items-center justify-between gap-3 select-none">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-sans font-bold text-amber-900 dark:text-[#fef08a] uppercase tracking-widest">
-                        ✦ Next Hand Charter:
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-amber-200/60">
-                        (Click any badge to adjust before dealing)
-                      </span>
+                  <div className="mt-6 px-4 py-3.5 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <span className="text-gc-small font-bold text-gc-ink">Next hand</span>
+                      <span className="text-gc-small text-gc-quiet"> · click a setting to change it before you deal</span>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('topic')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                        title="Click to change Topic for next round"
+                        className={chipButton}
+                        title="Change the topic for the next hand"
                       >
-                        <span>📚 {nextRoundSettings?.topic || settings.topic}</span>
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                        {nextRoundSettings?.topic || settings.topic}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('level')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                        title="Click to change CEFR Level for next round"
+                        className={chipButton}
+                        title="Change the level for the next hand"
                       >
-                        <span>📊 {nextRoundSettings?.level || settings.level}</span>
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                        {nextRoundSettings?.level || settings.level}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('theme')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                        title="Click to change Theme for next round"
+                        className={chipButton}
+                        title="Change the theme for the next hand"
                       >
-                        <span>🎭 {nextRoundSettings?.theme || settings.theme}</span>
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                        {nextRoundSettings?.theme || settings.theme}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleOpenSettingsModal('format')}
-                        className="px-3.5 py-1 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                        title="Click to switch Challenge Format before dealing next hand"
+                        className={chipButton}
+                        title="Change the kind of question for the next hand"
                       >
-                        <span>{nextFormatObj.icon} {nextFormatObj.shortLabel}</span>
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400">✏️</span>
+                        {nextFormatObj.shortLabel}
                       </button>
                     </div>
                   </div>
@@ -6701,36 +6707,37 @@ export function App() {
                     {roundHistory.length > 0 && (
                       <ActionButton
                         onClick={() => { playSound('click'); setShowReportCardModal(true); }}
-                        variant="outline-gold"
-                        className="text-xs py-2.5 px-4 flex items-center gap-2"
-                        title="View Cumulative Grammar Report Card"
+                        variant="ghost"
+                        className="h-10 px-4 text-gc-small font-semibold"
+                        title="See the grammar report card for every hand so far"
                       >
-                        <span>📜</span>
-                        <span>Ledger ({roundHistory.length})</span>
+                        Report card ({roundHistory.length})
                       </ActionButton>
                     )}
                     <ActionButton
                       onClick={() => handleOpenCloudModal('reports')}
-                      variant="outline-gold"
-                      className="text-xs py-2.5 px-4 flex items-center gap-2"
-                      title="Save or Load Session Report & Table State in Cloud"
+                      variant="ghost"
+                      className="h-10 px-4 text-gc-small font-semibold"
+                      title="Save or load the session report and table in the cloud"
                     >
-                      <span>☁️</span>
-                      <span>Cloud Save</span>
+                      <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to cloud</span>
                     </ActionButton>
                   </div>
-                  <ActionButton onClick={handleNextRound} playSound={playSound} variant="gold" className="text-lg sm:text-xl py-4 px-12 tracking-[0.15em]">
-                      {isGameOver ? 'SETTLE ACCOUNTS & FINISH 🏁' : 'DEAL NEXT HAND ➡️'}
+                  <ActionButton onClick={handleNextRound} playSound={playSound} variant="primary" className="min-h-[60px] text-gc-lead py-3 px-10">
+                      <span className="inline-flex items-center gap-2.5">
+                        {isGameOver ? 'See the final results' : 'Deal the next hand'}
+                        <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+                      </span>
                   </ActionButton>
                   <div className="flex-1 flex justify-end">
                     {!isGameOver && (
                       <ActionButton 
                         onClick={handleEndGameEarly} 
-                        variant="outline-red"
-                        className="text-xs py-2.5 px-4"
-                        title="Cash out and end game early"
+                        variant="ghost"
+                        className="h-10 px-4 text-gc-small font-semibold text-gc-loss"
+                        title="End the game now and go to the final results"
                       >
-                        Cash Out Early
+                        End the game early
                       </ActionButton>
                     )}
                   </div>
@@ -6855,18 +6862,15 @@ export function App() {
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300">
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
-             <ActionButton 
-                onClick={handleRestartGame} 
-                playSound={playSound} 
-                variant="outline-gold"
-                className="text-xs py-2 px-4 flex items-center gap-1.5 backdrop-blur-md"
-                title="Leave Table & Return to Lobby"
-             > 
-                <span className="inline-flex items-center gap-1.5">
-                  <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span>Lobby</span>
-                </span>
-             </ActionButton> 
+             <button
+                type="button"
+                onClick={() => { playSound('click'); handleRestartGame(); }}
+                className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold"
+                title="Leave the table and go back to the lobby"
+             >
+                <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span>Lobby</span>
+             </button>
           </div>
         )}
         
@@ -6885,13 +6889,13 @@ export function App() {
                 playSound('click');
                 setShowMpLobbyModal(true);
               }}
-              className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/80 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans tabular-nums text-xs font-extrabold uppercase tracking-wider"
-              title="Open Live Classroom Multiplayer Room Manager & QR Code"
+              className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold tabular-nums"
+              title="Open the room: QR code and who is connected"
             >
               <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
               <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>{mpRoomCode}</span>
-              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
+              <span>Room {mpRoomCode}</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">
                 {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length}
               </span>
             </button>
@@ -6900,8 +6904,8 @@ export function App() {
           <button
             type="button"
             onClick={() => handleOpenCloudModal(step === 'PLAYER_SETUP' ? 'rosters' : 'reports')}
-            className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans text-xs font-extrabold uppercase tracking-wider"
-            title="Open Teacher Cloud Vault (Class Rosters, Session Reports & Cloud Sentence Bank)"
+            className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold"
+            title="Cloud: class rosters, session reports and your own sentence bank"
           >
             <CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span className="hidden sm:inline">Cloud</span>
@@ -6911,11 +6915,7 @@ export function App() {
             <button
               type="button"
               onClick={handleOpenTeacherPinModal}
-              className={`h-11 px-3.5 flex items-center gap-2 rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans text-xs font-extrabold uppercase tracking-wider ${
-                isTeacherAiUnlocked
-                  ? 'bg-emerald-950/90 border-emerald-400/70 hover:border-emerald-300 text-emerald-200'
-                  : 'bg-amber-50/95 dark:bg-[#051c10]/95 border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a]'
-              }`}
+              className={`h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold ${isTeacherAiUnlocked ? '!border-gc-win/50' : ''}`}
               title={
                 isTeacherAiUnlocked
                   ? 'Live Gemini AI Unlocked (Teacher Mode) — Click to lock or manage Teacher PIN'
@@ -6924,7 +6924,7 @@ export function App() {
             >
               <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               {isTeacherAiUnlocked ? <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" /> : <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />}
-              <span>{isTeacherAiUnlocked ? 'Live AI' : 'Offline Bank'}</span>
+              <span>{isTeacherAiUnlocked ? 'Live AI' : 'Offline bank'}</span>
               {isTeacherAiUnlocked
                 ? <LockOpen className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
                 : <Lock className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />}
@@ -6933,9 +6933,9 @@ export function App() {
 
           <button 
             onClick={toggleTheme}
-            className="text-lg w-11 h-11 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-[#051c10]/90 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer" 
-            aria-label={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
-            title={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
+            className="w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer" 
+            aria-label={isDarkMode ? "Switch to the light theme" : "Switch to the dark theme"}
+            title={isDarkMode ? "Light theme" : "Dark theme"}
           > 
             {isDarkMode ? <Sun className="w-5 h-5" aria-hidden="true" /> : <Moon className="w-5 h-5" aria-hidden="true" />}
           </button>
@@ -6946,10 +6946,8 @@ export function App() {
               playSound('click');
               setIsProjectorMode(prev => !prev);
             }}
-            className={`hidden sm:flex text-lg w-11 h-11 items-center justify-center rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer ${
-              isProjectorMode
-                ? 'bg-amber-400 border-amber-200 text-slate-950 ring-2 ring-amber-300/70'
-                : 'bg-amber-50/90 dark:bg-[#051c10]/90 border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a]'
+            className={`!hidden sm:!inline-flex w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer ${
+              isProjectorMode ? '!bg-gc-gold !text-gc-on-gold !border-transparent' : ''
             }`}
             aria-pressed={isProjectorMode}
             aria-label="Projector mode: larger, solid text for the back of the room"
@@ -6968,9 +6966,9 @@ export function App() {
                 } 
                 playSound('click'); 
               }} 
-              className="text-lg w-11 h-11 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-[#051c10]/90 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer" 
+              className="w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer" 
               aria-label={isMuted ? "Unmute" : "Mute"}
-              title={isMuted ? "Unmute Casino Audio" : "Mute Casino Audio"}
+              title={isMuted ? "Sound on" : "Sound off"}
             > 
               {isMuted ? <VolumeX className="w-5 h-5" aria-hidden="true" /> : <Volume2 className="w-5 h-5" aria-hidden="true" />}
             </button>

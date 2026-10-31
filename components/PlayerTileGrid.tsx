@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check, Clock, Snowflake, X } from 'lucide-react';
 import { Player } from '../types';
 
 // Compact projector view for single-screen play: one small tile per player.
@@ -20,92 +21,108 @@ interface PlayerTileGridProps {
   outLabel: string;
 }
 
-const STATUS_TEXT: Record<SeatStatus, { icon: string; text: string }> = {
-  waiting: { icon: '🤔', text: 'Deciding' },
-  turn: { icon: '⏱️', text: 'Their turn' },
-  placed: { icon: '🂠', text: 'Bet placed' },
-  locked: { icon: '🔒', text: 'Locked in' },
-  frozen: { icon: '❄️', text: 'Frozen' },
-  satOut: { icon: '⏳', text: 'Sat out' },
-  out: { icon: '💸', text: 'Out' },
+const STATUS_TEXT: Record<SeatStatus, string> = {
+  waiting: 'Deciding',
+  turn: 'Their turn',
+  placed: 'Bet placed',
+  locked: 'Locked in',
+  frozen: 'Frozen',
+  satOut: 'Sat out',
+  out: 'Out',
+};
+
+// One colour per meaning: gold = their turn, blue = bet placed, green = locked in, red = out.
+const STATUS_CLASS: Record<SeatStatus, string> = {
+  waiting: 'bg-gc-line/[0.07] text-gc-quiet',
+  turn: 'bg-gc-gold text-gc-on-gold',
+  placed: 'bg-gc-info/15 text-gc-info',
+  locked: 'bg-gc-win/15 text-gc-win animate-gc-pop',
+  frozen: 'bg-gc-info/15 text-gc-info',
+  satOut: 'bg-gc-line/[0.07] text-gc-quiet',
+  out: 'bg-gc-loss/15 text-gc-loss',
+};
+
+const StatusIcon: React.FC<{ status: SeatStatus }> = ({ status }) => {
+  const cls = 'w-3.5 h-3.5 shrink-0';
+  switch (status) {
+    case 'waiting':
+      return (
+        <span className="inline-flex gap-[3px]" aria-hidden="true">
+          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink" />
+          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.2s]" />
+          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.4s]" />
+        </span>
+      );
+    case 'locked':
+      return <Check className={cls} strokeWidth={3} aria-hidden="true" />;
+    case 'frozen':
+      return <Snowflake className={cls} aria-hidden="true" />;
+    case 'satOut':
+      return <Clock className={cls} aria-hidden="true" />;
+    case 'out':
+      return <X className={cls} strokeWidth={3} aria-hidden="true" />;
+    default:
+      return null;
+  }
 };
 
 const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel }) => {
   return (
     <div
-      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5"
       role="list"
       aria-label="Players at the table"
     >
-      {tiles.map(({ player, status, badges }) => {
+      {tiles.map(({ player, status, badges }, i) => {
         const isOpen = openPlayerId === player.id;
-        const isDone = status === 'placed' || status === 'locked';
-        const statusInfo = status === 'out' ? { icon: '💸', text: outLabel } : STATUS_TEXT[status];
+        const statusText = status === 'out' ? outLabel : STATUS_TEXT[status];
         return (
+          // The wrapper slides in when the hand is dealt; the button inside lifts on hover
+          // (one element can't do both, the animation would pin its transform).
+          <div key={player.id} role="listitem" className="animate-gc-slide-up" style={{ animationDelay: `${Math.min(i, 11) * 40}ms` }}>
           <button
-            key={player.id}
             type="button"
-            role="listitem"
             onClick={() => onOpen(player.id)}
             aria-pressed={isOpen}
-            aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusInfo.text}. Open betting card.`}
-            className={`relative text-left rounded-2xl p-3 border-2 transition-all cursor-pointer glass-panel flex flex-col gap-2 hover:scale-[1.02] focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-300 ${
+            aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}
+            className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 px-3 pt-4 pb-3.5 flex flex-col items-center gap-2 text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 ${
               isOpen
-                ? 'border-[#fef08a] shadow-[0_0_24px_rgba(254,240,138,0.35)]'
-                : status === 'out'
-                  ? 'opacity-55 border-slate-500/30'
-                  : status === 'frozen'
-                    ? 'border-cyan-400/70'
-                    : status === 'turn'
-                      ? 'border-amber-400 animate-pulse'
-                      : isDone
-                        ? 'border-emerald-500'
-                        : 'border-[#d4af37]/40'
-            }`}
+                ? 'ring-2 ring-inset ring-gc-turn'
+                : status === 'turn'
+                  ? 'ring-2 ring-inset ring-gc-turn/80'
+                  : ''
+            } ${status === 'out' ? 'opacity-60' : ''}`}
           >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-11 h-11 rounded-full border-2 border-[#d4af37] bg-black/30 flex items-center justify-center text-2xl shrink-0 select-none">
-                {player.avatar}
-              </div>
-              <div className="min-w-0">
-                <div className="font-sans font-extrabold uppercase tracking-wide text-base leading-tight text-slate-900 dark:text-amber-50 truncate">
-                  {player.name}
-                </div>
-                <div className="font-sans tabular-nums font-black text-base text-emerald-800 dark:text-[#fef08a]">
-                  ${player.money.toLocaleString()}
-                </div>
-              </div>
-            </div>
-
-            <div
-              className={`rounded-lg px-2 py-1.5 text-sm font-sans font-bold flex items-center justify-center gap-1.5 border ${
-                isDone
-                  ? 'bg-emerald-500/20 border-emerald-400 text-emerald-950 dark:text-emerald-100'
-                  : status === 'turn'
-                    ? 'bg-amber-400/25 border-amber-300 text-amber-950 dark:text-amber-100'
-                    : status === 'frozen'
-                      ? 'bg-cyan-500/20 border-cyan-300 text-cyan-950 dark:text-cyan-100'
-                      : 'bg-black/5 dark:bg-black/30 border-[#d4af37]/40 text-slate-800 dark:text-amber-100'
-              }`}
+            <span
+              className="w-14 h-14 rounded-full grid place-items-center text-3xl leading-none bg-gc-line/[0.08] border-2 border-gc-turn/70 select-none shrink-0"
+              aria-hidden="true"
             >
-              <span aria-hidden="true">{statusInfo.icon}</span>
-              <span>{statusInfo.text}</span>
-            </div>
+              {player.avatar}
+            </span>
+            <span className="w-full text-gc-lead font-bold text-gc-ink truncate">{player.name}</span>
+            <span className="text-gc-lead font-bold tabular-nums text-gc-money -mt-1">${player.money.toLocaleString()}</span>
+            <span
+              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-gc-small font-bold whitespace-nowrap ${STATUS_CLASS[status]}`}
+            >
+              <StatusIcon status={status} />
+              {statusText}
+            </span>
 
             {badges.length > 0 && (
-              <div className="flex flex-wrap gap-1" aria-label="Power-ups and effects">
-                {badges.map((b, i) => (
+              <span className="flex flex-wrap justify-center gap-1" aria-label="Power-ups and effects">
+                {badges.map((b, j) => (
                   <span
-                    key={i}
+                    key={j}
                     title={b.label}
-                    className="text-base leading-none px-1 py-0.5 rounded-md bg-amber-500/15 border border-[#d4af37]/40"
+                    className="text-base leading-none px-1.5 py-1 rounded-md bg-gc-line/[0.07] border border-gc-line/[0.12]"
                   >
                     {b.icon}
                   </span>
                 ))}
-              </div>
+              </span>
             )}
           </button>
+          </div>
         );
       })}
     </div>

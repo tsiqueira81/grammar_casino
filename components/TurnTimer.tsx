@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check, Lock, LockOpen, Pause, Play, Plus, RotateCcw, Timer as TimerIcon } from 'lucide-react';
 import { PlayerTurnTimer, SoundEffect } from '../types';
 import { TURN_TIMER_BONUS_MS, TURN_TIMER_WARNING_SECONDS } from '../constants';
 
@@ -123,7 +124,12 @@ interface TurnTimerControlsProps {
   onUnlock: () => void;
 }
 
-const btnBase = 'px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-sans font-extrabold uppercase tracking-wider border transition-all cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed active:scale-95';
+// Style A buttons for the timer strips. Plain labels; one gold button per strip.
+const btnBase = 'h-9 px-4 rounded-full text-gc-small font-bold inline-flex items-center gap-1.5 whitespace-nowrap transition-all cursor-pointer select-none active:scale-95 disabled:cursor-not-allowed disabled:active:scale-100';
+const btnPrimary = `${btnBase} gc-btn-primary hover:brightness-105`;
+const btnGhost = `${btnBase} bg-gc-line/[0.06] border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.1] hover:border-gc-line/30`;
+const btnDanger = `${btnBase} bg-gc-danger/[0.08] border border-gc-danger/40 text-gc-danger hover:border-gc-danger/70`;
+const iconCls = 'w-4 h-4 shrink-0';
 
 /** Teacher-facing control strip for a player's betting turn. */
 export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
@@ -132,101 +138,98 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
 }) => {
   const status = timer?.status ?? 'idle';
   const held = status === 'running' && !!timer?.held;
+  const bonusSeconds = TURN_TIMER_BONUS_MS / 1000;
 
   let label: string;
-  let labelClass = 'text-amber-800 dark:text-amber-200/80';
+  let labelClass = 'text-gc-quiet';
   if (status === 'idle') {
-    label = blockedByName ? `Waiting · ${blockedByName}'s turn` : 'Awaiting turn';
+    label = blockedByName ? `Waiting for ${blockedByName} to finish` : 'Not started yet';
   } else if (status === 'running') {
-    label = held ? 'Clock held · popup / hint' : 'Betting in progress';
-    labelClass = held ? 'text-sky-700 dark:text-sky-300' : isWarning ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-300';
+    label = held ? 'On hold while a hint or window is open' : isWarning ? 'Last few seconds' : 'Betting now';
+    labelClass = held ? 'text-gc-info' : isWarning ? 'text-gc-loss' : 'text-gc-win';
   } else if (status === 'paused') {
-    label = 'Paused by teacher';
-    labelClass = 'text-sky-700 dark:text-sky-300';
+    label = 'Paused';
+    labelClass = 'text-gc-info';
   } else if (timer?.skipped || isFrozen) {
-    label = 'Skipped · frozen';
-    labelClass = 'text-cyan-700 dark:text-cyan-300';
+    label = 'Frozen this hand';
+    labelClass = 'text-gc-info';
   } else if (isSatOut) {
-    label = 'Sat out · no bet placed';
-    labelClass = 'text-rose-700 dark:text-rose-300';
+    label = 'Sat out (no bet)';
+    labelClass = 'text-gc-loss';
   } else {
-    label = 'Bet locked';
-    labelClass = 'text-slate-600 dark:text-slate-300';
+    label = 'Locked in';
+    labelClass = 'text-gc-win';
   }
 
   const clockClass =
-    status === 'locked' ? 'text-slate-500 dark:text-slate-400'
-    : isWarning ? 'text-rose-600 dark:text-rose-400 animate-pulse'
-    : status === 'paused' || held ? 'text-sky-700 dark:text-sky-300'
-    : 'text-amber-800 dark:text-[#fef08a]';
+    status === 'locked' ? 'text-gc-quiet'
+    : isWarning ? 'text-gc-loss animate-pulse'
+    : status === 'paused' || held ? 'text-gc-info'
+    : 'text-gc-money';
+
+  const frameClass = isWarning
+    ? 'border-gc-loss/60 bg-gc-loss/[0.06]'
+    : status === 'running' && !held
+      ? 'border-gc-win/40 bg-gc-win/[0.05]'
+      : 'border-gc-line/[0.12] bg-gc-line/[0.05]';
 
   return (
     <div
-      className={`mb-5 -mt-1 px-3.5 py-2.5 rounded-xl felt-well flex flex-wrap items-center justify-between gap-3 transition-all ${
-        isWarning ? '!border-rose-500/70 shadow-[0_0_18px_rgba(244,63,94,0.35)]' : ''
-      } ${status === 'running' && !held && !isWarning ? '!border-emerald-500/50' : ''}`}
+      className={`mb-5 -mt-1 px-4 py-3 rounded-gc border flex flex-wrap items-center justify-between gap-3 transition-colors ${frameClass}`}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <span className="text-lg select-none" aria-hidden="true">{status === 'locked' ? '🔒' : '⏱️'}</span>
-        <div className="flex flex-col leading-tight min-w-0">
-          <span className="text-[9px] font-sans uppercase tracking-[0.2em] text-amber-900/70 dark:text-amber-200/60 font-bold">Turn Clock</span>
-          <span className={`text-[11px] font-sans font-bold truncate ${labelClass}`}>{label}</span>
+        <span className="w-9 h-9 rounded-full grid place-items-center bg-gc-line/[0.07] text-gc-quiet shrink-0" aria-hidden="true">
+          {status === 'locked' ? <Lock className={iconCls} /> : <TimerIcon className={iconCls} />}
+        </span>
+        <div className="flex flex-col min-w-0">
+          <span className="text-gc-cap font-semibold text-gc-quiet">Turn timer</span>
+          <span className={`text-gc-small font-bold truncate ${labelClass}`}>{label}</span>
         </div>
-        <span className={`font-sans tabular-nums font-extrabold text-2xl tabular-nums tracking-tight ${clockClass}`} aria-live="off">
+        <span className={`text-gc-title tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
           {formatClock(remainingMs)}
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
         {(status === 'idle' || status === 'paused') && (
           <button
             type="button"
             onClick={onStart}
             disabled={status === 'idle' && !!blockedByName}
             title={status === 'idle' && blockedByName ? `Finish ${blockedByName}'s turn first` : status === 'paused' ? 'Resume the countdown' : 'Start this player\'s betting turn'}
-            className={`${btnBase} bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border-emerald-300/70 shadow-[0_2px_0_#064e3b]`}
+            className={btnPrimary}
           >
-            ▶ {status === 'paused' ? 'Resume' : 'Start'}
+            <Play className={iconCls} fill="currentColor" aria-hidden="true" />
+            {status === 'paused' ? 'Resume' : 'Start turn'}
           </button>
         )}
         {status === 'running' && (
-          <button
-            type="button"
-            onClick={onPause}
-            title="Pause the countdown"
-            className={`${btnBase} bg-gradient-to-b from-sky-500 to-sky-700 text-white border-sky-300/70 shadow-[0_2px_0_#0c4a6e]`}
-          >
-            ⏸ Pause
+          <button type="button" onClick={onPause} title="Pause the countdown" className={btnGhost}>
+            <Pause className={iconCls} aria-hidden="true" />
+            Pause
           </button>
         )}
         {(status === 'running' || status === 'paused') && (
           <>
-            <button
-              type="button"
-              onClick={onAddTime}
-              title={`Add ${TURN_TIMER_BONUS_MS / 1000} seconds`}
-              className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37]`}
-            >
-              +{TURN_TIMER_BONUS_MS / 1000}s
+            <button type="button" onClick={onAddTime} title={`Add ${bonusSeconds} seconds`} className={btnGhost}>
+              <Plus className={iconCls} aria-hidden="true" />
+              {bonusSeconds} s
             </button>
             <button
               type="button"
               onClick={onLockNow}
               title="End this turn now and lock the bet"
-              className={`${btnBase} bg-black/10 dark:bg-black/40 text-slate-800 dark:text-slate-200 border-slate-400/50 hover:border-slate-300`}
+              className={status === 'running' ? btnPrimary : btnGhost}
             >
-              🔒 Lock Now
+              <Lock className={iconCls} aria-hidden="true" />
+              Lock in
             </button>
           </>
         )}
         {status === 'locked' && !isFrozen && (
-          <button
-            type="button"
-            onClick={onUnlock}
-            title="Teacher override: reopen this player's bet"
-            className={`${btnBase} bg-black/10 dark:bg-black/40 text-rose-800 dark:text-rose-300 border-rose-400/50 hover:border-rose-400`}
-          >
-            🔓 Unlock
+          <button type="button" onClick={onUnlock} title="Teacher override: reopen this player's bet" className={btnDanger}>
+            <LockOpen className={iconCls} aria-hidden="true" />
+            Unlock
           </button>
         )}
       </div>
@@ -278,141 +281,133 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
   const { remainingMs, fraction, isWarning } = useTurnCountdown(timer, turnDurationMs, playSound);
   const status = timer?.status ?? 'idle';
   const held = status === 'running' && !!timer?.held;
+  const bonusSeconds = TURN_TIMER_BONUS_MS / 1000;
+  const lockedText = `${lockedCount} of ${totalActivePlayers} locked in`;
 
   let subtitle: string;
-  let subtitleClass = 'text-amber-800 dark:text-amber-200/80';
+  let subtitleClass = 'text-gc-quiet';
   if (allPlayersLocked) {
-    subtitle = `All ${totalActivePlayers} Players Locked In · Ready to Reveal!`;
-    subtitleClass = 'text-emerald-700 dark:text-emerald-300';
+    subtitle = `All ${totalActivePlayers} players are locked in. Ready to reveal.`;
+    subtitleClass = 'text-gc-win';
   } else if (status === 'running') {
     if (held) {
-      subtitle = 'Clock Held · Modal or Hint Open';
-      subtitleClass = 'text-sky-700 dark:text-sky-300';
+      subtitle = 'On hold while a hint or window is open';
+      subtitleClass = 'text-gc-info';
     } else if (isWarning) {
-      subtitle = 'Final Seconds! Lock In Your Wagers Now!';
-      subtitleClass = 'text-rose-600 dark:text-rose-400 animate-pulse';
+      subtitle = 'Last few seconds. Lock in your bets now.';
+      subtitleClass = 'text-gc-loss';
     } else {
-      subtitle = `All Players Betting Simultaneously (${lockedCount}/${totalActivePlayers} Locked)`;
-      subtitleClass = 'text-emerald-700 dark:text-emerald-300';
+      subtitle = 'Everyone is betting at the same time';
+      subtitleClass = 'text-gc-win';
     }
   } else if (status === 'paused') {
-    subtitle = `Timer Paused by Teacher (${lockedCount}/${totalActivePlayers} Locked)`;
-    subtitleClass = 'text-sky-700 dark:text-sky-300';
+    subtitle = 'Paused';
+    subtitleClass = 'text-gc-info';
   } else if (status === 'locked') {
-    subtitle = "Time's Up · Round Betting Closed";
-    subtitleClass = 'text-rose-700 dark:text-rose-300';
+    subtitle = "Time's up. Betting is closed.";
+    subtitleClass = 'text-gc-loss';
   } else {
-    subtitle = `Simultaneous Betting Open · Click Start for ${turnTimerSeconds}s Countdown`;
+    subtitle = `Betting is open. Start the ${turnTimerSeconds}-second countdown when you're ready.`;
   }
 
   const clockClass =
     allPlayersLocked
-      ? 'text-emerald-600 dark:text-emerald-400'
+      ? 'text-gc-win'
       : status === 'locked'
-        ? 'text-rose-600 dark:text-rose-400'
+        ? 'text-gc-loss'
         : isWarning
-          ? 'text-rose-600 dark:text-rose-400 animate-pulse drop-shadow-[0_0_12px_rgba(244,63,94,0.65)]'
+          ? 'text-gc-loss animate-pulse'
           : status === 'paused' || held
-            ? 'text-sky-700 dark:text-sky-300'
-            : 'text-amber-900 dark:text-[#fef08a] drop-shadow-[0_0_10px_rgba(212,175,55,0.35)]';
+            ? 'text-gc-info'
+            : 'text-gc-money';
 
   const barColor =
     allPlayersLocked
-      ? 'from-emerald-400 via-emerald-500 to-emerald-600'
+      ? 'bg-gc-win'
       : status === 'locked'
-        ? 'from-rose-500 to-rose-700'
+        ? 'bg-gc-loss'
         : isWarning
-          ? 'from-rose-500 via-red-500 to-amber-500 animate-pulse'
+          ? 'bg-gc-loss animate-pulse'
           : status === 'paused' || held
-            ? 'from-sky-400 to-sky-600'
-            : fraction < 0.35
-              ? 'from-amber-400 to-orange-500'
-              : 'from-[#fef08a] via-[#d4af37] to-emerald-500';
+            ? 'bg-gc-info'
+            : 'bg-gc-gold';
+
+  const frameClass =
+    isWarning && !allPlayersLocked
+      ? '!border-gc-loss/60'
+      : allPlayersLocked
+        ? '!border-gc-win/50'
+        : status === 'running' && !held
+          ? '!border-gc-win/35'
+          : '';
 
   return (
-    <div
-      className={`mb-5 p-4 sm:px-6 rounded-2xl glass-panel border-2 transition-all flex flex-col gap-3 ${
-        isWarning && !allPlayersLocked
-          ? 'border-rose-500 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
-          : allPlayersLocked
-            ? 'border-emerald-500/80 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
-            : status === 'running' && !held
-              ? 'border-emerald-500/60 shadow-[0_0_18px_rgba(16,185,129,0.18)]'
-              : 'border-[#d4af37]/60'
-      }`}
-    >
+    <div className={`gc-surface mb-5 p-4 sm:px-6 rounded-gc transition-colors flex flex-col gap-3 ${frameClass}`}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        {/* Left: Label + Big Shared Countdown Clock */}
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl felt-well border border-[#d4af37]/50 flex items-center justify-center text-2xl sm:text-3xl select-none shrink-0">
-            {allPlayersLocked ? '✅' : status === 'locked' ? '🔒' : isWarning ? '🚨' : '⏱️'}
-          </div>
-          <div className="flex flex-col min-w-0">
+        {/* Left: what the timer is doing */}
+        <div className="flex items-center gap-3.5 min-w-0">
+          <span
+            className={`w-12 h-12 rounded-gc-sm grid place-items-center shrink-0 bg-gc-line/[0.07] ${
+              allPlayersLocked ? 'text-gc-win' : isWarning || status === 'locked' ? 'text-gc-loss' : 'text-gc-quiet'
+            }`}
+            aria-hidden="true"
+          >
+            {allPlayersLocked ? <Check className="w-6 h-6" strokeWidth={3} /> : status === 'locked' ? <Lock className="w-6 h-6" /> : <TimerIcon className="w-6 h-6" />}
+          </span>
+          <div className="flex flex-col min-w-0 gap-0.5">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] sm:text-xs font-sans font-extrabold uppercase tracking-[0.22em] text-amber-900 dark:text-[#d4af37]">
-                Shared Round Timer ({turnTimerSeconds}s)
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/15 border border-[#d4af37]/40 text-amber-900 dark:text-[#fef08a]">
-                🔒 {lockedCount}/{totalActivePlayers} Locked
+              <h2 className="text-gc-body font-bold text-gc-ink">Round timer · {turnTimerSeconds} s</h2>
+              <span className="h-6 px-2.5 inline-flex items-center gap-1 rounded-full text-gc-cap tabular-nums font-semibold bg-gc-line/[0.07] text-gc-quiet">
+                <Lock className="w-3 h-3" aria-hidden="true" />
+                {lockedText}
               </span>
             </div>
-            <span className={`text-xs sm:text-sm font-sans font-bold truncate ${subtitleClass}`}>
-              {subtitle}
-            </span>
+            <span className={`text-gc-small font-semibold ${subtitleClass}`}>{subtitle}</span>
           </div>
         </div>
 
-        {/* Center/Right: Giant Digital Clock Display + Teacher Controls */}
+        {/* Right: the clock and the teacher's controls */}
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 ml-auto">
-          <div className="px-4 py-1.5 rounded-2xl felt-well border border-[#d4af37]/50 flex items-center gap-2">
-            <span className="text-[10px] font-sans uppercase tracking-widest text-amber-800/80 dark:text-amber-200/70 font-bold">
-              Time Left
-            </span>
-            <span
-              className={`font-sans tabular-nums font-black text-3xl sm:text-4xl tabular-nums tracking-tight ${clockClass}`}
-              aria-live="off"
-            >
+          <div className="flex items-baseline gap-2">
+            <span className="text-gc-cap font-semibold text-gc-quiet">Time left</span>
+            <span className={`text-gc-display tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
               {formatClock(remainingMs)}
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             {(status === 'idle' || status === 'paused') && !allPlayersLocked && (
-              <button
-                type="button"
-                onClick={onStart}
-                className={`${btnBase} bg-gradient-to-b from-emerald-500 to-emerald-700 text-white border-emerald-300/80 shadow-[0_2px_0_#064e3b] px-3.5 py-2 text-xs`}
-              >
-                ▶ {status === 'paused' ? 'Resume' : 'Start Timer'}
+              <button type="button" onClick={onStart} className={btnPrimary}>
+                <Play className={iconCls} fill="currentColor" aria-hidden="true" />
+                {status === 'paused' ? 'Resume' : 'Start timer'}
               </button>
             )}
             {status === 'running' && (
-              <button
-                type="button"
-                onClick={onPause}
-                className={`${btnBase} bg-gradient-to-b from-sky-500 to-sky-700 text-white border-sky-300/70 shadow-[0_2px_0_#0c4a6e] px-3 py-2 text-xs`}
-              >
-                ⏸ Pause
+              <button type="button" onClick={onPause} className={btnGhost}>
+                <Pause className={iconCls} aria-hidden="true" />
+                Pause
               </button>
             )}
             {(status === 'running' || status === 'paused' || status === 'locked') && (
               <button
                 type="button"
                 onClick={onAddTime}
-                title={`Add ${TURN_TIMER_BONUS_MS / 1000} seconds to the round timer`}
-                className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
+                title={`Add ${bonusSeconds} seconds to the round timer`}
+                className={btnGhost}
               >
-                +{TURN_TIMER_BONUS_MS / 1000}s
+                <Plus className={iconCls} aria-hidden="true" />
+                {bonusSeconds} s
               </button>
             )}
             {(status === 'running' || status === 'paused') && (
               <button
                 type="button"
                 onClick={onLockNow}
-                title="End the round timer immediately and lock betting"
-                className={`${btnBase} bg-black/10 dark:bg-black/40 text-slate-800 dark:text-slate-200 border-slate-400/50 hover:border-slate-300 px-3 py-2 text-xs`}
+                title="End the round timer now and close betting"
+                className={btnGhost}
               >
-                🔒 End Timer
+                <Lock className={iconCls} aria-hidden="true" />
+                End timer
               </button>
             )}
             {(status === 'locked' || status === 'paused') && (
@@ -420,42 +415,43 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
                 type="button"
                 onClick={onReset}
                 title="Reset and reopen the round timer for all players"
-                className={`${btnBase} bg-black/10 dark:bg-black/40 text-amber-900 dark:text-[#fef08a] border-[#d4af37]/60 hover:border-[#d4af37] px-3 py-2 text-xs`}
+                className={btnGhost}
               >
-                {status === 'locked' ? '🔓 Reopen Timer' : '↺ Reset'}
+                {status === 'locked' ? <LockOpen className={iconCls} aria-hidden="true" /> : <RotateCcw className={iconCls} aria-hidden="true" />}
+                {status === 'locked' ? 'Reopen betting' : 'Reset'}
               </button>
             )}
             <button
               type="button"
               onClick={onToggleAutoStart}
-              className={`px-3 py-2 rounded-lg text-[10px] sm:text-[11px] font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+              aria-pressed={autoStartTimer}
+              className={`${btnBase} border ${
                 autoStartTimer
-                  ? 'bg-amber-500/20 border-[#d4af37] text-amber-900 dark:text-[#fef08a]'
-                  : 'felt-well text-slate-600 dark:text-slate-300 border-slate-400/40'
+                  ? 'bg-gc-gold/15 border-gc-gold/50 text-gc-money'
+                  : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-quiet'
               }`}
-              title="Automatically start the shared round timer when each hand is dealt"
+              title="Start the round timer by itself when each hand is dealt"
             >
-              Auto-Start: {autoStartTimer ? 'ON' : 'OFF'}
+              Timer starts by itself: {autoStartTimer ? 'on' : 'off'}
             </button>
             {onOpenAiSettings && aiStatusLabel && (
               <button
                 type="button"
                 onClick={onOpenAiSettings}
-                className="px-3 py-1.5 bg-white/80 dark:bg-[#051c10] border border-[#d4af37]/50 hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-amber-50 flex items-center gap-1.5 shadow-sm font-medium cursor-pointer transition-all hover:scale-105"
-                title="Click to view AI & Offline Settings"
+                className={btnGhost}
+                title="AI and offline settings"
               >
-                <span>{aiStatusLabel}</span>
-                <span className="text-[10px] text-amber-600 dark:text-amber-400">⚙️</span>
+                {aiStatusLabel}
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Full-width Countdown Progress Bar */}
-      <div className="w-full h-2.5 rounded-full bg-black/15 dark:bg-black/50 overflow-hidden p-0.5 border border-[#d4af37]/25">
+      {/* The time left, as a bar */}
+      <div className="w-full h-2 rounded-full bg-gc-line/[0.1] overflow-hidden" aria-hidden="true">
         <div
-          className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-200`}
+          className={`h-full rounded-full ${barColor} transition-all duration-200`}
           style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}
         />
       </div>
