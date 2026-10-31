@@ -89,8 +89,8 @@ html.dark {
 
 body {
   font-family: var(--gc-font-sans);
-  background-color: #f5f0e6;
-  color: #1c1917;
+  background-color: rgb(var(--gc-bg));
+  color: rgb(var(--gc-ink));
   transition: background-color 0.35s ease, color 0.35s ease;
   overflow-x: hidden;
 }
@@ -113,28 +113,28 @@ html.dark body {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.035'/%3E%3C/svg%3E");
 }
 
-/* Light Theme - Monte Carlo Champagne & Warm Ivory Salon */
+/* Light theme: ivory paper with a faint navy hairline weave (style C's palette) */
 .game-container {
   position: relative;
-  background-color: #f3ede0;
+  background-color: rgb(var(--gc-bg));
   background-image:
-    radial-gradient(ellipse 80% 60% at 50% 12%, rgba(255, 252, 242, 0.95) 0%, rgba(242, 234, 216, 0.85) 55%, rgba(218, 204, 176, 0.95) 100%),
+    radial-gradient(ellipse 80% 60% at 50% 12%, #fffdf7 0%, rgba(248, 244, 234, 0.9) 55%, rgba(236, 228, 210, 0.95) 100%),
     repeating-linear-gradient(
       45deg,
-      rgba(180, 138, 44, 0.025) 0px,
-      rgba(180, 138, 44, 0.025) 1px,
+      rgba(22, 35, 63, 0.018) 0px,
+      rgba(22, 35, 63, 0.018) 1px,
       transparent 1px,
       transparent 10px
     ),
     repeating-linear-gradient(
       -45deg,
-      rgba(20, 83, 45, 0.025) 0px,
-      rgba(20, 83, 45, 0.025) 1px,
+      rgba(176, 141, 87, 0.025) 0px,
+      rgba(176, 141, 87, 0.025) 1px,
       transparent 1px,
       transparent 10px
     );
-  color: #1c1917;
-  box-shadow: inset 0 0 80px rgba(120, 82, 20, 0.14);
+  color: rgb(var(--gc-ink));
+  box-shadow: inset 0 0 80px rgba(22, 35, 63, 0.07);
 }
 
 /* Dark Theme - Authentic High-Roller Emerald Baize Table with Overhead Spotlight & Vignette */
@@ -148,12 +148,12 @@ html.dark .game-container {
   box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.85), inset 0 0 30px rgba(212, 175, 55, 0.08);
 }
 
-/* Realistic Metallic Gold Text Gradient */
+/* Logo and big titles: navy ink with a brass edge in the light theme, metallic gold in the dark theme */
 .text-gold {
-  background: linear-gradient(180deg, #b45309 0%, #d97706 35%, #92400e 70%, #451a03 100%);
+  background: linear-gradient(180deg, #2b3f6b 0%, #16233f 55%, #0d1730 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0px 2px 1px rgba(255, 255, 255, 0.5));
+  filter: drop-shadow(0px 1px 0px rgba(176, 141, 87, 0.55));
 }
 
 html.dark .text-gold {
@@ -164,7 +164,7 @@ html.dark .text-gold {
 }
 
 .text-gold-flat {
-  color: #92400e;
+  color: rgb(var(--gc-money));
 }
 
 html.dark .text-gold-flat {
@@ -179,17 +179,16 @@ html.dark .text-gold-flat {
     0 12px 32px -8px rgba(0, 0, 0, 0.25);
 }
 
-/* Luxury Salon Panel (Glass + Brass Inlay) */
+/* Panel: ivory card with a brass hairline (light), green glass with gold inlay (dark) */
 .glass-panel {
-  background: linear-gradient(165deg, rgba(255, 253, 248, 0.96) 0%, rgba(248, 242, 228, 0.94) 100%);
+  background: linear-gradient(165deg, rgba(255, 253, 247, 0.97) 0%, rgba(250, 246, 236, 0.95) 100%);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(180, 130, 35, 0.45);
+  border: 1px solid rgba(176, 141, 87, 0.45);
   box-shadow:
-    0 20px 45px -12px rgba(45, 30, 10, 0.14),
-    0 4px 12px -2px rgba(45, 30, 10, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    inset 0 0 0 1px rgba(212, 175, 55, 0.15);
-  color: #1c1917;
+    var(--gc-shadow-2),
+    0 4px 12px -2px rgba(22, 35, 63, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: rgb(var(--gc-ink));
 }
 
 html.dark .glass-panel {
@@ -204,11 +203,11 @@ html.dark .glass-panel {
   color: #f8fafc;
 }
 
-/* Recessed Felt Well (for chip trays, inputs, and table zones) */
+/* Recessed well (chip trays, inputs, table zones) */
 .felt-well {
-  background: rgba(235, 226, 208, 0.7);
-  border: 1px solid rgba(180, 130, 35, 0.3);
-  box-shadow: inset 0 3px 8px rgba(40, 25, 5, 0.12), 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: rgba(22, 35, 63, 0.045);
+  border: 1px solid rgba(176, 141, 87, 0.32);
+  box-shadow: inset 0 2px 6px rgba(22, 35, 63, 0.08), 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 html.dark .felt-well {
@@ -217,16 +216,15 @@ html.dark .felt-well {
   box-shadow: inset 0 4px 12px rgba(0, 0, 0, 0.75), 0 1px 0 rgba(254, 240, 138, 0.1);
 }
 
-/* VIP Player Station / Luxury Card */
+/* Player station card */
 .luxury-card {
-  background: linear-gradient(155deg, #fffdf9 0%, #f6efe2 100%);
-  border: 1px solid rgba(190, 142, 42, 0.55);
-  box-shadow: 
-    0 16px 36px -8px rgba(40, 25, 5, 0.12), 
-    0 4px 10px -2px rgba(40, 25, 5, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 0 24px rgba(202, 138, 4, 0.05);
-  color: #1c1917;
+  background: linear-gradient(155deg, #fffdf7 0%, #faf6ec 100%);
+  border: 1px solid rgba(176, 141, 87, 0.5);
+  box-shadow:
+    var(--gc-shadow-1),
+    0 4px 10px -2px rgba(22, 35, 63, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  color: rgb(var(--gc-ink));
 }
 
 html.dark .luxury-card {
@@ -270,10 +268,10 @@ html.dark .modal-content-scroll::-webkit-scrollbar-track {
 
 /* Sticky Header Animation */
 .sticky-sentence.stuck {
-  background: rgb(252, 248, 238); /* opaque: cards scrolling underneath must not show through */
+  background: #fffdf7; /* opaque: cards scrolling underneath must not show through */
   backdrop-filter: blur(16px);
-  border-bottom: 2px solid #ca8a04;
-  box-shadow: 0 16px 36px rgba(30, 20, 5, 0.18);
+  border-bottom: 2px solid #b08d57;
+  box-shadow: 0 16px 36px rgba(22, 35, 63, 0.16);
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
   transform: translateY(0);
@@ -285,6 +283,17 @@ html.dark .sticky-sentence.stuck {
   backdrop-filter: blur(16px);
   border-bottom: 2px solid #d4af37;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.85), 0 4px 20px rgba(212, 175, 55, 0.15);
+}
+
+/* Band behind the fixed top buttons while the sentence banner is stuck */
+.top-band {
+  background: #fffdf7;
+  border-bottom: 1px solid rgba(176, 141, 87, 0.3);
+}
+
+html.dark .top-band {
+  background: rgb(4, 24, 14);
+  border-bottom-color: rgba(212, 175, 55, 0.22);
 }
 
 @keyframes slide-down {

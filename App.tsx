@@ -11,6 +11,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
+import { ArrowLeft, BookOpen, Check, Cloud as CloudIcon, Copy, Dices, Lock, LockOpen, Moon, Projector, Smartphone, Sparkles, Sun, Volume2, VolumeX } from 'lucide-react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
 import Modal from './components/Modal';
@@ -49,6 +50,9 @@ import {
 } from './services/firebaseService';
 
 const HOUSE_BAILOUT_AMOUNT = 150;
+// The sentence banner sticks this far from the top of the window, just below the
+// fixed top buttons (16 px margin + 44 px buttons + 16 px gap), so it never slides under them.
+const STICKY_TOP_PX = 76;
 
 // --- Tone.js Sound Manager ---
 declare global {
@@ -983,7 +987,7 @@ export function App() {
       if (!el) return;
       // Leave room for the sticky sentence banner so it never covers the card's header.
       const bannerHeight = sentenceHeaderRef.current?.offsetHeight ?? 0;
-      const top = el.getBoundingClientRect().top + window.scrollY - bannerHeight - 16;
+      const top = el.getBoundingClientRect().top + window.scrollY - STICKY_TOP_PX - bannerHeight - 16;
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 50);
     return () => window.clearTimeout(id);
@@ -1447,7 +1451,7 @@ export function App() {
       ([entry]) => {
         setIsSentenceHeaderStuck(!entry.isIntersecting);
       },
-      { rootMargin: "-17px 0px 0px 0px", threshold: [1] } 
+      { rootMargin: `-${STICKY_TOP_PX + 1}px 0px 0px 0px`, threshold: [1] } 
     );
 
     observer.observe(header);
@@ -5510,7 +5514,7 @@ export function App() {
             return ( 
               <div className="w-full max-w-5xl animate-fade-in p-2 md:p-4"> 
                 {/* 3D Bespoke Casino Playing Card Container */}
-                <div ref={sentenceHeaderRef} className="card-reveal-container sticky top-0 z-30 mb-5 sm:mb-6">
+                <div ref={sentenceHeaderRef} className="card-reveal-container sticky z-30 mb-5 sm:mb-6" style={{ top: STICKY_TOP_PX }}>
                   <div className={`card-reveal-flipper ${isSentenceRevealed && !isLoading ? 'revealed' : ''}`}>
                     
                     {/* Front of Card (Guilloché Crimson & Gold Foil Playing Card Back) */}
@@ -5573,7 +5577,7 @@ export function App() {
                                       className="text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer"
                                       title="Copy sentence to clipboard"
                                     >
-                                      <span>{isCopied ? '✓' : '📋'}</span>
+                                      {isCopied ? <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
                                       <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
                                     </button>
                                     <button 
@@ -5590,7 +5594,7 @@ export function App() {
                                       className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                       title="Read sentence aloud"
                                     >
-                                      <span>🔊</span>
+                                      <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                                       <span className="text-[10px] font-sans font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
                                     </button>
                                 </div>
@@ -6338,7 +6342,9 @@ export function App() {
                     className="w-full md:w-auto text-lg sm:text-xl py-4 px-16 tracking-[0.18em]" 
                     disabled={isProcessing || !canRevealResults}
                   >
-                    {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : 'CALL THE HAND & REVEAL 🎲'}
+                    {isProcessing ? processingStatus || 'Croupier is Settling Bets...' : (
+                      <span className="inline-flex items-center justify-center gap-3">CALL THE HAND & REVEAL <Dices className="w-6 h-6 shrink-0" aria-hidden="true" /></span>
+                    )}
                   </ActionButton>
 
                   {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
@@ -6468,10 +6474,11 @@ export function App() {
                               }
                               }} 
                               disabled={isSpeaking}
-                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-sans uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-sans uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                               title="Read full completed sentence and analysis"
                           >
-                              {isSpeaking ? '🔊 Speaking...' : '🔊 Listen to Ruling'}
+                              <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                              {isSpeaking ? 'Speaking...' : 'Listen to Ruling'}
                           </button>
                       </div>
 
@@ -6855,12 +6862,20 @@ export function App() {
                 className="text-xs py-2 px-4 flex items-center gap-1.5 backdrop-blur-md"
                 title="Leave Table & Return to Lobby"
              > 
-                <span>&larr;</span>
-                <span>Lobby</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>Lobby</span>
+                </span>
              </ActionButton> 
           </div>
         )}
         
+        {/* While the sentence banner is stuck, a solid band sits behind the top buttons so the
+            table scrolling underneath never shows between them and the banner. */}
+        {step === 'IN_GAME' && isSentenceHeaderStuck && (
+          <div aria-hidden="true" className="top-band fixed inset-x-0 top-0 z-[29]" style={{ height: STICKY_TOP_PX }} />
+        )}
+
         {/* Top Controls: Multiplayer Room Badge, Teacher AI / Offline Mode Gate, Theme Toggle & Audio */}
         <div className="fixed top-4 right-4 z-50 flex items-center gap-2.5">
           {mpRoomCode && (
@@ -6874,7 +6889,8 @@ export function App() {
               title="Open Live Classroom Multiplayer Room Manager & QR Code"
             >
               <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-              <span>📱 {mpRoomCode}</span>
+              <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>{mpRoomCode}</span>
               <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px]">
                 {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length}
               </span>
@@ -6887,7 +6903,7 @@ export function App() {
             className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-sans text-xs font-extrabold uppercase tracking-wider"
             title="Open Teacher Cloud Vault (Class Rosters, Session Reports & Cloud Sentence Bank)"
           >
-            <span>☁️</span>
+            <CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span className="hidden sm:inline">Cloud</span>
           </button>
 
@@ -6907,8 +6923,11 @@ export function App() {
               }
             >
               <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-              <span>{isTeacherAiUnlocked ? '✨ Live AI' : '📚 Offline Bank'}</span>
-              <span className="text-[11px] opacity-80">{isTeacherAiUnlocked ? '🔓' : '🔒'}</span>
+              {isTeacherAiUnlocked ? <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" /> : <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />}
+              <span>{isTeacherAiUnlocked ? 'Live AI' : 'Offline Bank'}</span>
+              {isTeacherAiUnlocked
+                ? <LockOpen className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
+                : <Lock className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />}
             </button>
           )}
 
@@ -6918,7 +6937,7 @@ export function App() {
             aria-label={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
             title={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
           > 
-            {isDarkMode ? '☀️' : '🌙'}
+            {isDarkMode ? <Sun className="w-5 h-5" aria-hidden="true" /> : <Moon className="w-5 h-5" aria-hidden="true" />}
           </button>
 
           <button
@@ -6936,7 +6955,7 @@ export function App() {
             aria-label="Projector mode: larger, solid text for the back of the room"
             title={isProjectorMode ? 'Projector mode is on: click for normal text' : 'Projector mode: larger, solid text for the back of the room'}
           >
-            📽️
+            <Projector className="w-5 h-5" aria-hidden="true" />
           </button>
 
           {audioReady && (
@@ -6953,7 +6972,7 @@ export function App() {
               aria-label={isMuted ? "Unmute" : "Mute"}
               title={isMuted ? "Unmute Casino Audio" : "Mute Casino Audio"}
             > 
-              {isMuted ? '🔇' : '🔊'} 
+              {isMuted ? <VolumeX className="w-5 h-5" aria-hidden="true" /> : <Volume2 className="w-5 h-5" aria-hidden="true" />}
             </button>
           )}
         </div>
