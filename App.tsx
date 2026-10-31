@@ -6333,6 +6333,14 @@ export function App() {
                                         {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
                                           <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextRoundSettings.topic}</span>
                                         )}
+                                        {currentSentence?.bankTopic && (
+                                          <span
+                                            className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-mono-casino font-bold"
+                                            title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
+                                          >
+                                            This hand: {currentSentence.bankTopic}
+                                          </span>
+                                        )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
                                       <span className="inline-flex items-center gap-1">
@@ -6412,6 +6420,14 @@ export function App() {
                                         <span className="flex items-center gap-1">
                                           <span>📚</span>
                                           <span className="font-bold">{settings.topic}</span>
+                                          {currentSentence?.bankTopic && (
+                                            <span
+                                              className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-mono-casino font-bold"
+                                              title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
+                                            >
+                                              This hand: {currentSentence.bankTopic}
+                                            </span>
+                                          )}
                                         </span>
                                         {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
                                           <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">

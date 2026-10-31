@@ -15,7 +15,9 @@ app.use(express.json({ limit: '10mb' }));
 
 // --- Teacher PIN Gate for Live Gemini AI (Offline-Only Fallback for Students) ---
 const TEACHER_PIN_FILE = path.resolve(__dirname, '.teacher-pin.json');
-let activeTeacherPin = (process.env.TEACHER_PIN || '7777').trim();
+// No default PIN: if TEACHER_PIN is not set (and no saved PIN file exists), Live AI stays locked
+// and the game runs on the free Offline Curated Bank.
+let activeTeacherPin = (process.env.TEACHER_PIN || '').trim();
 
 try {
   if (fs.existsSync(TEACHER_PIN_FILE)) {
@@ -25,8 +27,15 @@ try {
     }
   }
 } catch (err) {
-  console.warn('Could not read .teacher-pin.json, using default/env TEACHER_PIN.');
+  console.warn('Could not read .teacher-pin.json, using env TEACHER_PIN (if set).');
 }
+
+function isPinConfigured(): boolean {
+  return activeTeacherPin.length > 0;
+}
+
+const PIN_NOT_CONFIGURED_ERROR =
+  'No Teacher PIN is set on this server. Add TEACHER_PIN to the server environment (.env) to enable Live AI.';
 
 function verifyPinMatch(candidate: string): boolean {
   const cleanCandidate = String(candidate || '').trim();
@@ -1698,10 +1707,14 @@ app.get("/api/teacher-auth/status", (req, res) => {
   res.json({
     unlocked: isTeacherAuthorized(req),
     pinRequired: true,
+    pinConfigured: isPinConfigured(),
   });
 });
 
 app.post("/api/teacher-auth/verify", (req, res) => {
+  if (!isPinConfigured()) {
+    return res.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+  }
   const clientIp = getClientIp(req);
   const lockout = checkPinLockout(clientIp);
   if (lockout.locked) {
@@ -1727,6 +1740,9 @@ app.post("/api/teacher-auth/verify", (req, res) => {
 });
 
 app.post("/api/teacher-auth/change-pin", (req, res) => {
+  if (!isPinConfigured()) {
+    return res.status(503).json({ ok: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+  }
   const clientIp = getClientIp(req);
   const lockout = checkPinLockout(clientIp);
   if (lockout.locked) {
@@ -1824,6 +1840,10 @@ app.post("/api/teacher-auth/google-verify", async (req, res) => {
         valid: false,
         error: "Access denied: Only teacher.siqueira@gmail.com can unlock Live AI via Google Sign-In.",
       });
+    }
+
+    if (!isPinConfigured()) {
+      return res.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
     }
 
     const clientIp = getClientIp(req);

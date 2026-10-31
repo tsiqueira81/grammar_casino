@@ -67,6 +67,9 @@ export interface GeneratedSentence {
   errorPhrase?: string; // Exact mistake/erroneous phrase if incorrect (e.g. "more lesser", "has went")
   mistakeType?: string; // Short descriptor of the specific error mechanism (e.g. "double comparative")
   questionType?: QuestionType;
+  // Set by the offline bank when it ran out of items for the chosen topic and
+  // served one from another topic at the same level.
+  bankTopic?: string;
   options?: string[];
   acceptedAnswers?: string[];
   correctAnswer?: string;
