@@ -15,6 +15,7 @@ import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
 import Modal from './components/Modal';
 import PlayerBettingCard from './components/PlayerBettingCard';
+import PlayerTileGrid, { PlayerTile, SeatStatus } from './components/PlayerTileGrid';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
 import PowerUpTooltip from './components/PowerUpTooltip';
@@ -37,6 +38,7 @@ import {
 import { HostRoomController, HostEventPayload } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { settleRound, buildAcceptedAnswerSet } from './utils/roundSettlement';
+import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import {
   signInTeacherWithGoogle,
   signOutTeacherGoogle,
@@ -277,6 +279,15 @@ const loadInitialState = () => {
 
 const initialGameState = loadInitialState();
 
+const renderTextSegments = (segments: TextSegment[], markClassName: string) =>
+  segments.map((seg, i) =>
+    seg.mark ? (
+      <mark key={i} className={markClassName}>{seg.text}</mark>
+    ) : (
+      <React.Fragment key={i}>{seg.text}</React.Fragment>
+    )
+  );
+
 export function App() {
   const [step, setStep] = useState<Step>(initialGameState?.step || 'PLAYER_SETUP');
   const [players, setPlayers] = useState<Player[]>(initialGameState?.players || []);
@@ -426,6 +437,10 @@ export function App() {
   const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
   const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
+  // Single-screen table layout: null = automatic (compact grid from 4 players up).
+  const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards' | null>(null);
+  const [openSeatPlayerId, setOpenSeatPlayerId] = useState<number | null>(null);
+  const openSeatRef = useRef<HTMLDivElement>(null);
   const [mpStudentPendingTarget, setMpStudentPendingTarget] = useState<Record<number, PowerUpKey | null>>({});
   const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, boolean>>({});
   const [mpStudentNotifications, setMpStudentNotifications] = useState<
@@ -925,6 +940,39 @@ export function App() {
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
     showDeckConfigModal, showCloudModal, isLoading, isProcessing, hints
   ]);
+
+  // --- Single-screen compact grid ---
+  const effectiveTableLayout: 'grid' | 'cards' = tableLayoutPref ?? (players.length >= 4 ? 'grid' : 'cards');
+
+  // Close the open betting card when a new hand starts or the screen changes.
+  useEffect(() => {
+    setOpenSeatPlayerId(null);
+  }, [currentRound, step]);
+
+  // With the turn timer on, open the card of whoever's turn it is.
+  const activeTurnPlayerId = isTurnTimerEnabled && !mpRoomCode
+    ? players.find(p => {
+        const st = turnTimers[p.id]?.status;
+        return st === 'running' || st === 'paused';
+      })?.id ?? null
+    : null;
+  useEffect(() => {
+    if (activeTurnPlayerId !== null) setOpenSeatPlayerId(activeTurnPlayerId);
+  }, [activeTurnPlayerId]);
+
+  // Bring the opened card into view below the sticky sentence.
+  useEffect(() => {
+    if (openSeatPlayerId === null) return;
+    const id = window.setTimeout(() => {
+      const el = openSeatRef.current;
+      if (!el) return;
+      // Leave room for the sticky sentence banner so it never covers the card's header.
+      const bannerHeight = sentenceHeaderRef.current?.offsetHeight ?? 0;
+      const top = el.getBoundingClientRect().top + window.scrollY - bannerHeight - 16;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [openSeatPlayerId]);
 
   // Handler-level enforcement: returns true only when the player is allowed to make bet/hint/power-up changes
   const canPlayerAct = useCallback((playerId: number): boolean => {
@@ -5247,6 +5295,175 @@ export function App() {
               );
             }
 
+            const renderPlayerSeat = (player: Player) => {
+                      const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
+                      const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
+                      const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
+                      const isBetCapped = playerCaps.length > 0 || player.effects.some(e => (e.type as string) === 'BET_CAP');
+                      const betCapAmount = playerCaps.length > 0 
+                        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
+                        : (isBetCapped ? 50 : BET_CAP_AMOUNT);
+                      const playerHighRollers = allActive.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
+                      const isHighRoller = playerHighRollers.length > 0;
+                      const minBetAmount = isHighRoller
+                        ? Math.min(
+                            player.money,
+                            Math.max(
+                              1,
+                              playerHighRollers.reduce(
+                                (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
+                                Math.ceil(player.money * 0.5)
+                              )
+                            )
+                          )
+                        : 0;
+                      const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
+                      let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
+                      if (scalpelPu && currentSentence) {
+                        if (currentQuestionType === 'multipleChoice') {
+                          scalpelHint = { eliminatedOptions: scalpelPu.eliminatedOptions || [] };
+                        } else if (currentQuestionType === 'openCloze' && currentSentence.correctAnswer) {
+                          const word = currentSentence.correctAnswer.trim();
+                          if (word.length > 0) {
+                            const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+                            scalpelHint = {
+                              clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
+                            };
+                          }
+                        } else if (currentQuestionType === 'wordFormation' && currentSentence.correctAnswer) {
+                          const word = currentSentence.correctAnswer.trim();
+                          if (word.length > 0) {
+                            if (word.length <= 3) {
+                              const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+                              scalpelHint = {
+                                clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
+                              };
+                            } else {
+                              const middleCount = Math.max(1, word.length - 3);
+                              const middle = Array(middleCount).fill('_').join(' ');
+                              const lastTwo = `${word[word.length - 2]} ${word[word.length - 1]}`;
+                              scalpelHint = {
+                                clozeMask: `${word[0]} ${middle} ${lastTwo} (${word.length} letters)`,
+                              };
+                            }
+                          }
+                        } else if (currentQuestionType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+                          const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
+                          if (words.length > 0) {
+                            if (words.length <= 2) {
+                              scalpelHint = {
+                                clozeMask: `${words.length} words: ${words[0]} ___`,
+                              };
+                            } else {
+                              const middle = Array(words.length - 2).fill('___').join(' ');
+                              scalpelHint = {
+                                clozeMask: `${words.length} words: ${words[0]} ${middle} ${words[words.length - 1]}`,
+                              };
+                            }
+                          }
+                        }
+                      }
+                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => (e.type as string) === 'SUB_ZERO');
+                      const myActive = playerActive[0]; 
+                      const playerTimer = turnTimers[player.id];
+                      const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
+                      const mpSeat = mpSeats[player.id];
+                      const audiencePollFeed = playerActive.some(pu => pu.type === 'AUDIENCE_POLL')
+                        ? buildAudiencePollSummary(players, bets, activePowerUps, currentSentence, player.id)
+                        : null;
+                      
+                      return (
+                        <div key={player.id} className="space-y-2">
+                          {mpRoomCode && mpSeat?.lockedIn && !isFrozen && player.money > 0 && (
+                            <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/50 text-emerald-900 dark:text-emerald-200">
+                              <span className="text-xs font-serif font-extrabold uppercase tracking-wider flex items-center gap-2">
+                                <span>🔒</span>
+                                <span>{player.name} Locked In Wager on Device</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleMpUnlockPlayer(player.id)}
+                                title="Teacher Only: Unlock this player's wager so they can change their bet"
+                                className="px-3 py-1 rounded-lg font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
+                              >
+                                <span>🔓</span>
+                                <span>Unlock Player</span>
+                              </button>
+                            </div>
+                          )}
+                          <PlayerBettingCard 
+                            player={player} 
+                            bet={bets[player.id]} 
+                            onBetChange={handleBetChange} 
+                            onGetHint={handleGetHint} 
+                            hint={hints[player.id]} 
+                            playSound={playSound} 
+                            onGetPowerUp={handleBuyRandomPowerUp} 
+                            powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
+                            activePowerUp={myActive} 
+                            isBetCapped={isBetCapped} 
+                            betCapAmount={betCapAmount}
+                            isHighRoller={isHighRoller}
+                            minBetAmount={minBetAmount}
+                            scalpelHint={scalpelHint}
+                            audiencePollFeed={audiencePollFeed}
+                            isFrozen={isFrozen}
+                            activePowerUps={playerActive} 
+                            usedPowerUps={powerUpsUsedThisRound[player.id] || []}
+                            players={players} 
+                            onUpdateMoney={handleUpdatePlayerMoney}
+                            currentSentenceText={currentSentence?.text}
+                            questionType={currentQuestionType}
+                            options={currentSentence?.options}
+                            baseWord={currentSentence?.baseWord}
+                            onChangeAvatar={handleOpenAvatarModal}
+                            onUpdateName={handleUpdatePlayerName}
+                            targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
+                            timerEnabled={isTurnTimerEnabled && !mpRoomCode}
+                            turnTimer={playerTimer}
+                            turnDurationMs={turnDurationMs}
+                            canAct={canPlayerAct(player.id)}
+                            isSatOut={isSatOut && !mpRoomCode}
+                            timerBlockedByName={!mpRoomCode && activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
+                            onTimerStart={handleTimerStart}
+                            onTimerPause={handleTimerPause}
+                            onTimerAddTime={handleTimerAddTime}
+                            onTimerLockNow={handleTimerLockNow}
+                            onTimerUnlock={handleTimerUnlock}
+                          />
+                        </div>
+                      );
+            };
+
+            // Compact grid (single-screen): tile status per player, never the pick itself.
+            const playerTiles: PlayerTile[] = players.map(player => {
+              const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
+              const frozen = isPlayerFrozen(player.id);
+              const timer = turnTimers[player.id];
+              const placed = hasPlayerPlacedBet(player.id);
+              let status: SeatStatus = 'waiting';
+              if (player.money <= 0) status = 'out';
+              else if (frozen) status = 'frozen';
+              else if (isTurnTimerEnabled && timer?.status === 'locked') status = placed ? 'locked' : 'satOut';
+              else if (activeTurnPlayer?.id === player.id) status = 'turn';
+              else if (placed) status = 'placed';
+              const badges = [
+                ...playerActive.map(pu => ({ icon: POWER_UPS[pu.type]?.icon || '✨', label: POWER_UPS[pu.type]?.name || pu.type })),
+                ...player.effects.map(ef => ({ icon: POWER_UPS[ef.type as PowerUpKey]?.icon || '✨', label: POWER_UPS[ef.type as PowerUpKey]?.name || ef.type })),
+              ];
+              return { player, status, badges };
+            });
+            const openSeatPlayer = openSeatPlayerId !== null ? players.find(p => p.id === openSeatPlayerId) || null : null;
+            const nextSeatPlayer = (() => {
+              if (!openSeatPlayer) return null;
+              const idx = players.findIndex(p => p.id === openSeatPlayer.id);
+              for (let k = 1; k < players.length; k++) {
+                const candidate = players[(idx + k) % players.length];
+                if (candidate.money > 0 && !isPlayerFrozen(candidate.id) && !hasPlayerPlacedBet(candidate.id)) return candidate;
+              }
+              return null;
+            })();
+
             const sentenceLength = currentSentence?.text?.length || 0;
             const sentenceTextClass = sentenceLength > 150
               ? "text-lg sm:text-xl md:text-2xl leading-snug md:leading-normal"
@@ -6020,146 +6237,75 @@ export function App() {
                     })}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 gap-5 sm:gap-6"> 
-                    {players.map(player => { 
-                      const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
-                      const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                      const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
-                      const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-                      const betCapAmount = playerCaps.length > 0 
-                        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-                        : (isBetCapped ? 50 : BET_CAP_AMOUNT);
-                      const playerHighRollers = allActive.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-                      const isHighRoller = playerHighRollers.length > 0;
-                      const minBetAmount = isHighRoller
-                        ? Math.min(
-                            player.money,
-                            Math.max(
-                              1,
-                              playerHighRollers.reduce(
-                                (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-                                Math.ceil(player.money * 0.5)
-                              )
-                            )
-                          )
-                        : 0;
-                      const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
-                      let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
-                      if (scalpelPu && currentSentence) {
-                        if (currentQuestionType === 'multipleChoice') {
-                          scalpelHint = { eliminatedOptions: scalpelPu.eliminatedOptions || [] };
-                        } else if (currentQuestionType === 'openCloze' && currentSentence.correctAnswer) {
-                          const word = currentSentence.correctAnswer.trim();
-                          if (word.length > 0) {
-                            const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
-                            scalpelHint = {
-                              clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
-                            };
-                          }
-                        } else if (currentQuestionType === 'wordFormation' && currentSentence.correctAnswer) {
-                          const word = currentSentence.correctAnswer.trim();
-                          if (word.length > 0) {
-                            if (word.length <= 3) {
-                              const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
-                              scalpelHint = {
-                                clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
-                              };
-                            } else {
-                              const middleCount = Math.max(1, word.length - 3);
-                              const middle = Array(middleCount).fill('_').join(' ');
-                              const lastTwo = `${word[word.length - 2]} ${word[word.length - 1]}`;
-                              scalpelHint = {
-                                clozeMask: `${word[0]} ${middle} ${lastTwo} (${word.length} letters)`,
-                              };
-                            }
-                          }
-                        } else if (currentQuestionType === 'keyWordTransformation' && currentSentence.correctAnswer) {
-                          const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
-                          if (words.length > 0) {
-                            if (words.length <= 2) {
-                              scalpelHint = {
-                                clozeMask: `${words.length} words: ${words[0]} ___`,
-                              };
-                            } else {
-                              const middle = Array(words.length - 2).fill('___').join(' ');
-                              scalpelHint = {
-                                clozeMask: `${words.length} words: ${words[0]} ${middle} ${words[words.length - 1]}`,
-                              };
-                            }
-                          }
-                        }
-                      }
-                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
-                      const myActive = playerActive[0]; 
-                      const playerTimer = turnTimers[player.id];
-                      const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
-                      const mpSeat = mpSeats[player.id];
-                      const audiencePollFeed = playerActive.some(pu => pu.type === 'AUDIENCE_POLL')
-                        ? buildAudiencePollSummary(players, bets, activePowerUps, currentSentence, player.id)
-                        : null;
-                      
-                      return (
-                        <div key={player.id} className="space-y-2">
-                          {mpRoomCode && mpSeat?.lockedIn && !isFrozen && player.money > 0 && (
-                            <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/50 text-emerald-900 dark:text-emerald-200">
-                              <span className="text-xs font-serif font-extrabold uppercase tracking-wider flex items-center gap-2">
-                                <span>🔒</span>
-                                <span>{player.name} Locked In Wager on Device</span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleMpUnlockPlayer(player.id)}
-                                title="Teacher Only: Unlock this player's wager so they can change their bet"
-                                className="px-3 py-1 rounded-lg font-serif font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
-                              >
-                                <span>🔓</span>
-                                <span>Unlock Player</span>
-                              </button>
-                            </div>
-                          )}
-                          <PlayerBettingCard 
-                            player={player} 
-                            bet={bets[player.id]} 
-                            onBetChange={handleBetChange} 
-                            onGetHint={handleGetHint} 
-                            hint={hints[player.id]} 
-                            playSound={playSound} 
-                            onGetPowerUp={handleBuyRandomPowerUp} 
-                            powerUpUsedThisRound={(powerUpsUsedThisRound[player.id] || []).length >= ((playerActive.some(p => p.type === 'POWER_SURGE') ? 3 : 1))} 
-                            activePowerUp={myActive} 
-                            isBetCapped={isBetCapped} 
-                            betCapAmount={betCapAmount}
-                            isHighRoller={isHighRoller}
-                            minBetAmount={minBetAmount}
-                            scalpelHint={scalpelHint}
-                            audiencePollFeed={audiencePollFeed}
-                            isFrozen={isFrozen}
-                            activePowerUps={playerActive} 
-                            usedPowerUps={powerUpsUsedThisRound[player.id] || []}
-                            players={players} 
-                            onUpdateMoney={handleUpdatePlayerMoney}
-                            currentSentenceText={currentSentence?.text}
-                            questionType={currentQuestionType}
-                            options={currentSentence?.options}
-                            baseWord={currentSentence?.baseWord}
-                            onChangeAvatar={handleOpenAvatarModal}
-                            onUpdateName={handleUpdatePlayerName}
-                            targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
-                            timerEnabled={isTurnTimerEnabled && !mpRoomCode}
-                            turnTimer={playerTimer}
-                            turnDurationMs={turnDurationMs}
-                            canAct={canPlayerAct(player.id)}
-                            isSatOut={isSatOut && !mpRoomCode}
-                            timerBlockedByName={!mpRoomCode && activeTurnPlayer && activeTurnPlayer.id !== player.id ? activeTurnPlayer.name : undefined}
-                            onTimerStart={handleTimerStart}
-                            onTimerPause={handleTimerPause}
-                            onTimerAddTime={handleTimerAddTime}
-                            onTimerLockNow={handleTimerLockNow}
-                            onTimerUnlock={handleTimerUnlock}
-                          />
+                  <div className="space-y-4">
+                    {!mpRoomCode && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                        <div className="text-sm font-serif text-slate-700 dark:text-amber-100/90">
+                          {effectiveTableLayout === 'grid'
+                            ? 'Tap a player to open their betting card. Picks stay hidden until the reveal.'
+                            : 'All betting cards are open. Everyone can see each pick.'}
                         </div>
-                      );
-                    })} 
+                        <div className="inline-flex rounded-xl border border-[#d4af37]/60 overflow-hidden" role="group" aria-label="Table layout">
+                          {(['grid', 'cards'] as const).map(layout => (
+                            <button
+                              key={layout}
+                              type="button"
+                              onClick={() => { playSound('click'); setTableLayoutPref(layout); }}
+                              aria-pressed={effectiveTableLayout === layout}
+                              className={`px-3.5 py-1.5 text-xs font-serif font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                                effectiveTableLayout === layout
+                                  ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04]'
+                                  : 'felt-well text-slate-800 dark:text-amber-100'
+                              }`}
+                            >
+                              {layout === 'grid' ? '▦ Compact grid' : '▤ Full cards'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {!mpRoomCode && effectiveTableLayout === 'grid' ? (
+                      <>
+                        <PlayerTileGrid
+                          tiles={playerTiles}
+                          openPlayerId={openSeatPlayer ? openSeatPlayer.id : null}
+                          onOpen={(id) => { playSound('click'); setOpenSeatPlayerId(prev => (prev === id ? null : id)); }}
+                          outLabel="Eliminated"
+                        />
+                        {openSeatPlayer && (
+                          <div ref={openSeatRef} className="space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                              <div className="text-sm font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
+                                {openSeatPlayer.avatar} {openSeatPlayer.name}'s betting card
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {nextSeatPlayer && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { playSound('click'); setOpenSeatPlayerId(nextSeatPlayer.id); }}
+                                    className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider border border-[#d4af37]/60 felt-well text-slate-800 dark:text-amber-100 hover:border-[#d4af37] cursor-pointer"
+                                  >
+                                    Next: {nextSeatPlayer.name} →
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => { playSound('click'); setOpenSeatPlayerId(null); }}
+                                  className="px-3.5 py-1.5 rounded-xl text-xs font-serif font-bold uppercase tracking-wider bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border border-[#fef9c3] cursor-pointer"
+                                >
+                                  Done · hide card
+                                </button>
+                              </div>
+                            </div>
+                            {renderPlayerSeat(openSeatPlayer)}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-5 sm:gap-6">
+                        {players.map(renderPlayerSeat)}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
@@ -6210,6 +6356,14 @@ export function App() {
             const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || isAllBankrupt;
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
+            // Flawed Valid/Flawed sentences: underline the mistake and highlight the fix.
+            const revealHighlight = (() => {
+              if (!currentSentence || isResultCloze || currentSentence.isCorrect || !currentSentence.correction) return null;
+              const diff = diffWords(currentSentence.text, currentSentence.correction);
+              const fromPhrase = markErrorPhrase(currentSentence.text, currentSentence.errorPhrase);
+              const sentence = fromPhrase || diff.original;
+              return { sentence, correction: diff.corrected };
+            })();
             const nextFormatObj = CHALLENGE_FORMATS.find(f => f.id === (nextRoundSettings?.challengeFormat || settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
 
             return ( 
@@ -6311,7 +6465,9 @@ export function App() {
                       )}
 
                       <p className="text-2xl sm:text-3xl font-editorial text-slate-900 dark:text-amber-50 italic leading-relaxed mb-6">
-                        &ldquo;{currentSentence?.text}&rdquo;
+                        &ldquo;{revealHighlight
+                          ? renderTextSegments(revealHighlight.sentence, 'bg-transparent text-rose-700 dark:text-rose-300 underline decoration-wavy decoration-rose-500 decoration-2 underline-offset-[6px]')
+                          : currentSentence?.text}&rdquo;
                         {resultQuestionType === 'wordFormation' && currentSentence?.baseWord && (
                           <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] font-mono-casino font-black not-italic tracking-wider text-base sm:text-lg align-middle">
                             ({currentSentence.baseWord.toUpperCase()})
@@ -6346,7 +6502,9 @@ export function App() {
                                   )}
                               </div>
                               <div className="text-lg sm:text-xl text-emerald-900 dark:text-emerald-300 font-editorial font-medium">
-                                &ldquo;{currentSentence?.correction}&rdquo;
+                                &ldquo;{revealHighlight
+                                  ? renderTextSegments(revealHighlight.correction, 'bg-emerald-500/20 text-emerald-950 dark:text-emerald-100 font-bold rounded px-1')
+                                  : currentSentence?.correction}&rdquo;
                               </div>
                           </div>
                       )}

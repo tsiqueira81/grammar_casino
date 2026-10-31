@@ -225,7 +225,7 @@
 
       /* Sticky Header Animation */
       .sticky-sentence.stuck {
-        background: rgba(252, 248, 238, 0.97);
+        background: rgb(252, 248, 238); /* opaque: cards scrolling underneath must not show through */
         backdrop-filter: blur(16px);
         border-bottom: 2px solid #ca8a04;
         box-shadow: 0 16px 36px rgba(30, 20, 5, 0.18);
@@ -236,7 +236,7 @@
       }
 
       html.dark .sticky-sentence.stuck {
-        background: rgba(4, 24, 14, 0.96);
+        background: rgb(4, 24, 14);
         backdrop-filter: blur(16px);
         border-bottom: 2px solid #d4af37;
         box-shadow: 0 18px 40px rgba(0, 0, 0, 0.85), 0 4px 20px rgba(212, 175, 55, 0.15);
