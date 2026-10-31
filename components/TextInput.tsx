@@ -1,4 +1,5 @@
 import React, { forwardRef } from 'react';
+import { twMerge } from 'tailwind-merge';
 
 interface TextInputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
 
@@ -18,7 +19,7 @@ const TextInput = forwardRef<HTMLInputElement, TextInputProps>(({ className, onW
   return (
     <input
       ref={ref}
-      className={`${baseClasses} ${className || ''}`}
+      className={twMerge(baseClasses, className)}
       onWheel={handleWheel}
       {...rest}
     />

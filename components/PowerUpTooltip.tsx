@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { twMerge } from 'tailwind-merge';
 import { PowerUpKey } from '../types';
 import { POWER_UPS } from '../constants';
 
@@ -50,7 +51,7 @@ export const PowerUpTooltip: React.FC<PowerUpTooltipProps> = ({
 
   return (
     <Component
-      className={`relative inline-flex items-center justify-center ${className}`}
+      className={twMerge('relative inline-flex items-center justify-center', className)}
       onMouseEnter={() => setIsVisible(true)}
       onMouseLeave={() => setIsVisible(false)}
       onFocus={() => setIsVisible(true)}

@@ -4988,7 +4988,7 @@ export function App() {
                         <p className="text-xs text-slate-600 dark:text-slate-300/80">
                           Players can draw random cards from this shoe during betting rounds to gain advantages or sabotage rivals.
                         </p>
-                        <div className="flex items-center gap-1.5 pt-1 overflow-x-auto max-w-full py-0.5">
+                        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pt-1 pb-0.5">
                           {selectedPowerUps.slice(0, 12).map(k => (
                             <span key={k} className="text-base select-none bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded border border-purple-400/20" title={POWER_UPS[k]?.name}>
                               {POWER_UPS[k]?.icon}
@@ -5587,7 +5587,7 @@ export function App() {
                                         )
                                       } 
                                       disabled={isSpeaking}
-                                      className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                      className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                                       title="Read sentence aloud"
                                     >
                                       <span>🔊</span>
@@ -5921,12 +5921,12 @@ export function App() {
                                                   e.stopPropagation();
                                                   handleTogglePowerUpInDeck(key);
                                                 }}
-                                                className={`relative p-0.5 rounded transition-all duration-150 cursor-pointer select-none group focus:outline-none ${
+                                                className={`relative p-0.5 rounded transition-all duration-150 select-none group focus:outline-none ${
                                                   isFormatDisabled
                                                     ? 'opacity-25 grayscale cursor-not-allowed'
                                                     : isActive 
-                                                      ? 'opacity-100 hover:scale-130 filter drop-shadow-sm' 
-                                                      : 'opacity-30 grayscale hover:opacity-75 hover:scale-110'
+                                                      ? 'opacity-100 hover:scale-130 filter drop-shadow-sm cursor-pointer' 
+                                                      : 'opacity-30 grayscale hover:opacity-75 hover:scale-110 cursor-pointer'
                                                 }`}
                                                 title={
                                                   isDisabledInCloze
@@ -6468,7 +6468,7 @@ export function App() {
                               }
                               }} 
                               disabled={isSpeaking}
-                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-serif uppercase tracking-wider font-bold cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              className={`px-3 py-1 rounded-full felt-well hover:border-[#d4af37] text-amber-900 dark:text-amber-200 transition-all text-xs font-serif uppercase tracking-wider font-bold ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                               title="Read full completed sentence and analysis"
                           >
                               {isSpeaking ? '🔊 Speaking...' : '🔊 Listen to Ruling'}

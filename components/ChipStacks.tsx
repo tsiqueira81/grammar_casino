@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { twMerge } from 'tailwind-merge';
 import { SoundEffect } from '../types';
 
 export type ChipDenomination = 10 | 25 | 50 | 100 | 500;
@@ -335,14 +336,14 @@ export const ChipRack: React.FC<ChipRackProps> = ({
 
   if (amount <= 0 || stacks.length === 0) {
     return (
-      <div className={`text-xs text-slate-400 dark:text-slate-500 italic py-1 ${className}`}>
+      <div className={twMerge('text-xs text-slate-400 dark:text-slate-500 italic py-1', className)}>
         {emptyPlaceholder}
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-wrap items-end justify-center gap-3.5 p-3 felt-well rounded-xl ${className}`}>
+    <div className={twMerge('flex flex-wrap items-end justify-center gap-3.5 p-3 felt-well rounded-xl', className)}>
       {stacks.map(({ denom, count }) => (
         <ChipStack
           key={denom}
@@ -391,7 +392,7 @@ export const QuickChipTray: React.FC<QuickChipTrayProps> = ({
   };
 
   return (
-    <div className={`p-3 rounded-xl felt-well space-y-2 ${className}`}>
+    <div className={twMerge('p-3 rounded-xl felt-well space-y-2', className)}>
       <div className="flex items-center justify-between text-[11px] font-serif uppercase tracking-widest text-amber-900 dark:text-amber-200/90">
         <span className="flex items-center gap-1.5 font-bold">
           <span className="text-[#d4af37]">◈</span>

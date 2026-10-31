@@ -664,7 +664,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
 
            {targetAmount && targetAmount > 0 && (
              <div 
-               className={`text-[11px] font-mono-casino font-medium mt-1.5 flex items-center gap-1.5 justify-end ${player.money >= targetAmount ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-slate-500 dark:text-amber-200/60'}`}
+               className={`text-[11px] font-mono-casino mt-1.5 flex items-center gap-1.5 justify-end ${player.money >= targetAmount ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'font-medium text-slate-500 dark:text-amber-200/60'}`}
                title={`Target goal: $${targetAmount.toLocaleString()}`}
              >
                <span>🎯 Target: ${targetAmount.toLocaleString()}</span>

@@ -1349,10 +1349,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {/* Wager Amount Controls */}
                   <div
                     ref={wagerSectionRef}
-                    className={`pt-3 border-t border-[#d4af37]/20 space-y-2.5 rounded-xl transition-all ${
+                    className={`space-y-2.5 rounded-xl transition-all ${
                       highlightWagerMissing
                         ? 'p-3 border-2 border-rose-500 ring-2 ring-rose-500/35 bg-rose-500/10'
-                        : ''
+                        : 'pt-3 border-t border-[#d4af37]/20'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -1838,10 +1838,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         targetId: t.id,
                       })
                     }
-                    className={`w-full min-h-[52px] px-4 py-2.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                    className={`w-full min-h-[52px] px-4 py-2.5 rounded-xl border flex items-center justify-between transition-all ${
                       blocked
                         ? 'opacity-45 grayscale cursor-not-allowed felt-well border-slate-500/30'
-                        : 'felt-well border-[#d4af37]/60 hover:border-[#d4af37]'
+                        : 'felt-well border-[#d4af37]/60 hover:border-[#d4af37] cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">

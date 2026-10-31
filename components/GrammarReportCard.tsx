@@ -345,7 +345,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
               <button
                 onClick={() => handleGeneratePDF(false)}
                 disabled={isGeneratingPDF}
-                className="px-4 py-2 text-xs font-serif font-bold uppercase tracking-wider rounded-l-lg bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black border border-amber-400 dark:border-amber-300 transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-60"
+                className="px-4 py-2 text-xs font-serif font-bold uppercase tracking-wider rounded-l-lg bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 border border-amber-400 dark:border-amber-300 transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-60"
                 title="Generate and download complete pedagogical PDF report"
               >
                 {isGeneratingPDF ? (
