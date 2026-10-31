@@ -27,6 +27,7 @@ latest.yml
 .env
 .env.*
 !.env.example
+.teacher-pin.json
 *.local
 *.pem
 *.key
@@ -36,6 +37,7 @@ latest.yml
 # Serverless & Agent tool artifacts
 .netlify
 .antigravity
+.aistudio
 
 # Generated documents & exports
 *.pdf

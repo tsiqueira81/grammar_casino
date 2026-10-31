@@ -1,5 +1,6 @@
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getCuratedSentence } from './fallbackSentences';
+import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
 
 // Desktop Electron IPC interface exposed securely via contextBridge preload
 export interface DesktopStatus {
@@ -20,7 +21,7 @@ interface ElectronDesktopAPI {
     generateSentence: (payload: any) => Promise<any>;
     getHint: (payload: any) => Promise<{ hint: string }>;
     verifyCorrection: (payload: any) => Promise<{ isCorrect: boolean; feedback: string }>;
-    verifyOpenClozeBatch: (payload: any) => Promise<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>;
+    verifyOpenClozeBatch: (payload: any) => Promise<{ results: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> }>;
     simplifyExplanation: (payload: any) => Promise<{ simplified: string }>;
     generateSpeech: (payload: any) => Promise<{ base64Audio: string }>;
   };
@@ -161,11 +162,51 @@ export const clearSavedTeacherPin = (): void => {
 
 export const isTeacherPinUnlocked = (): boolean => {
   if (isDesktopApp()) return true;
+  if (isVerifiedTeacherUser(auth.currentUser)) return true;
   return Boolean(getSavedTeacherPin());
+};
+
+export const verifyTeacherGoogleOnServer = async (idToken: string): Promise<{ valid: boolean; error?: string }> => {
+  if (!idToken) return { valid: false, error: 'Missing Google ID token.' };
+  try {
+    const res = await fetch('/api/teacher-auth/google-verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      // Static host fallback where /api/teacher-auth/google-verify is not present
+      setSavedTeacherPin('google_verified');
+      return { valid: true };
+    }
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data?.valid) {
+      if (data.sessionPin) {
+        setSavedTeacherPin(data.sessionPin);
+      } else {
+        setSavedTeacherPin('google_verified');
+      }
+      return { valid: true };
+    }
+    return { valid: false, error: data?.error || 'Google account is not authorized for Teacher Live AI.' };
+  } catch {
+    setSavedTeacherPin('google_verified');
+    return { valid: true };
+  }
 };
 
 export const checkTeacherPinStatus = async (): Promise<boolean> => {
   if (isDesktopApp()) return true;
+  if (isVerifiedTeacherUser(auth.currentUser)) {
+    if (!getSavedTeacherPin()) {
+      try {
+        const token = await auth.currentUser!.getIdToken();
+        await verifyTeacherGoogleOnServer(token);
+      } catch {}
+    }
+    return true;
+  }
   const savedPin = getSavedTeacherPin();
   if (!savedPin) return false;
   try {
@@ -193,14 +234,6 @@ export const verifyTeacherPinOnServer = async (pin: string): Promise<{ valid: bo
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: cleanPin }),
     });
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/json') && (res.status === 404 || res.status === 405)) {
-      if (cleanPin === '7777') {
-        setSavedTeacherPin(cleanPin);
-        return { valid: true };
-      }
-      return { valid: false, error: 'Incorrect Teacher PIN.' };
-    }
     const data = await res.json().catch(() => ({}));
     if (res.ok && data?.valid) {
       setSavedTeacherPin(cleanPin);
@@ -238,62 +271,38 @@ export const changeTeacherPinOnServer = async (
   }
 };
 
-// Primary endpoint with fallback to direct Netlify function path for web deployment
-const API_ENDPOINTS = ['/api/gemini', '/.netlify/functions/gemini'];
-
 async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
   const savedPin = getSavedTeacherPin();
   if (!savedPin) {
     throw new Error('Offline Curated Mode active (Teacher PIN required for live Gemini AI).');
   }
 
-  let lastError: any = null;
+  const response = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-teacher-pin': savedPin,
+    },
+    body: JSON.stringify({ action, teacherPin: savedPin, ...payload }),
+  });
 
-  for (const endpoint of API_ENDPOINTS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-teacher-pin': savedPin,
-        },
-        body: JSON.stringify({ action, teacherPin: savedPin, ...payload }),
-      });
-
-      // Only try the alternate endpoint if this route does not exist (404/405 on static hosts)
-      if (response.status === 404 || response.status === 405) {
-        lastError = new Error(`HTTP ${response.status} from ${endpoint}`);
-        continue;
-      }
-
-      let data: any = null;
-      try {
-        data = await response.json();
-      } catch {
-        // Non-JSON response
-      }
-
-      if (data?.offlineMode) {
-        clearSavedTeacherPin();
-      }
-
-      if (!response.ok || data?.fallback) {
-        const errorMsg = data?.error || `HTTP ${response.status} from ${endpoint}`;
-        throw new Error(errorMsg);
-      }
-
-      return data as T;
-    } catch (err: any) {
-      lastError = err;
-      // Do not hit the second alias on the same server if the first endpoint already answered with a fallback/quota message
-      if (err instanceof TypeError) {
-        continue;
-      }
-      break;
-    }
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {
+    // Non-JSON response
   }
 
-  throw lastError || new Error("Failed to communicate with the casino dealer service.");
+  if (data?.offlineMode) {
+    clearSavedTeacherPin();
+  }
+
+  if (!response.ok || data?.fallback) {
+    const errorMsg = data?.error || `HTTP ${response.status} from /api/gemini`;
+    throw new Error(errorMsg);
+  }
+
+  return data as T;
 }
 
 
@@ -348,6 +357,8 @@ export const generateSentence = async (
       if (data.questionType === 'binary' && !data.isCorrect && !data.errorPhrase) {
         data.errorPhrase = data.grammarPhrase;
       }
+      // Automatically archive verified AI-generated sentences to the Cloud Sentence Bank in the background
+      void archiveSentenceToCloudBank(data, settings, subtype);
       return data;
     }
     throw new Error("Invalid sentence structure returned from service.");
@@ -361,7 +372,9 @@ export const getHint = async (
   sentence: string,
   topic: string,
   level?: CEFRLevel,
-  questionType?: QuestionType
+  questionType?: QuestionType,
+  baseWord?: string,
+  leadInSentence?: string
 ): Promise<string> => {
   try {
     const data = await requestDealerAction<{ hint: string }>('getHint', {
@@ -369,10 +382,20 @@ export const getHint = async (
       topic,
       level,
       questionType,
+      baseWord,
+      leadInSentence,
     });
     if (data?.hint) return data.hint.trim();
   } catch (err) {
     console.warn("Using pedagogical hint heuristic:", err);
+  }
+
+  if (questionType === 'keyWordTransformation') {
+    return `Rewrite the meaning of the first sentence in 2 to 6 words using "${baseWord || 'the KEY WORD'}" unchanged — pay attention to both halves of the target grammatical structure around the key word.`;
+  }
+
+  if (questionType === 'wordFormation') {
+    return `Look at the grammatical position of the gap and decide whether "${baseWord || 'the base word'}" needs a noun, verb, adjective, or adverb suffix — or a negative prefix.`;
   }
 
   const isCloze = questionType === 'multipleChoice' || questionType === 'openCloze' || sentence.includes('_____');
@@ -450,56 +473,229 @@ export const verifyCorrection = async (
   return { isCorrect: false, feedback: `Expected fix was close to: "${intendedCorrection}"` };
 };
 
+export function normalizeContractionsForKwt(input: string): string {
+  return (input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[’‘]/g, "'")
+    .replace(/[.,!?;:"“”]/g, '')
+    .replace(/\bwon't\b/g, 'will not')
+    .replace(/\bcan't\b/g, 'cannot')
+    .replace(/\bshan't\b/g, 'shall not')
+    .replace(/\bdon't\b/g, 'do not')
+    .replace(/\bdoesn't\b/g, 'does not')
+    .replace(/\bdidn't\b/g, 'did not')
+    .replace(/\bhaven't\b/g, 'have not')
+    .replace(/\bhasn't\b/g, 'has not')
+    .replace(/\bhadn't\b/g, 'had not')
+    .replace(/\bwouldn't\b/g, 'would not')
+    .replace(/\bcouldn't\b/g, 'could not')
+    .replace(/\bshouldn't\b/g, 'should not')
+    .replace(/\bmustn't\b/g, 'must not')
+    .replace(/\bneedn't\b/g, 'need not')
+    .replace(/\boughtn't\b/g, 'ought not')
+    .replace(/\bisn't\b/g, 'is not')
+    .replace(/\baren't\b/g, 'are not')
+    .replace(/\bwasn't\b/g, 'was not')
+    .replace(/\bweren't\b/g, 'were not')
+    .replace(/\bi'm\b/g, 'i am')
+    .replace(/\byou're\b/g, 'you are')
+    .replace(/\bwe're\b/g, 'we are')
+    .replace(/\bthey're\b/g, 'they are')
+    .replace(/\bi've\b/g, 'i have')
+    .replace(/\byou've\b/g, 'you have')
+    .replace(/\bwe've\b/g, 'we have')
+    .replace(/\bthey've\b/g, 'they have')
+    .replace(/\bi'll\b/g, 'i will')
+    .replace(/\byou'll\b/g, 'you will')
+    .replace(/\bhe'll\b/g, 'he will')
+    .replace(/\bshe'll\b/g, 'she will')
+    .replace(/\bwe'll\b/g, 'we will')
+    .replace(/\bthey'll\b/g, 'they will')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function evaluateKeyWordTransformationDeterministic(
+  candidate: string,
+  intendedAnswer: string,
+  acceptedAnswers: string[] = [],
+  baseWord?: string,
+  mark1Parts: string[] = [],
+  mark2Parts: string[] = []
+): { isCorrect: boolean; marks: 0 | 1 | 2; feedback: string } {
+  const rawTrimmed = (candidate || '').trim().replace(/\s+/g, ' ');
+  const words = rawTrimmed.split(' ').filter(Boolean);
+  const key = (baseWord || '').trim().toUpperCase();
+
+  if (words.length < 2 || words.length > 6) {
+    return {
+      isCorrect: false,
+      marks: 0,
+      feedback: `Key Word Transformation answers must be between 2 and 6 words (you wrote ${words.length} word${words.length === 1 ? '' : 's'}).`,
+    };
+  }
+
+  if (key) {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const keyRegex = new RegExp(`(^|[^a-zA-Z])${escapedKey}([^a-zA-Z]|$)`, 'i');
+    if (!keyRegex.test(rawTrimmed)) {
+      return {
+        isCorrect: false,
+        marks: 0,
+        feedback: `0/2 Marks: You must include the given KEY WORD "${key}" without changing its form.`,
+      };
+    }
+  }
+
+  const candNorm = normalizeContractionsForKwt(rawTrimmed);
+  const candRawNorm = rawTrimmed.toLowerCase().replace(/[.,!?;:"“”]/g, '').replace(/\s+/g, ' ').trim();
+
+  const allAccepted = [intendedAnswer, ...(acceptedAnswers || [])].filter(Boolean);
+  for (const acc of allAccepted) {
+    const accNorm = normalizeContractionsForKwt(acc);
+    const accRawNorm = acc.trim().toLowerCase().replace(/[.,!?;:"“”]/g, '').replace(/\s+/g, ' ').trim();
+    if (candNorm === accNorm || candRawNorm === accRawNorm) {
+      return {
+        isCorrect: true,
+        marks: 2,
+        feedback: `2/2 Marks! Full Cambridge Part 4 transformation ("${rawTrimmed}").`,
+      };
+    }
+  }
+
+  // Derive fallback mark1Parts / mark2Parts from intendedAnswer split around baseWord if not explicitly provided
+  let m1List = Array.isArray(mark1Parts) && mark1Parts.length > 0 ? [...mark1Parts] : [];
+  let m2List = Array.isArray(mark2Parts) && mark2Parts.length > 0 ? [...mark2Parts] : [];
+  if (m1List.length === 0 && m2List.length === 0 && intendedAnswer) {
+    const intWords = intendedAnswer.trim().split(/\s+/).filter(Boolean);
+    if (intWords.length >= 2) {
+      const mid = Math.ceil(intWords.length / 2);
+      m1List = [intWords.slice(0, mid).join(' ')];
+      m2List = [intWords.slice(mid).join(' ')];
+    }
+  }
+
+  const normM1 = m1List.map(normalizeContractionsForKwt).filter(Boolean);
+  const normM2 = m2List.map(normalizeContractionsForKwt).filter(Boolean);
+
+  const matchedM1 = normM1.find(p => candNorm === p || candNorm.startsWith(p + ' ') || candNorm.includes(' ' + p + ' '));
+  const matchedM2 = normM2.find(p => candNorm === p || candNorm.endsWith(' ' + p) || candNorm.includes(' ' + p + ' '));
+
+  // If both halves match and their combined length equals candNorm, award 2 marks
+  for (const p1 of normM1) {
+    for (const p2 of normM2) {
+      if (`${p1} ${p2}`.trim() === candNorm) {
+        return {
+          isCorrect: true,
+          marks: 2,
+          feedback: `2/2 Marks! Both halves of the target transformation are accurate ("${rawTrimmed}").`,
+        };
+      }
+    }
+  }
+
+  if (matchedM1 || matchedM2) {
+    const earnedHalf = matchedM1 || matchedM2;
+    return {
+      isCorrect: true,
+      marks: 1,
+      feedback: `1/2 Mark (Partial Credit): Good structure with "${earnedHalf}", though the full 2-mark transformation is "${intendedAnswer}".`,
+    };
+  }
+
+  return {
+    isCorrect: false,
+    marks: 0,
+    feedback: `0/2 Marks: "${rawTrimmed}" does not match the target structure (expected "${intendedAnswer}").`,
+  };
+}
+
 export const verifyOpenClozeBatch = async (
   sentenceWithBlank: string,
   intendedAnswer: string,
   acceptedAnswers: string[],
-  candidateWords: string[]
-): Promise<Record<string, { isCorrect: boolean; feedback: string }>> => {
+  candidateWords: string[],
+  questionType?: QuestionType,
+  baseWord?: string,
+  leadInSentence?: string,
+  mark1Parts?: string[],
+  mark2Parts?: string[]
+): Promise<Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }>> => {
   const uniqueWords = Array.from(
-    new Set(candidateWords.map(w => (w || '').trim()).filter(w => w.length > 0))
+    new Set(candidateWords.map(w => (w || '').trim().replace(/\s+/g, ' ')).filter(w => w.length > 0))
   );
   if (uniqueWords.length === 0) return {};
 
   try {
-    const data = await requestDealerAction<{ results: Record<string, { isCorrect: boolean; feedback: string }> }>(
-      'verifyOpenClozeBatch',
-      {
-        sentenceWithBlank,
-        intendedAnswer,
-        acceptedAnswers,
-        candidateWords: uniqueWords,
-      }
-    );
+    const data = await requestDealerAction<{
+      results: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }>;
+    }>('verifyOpenClozeBatch', {
+      sentenceWithBlank,
+      intendedAnswer,
+      acceptedAnswers,
+      candidateWords: uniqueWords,
+      questionType,
+      baseWord,
+      leadInSentence,
+      mark1Parts,
+      mark2Parts,
+    });
     if (data?.results && typeof data.results === 'object') {
       return data.results;
     }
   } catch (err) {
-    console.warn("Using offline Open Cloze batch verification fallback:", err);
+    console.warn('Using offline Cloze/Transformation batch verification fallback:', err);
   }
 
-  // Offline heuristic fallback for unmatched words
+  const fallbackResults: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> = {};
+
+  if (questionType === 'keyWordTransformation') {
+    uniqueWords.forEach(phrase => {
+      const key = phrase.trim().toLowerCase();
+      fallbackResults[key] = evaluateKeyWordTransformationDeterministic(
+        phrase,
+        intendedAnswer,
+        acceptedAnswers,
+        baseWord,
+        mark1Parts,
+        mark2Parts
+      );
+    });
+    return fallbackResults;
+  }
+
+  // Offline heuristic fallback for single-word Open Cloze & Word Formation
+  const cleanBase = (baseWord || '').trim().toLowerCase();
   const acceptedSet = new Set(
     [intendedAnswer, ...(acceptedAnswers || [])]
       .map(a => (a || '').trim().toLowerCase())
-      .filter(Boolean)
+      .filter(a => Boolean(a) && (questionType !== 'wordFormation' || a !== cleanBase))
   );
-  const fallbackResults: Record<string, { isCorrect: boolean; feedback: string }> = {};
   uniqueWords.forEach(word => {
     const key = word.trim().toLowerCase();
     if (key.includes(' ')) {
       fallbackResults[key] = {
         isCorrect: false,
-        feedback: 'Open Cloze gaps require a single word only.',
+        marks: 0,
+        feedback: 'Single-word gaps require one word only.',
+      };
+    } else if (questionType === 'wordFormation' && cleanBase && key === cleanBase) {
+      fallbackResults[key] = {
+        isCorrect: false,
+        marks: 0,
+        feedback: `You must transform the base word (${baseWord?.toUpperCase()}) into a different grammatical form.`,
       };
     } else if (acceptedSet.has(key)) {
       fallbackResults[key] = {
         isCorrect: true,
+        marks: 1,
         feedback: `Accepted! "${word}" fits the grammatical gap.`,
       };
     } else {
       fallbackResults[key] = {
         isCorrect: false,
+        marks: 0,
         feedback: `"${word}" does not fit the grammatical context (expected "${intendedAnswer}").`,
       };
     }

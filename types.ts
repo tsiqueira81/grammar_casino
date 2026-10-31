@@ -43,11 +43,11 @@ export interface Player {
   effects: PlayerEffect[];
 }
 
-export type GrammarTopic = 'Tenses' | 'Prepositions' | 'Articles' | 'Conditionals' | 'Modals' | 'Phrasal Verbs' | 'Reported Speech' | 'My own choice';
+export type GrammarTopic = 'Tenses' | 'Prepositions' | 'Articles' | 'Conditionals' | 'Modals' | 'Phrasal Verbs' | 'Reported Speech' | 'Collocations' | 'My own choice';
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 export type Theme = 'Fantasy 🐉' | 'Sci-Fi 🚀' | 'History 🏛️' | 'Everyday Life ☕' | 'Business 💼' | 'Technology 💻' | 'Pop Culture 🍿' | 'Custom ✍️';
 
-export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze';
+export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation';
 export type ChallengeFormat = QuestionType | 'mixed';
 
 export interface Settings {
@@ -55,6 +55,7 @@ export interface Settings {
   level: CEFRLevel;
   theme: string;
   challengeFormat?: ChallengeFormat;
+  mixedFormats?: QuestionType[];
 }
 
 export interface GeneratedSentence {
@@ -69,6 +70,10 @@ export interface GeneratedSentence {
   options?: string[];
   acceptedAnswers?: string[];
   correctAnswer?: string;
+  baseWord?: string;
+  leadInSentence?: string;
+  mark1Parts?: string[];
+  mark2Parts?: string[];
 }
 
 export interface Bet {
@@ -99,6 +104,7 @@ export interface RoundResultInfo {
   amountChanged: number;
   questionType?: QuestionType;
   playerAnswerDisplay?: string;
+  marksAwarded?: 0 | 1 | 2;
 }
 
 export interface GameError {
@@ -152,12 +158,25 @@ export type PowerUpKey =
   | 'TEACHERS_PET'
   | 'CORRECTION_BOUNTY'
   | 'LONE_WOLF'
-  | 'SWAP';
+  | 'SWAP'
+  | 'SCALPEL'
+  | 'PEEKABOO'
+  | 'COPYCAT'
+  | 'BLOOD_PACT'
+  | 'CROWD_SURFER'
+  | 'HIGH_ROLLER'
+  | 'DOUBLE_OR_NOTHING'
+  | 'BOOMERANG'
+  | 'PICKPOCKET'
+  | 'AUDIENCE_POLL'
+  | 'UNDERDOG'
+  | 'SCAVENGER';
 
 export interface ActivePowerUp {
   type: PowerUpKey;
   target?: number; // Player ID of the target
   amount?: number; // Cap amount or custom value
+  eliminatedOptions?: string[]; // Eliminated MC options for 50/50 Scalpel
 }
 
 export interface UsedPowerUp {
@@ -195,6 +214,7 @@ export interface RoundPlayerResult {
   splitOptions?: string[];
   clozeAnswer?: string;
   splitClozeAnswers?: [string, string];
+  marksAwarded?: 0 | 1 | 2;
 }
 
 export interface RoundHistoryRecord {

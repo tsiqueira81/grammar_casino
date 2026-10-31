@@ -6,10 +6,10 @@ import {
   WheelItem, RoundHistoryRecord, RoundPlayerResult, PlayerTurnTimer, QuestionType, ChallengeFormat
 } from './types';
 import { 
-  POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
+  POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
   INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
-  CHALLENGE_FORMATS, CLOZE_DISABLED_POWER_UPS
+  CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -24,14 +24,26 @@ import RoundSettingsModal, { SettingsModalTab } from './components/RoundSettings
 import DeckConfigModal from './components/DeckConfigModal';
 import MultiplayerLobbyModal from './components/MultiplayerLobbyModal';
 import StudentControllerView from './components/StudentControllerView';
+import CloudManagerModal, { CloudManagerTab } from './components/CloudManagerModal';
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
   isPlayerTargetedThisRound,
   isBetCompleteForQuestionType,
+  isValidKeyWordTransformationPhrase,
+  buildAudiencePollSummary,
+  isPlayerUnderdog,
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+import {
+  signInTeacherWithGoogle,
+  signOutTeacherGoogle,
+  subscribeToAuthChanges,
+  syncCloudSentenceBank,
+  isVerifiedTeacherUser,
+  CloudRoster,
+} from './services/firebaseService';
 
 const HOUSE_BAILOUT_AMOUNT = 150;
 
@@ -111,18 +123,108 @@ function base64ToBytes(base64: string) {
 function pcmToAudioBuffer(
   data: Uint8Array,
   ctx: AudioContext,
-  sampleRate: number = 24000,
-  numChannels: number = 1
+  defaultSampleRate: number = 24000,
+  defaultNumChannels: number = 1
 ): AudioBuffer {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
+  let pcmBytes = data;
+  let sampleRate = defaultSampleRate;
+  let numChannels = defaultNumChannels;
+
+  // Gemini 3.8 TTS unary calls return a complete WAV file (RIFF....WAVE) which
+  // includes a 44-byte header and often trailing LIST/INFO metadata chunks at the end.
+  // If we don't extract strictly the 'data' subchunk, those trailing metadata bytes
+  // get played as a burst of static/noise at the end of the sentence.
+  const isRiffWav =
+    data.length > 44 &&
+    data[0] === 0x52 && // 'R'
+    data[1] === 0x49 && // 'I'
+    data[2] === 0x46 && // 'F'
+    data[3] === 0x46 && // 'F'
+    data[8] === 0x57 && // 'W'
+    data[9] === 0x41 && // 'A'
+    data[10] === 0x56 && // 'V'
+    data[11] === 0x45;   // 'E'
+
+  if (isRiffWav) {
+    let offset = 12;
+    let foundDataChunk = false;
+    while (offset + 8 <= data.length) {
+      const chunkId = String.fromCharCode(
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3]
+      );
+      const chunkSize =
+        (data[offset + 4] |
+          (data[offset + 5] << 8) |
+          (data[offset + 6] << 16) |
+          (data[offset + 7] << 24)) >>>
+        0;
+      const chunkDataStart = offset + 8;
+
+      if (chunkId === 'fmt ' && chunkSize >= 16 && chunkDataStart + 16 <= data.length) {
+        const parsedChannels = data[chunkDataStart + 2] | (data[chunkDataStart + 3] << 8);
+        const parsedRate =
+          (data[chunkDataStart + 4] |
+            (data[chunkDataStart + 5] << 8) |
+            (data[chunkDataStart + 6] << 16) |
+            (data[chunkDataStart + 7] << 24)) >>>
+          0;
+        if (parsedChannels >= 1 && parsedChannels <= 2) numChannels = parsedChannels;
+        if (parsedRate >= 8000 && parsedRate <= 96000) sampleRate = parsedRate;
+      } else if (chunkId === 'data') {
+        // Streaming WAV headers sometimes set chunkSize to 0xFFFFFFFF; clamp to actual buffer length
+        const availableBytes = data.length - chunkDataStart;
+        const actualDataBytes =
+          chunkSize > 0 && chunkSize <= availableBytes ? chunkSize : availableBytes;
+        pcmBytes = data.subarray(chunkDataStart, chunkDataStart + actualDataBytes);
+        foundDataChunk = true;
+        break;
+      }
+
+      if (chunkSize === 0 || chunkDataStart + chunkSize > data.length) {
+        break;
+      }
+      offset = chunkDataStart + chunkSize + (chunkSize % 2);
+    }
+
+    if (!foundDataChunk) {
+      // Fallback: strip standard 44-byte WAV header
+      pcmBytes = data.subarray(44);
+    }
+  }
+
+  // Ensure even byte length for Int16Array
+  const alignedByteLength = pcmBytes.byteLength - (pcmBytes.byteLength % 2);
+  const sampleCount = Math.floor(alignedByteLength / 2);
+  const view = new DataView(pcmBytes.buffer, pcmBytes.byteOffset, alignedByteLength);
+
+  const rawFrameCount = Math.floor(sampleCount / numChannels);
+  // Trim any tiny trailing click/pop in the last ~15ms and apply a smooth fade-in/fade-out
+  const trimTailFrames = Math.min(Math.floor(sampleRate * 0.012), Math.floor(rawFrameCount * 0.05));
+  const frameCount = Math.max(1, rawFrameCount - trimTailFrames);
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  const fadeInFrames = Math.min(Math.floor(sampleRate * 0.006), Math.floor(frameCount * 0.1));
+  const fadeOutFrames = Math.min(Math.floor(sampleRate * 0.03), Math.floor(frameCount * 0.15));
 
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
-      // Convert int16 to float32 [-1.0, 1.0]
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      const sampleIndex = (i * numChannels + channel) * 2;
+      let sample = view.getInt16(sampleIndex, true) / 32768.0;
+
+      if (i < fadeInFrames && fadeInFrames > 0) {
+        sample *= i / fadeInFrames;
+      } else if (i >= frameCount - fadeOutFrames && fadeOutFrames > 0) {
+        const remaining = frameCount - 1 - i;
+        // Cosine fade-out to eliminate any end-of-clip pop or noise
+        const t = remaining / fadeOutFrames;
+        sample *= 0.5 * (1 - Math.cos(Math.PI * t));
+      }
+
+      channelData[i] = sample;
     }
   }
   return buffer;
@@ -184,10 +286,21 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = initialGameState?.settings;
     if (saved) {
-      return { ...saved, challengeFormat: saved.challengeFormat || 'binary' };
+      return {
+        ...saved,
+        challengeFormat: saved.challengeFormat || 'binary',
+        mixedFormats: getEffectiveMixedFormats(saved.mixedFormats),
+      };
     }
-    return { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' };
+    return {
+      topic: GRAMMAR_TOPICS[0],
+      level: CEFR_LEVELS[2],
+      theme: THEMES[0],
+      challengeFormat: 'binary',
+      mixedFormats: ALL_QUESTION_TYPES,
+    };
   });
+  const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
   const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || '');
   const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
   const mixedFormatIndexRef = useRef(0);
@@ -328,8 +441,10 @@ export function App() {
     isEncrypted: false,
   });
 
-  // Teacher PIN Gate for Web Live AI & Live Classroom Hosting (Offline-Only Fallback for Unauthenticated Visitors)
+  // Teacher PIN & Google Auth Gate for Web Live AI, Cloud Vault & Live Classroom Hosting
   const [isTeacherAiUnlocked, setIsTeacherAiUnlocked] = useState<boolean>(() => GeminiService.isTeacherPinUnlocked());
+  const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState<boolean>(false);
   const [showTeacherPinModal, setShowTeacherPinModal] = useState<boolean>(false);
   const [teacherPinInput, setTeacherPinInput] = useState<string>('');
   const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
@@ -337,6 +452,12 @@ export function App() {
   const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
   const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
+  const pendingOpenCloudTabAfterPinRef = useRef<CloudManagerTab | null>(null);
+
+  // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
+  const [showCloudModal, setShowCloudModal] = useState<boolean>(false);
+  const [cloudModalTab, setCloudModalTab] = useState<CloudManagerTab>('rosters');
+  const [activeCloudRoster, setActiveCloudRoster] = useState<{ id: string; name: string } | null>(null);
 
   const refreshDesktopStatus = useCallback(() => {
     GeminiService.getDesktopStatus().then(setDesktopStatus);
@@ -345,11 +466,31 @@ export function App() {
 
   useEffect(() => {
     refreshDesktopStatus();
+    // Sync the auto-growing Cloud Sentence Bank into local cache on startup
+    void syncCloudSentenceBank();
+
+    // Listen to Firebase Google Auth state
+    const unsubscribeAuth = subscribeToAuthChanges(async (user) => {
+      if (user && user.email) {
+        setTeacherGoogleEmail(user.email);
+        if (isVerifiedTeacherUser(user)) {
+          try {
+            const idToken = await user.getIdToken();
+            await GeminiService.verifyTeacherGoogleOnServer(idToken);
+          } catch {}
+          setIsTeacherAiUnlocked(true);
+        }
+      } else {
+        setTeacherGoogleEmail(null);
+      }
+    });
+
     const handleOnline = () => refreshDesktopStatus();
     const handleOffline = () => refreshDesktopStatus();
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
+      unsubscribeAuth();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -357,6 +498,23 @@ export function App() {
 
   const handleOpenTeacherPinModal = () => {
     playSound('click');
+    pendingCreateRoomAfterPinRef.current = false;
+    pendingOpenCloudTabAfterPinRef.current = null;
+    setTeacherPinInput('');
+    setNewTeacherPinInput('');
+    setShowChangePinForm(false);
+    setTeacherPinNotice(null);
+    setShowTeacherPinModal(true);
+  };
+
+  const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
+    playSound('click');
+    if (isTeacherAiUnlocked || desktopStatus.isDesktop) {
+      setCloudModalTab(tab);
+      setShowCloudModal(true);
+      return;
+    }
+    pendingOpenCloudTabAfterPinRef.current = tab;
     pendingCreateRoomAfterPinRef.current = false;
     setTeacherPinInput('');
     setNewTeacherPinInput('');
@@ -384,6 +542,58 @@ export function App() {
     }
   };
 
+  const handleSignInWithGoogle = async () => {
+    if (isSigningInGoogle) return;
+    playSound('click');
+    setIsSigningInGoogle(true);
+    setTeacherPinNotice(null);
+    const res = await signInTeacherWithGoogle();
+    if (!res.ok || !res.user) {
+      setIsSigningInGoogle(false);
+      if (res.error) {
+        setTeacherPinNotice({ type: 'error', text: res.error });
+      }
+      return;
+    }
+
+    setTeacherGoogleEmail(res.user.email || null);
+    if (!res.isVerifiedTeacher) {
+      setIsSigningInGoogle(false);
+      playSound('error');
+      setTeacherPinNotice({
+        type: 'error',
+        text: `Signed in as ${res.user.email}. Only teacher.siqueira@gmail.com automatically unlocks Teacher Mode without a PIN.`,
+      });
+      return;
+    }
+
+    if (res.idToken) {
+      await GeminiService.verifyTeacherGoogleOnServer(res.idToken);
+    }
+    setIsSigningInGoogle(false);
+    playSound('success');
+    setIsTeacherAiUnlocked(true);
+
+    if (pendingCreateRoomAfterPinRef.current) {
+      pendingCreateRoomAfterPinRef.current = false;
+      setShowTeacherPinModal(false);
+      await startHostMultiplayerRoom();
+      return;
+    }
+    if (pendingOpenCloudTabAfterPinRef.current) {
+      const targetTab = pendingOpenCloudTabAfterPinRef.current;
+      pendingOpenCloudTabAfterPinRef.current = null;
+      setShowTeacherPinModal(false);
+      setCloudModalTab(targetTab);
+      setShowCloudModal(true);
+      return;
+    }
+    setTeacherPinNotice({
+      type: 'success',
+      text: `Verified via Google (${res.user.email})! Live Gemini AI, QR Room Hosting & Cloud Vault are unlocked.`,
+    });
+  };
+
   const handleUnlockTeacherPin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!teacherPinInput.trim() || isVerifyingTeacherPin) return;
@@ -401,9 +611,17 @@ export function App() {
         await startHostMultiplayerRoom();
         return;
       }
+      if (pendingOpenCloudTabAfterPinRef.current) {
+        const targetTab = pendingOpenCloudTabAfterPinRef.current;
+        pendingOpenCloudTabAfterPinRef.current = null;
+        setShowTeacherPinModal(false);
+        setCloudModalTab(targetTab);
+        setShowCloudModal(true);
+        return;
+      }
       setTeacherPinNotice({
         type: 'success',
-        text: 'Teacher PIN verified! Live Gemini AI & Live Room Hosting are unlocked for this game session.',
+        text: 'Teacher PIN verified! Live Gemini AI, Cloud Vault & Live Room Hosting are unlocked for this session.',
       });
     } else {
       playSound('error');
@@ -411,10 +629,15 @@ export function App() {
     }
   };
 
-  const handleLockTeacherPin = () => {
+  const handleLockTeacherPin = async () => {
     playSound('click');
     pendingCreateRoomAfterPinRef.current = false;
+    pendingOpenCloudTabAfterPinRef.current = null;
     GeminiService.clearSavedTeacherPin();
+    if (teacherGoogleEmail) {
+      await signOutTeacherGoogle();
+      setTeacherGoogleEmail(null);
+    }
     setIsTeacherAiUnlocked(false);
     setShowChangePinForm(false);
     if (mpControllerRef.current) {
@@ -643,11 +866,35 @@ export function App() {
       if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) >= 1;
       return Boolean(playerBet.selectedOption?.trim());
     }
-    if (qType === 'openCloze') {
+    if (qType === 'openCloze' || qType === 'wordFormation') {
+      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
+      const isValidWord = (w?: string) => {
+        const trimmed = (w || '').trim().toLowerCase();
+        if (!trimmed) return false;
+        if (baseNorm && trimmed === baseNorm) return false;
+        return true;
+      };
       if (hasSplitBet) {
-        return Boolean(playerBet.splitClozeAnswers?.[0]?.trim() || playerBet.splitClozeAnswers?.[1]?.trim());
+        const w1 = playerBet.splitClozeAnswers?.[0];
+        const w2 = playerBet.splitClozeAnswers?.[1];
+        if (baseNorm && ((w1?.trim() && w1.trim().toLowerCase() === baseNorm) || (w2?.trim() && w2.trim().toLowerCase() === baseNorm))) {
+          return false;
+        }
+        return isValidWord(w1) || isValidWord(w2);
       }
-      return Boolean(playerBet.clozeAnswer?.trim());
+      return isValidWord(playerBet.clozeAnswer);
+    }
+    if (qType === 'keyWordTransformation') {
+      const keyWord = currentSentence?.baseWord;
+      if (hasSplitBet) {
+        const w1 = (playerBet.splitClozeAnswers?.[0] || '').trim();
+        const w2 = (playerBet.splitClozeAnswers?.[1] || '').trim();
+        if (!w1 && !w2) return false;
+        if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
+        if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
+        return true;
+      }
+      return isValidKeyWordTransformationPhrase(playerBet.clozeAnswer, keyWord);
     }
     if (hasSplitBet) return true;
     return playerBet.opinion === 'correct' || playerBet.opinion === 'incorrect';
@@ -666,6 +913,7 @@ export function App() {
       showReportCardModal ||
       showSettingsModal ||
       showDeckConfigModal ||
+      showCloudModal ||
       isLoading ||
       isProcessing
     );
@@ -674,7 +922,7 @@ export function App() {
   }, [
     error, historyPlayer, mpRoomCode, showPowerUpModal, showTargetModal, showAvatarModal,
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
-    showDeckConfigModal, isLoading, isProcessing, hints
+    showDeckConfigModal, showCloudModal, isLoading, isProcessing, hints
   ]);
 
   // Handler-level enforcement: returns true only when the player is allowed to make bet/hint/power-up changes
@@ -1293,6 +1541,7 @@ export function App() {
         level: settings.level,
         theme: resolvedTheme,
         challengeFormat: settings.challengeFormat || 'binary',
+        mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
       };
     } else {
       const candidate = nextRoundSettings || settings;
@@ -1300,14 +1549,17 @@ export function App() {
       targetSettings = candidate;
     }
 
-    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${pastSentences.length}|${isTeacherAiUnlocked ? 'ai' : 'offline'}`;
+    const activeMixedSubsetKey = (targetSettings.challengeFormat || 'binary') === 'mixed'
+      ? getEffectiveMixedFormats(targetSettings.mixedFormats).join(',')
+      : '';
+    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${activeMixedSubsetKey}|${pastSentences.length}|${isTeacherAiUnlocked ? 'ai' : 'offline'}`;
     if (prefetchRef.current?.key === settingsKey) return;
 
     const triggerPrefetch = () => {
       if (prefetchRef.current?.key === settingsKey) return;
 
       const formatSetting: ChallengeFormat = targetSettings.challengeFormat || 'binary';
-      const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
+      const rotationOrder: QuestionType[] = getEffectiveMixedFormats(targetSettings.mixedFormats);
       const formatIdx = isSettingsPart2 ? 0 : mixedFormatIndexRef.current;
       const resolvedQuestionType: QuestionType = formatSetting === 'mixed'
         ? rotationOrder[formatIdx % rotationOrder.length]
@@ -1368,7 +1620,10 @@ export function App() {
             throw new Error("Invalid settings provided to fetch a new sentence.");
         }
         const formatSetting: ChallengeFormat = currentSettings.challengeFormat || 'binary';
-        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${history.length}|${GeminiService.isTeacherPinUnlocked() ? 'ai' : 'offline'}`;
+        const expectedMixedSubsetKey = formatSetting === 'mixed'
+          ? getEffectiveMixedFormats(currentSettings.mixedFormats).join(',')
+          : '';
+        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${expectedMixedSubsetKey}|${history.length}|${GeminiService.isTeacherPinUnlocked() ? 'ai' : 'offline'}`;
 
         let generated: GeneratedSentence | null = null;
         let subtype: string | null = null;
@@ -1398,7 +1653,7 @@ export function App() {
         }
 
         if (!generated) {
-          const rotationOrder: QuestionType[] = ['binary', 'multipleChoice', 'openCloze'];
+          const rotationOrder: QuestionType[] = getEffectiveMixedFormats(currentSettings.mixedFormats);
           resolvedQuestionType = formatSetting === 'mixed'
             ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
             : formatSetting;
@@ -1497,6 +1752,7 @@ export function App() {
       level: settings.level,
       theme: finalTheme,
       challengeFormat: settings.challengeFormat || 'binary',
+      mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
     };
     mixedFormatIndexRef.current = 0;
     setSettings(newSettings);
@@ -1548,7 +1804,9 @@ export function App() {
           currentSentence.text,
           settings.topic,
           settings.level as any,
-          currentSentence.questionType || 'binary'
+          currentSentence.questionType || 'binary',
+          currentSentence.baseWord,
+          currentSentence.leadInSentence
         );
         setHints(h => ({...h, [playerId]: { text: hintText, isLoading: false }}));
       } catch (err: any) {
@@ -1640,22 +1898,15 @@ export function App() {
     playSound('click');
   }, [activePowerUps, playSound]);
 
-  // Whenever there's a change in any player's current funds, check if their bet amount isn't over their funds limit and adjust it
+  // Whenever there's a change in any player's current funds or active power-ups, ensure their bet stays within [minLimit, maxLimit]
   useEffect(() => {
     setBets(prevBets => {
       let changed = false;
       const updatedBets = { ...prevBets };
+      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
 
       players.forEach(player => {
         const playerBet = updatedBets[player.id];
-        if (!playerBet || playerBet.bet === undefined || playerBet.bet === '') {
-          return;
-        }
-
-        const currentBetNum = Number(playerBet.bet);
-        if (isNaN(currentBetNum)) return;
-
-        const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
         const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : (activePowerUps[player.id] || []).includes(pu)));
         const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
         const capLimit = playerCaps.length > 0 
@@ -1663,15 +1914,52 @@ export function App() {
           : (isCapped ? 50 : BET_CAP_AMOUNT);
         const maxLimit = isCapped ? Math.min(Math.max(0, player.money), capLimit) : Math.max(0, player.money);
 
+        const playerHighRollers = allPowerUps.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
+        const isHighRoller = playerHighRollers.length > 0;
+        const minLimit = isHighRoller && player.money > 0
+          ? Math.min(
+              maxLimit,
+              Math.max(
+                1,
+                playerHighRollers.reduce(
+                  (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
+                  Math.ceil(player.money * 0.5)
+                )
+              )
+            )
+          : 0;
+
         if (player.money <= 0) {
-          if (playerBet.bet !== 0 && playerBet.bet !== '') {
+          if (playerBet && playerBet.bet !== undefined && playerBet.bet !== '' && playerBet.bet !== 0) {
             updatedBets[player.id] = {
               ...playerBet,
               bet: 0
             };
             changed = true;
           }
-        } else if (currentBetNum > maxLimit) {
+          return;
+        }
+
+        if (isHighRoller && minLimit > 0) {
+          const currentBetNum = playerBet?.bet !== undefined && playerBet?.bet !== '' ? Number(playerBet.bet) : 0;
+          if (isNaN(currentBetNum) || currentBetNum < minLimit) {
+            updatedBets[player.id] = {
+              ...(playerBet || {}),
+              bet: minLimit,
+            };
+            changed = true;
+            return;
+          }
+        }
+
+        if (!playerBet || playerBet.bet === undefined || playerBet.bet === '') {
+          return;
+        }
+
+        const currentBetNum = Number(playerBet.bet);
+        if (isNaN(currentBetNum)) return;
+
+        if (currentBetNum > maxLimit) {
           updatedBets[player.id] = {
             ...playerBet,
             bet: maxLimit
@@ -1689,8 +1977,10 @@ export function App() {
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return;
     
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze';
+    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
+    if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(powerUpKey)) return;
+    if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(powerUpKey)) return;
 
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
@@ -1703,10 +1993,12 @@ export function App() {
     const powerUp = POWER_UPS[powerUpKey];
     if (powerUp.requiresTarget) {
       const eligibleTargets = players.filter(p => p.id !== playerId && p.money > 0);
+      const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
+      const ignoresShield = powerUpKey === 'COPYCAT';
       const unshieldedTargets = eligibleTargets.filter(p => {
         const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-        const hasShield = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
-        const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+        const hasShield = !ignoresShield && pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+        const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
         return !hasShield && !alreadyAttacked;
       });
       if (eligibleTargets.length === 0 || unshieldedTargets.length === 0) {
@@ -1750,7 +2042,7 @@ export function App() {
           setShowTargetModal({ powerUp: powerUpKey, playerId });
         }
     } else {
-        // ... (Immediate effect logic)
+        // Immediate effect logic
         let modalMessage = `${powerUp.icon} ${powerUp.description}`;
         
         if (powerUpKey === 'GRAMMAR_GOGGLES' && currentSentence) {
@@ -1758,11 +2050,139 @@ export function App() {
               setHighlightedPhrase(currentSentence.grammarPhrase || 'the key part of the sentence');
             }
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
+        } else if (powerUpKey === 'SCALPEL' && currentSentence) {
+            const qType = currentSentence.questionType || 'binary';
+            if (qType === 'multipleChoice') {
+              const correctNorm = (currentSentence.correctAnswer || '').trim().toLowerCase();
+              const wrongOpts = (currentSentence.options || []).filter(
+                o => o.trim().toLowerCase() !== correctNorm
+              );
+              const shuffledWrong = [...wrongOpts].sort(() => Math.random() - 0.5);
+              const eliminatedOptions = shuffledWrong.slice(0, 2);
+              const eliminatedNormSet = new Set(eliminatedOptions.map(o => o.trim().toLowerCase()));
+
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL', eliminatedOptions }],
+              }));
+
+              // Clear player's current pick if they had selected an eliminated option
+              setBets(prev => {
+                const cur = prev[playerId];
+                if (!cur) return prev;
+                let changed = false;
+                const nextBet = { ...cur };
+                if (nextBet.selectedOption && eliminatedNormSet.has(nextBet.selectedOption.trim().toLowerCase())) {
+                  nextBet.selectedOption = undefined;
+                  changed = true;
+                }
+                if (Array.isArray(nextBet.splitOptions) && nextBet.splitOptions.length > 0) {
+                  const filtered = nextBet.splitOptions.filter(
+                    o => !eliminatedNormSet.has(o.trim().toLowerCase())
+                  );
+                  if (filtered.length !== nextBet.splitOptions.length) {
+                    nextBet.splitOptions = filtered;
+                    changed = true;
+                  }
+                }
+                return changed ? { ...prev, [playerId]: nextBet } : prev;
+              });
+
+              modalMessage = `${powerUp.icon} Eliminated 2 wrong options: "${eliminatedOptions.join('" & "')}"!`;
+            } else if (qType === 'openCloze' && currentSentence.correctAnswer) {
+              const word = currentSentence.correctAnswer.trim();
+              const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+              const mask = `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`;
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
+              }));
+              modalMessage = `${powerUp.icon} Open Cloze Clue: ${mask}`;
+            } else if (qType === 'wordFormation' && currentSentence.correctAnswer) {
+              const word = currentSentence.correctAnswer.trim();
+              let mask = '';
+              if (word.length <= 3) {
+                const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+                mask = `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`;
+              } else {
+                const middleCount = Math.max(1, word.length - 3);
+                const middle = Array(middleCount).fill('_').join(' ');
+                const lastTwo = `${word[word.length - 2]} ${word[word.length - 1]}`;
+                mask = `${word[0]} ${middle} ${lastTwo} (${word.length} letters)`;
+              }
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
+              }));
+              modalMessage = `${powerUp.icon} Word Formation Clue: ${mask}`;
+            } else if (qType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+              const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
+              let mask = '';
+              if (words.length <= 2) {
+                mask = `${words.length} words: ${words[0]} ___`;
+              } else {
+                const middle = Array(words.length - 2).fill('___').join(' ');
+                mask = `${words.length} words: ${words[0]} ${middle} ${words[words.length - 1]}`;
+              }
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
+              }));
+              modalMessage = `${powerUp.icon} Key Word Transformation Clue: ${mask}`;
+            } else {
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
+              }));
+            }
+        } else if (powerUpKey === 'BOOMERANG') {
+            // Check if an active round debuff was already placed on this player earlier this hand; if so, reflect it immediately!
+            let reflectedCasterId: number | null = null;
+            let reflectedDebuff: ActivePowerUp | null = null;
+            const nextActive = { ...activePowerUps };
+
+            for (const [sourceKey, list] of Object.entries(nextActive) as [string, ActivePowerUp[]][]) {
+              const sId = Number(sourceKey);
+              if (sId === playerId) continue;
+              const arr = [...(list || [])];
+              const idx = arr.findIndex(
+                pu =>
+                  pu.target === playerId &&
+                  ['HALF_BAKED', 'SUB_ZERO', 'BET_CAP', 'HIGH_ROLLER'].includes(pu.type)
+              );
+              if (idx !== -1) {
+                reflectedCasterId = sId;
+                reflectedDebuff = arr[idx];
+                const casterPlayer = players.find(p => p.id === sId);
+                const updatedDebuff: ActivePowerUp = {
+                  ...reflectedDebuff,
+                  target: sId,
+                  ...(reflectedDebuff.type === 'HIGH_ROLLER' && casterPlayer
+                    ? { amount: Math.max(1, Math.ceil(casterPlayer.money * 0.5)) }
+                    : {}),
+                };
+                arr[idx] = updatedDebuff;
+                nextActive[sId] = arr;
+                break;
+              }
+            }
+
+            if (reflectedCasterId !== null && reflectedDebuff !== null) {
+              setActivePowerUps(nextActive);
+              const casterName = players.find(p => p.id === reflectedCasterId)?.name || 'the attacker';
+              modalMessage = `${powerUp.icon} Boomerang immediately reflected ${POWER_UPS[reflectedDebuff.type]?.name} back onto ${casterName}!`;
+            } else {
+              setActivePowerUps(prev => ({
+                ...prev,
+                [playerId]: [...(prev[playerId] || []), { type: 'BOOMERANG' }],
+              }));
+              modalMessage = `${powerUp.icon} Boomerang armed! Any offensive targeted power-up used against you this round will bounce back at the attacker.`;
+            }
         } else if (powerUpKey === 'TAXMAN') {
             let taxCollected = 0;
             const updatedTaxedPlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.min(TAXMAN_AMOUNT, p.money);
                     taxCollected += tax;
@@ -1776,7 +2196,7 @@ export function App() {
              let taxCollected = 0;
              const updatedTithePlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.floor(p.money * 0.10);
                     taxCollected += tax;
@@ -1801,7 +2221,7 @@ export function App() {
             Object.keys(newActivePowerUps).forEach(sourceId => {
                 const sId = Number(sourceId);
                 newActivePowerUps[sId] = (newActivePowerUps[sId] as ActivePowerUp[]).filter((pu: ActivePowerUp) => {
-                    if (pu.target === playerId && ['HALF_BAKED', 'SUB_ZERO', 'CRUCIO', 'THE_PUNISHER', 'BET_CAP', 'SILENCED'].includes(pu.type)) {
+                    if (pu.target === playerId && ['HALF_BAKED', 'SUB_ZERO', 'CRUCIO', 'THE_PUNISHER', 'BET_CAP', 'HIGH_ROLLER', 'SILENCED'].includes(pu.type)) {
                         return false; 
                     }
                     return true;
@@ -1831,7 +2251,7 @@ export function App() {
                  }
                  return p;
              }));
-             modalMessage = `${powerUp.icon} Auto-revives you with $100 the next time you hit $0.`;
+             modalMessage = `${powerUp.icon} Auto-revives you with $300 the next time you hit $0.`;
         } else if (powerUpKey === 'ROBIN_HOOD') {
              const richestAmount = Math.max(...activePlayers.map(p => p.money));
              const richestPlayers = activePlayers.filter(p => p.money === richestAmount);
@@ -1842,7 +2262,7 @@ export function App() {
              // Phase 1: Steal from Richest
              const newPlayerState = players.map(p => {
                  const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                 const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD');
+                 const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
                  
                  if (richestPlayers.find(rp => rp.id === p.id) && !isShielded) {
                      const stolen = Math.floor(p.money * 0.20);
@@ -1907,10 +2327,24 @@ export function App() {
                 setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
                 modalMessage = `${powerUp.icon} Reach a 3-win streak to earn +50% of your bankroll (Current: ${player.winStreak}/3).`;
             }
-        } else if (powerUpKey === 'CORRECTION_BOUNTY') {
-            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-            modalMessage = `${powerUp.icon} ${powerUp.description}`;
-        } else if (powerUpKey === 'LONE_WOLF') {
+        } else if (powerUpKey === 'AUDIENCE_POLL') {
+            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'AUDIENCE_POLL' }] }));
+            const poll = buildAudiencePollSummary(players, bets, activePowerUps, currentSentence, playerId);
+            const breakdownPreview = poll.breakdown.length > 0
+              ? ` (${poll.breakdown.map(b => `${b.label}: ${b.percent}%`).join(' · ')})`
+              : '';
+            modalMessage = `${powerUp.icon} Live Ask the Table Poll active on your betting card! ${poll.summaryText}${breakdownPreview}`;
+        } else if (powerUpKey === 'UNDERDOG') {
+            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'UNDERDOG' }] }));
+            const updatedPlayersPreview = players.map(p => p.id === playerId ? { ...p, money: newMoney } : p);
+            const qualifiesNow = isPlayerUnderdog(playerId, updatedPlayersPreview);
+            modalMessage = qualifiesNow
+              ? `${powerUp.icon} Underdog Surge active! You are currently in underdog position — a winning bet this hand will award a 2.5× comeback payout (+150% winnings)!`
+              : `${powerUp.icon} ${powerUp.description} (Note: You currently lead the table; Underdog Surge triggers if you are trailing or in the bottom half when bets settle.)`;
+        } else if (powerUpKey === 'SCAVENGER') {
+            setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SCAVENGER' }] }));
+            modalMessage = `${powerUp.icon} Dead Pool Scavenger armed! You will scoop up 25% of every losing bet lost by other players to the House this round (up to +$500).`;
+        } else if (powerUpKey === 'CORRECTION_BOUNTY' || powerUpKey === 'LONE_WOLF' || powerUpKey === 'CROWD_SURFER' || powerUpKey === 'DOUBLE_OR_NOTHING') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
             modalMessage = `${powerUp.icon} ${powerUp.description}`;
         } else {
@@ -2073,10 +2507,13 @@ export function App() {
     const limit = hasPowerSurge ? 3 : 1;
     if (usage >= limit) return;
 
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze';
-    const drawablePool = isClozeRound
-      ? availablePowerUps.filter(k => !CLOZE_DISABLED_POWER_UPS.includes(k))
-      : availablePowerUps;
+    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const drawablePool = availablePowerUps.filter(k => {
+      if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
+      if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(k)) return false;
+      if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(k)) return false;
+      return true;
+    });
 
     if (drawablePool.length === 0) {
          if (mpRoomCode && mpSeats[playerId]) {
@@ -2171,12 +2608,15 @@ export function App() {
     const powerUpKey = overridePowerUpKey ?? showTargetModal?.powerUp;
     if (playerId === undefined || !powerUpKey) return;
     const powerUpInfo = POWER_UPS[powerUpKey];
+    const sourcePlayer = players.find(p => p.id === playerId);
     const targetPlayer = players.find(p => p.id === targetId);
     const isRemoteBuyer = Boolean(mpRoomCode && mpSeats[playerId]);
 
+    const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
+    const ignoresShield = powerUpKey === 'COPYCAT';
     const targetActivePowerUps = (activePowerUps[targetId] || []) as ActivePowerUp[];
-    const isTargetShielded = targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
-    const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(targetId, powerUpsUsedThisRound, activePowerUps);
+    const isTargetShielded = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+    const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(targetId, powerUpsUsedThisRound, activePowerUps);
     if (isTargetShielded || alreadyAttacked) {
         if (isRemoteBuyer) {
           setMpStudentNotifications(prev => ({
@@ -2196,7 +2636,23 @@ export function App() {
         }
         return;
     }
-    if (!targetPlayer) return;
+    if (!targetPlayer || !sourcePlayer) return;
+
+    // Check if target has a concealed BOOMERANG trap active (reflects offensive power-ups)
+    const isOffensiveAttack = [
+      'THE_PUNISHER',
+      'PICKPOCKET',
+      'SUB_ZERO',
+      'BET_CAP',
+      'HIGH_ROLLER',
+      'HALF_BAKED',
+      'SWAP',
+      'CRUCIO',
+      'SILENCER',
+    ].includes(powerUpKey);
+    const targetHasBoomerang = isOffensiveAttack && targetActivePowerUps.some(pu => pu.type === 'BOOMERANG');
+    const effectiveTargetId = targetHasBoomerang ? playerId : targetId;
+    const effectiveTargetPlayer = targetHasBoomerang ? sourcePlayer : targetPlayer;
 
     setPowerUpsUsedThisRound(prev => {
         const playerUsage = [...(prev[playerId] || [])];
@@ -2216,72 +2672,247 @@ export function App() {
             }
         }
         if (index !== -1) {
-            playerUsage[index] = { ...playerUsage[index], targetId: targetId };
+            playerUsage[index] = { ...playerUsage[index], targetId: effectiveTargetId };
         }
         return { ...prev, [playerId]: playerUsage };
     });
 
+    // If Boomerang triggered, consume one BOOMERANG from targetPlayer's activePowerUps
+    const removeBoomerangFromTarget = (prevMap: Record<number, ActivePowerUp[]>) => {
+      if (!targetHasBoomerang) return prevMap;
+      const list = [...(prevMap[targetId] || [])];
+      const bIdx = list.findIndex(pu => pu.type === 'BOOMERANG');
+      if (bIdx !== -1) {
+        list.splice(bIdx, 1);
+      }
+      return { ...prevMap, [targetId]: list };
+    };
+
     let customModalMessage: string | null = null;
 
     if (powerUpKey === 'THE_PUNISHER') {
-        const newMoney = Math.floor(targetPlayer.money * 0.75);
-        setPlayers(ps => ps.map(p => p.id === targetId ? {...p, money: newMoney} : p));
-        customModalMessage = `${powerUpInfo.icon} Cut ${targetPlayer.name}'s bankroll by 25% (now $${newMoney.toLocaleString()}).`;
-    } else if (powerUpKey === 'SWAP') {
-        const sourcePlayer = players.find(p => p.id === playerId);
-        const sourceFunds = sourcePlayer ? sourcePlayer.money : 0;
-        const targetFunds = targetPlayer.money;
-        setPlayers(ps => ps.map(p => {
-            if (p.id === playerId) return { ...p, money: targetFunds };
-            if (p.id === targetId) return { ...p, money: sourceFunds };
+        const newMoney = Math.floor(effectiveTargetPlayer.money * 0.75);
+        setPlayers(ps => ps.map(p => p.id === effectiveTargetId ? {...p, money: newMoney} : p));
+        if (targetHasBoomerang) {
+          setActivePowerUps(prev => removeBoomerangFromTarget(prev));
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected 💀 The Punisher back onto ${sourcePlayer.name}, cutting ${sourcePlayer.name}'s bankroll by 25% (now $${newMoney.toLocaleString()})!`;
+        } else {
+          customModalMessage = `${powerUpInfo.icon} Cut ${targetPlayer.name}'s bankroll by 25% (now $${newMoney.toLocaleString()}).`;
+        }
+    } else if (powerUpKey === 'PICKPOCKET') {
+        if (targetHasBoomerang) {
+          // Attacker gets pickpocketed for 20% by the defender!
+          const stolen = Math.floor(sourcePlayer.money * 0.20);
+          const newSourceMoney = Math.max(0, sourcePlayer.money - stolen);
+          const newTargetMoney = targetPlayer.money + stolen;
+          setPlayers(ps => ps.map(p => {
+            if (p.id === playerId) return { ...p, money: newSourceMoney };
+            if (p.id === targetId) return { ...p, money: newTargetMoney };
             return p;
-        }));
-        setBets(prevBets => {
-            let nextBets = { ...prevBets };
-            let changed = false;
-            if (nextBets[playerId]?.bet && Number(nextBets[playerId].bet) > targetFunds) {
-                nextBets[playerId] = { ...nextBets[playerId], bet: targetFunds };
-                changed = true;
-            }
-            if (nextBets[targetId]?.bet && Number(nextBets[targetId].bet) > sourceFunds) {
-                nextBets[targetId] = { ...nextBets[targetId], bet: sourceFunds };
-                changed = true;
-            }
-            return changed ? nextBets : prevBets;
-        });
-        customModalMessage = `${powerUpInfo.icon} Swapped bankrolls with ${targetPlayer.name} ($${sourceFunds.toLocaleString()} ↔ $${targetFunds.toLocaleString()}).`;
+          }));
+          setActivePowerUps(prev => removeBoomerangFromTarget(prev));
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected 🕵️‍♂️ Pickpocket and snatched $${stolen.toLocaleString()} (20%) from ${sourcePlayer.name}!`;
+        } else {
+          const stolen = Math.floor(targetPlayer.money * 0.20);
+          const newTargetMoney = Math.max(0, targetPlayer.money - stolen);
+          const newSourceMoney = sourcePlayer.money + stolen;
+          setPlayers(ps => ps.map(p => {
+            if (p.id === playerId) return { ...p, money: newSourceMoney };
+            if (p.id === targetId) return { ...p, money: newTargetMoney };
+            return p;
+          }));
+          customModalMessage = `${powerUpInfo.icon} Pickpocketed $${stolen.toLocaleString()} (20%) from ${targetPlayer.name}!`;
+        }
+    } else if (powerUpKey === 'SWAP') {
+        const sourceFunds = sourcePlayer.money;
+        const targetFunds = targetPlayer.money;
+        if (targetHasBoomerang) {
+          setActivePowerUps(prev => removeBoomerangFromTarget(prev));
+          if (sourceFunds < targetFunds) {
+            // Poorer attacker tried to Swap with a richer Boomerang holder: steal 25% of attacker's bankroll instead!
+            const penalty = Math.floor(sourceFunds * 0.25);
+            const newSource = Math.max(0, sourceFunds - penalty);
+            const newTarget = targetFunds + penalty;
+            setPlayers(ps => ps.map(p => {
+              if (p.id === playerId) return { ...p, money: newSource };
+              if (p.id === targetId) return { ...p, money: newTarget };
+              return p;
+            }));
+            customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} deflected ${sourcePlayer.name}'s Swap and seized $${penalty.toLocaleString()} (25% of ${sourcePlayer.name}'s vault)!`;
+          } else {
+            // Attacker was richer, so the swap favors the defender
+            setPlayers(ps => ps.map(p => {
+              if (p.id === playerId) return { ...p, money: targetFunds };
+              if (p.id === targetId) return { ...p, money: sourceFunds };
+              return p;
+            }));
+            customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected Swap in their favor ($${targetFunds.toLocaleString()} ↔ $${sourceFunds.toLocaleString()})!`;
+          }
+        } else {
+          setPlayers(ps => ps.map(p => {
+              if (p.id === playerId) return { ...p, money: targetFunds };
+              if (p.id === targetId) return { ...p, money: sourceFunds };
+              return p;
+          }));
+          setBets(prevBets => {
+              let nextBets = { ...prevBets };
+              let changed = false;
+              if (nextBets[playerId]?.bet && Number(nextBets[playerId].bet) > targetFunds) {
+                  nextBets[playerId] = { ...nextBets[playerId], bet: targetFunds };
+                  changed = true;
+              }
+              if (nextBets[targetId]?.bet && Number(nextBets[targetId].bet) > sourceFunds) {
+                  nextBets[targetId] = { ...nextBets[targetId], bet: sourceFunds };
+                  changed = true;
+              }
+              return changed ? nextBets : prevBets;
+          });
+          customModalMessage = `${powerUpInfo.icon} Swapped bankrolls with ${targetPlayer.name} ($${sourceFunds.toLocaleString()} ↔ $${targetFunds.toLocaleString()}).`;
+        }
     } else if (powerUpKey === 'CRUCIO') {
         setPlayers(ps => ps.map(p => {
-            if (p.id === targetId) {
+            if (p.id === effectiveTargetId) {
                 return { ...p, effects: [...p.effects, { type: 'CRUCIO', roundsLeft: 3 }] };
             }
             return p;
         }));
+        if (targetHasBoomerang) {
+          setActivePowerUps(prev => removeBoomerangFromTarget(prev));
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected ⛓️ Crucio back onto ${sourcePlayer.name} for 3 rounds!`;
+        }
     } else if (powerUpKey === 'SILENCER') {
-        const targetUsage = powerUpsUsedThisRound[targetId] || [];
+        const targetUsage = powerUpsUsedThisRound[effectiveTargetId] || [];
         const hasUsedPowerUp = targetUsage.length > 0;
-        // If they used one, silence carries to next round (2 ticks). If not, just this round (1 tick).
         const duration = hasUsedPowerUp ? 2 : 1;
 
         setPlayers(ps => ps.map(p => {
-            if (p.id === targetId) {
+            if (p.id === effectiveTargetId) {
                 return { ...p, effects: [...p.effects, { type: 'SILENCED', roundsLeft: duration }] };
             }
             return p;
         }));
+        if (targetHasBoomerang) {
+          setActivePowerUps(prev => removeBoomerangFromTarget(prev));
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected 🤐 Silencer back onto ${sourcePlayer.name}!`;
+        }
+    } else if (powerUpKey === 'HIGH_ROLLER') {
+        const minFloor = Math.max(1, Math.ceil(effectiveTargetPlayer.money * 0.50));
+        setActivePowerUps(prev => {
+          const base = removeBoomerangFromTarget(prev);
+          // Clear any conflicting BET_CAP on effectiveTargetId
+          const cleaned: Record<number, ActivePowerUp[]> = {};
+          for (const [k, list] of Object.entries(base)) {
+            cleaned[Number(k)] = (list || []).filter(
+              pu => !(pu.type === 'BET_CAP' && pu.target === effectiveTargetId)
+            );
+          }
+          cleaned[playerId] = [
+            ...(cleaned[playerId] || []),
+            { type: 'HIGH_ROLLER', target: effectiveTargetId, amount: minFloor },
+          ];
+          return cleaned;
+        });
+        setBets(prev => {
+          const curBet = prev[effectiveTargetId]?.bet;
+          if (curBet === undefined || curBet === '' || Number(curBet) < minFloor) {
+            return { ...prev, [effectiveTargetId]: { ...(prev[effectiveTargetId] || {}), bet: minFloor } };
+          }
+          return prev;
+        });
+        if (targetHasBoomerang) {
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected 🔥 High Roller back onto ${sourcePlayer.name} (forced minimum bet: $${minFloor.toLocaleString()})!`;
+        } else {
+          customModalMessage = `${powerUpInfo.icon} Forced ${targetPlayer.name}'s minimum wager to $${minFloor.toLocaleString()} (50% of bankroll) this hand!`;
+        }
+    } else if (powerUpKey === 'PEEKABOO') {
+        setActivePowerUps(prev => ({
+          ...prev,
+          [playerId]: [...(prev[playerId] || []), { type: 'PEEKABOO', target: targetId }],
+        }));
+        const tBet = bets[targetId];
+        const qType = currentSentence?.questionType || 'binary';
+        let spySummary = 'Undecided';
+        if (tBet) {
+          if (qType === 'multipleChoice') {
+            spySummary = tBet.selectedOption ? `"${tBet.selectedOption}"` : (tBet.splitOptions?.length ? `Split: ${tBet.splitOptions.join(' / ')}` : 'Undecided');
+          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+            spySummary = tBet.clozeAnswer ? `"${tBet.clozeAnswer}"` : (tBet.splitClozeAnswers?.some(Boolean) ? `Split: ${tBet.splitClozeAnswers.filter(Boolean).join(' / ')}` : 'Undecided');
+          } else {
+            spySummary = tBet.opinion === 'correct' ? '✓ Valid' : tBet.opinion === 'incorrect' ? '✕ Flawed' : 'Undecided';
+          }
+        }
+        const wagerStr = typeof tBet?.bet === 'number' ? `$${tBet.bet.toLocaleString()}` : '$0';
+        customModalMessage = `${powerUpInfo.icon} Spying on ${targetPlayer.name}: Currently ${spySummary} with a ${wagerStr} wager. Live updates will appear on your betting pad!`;
+    } else if (powerUpKey === 'COPYCAT') {
+        setActivePowerUps(prev => ({
+          ...prev,
+          [playerId]: [...(prev[playerId] || []), { type: 'COPYCAT', target: targetId }],
+        }));
+        customModalMessage = `${powerUpInfo.icon} Copycat linked to ${targetPlayer.name}! If they win this hand, you earn +50% of their winnings; if they miss, you lose $100.`;
+    } else if (powerUpKey === 'BLOOD_PACT') {
+        setActivePowerUps(prev => ({
+          ...prev,
+          [playerId]: [...(prev[playerId] || []), { type: 'BLOOD_PACT', target: targetId }],
+        }));
+        customModalMessage = `${powerUpInfo.icon} Blood Pact sealed between ${sourcePlayer.name} and ${targetPlayer.name}! Both win = +50% bonus each; if one misses, the loser pays $100 to the winner!`;
+        if (mpRoomCode && mpSeats[targetId]) {
+          setMpStudentNotifications(prev => ({
+            ...prev,
+            [targetId]: {
+              id: String(Date.now() + 1),
+              title: '🤝 Blood Pact Sealed!',
+              message: `${sourcePlayer.name} linked you in a Blood Pact for this round! If you both get the question right, you both get +50% payout. If one misses, the wrong player pays $100 to the right player!`,
+              icon: '🤝',
+            },
+          }));
+        }
     } else {
-        setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey, target: targetId, ...(powerUpKey === 'BET_CAP' ? { amount: BET_CAP_AMOUNT } : {})}]}));
+        setActivePowerUps(prev => {
+          const base = removeBoomerangFromTarget(prev);
+          // If BET_CAP is applied, remove any conflicting HIGH_ROLLER on effectiveTargetId
+          const cleaned: Record<number, ActivePowerUp[]> = {};
+          for (const [k, list] of Object.entries(base)) {
+            cleaned[Number(k)] =
+              powerUpKey === 'BET_CAP'
+                ? (list || []).filter(pu => !(pu.type === 'HIGH_ROLLER' && pu.target === effectiveTargetId))
+                : [...(list || [])];
+          }
+          cleaned[playerId] = [
+            ...(cleaned[playerId] || []),
+            {
+              type: powerUpKey,
+              target: effectiveTargetId,
+              ...(powerUpKey === 'BET_CAP' ? { amount: BET_CAP_AMOUNT } : {}),
+            },
+          ];
+          return cleaned;
+        });
+        if (targetHasBoomerang) {
+          customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected ${powerUpInfo.icon} ${powerUpInfo.name} back onto ${sourcePlayer.name}!`;
+        }
     }
     
-    // Automatically clamp target's bet even if their bet is already locked
+    // Automatically clamp effective target's bet even if their bet is already locked
     if (powerUpKey === 'BET_CAP') {
       setBets(prev => {
-        const targetBet = prev[targetId]?.bet;
+        const targetBet = prev[effectiveTargetId]?.bet;
         if (targetBet !== undefined && targetBet !== '' && Number(targetBet) > BET_CAP_AMOUNT) {
-          return { ...prev, [targetId]: { ...(prev[targetId] || {}), bet: BET_CAP_AMOUNT } };
+          return { ...prev, [effectiveTargetId]: { ...(prev[effectiveTargetId] || {}), bet: BET_CAP_AMOUNT } };
         }
         return prev;
       });
+    }
+
+    if (targetHasBoomerang && mpRoomCode && mpSeats[targetId]) {
+      setMpStudentNotifications(prev => ({
+        ...prev,
+        [targetId]: {
+          id: String(Date.now() + 2),
+          title: '🪃 Boomerang Triggered!',
+          message: `Your Boomerang reflected ${sourcePlayer.name}'s ${powerUpInfo.name} right back at them!`,
+          icon: '🪃',
+        },
+      }));
     }
 
     playSound('powerUp');
@@ -2294,13 +2925,17 @@ export function App() {
       });
       setMpStudentNotifications(prev => ({
         ...prev,
-        [playerId]: { id: String(Date.now()), title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon },
+        [playerId]: { id: String(Date.now()), title: targetHasBoomerang ? '🪃 Boomerang Reflected!' : powerUpInfo.name, message: finalMsg, icon: targetHasBoomerang ? '🪃' : powerUpInfo.icon },
       }));
     } else {
       setShowTargetModal(null);
     }
-    setShowPowerUpModal({ title: powerUpInfo.name, message: finalMsg, icon: powerUpInfo.icon });
-  }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats]); 
+    setShowPowerUpModal({
+      title: targetHasBoomerang ? '🪃 Boomerang Reflected!' : powerUpInfo.name,
+      message: finalMsg,
+      icon: targetHasBoomerang ? '🪃' : powerUpInfo.icon,
+    });
+  }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats, bets, currentSentence]); 
 
   const handleCancelTargetModal = useCallback((overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
     const playerId = overridePlayerId ?? showTargetModal?.playerId;
@@ -2728,7 +3363,7 @@ export function App() {
       const allMpReady = unfrozenPlayers.every(p => {
         if (mpSeats[p.id]?.lockedIn) return true;
         const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit);
+        return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit, currentSentence?.baseWord);
       });
       if (!allMpReady && !teacherRevealOverride) {
         setError({
@@ -2744,6 +3379,9 @@ export function App() {
         return;
       }
     } else {
+      let hasUnchangedBaseWordPlayer: string | null = null;
+      let hasInvalidKwtPlayer: string | null = null;
+      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
       const allValidBetsFinalized = unfrozenPlayers.every(p => {
         const playerBet = bets[p.id];
         const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
@@ -2754,22 +3392,69 @@ export function App() {
             ? (playerBet?.splitOptions?.length ?? 0) >= 1
             : Boolean(playerBet?.selectedOption?.trim());
         }
-        if (qType === 'openCloze') {
-          return hasSplitBet
-            ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() || playerBet?.splitClozeAnswers?.[1]?.trim())
-            : Boolean(playerBet?.clozeAnswer?.trim());
+        if (qType === 'openCloze' || qType === 'wordFormation') {
+          if (hasSplitBet) {
+            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
+            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
+            if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) {
+              hasUnchangedBaseWordPlayer = p.name;
+              return false;
+            }
+            return Boolean(w1 || w2);
+          }
+          const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
+          if (baseNorm && w && w === baseNorm) {
+            hasUnchangedBaseWordPlayer = p.name;
+            return false;
+          }
+          return Boolean(w);
+        }
+        if (qType === 'keyWordTransformation') {
+          const keyWord = currentSentence?.baseWord;
+          if (hasSplitBet) {
+            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
+            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
+            if (!w1 && !w2) return false;
+            if ((w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) || (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord))) {
+              hasInvalidKwtPlayer = p.name;
+              return false;
+            }
+            return true;
+          }
+          const w = (playerBet?.clozeAnswer || '').trim();
+          if (!w) return false;
+          if (!isValidKeyWordTransformationPhrase(w, keyWord)) {
+            hasInvalidKwtPlayer = p.name;
+            return false;
+          }
+          return true;
         }
         if (hasSplitBet) return true;
         return Boolean(playerBet?.opinion);
       });
 
       if (!allValidBetsFinalized && !teacherRevealOverride) { 
-        const promptMsg = qType === 'multipleChoice'
-          ? "All active (unfrozen) players must choose an option and enter a bet."
-          : qType === 'openCloze'
-            ? "All active (unfrozen) players must type their missing word(s) and enter a bet."
-            : "All active (unfrozen) players must select an opinion and enter a bet.";
-        setError({ title: "Invalid Bets", message: promptMsg });
+        const promptMsg = hasUnchangedBaseWordPlayer
+          ? `${hasUnchangedBaseWordPlayer} typed the unchanged base word "(${(currentSentence?.baseWord || '').toUpperCase()})". Players must transform the base word into a new grammatical form before revealing results!`
+          : hasInvalidKwtPlayer
+            ? `${hasInvalidKwtPlayer}'s answer must use 2 to 6 words and include the exact unchanged KEY WORD "${(currentSentence?.baseWord || '').toUpperCase()}"!`
+            : qType === 'multipleChoice'
+              ? "All active (unfrozen) players must choose an option and enter a bet."
+              : qType === 'keyWordTransformation'
+                ? `All active (unfrozen) players must type a 2–6 word phrase containing "${(currentSentence?.baseWord || '').toUpperCase()}" and enter a bet.`
+                : qType === 'wordFormation'
+                  ? "All active (unfrozen) players must type a transformed form of the base word and enter a bet."
+                  : qType === 'openCloze'
+                    ? "All active (unfrozen) players must type their missing word(s) and enter a bet."
+                    : "All active (unfrozen) players must select an opinion and enter a bet.";
+        setError({
+          title: hasUnchangedBaseWordPlayer
+            ? "Transform the Base Word!"
+            : hasInvalidKwtPlayer
+              ? "Check Key Word & Word Count!"
+              : "Invalid Bets",
+          message: promptMsg,
+        });
         return;
       }
     }
@@ -2815,17 +3500,26 @@ export function App() {
     // 1. Binary mode correction verification
     const verifications = await verifyPlayerCorrections();
 
-    // 2. Open Cloze instant (0ms) + single batched AI verification for unmatched words
+    // 2. Open Cloze, Word Formation & Key Word Transformation instant (0ms) + single batched AI verification
+    const baseWordNorm = qType === 'wordFormation' ? (currentSentence.baseWord || '').trim().toLowerCase() : '';
     const acceptedSet = new Set<string>();
     if (currentSentence.correctAnswer) {
-      acceptedSet.add(currentSentence.correctAnswer.trim().toLowerCase());
+      const cNorm = currentSentence.correctAnswer.trim().toLowerCase();
+      if (!baseWordNorm || cNorm !== baseWordNorm) {
+        acceptedSet.add(cNorm);
+      }
     }
     (currentSentence.acceptedAnswers || []).forEach(ans => {
-      if (ans && ans.trim()) acceptedSet.add(ans.trim().toLowerCase());
+      if (ans && ans.trim()) {
+        const aNorm = ans.trim().toLowerCase();
+        if (!baseWordNorm || aNorm !== baseWordNorm) {
+          acceptedSet.add(aNorm);
+        }
+      }
     });
 
-    const clozeWordVerifications: Record<string, { isCorrect: boolean; feedback: string }> = {};
-    if (qType === 'openCloze') {
+    const clozeWordVerifications: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> = {};
+    if (qType === 'openCloze' || qType === 'wordFormation') {
       const unmatchedWordsMap = new Map<string, number>(); // normalizedWord -> representative playerId
       validPlayers.forEach(p => {
         const b = bets[p.id];
@@ -2838,6 +3532,13 @@ export function App() {
         candidateWords.forEach(rawWord => {
           const norm = (rawWord || '').trim().toLowerCase();
           if (!norm) return;
+          if (baseWordNorm && norm === baseWordNorm) {
+            clozeWordVerifications[norm] = {
+              isCorrect: false,
+              feedback: `Must transform the base word "${(currentSentence.baseWord || '').toUpperCase()}" into a new grammatical form!`,
+            };
+            return;
+          }
           if (acceptedSet.has(norm)) {
             // Instant 0ms match!
             clozeWordVerifications[norm] = {
@@ -2851,7 +3552,9 @@ export function App() {
       });
 
       if (unmatchedWordsMap.size > 0) {
-        setProcessingStatus(`Grading ${unmatchedWordsMap.size} custom Open Cloze answer(s) with AI Judge...`);
+        setProcessingStatus(
+          `Grading ${unmatchedWordsMap.size} custom ${qType === 'wordFormation' ? 'Word Formation' : 'Open Cloze'} answer(s) with AI Judge...`
+        );
         const unmatchedWordsList = Array.from(unmatchedWordsMap.keys());
 
         try {
@@ -2859,13 +3562,78 @@ export function App() {
             currentSentence.text,
             currentSentence.correctAnswer || '',
             currentSentence.acceptedAnswers || [],
-            unmatchedWordsList
+            unmatchedWordsList,
+            qType,
+            currentSentence.baseWord
           );
           Object.entries(batchResults).forEach(([wordKey, res]) => {
             clozeWordVerifications[wordKey.trim().toLowerCase()] = res;
           });
         } catch (err) {
-          console.error("Failed batched open cloze verification:", err);
+          console.error("Failed batched cloze verification:", err);
+        }
+      }
+    } else if (qType === 'keyWordTransformation') {
+      const kwtToVerifyWithAi = new Set<string>();
+      validPlayers.forEach(p => {
+        const b = bets[p.id];
+        if (!b) return;
+        const pSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
+        const candidatePhrases = pSplit
+          ? [b.splitClozeAnswers?.[0], b.splitClozeAnswers?.[1]]
+          : [b.clozeAnswer];
+
+        candidatePhrases.forEach(rawPhrase => {
+          const norm = (rawPhrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          if (!norm) return;
+          const detResult = GeminiService.evaluateKeyWordTransformationDeterministic(
+            rawPhrase || '',
+            currentSentence.correctAnswer || '',
+            currentSentence.acceptedAnswers || [],
+            currentSentence.baseWord,
+            currentSentence.mark1Parts,
+            currentSentence.mark2Parts
+          );
+          clozeWordVerifications[norm] = detResult;
+          // If deterministic check gave < 2 marks (and didn't fail the mandatory key-word/word-count check), consult AI Judge for valid alternative phrasing
+          const hasValidKeyAndCount = isValidKeyWordTransformationPhrase(rawPhrase, currentSentence.baseWord);
+          if (detResult.marks < 2 && hasValidKeyAndCount) {
+            kwtToVerifyWithAi.add(norm);
+          }
+        });
+      });
+
+      if (kwtToVerifyWithAi.size > 0) {
+        setProcessingStatus(
+          `Grading ${kwtToVerifyWithAi.size} Key Word Transformation answer(s) with Cambridge 2-Mark AI Judge...`
+        );
+        try {
+          const batchResults = await GeminiService.verifyOpenClozeBatch(
+            currentSentence.text,
+            currentSentence.correctAnswer || '',
+            currentSentence.acceptedAnswers || [],
+            Array.from(kwtToVerifyWithAi),
+            'keyWordTransformation',
+            currentSentence.baseWord,
+            currentSentence.leadInSentence,
+            currentSentence.mark1Parts,
+            currentSentence.mark2Parts
+          );
+          Object.entries(batchResults).forEach(([phraseKey, aiRes]) => {
+            const normKey = phraseKey.trim().toLowerCase().replace(/\s+/g, ' ');
+            const existing = clozeWordVerifications[normKey];
+            const aiMarks: 0 | 1 | 2 = aiRes.marks === 2 ? 2 : aiRes.marks === 1 ? 1 : (aiRes.isCorrect ? 2 : 0);
+            const existingMarks: 0 | 1 | 2 = existing?.marks ?? 0;
+            if (!existing || aiMarks >= existingMarks) {
+              clozeWordVerifications[normKey] = {
+                isCorrect: aiMarks >= 1,
+                marks: aiMarks,
+                feedback: aiRes.feedback || existing?.feedback || '',
+              };
+            }
+          });
+        } catch (err) {
+          console.error("Failed batched Key Word Transformation verification:", err);
         }
       }
     }
@@ -2875,9 +3643,29 @@ export function App() {
       return opt.trim().toLowerCase() === currentSentence.correctAnswer.trim().toLowerCase();
     };
 
+    const getKwtPhraseMarks = (phrase: string | undefined): 0 | 1 | 2 => {
+      const norm = (phrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!norm) return 0;
+      const entry = clozeWordVerifications[norm];
+      if (entry && entry.marks !== undefined) return entry.marks;
+      const det = GeminiService.evaluateKeyWordTransformationDeterministic(
+        phrase || '',
+        currentSentence.correctAnswer || '',
+        currentSentence.acceptedAnswers || [],
+        currentSentence.baseWord,
+        currentSentence.mark1Parts,
+        currentSentence.mark2Parts
+      );
+      return det.marks;
+    };
+
     const isClozeWordCorrect = (word: string | undefined): boolean => {
+      if (qType === 'keyWordTransformation') {
+        return getKwtPhraseMarks(word) >= 1;
+      }
       const norm = (word || '').trim().toLowerCase();
       if (!norm) return false;
+      if (baseWordNorm && norm === baseWordNorm) return false;
       if (acceptedSet.has(norm)) return true;
       return Boolean(clozeWordVerifications[norm]?.isCorrect);
     };
@@ -2920,9 +3708,9 @@ export function App() {
         uniqueKeys.forEach(key => {
           choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
         });
-      } else if (qType === 'openCloze') {
+      } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
         const words: string[] = pSplit ? (b.splitClozeAnswers || []) : (b.clozeAnswer ? [b.clozeAnswer] : []);
-        const uniqueKeys = Array.from(new Set<string>(words.map(w => (w || '').trim().toLowerCase()).filter(Boolean)));
+        const uniqueKeys = Array.from(new Set<string>(words.map(w => (w || '').trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)));
         uniqueKeys.forEach(key => {
           choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
         });
@@ -2944,7 +3732,7 @@ export function App() {
           }
           return isMcOptionCorrect(b.selectedOption);
         }
-        if (qType === 'openCloze') {
+        if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
           if (pSplit) {
             return (b.splitClozeAnswers || []).some(w => isClozeWordCorrect(w));
           }
@@ -2975,98 +3763,121 @@ export function App() {
         const count = key ? (choiceFrequency[key] || 0) : 0;
         return (count > 0 && count < maxChoiceCount) || (winningPlayersCount > 0 && winningPlayersCount < validPlayers.length - winningPlayersCount);
       }
-      if (qType === 'openCloze') {
+      if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
         const chosen = pSplit
           ? (b.splitClozeAnswers || []).find(w => isClozeWordCorrect(w))
           : b.clozeAnswer;
-        const key = (chosen || '').trim().toLowerCase();
+        const key = (chosen || '').trim().toLowerCase().replace(/\s+/g, ' ');
         const count = key ? (choiceFrequency[key] || 0) : 0;
         return (count > 0 && count < maxChoiceCount) || (winningPlayersCount > 0 && winningPlayersCount < validPlayers.length - winningPlayersCount);
       }
       return false;
     };
 
-    const updatedPlayers = players.map(player => {
-      if (!activePlayers.find(ap => ap.id === player.id)) return player; 
-      
-      const allActivePowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+    // Pass 1: Evaluate each player's individual answer, wager, and personal modifiers
+    interface PlayerSettlementDraft {
+      player: Player;
+      participated: boolean;
+      isFrozen: boolean;
+      satOut: boolean;
+      finalBet: number;
+      isWin: boolean;
+      marksAwarded?: 0 | 1 | 2;
+      outcomeAmount: number;
+      outcomeText: string;
+      correctionFeedbackText: string;
+      playerAnswerDisplay: string;
+      syntheticOpinion: 'correct' | 'incorrect';
+      playerBetData?: Bet;
+      hasSplitBet: boolean;
+      teachersPetAwarded: boolean;
+    }
+
+    const allActivePowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
+    const draftsById = new Map<number, PlayerSettlementDraft>();
+
+    players.forEach(player => {
+      if (!activePlayers.find(ap => ap.id === player.id)) return;
       const playerPowerUps = (activePowerUps[player.id] || []) as ActivePowerUp[];
 
-      const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+      const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === ('SUB_ZERO' as any));
       if (isFrozen) {
-          newRoundResultsData.push({
-            name: player.name,
-            bet: 0,
-            opinion: 'correct',
-            questionType: qType,
-            playerAnswerDisplay: 'Frozen ❄️',
-            outcomeText: 'Frozen ❄️',
-            newTotal: player.money,
-            correctionFeedback: '',
-            amountChanged: 0,
-          });
-          newRoundPlayerResults.push({
-            playerId: player.id,
-            playerName: player.name,
-            playerAvatar: player.avatar,
-            bet: 0,
-            opinion: 'correct',
-            questionType: qType,
-            playerAnswerDisplay: 'Frozen ❄️',
-            isWin: false,
-            amountChanged: 0,
-            newTotal: player.money,
-          });
-          const updatedEffects = player.effects.map(e => ({...e, roundsLeft: e.roundsLeft - 1})).filter(e => e.roundsLeft > 0 || e.roundsLeft === -1);
-          return { ...player, effects: updatedEffects };
+        draftsById.set(player.id, {
+          player,
+          participated: false,
+          isFrozen: true,
+          satOut: false,
+          finalBet: 0,
+          isWin: false,
+          outcomeAmount: 0,
+          outcomeText: 'Frozen ❄️',
+          correctionFeedbackText: '',
+          playerAnswerDisplay: 'Frozen ❄️',
+          syntheticOpinion: 'correct',
+          hasSplitBet: false,
+          teachersPetAwarded: false,
+        });
+        return;
       }
 
-      // If turn timer is active in single-screen mode (or teacher overrode) and player did not place a complete bet, they sit out as if frozen
       const satOut = (isTurnTimerEnabled && !mpRoomCode)
         ? !hasPlayerPlacedBet(player.id)
         : !hasPlayerPlacedBet(player.id) && teacherRevealOverride;
       if (satOut) {
-          newRoundResultsData.push({
-            name: player.name,
-            bet: 0,
-            opinion: 'correct',
-            questionType: qType,
-            playerAnswerDisplay: 'Sat Out ⏱️',
-            outcomeText: 'Sat Out ⏱️',
-            newTotal: player.money,
-            correctionFeedback: '',
-            amountChanged: 0,
-          });
-          newRoundPlayerResults.push({
-            playerId: player.id,
-            playerName: player.name,
-            playerAvatar: player.avatar,
-            bet: 0,
-            opinion: 'correct',
-            questionType: qType,
-            playerAnswerDisplay: 'Sat Out ⏱️',
-            isWin: false,
-            amountChanged: 0,
-            newTotal: player.money,
-          });
-          const updatedEffects = player.effects.map(e => ({...e, roundsLeft: e.roundsLeft - 1})).filter(e => e.roundsLeft > 0 || e.roundsLeft === -1);
-          return { ...player, effects: updatedEffects };
+        draftsById.set(player.id, {
+          player,
+          participated: false,
+          isFrozen: false,
+          satOut: true,
+          finalBet: 0,
+          isWin: false,
+          outcomeAmount: 0,
+          outcomeText: 'Sat Out ⏱️',
+          correctionFeedbackText: '',
+          playerAnswerDisplay: 'Sat Out ⏱️',
+          syntheticOpinion: 'correct',
+          hasSplitBet: false,
+          teachersPetAwarded: false,
+        });
+        return;
       }
 
-      let playerBetData = bets[player.id];
-      const betAmount = (typeof playerBetData?.bet === 'number') ? playerBetData.bet : 0;
+      const playerBetData = bets[player.id];
+      const betAmount = typeof playerBetData?.bet === 'number' ? playerBetData.bet : 0;
       const hasSplitBet = playerPowerUps.some(pu => pu.type === 'SPLIT_BET');
       const playerCaps = allActivePowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerPowerUps.includes(pu)));
-      const isPlayerBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-      const playerCapLimit = playerCaps.length > 0 
+      const isPlayerBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === ('BET_CAP' as any));
+      const playerCapLimit = playerCaps.length > 0
         ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
         : (isPlayerBetCapped ? 50 : BET_CAP_AMOUNT);
       let finalBet = isPlayerBetCapped ? Math.min(betAmount, playerCapLimit) : betAmount;
-      
+
+      // Enforce High Roller minimum floor if targeted
+      const playerHighRollers = allActivePowerUps.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
+      if (playerHighRollers.length > 0 && player.money > 0) {
+        const minRollerFloor = Math.min(
+          player.money,
+          Math.max(
+            1,
+            playerHighRollers.reduce(
+              (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
+              Math.ceil(player.money * 0.5)
+            )
+          )
+        );
+        finalBet = Math.max(finalBet, minRollerFloor);
+      }
+
+      const hasDoubleOrNothing = playerPowerUps.some(pu => pu.type === 'DOUBLE_OR_NOTHING');
+      const hasCrowdSurfer = playerPowerUps.some(pu => pu.type === 'CROWD_SURFER');
+      const hasUnderdog = playerPowerUps.some(pu => pu.type === 'UNDERDOG');
+      const qualifiesUnderdog = hasUnderdog && isPlayerUnderdog(player.id, players);
+
       let outcomeAmount = 0;
       let outcomeText = '';
       let correctionBonusApplied = false;
       let isWin = false;
+      let marksAwarded: 0 | 1 | 2 | undefined = undefined;
       let correctionFeedbackText = '';
       let playerAnswerDisplay = '';
 
@@ -3086,7 +3897,7 @@ export function App() {
         } else {
           playerAnswerDisplay = formatMcOptionWithLetter(playerBetData?.selectedOption);
         }
-      } else if (qType === 'openCloze') {
+      } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
         if (hasSplitBet) {
           const w1 = playerBetData?.splitClozeAnswers?.[0]?.trim() || '';
           const w2 = playerBetData?.splitClozeAnswers?.[1]?.trim() || '';
@@ -3145,7 +3956,64 @@ export function App() {
                       playSound('lose', loseSoundCount++);
                   }
               }
-          } else if (qType === 'openCloze') {
+          } else if (qType === 'keyWordTransformation') {
+              const w1 = (playerBetData?.splitClozeAnswers?.[0] || '').trim();
+              const w2 = (playerBetData?.splitClozeAnswers?.[1] || '').trim();
+              const isSingleOrDuplicate =
+                (Boolean(w1) && !w2) ||
+                (!w1 && Boolean(w2)) ||
+                (Boolean(w1) && Boolean(w2) && w1.toLowerCase().replace(/\s+/g, ' ') === w2.toLowerCase().replace(/\s+/g, ' '));
+              if (isSingleOrDuplicate) {
+                  const singlePhrase = w1 || w2;
+                  const m = getKwtPhraseMarks(singlePhrase);
+                  marksAwarded = m;
+                  if (m === 2) {
+                      isWin = true;
+                      outcomeAmount = wager * 2;
+                      outcomeText = `2/2 Marks · Split 2× Win (+$${outcomeAmount})!`;
+                      playSound('win', winSoundCount++);
+                  } else if (m === 1) {
+                      isWin = true;
+                      outcomeAmount = wager;
+                      outcomeText = `1/2 Mark · Split 1× Win (+$${outcomeAmount})!`;
+                      playSound('win', winSoundCount++);
+                  } else {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `0/2 Marks · Split Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  }
+              } else {
+                  const m1 = getKwtPhraseMarks(w1);
+                  const m2 = getKwtPhraseMarks(w2);
+                  const bestMark: 0 | 1 | 2 = (Math.max(m1, m2) as 0 | 1 | 2);
+                  marksAwarded = bestMark;
+                  const halfWager = Math.round(wager * 0.5);
+                  if (m1 === 0 && m2 === 0) {
+                      isWin = false;
+                      outcomeAmount = -wager;
+                      outcomeText = `0/2 Marks · 50/50 Split Loss (-$${wager})`;
+                      playSound('lose', loseSoundCount++);
+                  } else {
+                      isWin = true;
+                      const gain1 = m1 === 2 ? halfWager * 2 : m1 === 1 ? halfWager : 0;
+                      const gain2 = m2 === 2 ? halfWager * 2 : m2 === 1 ? halfWager : 0;
+                      outcomeAmount = gain1 + gain2;
+                      outcomeText = `50/50 Split (${m1}/2 & ${m2}/2 Marks: +$${outcomeAmount})!`;
+                      playSound('win', winSoundCount++);
+                  }
+              }
+              const fbParts: string[] = [];
+              const seenNorms = new Set<string>();
+              [w1, w2].forEach(w => {
+                const norm = (w || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                if (norm && !seenNorms.has(norm) && clozeWordVerifications[norm]?.feedback) {
+                  seenNorms.add(norm);
+                  fbParts.push(clozeWordVerifications[norm].feedback);
+                }
+              });
+              if (fbParts.length > 0) correctionFeedbackText = fbParts.join(' · ');
+          } else if (qType === 'openCloze' || qType === 'wordFormation') {
               const w1 = (playerBetData?.splitClozeAnswers?.[0] || '').trim();
               const w2 = (playerBetData?.splitClozeAnswers?.[1] || '').trim();
               const isSingleOrDuplicateCloze =
@@ -3237,12 +4105,34 @@ export function App() {
               }
           }
 
+          // Double or Nothing on Split Bet
+          if (hasDoubleOrNothing) {
+              const failedMandatoryCorrection =
+                qType === 'binary' && !currentSentence.isCorrect && !verifications[player.id]?.isCorrect;
+              if (isWin && !failedMandatoryCorrection) {
+                  outcomeAmount = Math.round(outcomeAmount * 3);
+                  outcomeText += ' + Double or Nothing (3×)! 🎲';
+              } else {
+                  isWin = false;
+                  outcomeAmount = -Math.round(wager * 1.5);
+                  outcomeText = failedMandatoryCorrection
+                    ? 'Double or Nothing Loss (Failed Mandatory Correction: -1.5×)! 🎲'
+                    : 'Double or Nothing Loss (-1.5×)! 🎲';
+              }
+          }
+
           // Shared Split Bet modifiers on Win / Loss
           if (isWin && outcomeAmount > 0) {
               const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
               if (hasLoneWolf && winningPlayersCount === 1) {
                   outcomeAmount = Math.round(outcomeAmount * 3);
                   outcomeText += ' + Lone Wolf (3x Payout)! 🐺';
+              }
+              if (hasCrowdSurfer && winningPlayersCount > 1) {
+                  const otherWinners = winningPlayersCount - 1;
+                  const crowdBonus = Math.round(outcomeAmount * (0.10 * otherWinners));
+                  outcomeAmount += crowdBonus;
+                  outcomeText += ` + Crowd Surfer (+${otherWinners * 10}%)! 📢`;
               }
               const hasBountyHunter = playerPowerUps.some(pu => pu.type === 'BOUNTY_HUNTER');
               if (hasBountyHunter && isPlayerInMinority(player.id)) {
@@ -3254,7 +4144,11 @@ export function App() {
                   outcomeAmount = Math.round(outcomeAmount * JACKPOT_MULTIPLIER);
                   outcomeText += ' + Jackpot! 🎰';
               }
-          } else if (!isWin && outcomeAmount < 0 && (qType === 'multipleChoice' || qType === 'openCloze')) {
+              if (qualifiesUnderdog) {
+                  outcomeAmount = Math.round(outcomeAmount * 2.5);
+                  outcomeText += ' + Underdog Surge (2.5×)! 🚀';
+              }
+          } else if (!isWin && outcomeAmount < 0 && (qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation' || hasDoubleOrNothing)) {
               let lossAmount = Math.abs(outcomeAmount);
               const hasImmunity = playerPowerUps.some(pu => pu.type === 'IMMUNITY_IDOL');
               if (hasImmunity) {
@@ -3279,43 +4173,93 @@ export function App() {
       } else {
           let playerGuessedCorrectly = false;
           if (qType === 'multipleChoice') {
-              if (!playerBetData?.selectedOption) return player;
+              if (!playerBetData?.selectedOption) return;
               playerGuessedCorrectly = isMcOptionCorrect(playerBetData.selectedOption);
-          } else if (qType === 'openCloze') {
-              if (!playerBetData?.clozeAnswer?.trim()) return player;
+          } else if (qType === 'keyWordTransformation') {
+              if (!playerBetData?.clozeAnswer?.trim()) return;
+              const kwtMarks = getKwtPhraseMarks(playerBetData.clozeAnswer);
+              marksAwarded = kwtMarks;
+              playerGuessedCorrectly = kwtMarks >= 1;
+              const norm = playerBetData.clozeAnswer.trim().toLowerCase().replace(/\s+/g, ' ');
+              if (clozeWordVerifications[norm]?.feedback) {
+                  correctionFeedbackText = clozeWordVerifications[norm].feedback;
+              }
+          } else if (qType === 'openCloze' || qType === 'wordFormation') {
+              if (!playerBetData?.clozeAnswer?.trim()) return;
               playerGuessedCorrectly = isClozeWordCorrect(playerBetData.clozeAnswer);
               const norm = playerBetData.clozeAnswer.trim().toLowerCase();
               if (clozeWordVerifications[norm]?.feedback) {
                   correctionFeedbackText = clozeWordVerifications[norm].feedback;
               }
           } else {
-              if (!playerBetData || !playerBetData.opinion) return player;
+              if (!playerBetData || !playerBetData.opinion) return;
               playerGuessedCorrectly = (playerBetData.opinion === 'correct' && currentSentence.isCorrect) || 
                                        (playerBetData.opinion === 'incorrect' && !currentSentence.isCorrect);
           }
 
-          if (playerGuessedCorrectly) {
+          // Confirmed Rule: For Double or Nothing in Binary mode on a flawed sentence, a valid correction is mandatory!
+          const failedDoubleOrNothingCorrection =
+            hasDoubleOrNothing &&
+            qType === 'binary' &&
+            !currentSentence.isCorrect &&
+            playerGuessedCorrectly &&
+            !verifications[player.id]?.isCorrect;
+
+          if (playerGuessedCorrectly && !failedDoubleOrNothingCorrection) {
             isWin = true;
             playSound('win', winSoundCount++);
-            let winnings = finalBet;
+            const baseWinMultiplier = qType === 'keyWordTransformation' && marksAwarded === 2 ? 2 : 1;
+            let winnings = finalBet * baseWinMultiplier;
+
+            if (hasDoubleOrNothing) {
+                winnings = qType === 'keyWordTransformation'
+                  ? (marksAwarded === 2 ? finalBet * 4 : finalBet * 2)
+                  : finalBet * 3;
+                if (qType === 'binary' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+                  correctionBonusApplied = true;
+                }
+            }
 
             const hasLoneWolf = playerPowerUps.some(pu => pu.type === 'LONE_WOLF');
             const isLoneWolfActive = hasLoneWolf && winningPlayersCount === 1;
             if (isLoneWolfActive) {
-                winnings = finalBet * 3;
+                winnings = winnings * 3;
             }
 
             const isHalfBaked = allActivePowerUps.some(pu => pu.type === 'HALF_BAKED' && pu.target === player.id);
             if (isHalfBaked) winnings *= 0.5;
             outcomeAmount = Math.round(winnings);
-            outcomeText = isLoneWolfActive ? 'Win (Lone Wolf 3x!) 🐺' : 'Win';
+            if (qType === 'keyWordTransformation') {
+              const markPrefix = marksAwarded === 2 ? '2/2 Marks · 2× Win' : '1/2 Mark · 1× Win';
+              outcomeText = hasDoubleOrNothing
+                ? isLoneWolfActive
+                  ? `${markPrefix} (Double or Nothing + Lone Wolf 3×!) 🎲🐺`
+                  : `${markPrefix} (Double or Nothing ${marksAwarded === 2 ? '4×' : '2×'}!) 🎲`
+                : isLoneWolfActive
+                  ? `${markPrefix} (Lone Wolf 3×!) 🐺`
+                  : `${markPrefix}!`;
+            } else {
+              outcomeText = hasDoubleOrNothing
+                ? isLoneWolfActive
+                  ? 'Win (Double or Nothing 3× + Lone Wolf 3×!) 🎲🐺'
+                  : 'Win (Double or Nothing 3×!) 🎲'
+                : isLoneWolfActive
+                  ? 'Win (Lone Wolf 3x!) 🐺'
+                  : 'Win';
+            }
             
+            if (hasCrowdSurfer && winningPlayersCount > 1) {
+                const otherWinners = winningPlayersCount - 1;
+                const crowdBonus = Math.round(outcomeAmount * (0.10 * otherWinners));
+                outcomeAmount += crowdBonus;
+                outcomeText += ` + Crowd Surfer (+${otherWinners * 10}%)! 📢`;
+            }
             const hasBountyHunter = playerPowerUps.some(pu => pu.type === 'BOUNTY_HUNTER');
             if (hasBountyHunter && isPlayerInMinority(player.id)) {
                 outcomeAmount = Math.round(outcomeAmount * 1.5);
                 outcomeText += ' + Bounty! 🎯';
             }
-            if (qType === 'binary' && playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
+            if (!hasDoubleOrNothing && qType === 'binary' && playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect && verifications[player.id]?.isCorrect) {
               outcomeAmount += finalBet; 
               outcomeText += ' + Correction! 🧠';
               correctionBonusApplied = true;
@@ -3329,6 +4273,10 @@ export function App() {
             if (hasJackpot) {
               outcomeAmount = Math.round(outcomeAmount * JACKPOT_MULTIPLIER);
               outcomeText += ' + Jackpot! 🎰';
+            }
+            if (qualifiesUnderdog) {
+              outcomeAmount = Math.round(outcomeAmount * 2.5);
+              outcomeText += ' + Underdog Surge (2.5×)! 🚀';
             }
             const hasSnowball = playerPowerUps.some(pu => pu.type === 'SNOWBALL');
             if (hasSnowball && player.winStreak > 0) {
@@ -3345,8 +4293,14 @@ export function App() {
           } else { 
             isWin = false;
             playSound('lose', loseSoundCount++);
-            let lossAmount = finalBet;
-            outcomeText = 'Lose';
+            let lossAmount = hasDoubleOrNothing ? Math.round(finalBet * 1.5) : finalBet;
+            outcomeText = failedDoubleOrNothingCorrection
+              ? 'Double or Nothing Loss (Failed Mandatory Correction: -1.5×)! 🎲'
+              : hasDoubleOrNothing
+                ? 'Double or Nothing Loss (-1.5×)! 🎲'
+                : qType === 'keyWordTransformation'
+                  ? '0/2 Marks · Lose'
+                  : 'Lose';
             const hasImmunity = playerPowerUps.some(pu => pu.type === 'IMMUNITY_IDOL');
             if (hasImmunity) {
                 lossAmount = 0;
@@ -3387,16 +4341,6 @@ export function App() {
           outcomeText += ` + Teacher's Pet (+$${petGrant.toLocaleString()})! 🍎`;
           teachersPetAwarded = true;
       }
-      
-      let newMoney = Math.max(0, player.money + outcomeAmount);
-
-      // Check for Second Chance
-      const secondChanceEffect = player.effects.find(e => e.type === 'SECOND_CHANCE');
-      if (newMoney <= 0 && secondChanceEffect) {
-          newMoney = 100;
-          outcomeText += " (Second Chance!) 👼";
-          // Mark to remove later in updatedEffects
-      }
 
       // Updated Correction Feedback Logic to support Split Bet (binary mode only)
       if (qType === 'binary') {
@@ -3410,9 +4354,166 @@ export function App() {
             else if((hasSplitBet && !currentSentence.isCorrect) || (playerBetData?.opinion === 'incorrect' && !currentSentence.isCorrect)) { 
                correctionFeedbackText = `Rejected for bonus. ${correctionFeedbackText}`;
             } else correctionFeedbackText = `N/A (Sentence was correct).`;
+        } else if (hasDoubleOrNothing && !currentSentence.isCorrect && playerBetData?.opinion === 'incorrect') {
+            correctionFeedbackText = 'Double or Nothing requires a valid correction on flawed sentences!';
         }
       }
-      
+
+      const syntheticOpinion: 'correct' | 'incorrect' = qType === 'binary'
+        ? (hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'))
+        : (isWin ? 'correct' : 'incorrect');
+
+      draftsById.set(player.id, {
+        player,
+        participated: true,
+        isFrozen: false,
+        satOut: false,
+        finalBet,
+        isWin,
+        marksAwarded,
+        outcomeAmount,
+        outcomeText,
+        correctionFeedbackText,
+        playerAnswerDisplay,
+        syntheticOpinion,
+        playerBetData,
+        hasSplitBet,
+        teachersPetAwarded,
+      });
+    });
+
+    // Pass 2: Apply relational power-ups (COPYCAT, BLOOD_PACT, and SCAVENGER) across participating players
+    const baseWinningAmounts = new Map<number, number>();
+    const baseLosingAmounts = new Map<number, number>();
+    draftsById.forEach((d, pid) => {
+      baseWinningAmounts.set(pid, Math.max(0, d.outcomeAmount));
+      baseLosingAmounts.set(pid, !d.isWin && d.outcomeAmount < 0 ? Math.abs(d.outcomeAmount) : 0);
+    });
+
+    for (const [casterIdStr, puList] of Object.entries(activePowerUps) as [string, ActivePowerUp[]][]) {
+      const casterId = Number(casterIdStr);
+      const casterDraft = draftsById.get(casterId);
+      if (!casterDraft || !casterDraft.participated) continue;
+
+      for (const pu of puList || []) {
+        if (pu.type === 'COPYCAT' && pu.target !== undefined) {
+          const targetDraft = draftsById.get(pu.target);
+          if (!targetDraft || !targetDraft.participated) continue;
+          if (targetDraft.isWin) {
+            const targetBaseWin = baseWinningAmounts.get(pu.target) ?? Math.max(0, targetDraft.outcomeAmount);
+            const copyBonus = Math.max(50, Math.round(targetBaseWin * 0.50));
+            casterDraft.outcomeAmount += copyBonus;
+            casterDraft.outcomeText += ` + Copycat (${targetDraft.player.name}: +$${copyBonus.toLocaleString()})! 🪞`;
+          } else {
+            casterDraft.outcomeAmount -= 100;
+            casterDraft.outcomeText += ` - Copycat Penalty (${targetDraft.player.name} missed: -$100) 🪞`;
+          }
+        } else if (pu.type === 'BLOOD_PACT' && pu.target !== undefined) {
+          const targetDraft = draftsById.get(pu.target);
+          if (!targetDraft || !targetDraft.participated) continue;
+          if (casterDraft.isWin && targetDraft.isWin) {
+            const cBase = baseWinningAmounts.get(casterId) ?? Math.max(0, casterDraft.outcomeAmount);
+            const tBase = baseWinningAmounts.get(pu.target) ?? Math.max(0, targetDraft.outcomeAmount);
+            const cBonus = Math.max(50, Math.round(cBase * 0.50));
+            const tBonus = Math.max(50, Math.round(tBase * 0.50));
+            casterDraft.outcomeAmount += cBonus;
+            casterDraft.outcomeText += ` + Blood Pact (+$${cBonus.toLocaleString()})! 🤝`;
+            targetDraft.outcomeAmount += tBonus;
+            targetDraft.outcomeText += ` + Blood Pact (+$${tBonus.toLocaleString()})! 🤝`;
+          } else if (casterDraft.isWin && !targetDraft.isWin) {
+            casterDraft.outcomeAmount += 100;
+            casterDraft.outcomeText += ` + Blood Pact Tribute (+$100 from ${targetDraft.player.name})! 🤝`;
+            targetDraft.outcomeAmount -= 100;
+            targetDraft.outcomeText += ` - Blood Pact Tribute (-$100 to ${casterDraft.player.name}) 🤝`;
+          } else if (!casterDraft.isWin && targetDraft.isWin) {
+            targetDraft.outcomeAmount += 100;
+            targetDraft.outcomeText += ` + Blood Pact Tribute (+$100 from ${casterDraft.player.name})! 🤝`;
+            casterDraft.outcomeAmount -= 100;
+            casterDraft.outcomeText += ` - Blood Pact Tribute (-$100 to ${targetDraft.player.name}) 🤝`;
+          } else {
+            casterDraft.outcomeAmount -= 100;
+            casterDraft.outcomeText += ` - Blood Pact Broken (-$100) 🤝`;
+            targetDraft.outcomeAmount -= 100;
+            targetDraft.outcomeText += ` - Blood Pact Broken (-$100) 🤝`;
+          }
+        } else if (pu.type === 'SCAVENGER') {
+          let totalOtherLosses = 0;
+          let losingRivalsCount = 0;
+          draftsById.forEach((otherDraft, otherPid) => {
+            if (otherPid === casterId || !otherDraft.participated) return;
+            const lostAmt = baseLosingAmounts.get(otherPid) ?? 0;
+            if (lostAmt > 0) {
+              totalOtherLosses += lostAmt;
+              losingRivalsCount += 1;
+            }
+          });
+          const scavenged = Math.min(500, Math.round(totalOtherLosses * 0.25));
+          if (scavenged > 0) {
+            casterDraft.outcomeAmount += scavenged;
+            casterDraft.outcomeText += ` + Scavenger (+$${scavenged.toLocaleString()} from ${losingRivalsCount} losing bet${losingRivalsCount === 1 ? '' : 's'})! 🦅`;
+          } else {
+            casterDraft.outcomeText += ' (Scavenger: $0 — no rival losses) 🦅';
+          }
+        }
+      }
+    }
+
+    // Finalize player money, Second Chance, history, and round results
+    const updatedPlayers = players.map(player => {
+      const draft = draftsById.get(player.id);
+      if (!draft) return player;
+
+      if (!draft.participated) {
+        newRoundResultsData.push({
+          name: player.name,
+          bet: 0,
+          opinion: 'correct',
+          questionType: qType,
+          playerAnswerDisplay: draft.playerAnswerDisplay,
+          outcomeText: draft.outcomeText,
+          newTotal: player.money,
+          correctionFeedback: '',
+          amountChanged: 0,
+        });
+        newRoundPlayerResults.push({
+          playerId: player.id,
+          playerName: player.name,
+          playerAvatar: player.avatar,
+          bet: 0,
+          opinion: 'correct',
+          questionType: qType,
+          playerAnswerDisplay: draft.playerAnswerDisplay,
+          isWin: false,
+          amountChanged: 0,
+          newTotal: player.money,
+        });
+        const updatedEffects = player.effects.map(e => ({...e, roundsLeft: e.roundsLeft - 1})).filter(e => e.roundsLeft > 0 || e.roundsLeft === -1);
+        return { ...player, effects: updatedEffects };
+      }
+
+      const {
+        finalBet,
+        isWin,
+        marksAwarded,
+        outcomeAmount,
+        correctionFeedbackText,
+        playerAnswerDisplay,
+        syntheticOpinion,
+        playerBetData,
+        hasSplitBet,
+        teachersPetAwarded,
+      } = draft;
+      let { outcomeText } = draft;
+
+      let newMoney = Math.max(0, player.money + outcomeAmount);
+
+      // Check for Second Chance
+      const secondChanceEffect = player.effects.find(e => e.type === 'SECOND_CHANCE');
+      if (newMoney <= 0 && secondChanceEffect) {
+          newMoney = 300;
+          outcomeText += " (Second Chance: +$300!) 👼";
+      }
+
       const newHistoryEntry = {
         round: currentRound,
         amount: outcomeAmount,
@@ -3421,15 +4522,12 @@ export function App() {
         sentence: currentSentence.text,
       };
 
-      const syntheticOpinion: 'correct' | 'incorrect' = qType === 'binary'
-        ? (hasSplitBet ? 'correct' : (playerBetData?.opinion || 'correct'))
-        : (isWin ? 'correct' : 'incorrect');
-
       newRoundResultsData.push({ 
         name: player.name, 
         bet: finalBet, 
         opinion: syntheticOpinion,
         questionType: qType,
+        marksAwarded,
         playerAnswerDisplay,
         outcomeText, 
         newTotal: newMoney, 
@@ -3444,6 +4542,7 @@ export function App() {
         bet: finalBet,
         opinion: syntheticOpinion,
         questionType: qType,
+        marksAwarded,
         options: currentSentence.options,
         selectedOption: playerBetData?.selectedOption,
         splitOptions: hasSplitBet ? playerBetData?.splitOptions : undefined,
@@ -3459,8 +4558,8 @@ export function App() {
       });
       
       // Update effects: Decrement positive rounds, keep -1 (unless consumed Second Chance or Teacher's Pet)
-      let updatedEffects = player.effects.map(e => {
-        if (e.type === 'SECOND_CHANCE' && newMoney === 100 && player.money + outcomeAmount <= 0) {
+      const updatedEffects = player.effects.map(e => {
+        if (e.type === 'SECOND_CHANCE' && newMoney === 300 && player.money + outcomeAmount <= 0) {
              return null; // Consumed
         }
         if (e.type === 'TEACHERS_PET' && teachersPetAwarded) {
@@ -3506,11 +4605,12 @@ export function App() {
     const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     
-    // In Multiplayer Classroom Mode, bankrupt players receive an automatic $150 House Bailout on the next round instead of permanent elimination
+    // In Multiplayer Classroom Mode, bankrupt players receive an automatic $150 House Bailout ONLY in Fixed Rounds or Target Bankroll modes (never in High-Roller Survival)
+    const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
     const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
     const hasTargetWinner = gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount);
-    const isMultiplayerWinner = !mpRoomCode && players.length > 1 && stillActivePlayers.length <= 1;
-    const isAllBankruptGameOver = !mpRoomCode && stillActivePlayers.length === 0;
+    const isMultiplayerWinner = !isBailoutEnabled && players.length > 1 && stillActivePlayers.length <= 1;
+    const isAllBankruptGameOver = !isBailoutEnabled && stillActivePlayers.length === 0;
     const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || isAllBankruptGameOver;
 
     if (isGameOver) {
@@ -3523,7 +4623,7 @@ export function App() {
             if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) {
                 finalWinnerPlayer = null; // Tied
             }
-        } else if (stillActivePlayers.length === 1 && !mpRoomCode) {
+        } else if (stillActivePlayers.length === 1 && !isBailoutEnabled) {
             finalWinnerPlayer = stillActivePlayers[0];
         } else if (pool.length >= 1 && isRoundLimitReached) {
              const sortedPlayers = [...pool].sort((a,b) => b.money - a.money);
@@ -3543,7 +4643,7 @@ export function App() {
         const playerQueue = stillActivePlayers.length > 0
           ? [...stillActivePlayers.slice(1), stillActivePlayers[0]]
           : [];
-        if (mpRoomCode) {
+        if (isBailoutEnabled) {
           const bailedOut = eliminatedPlayers.map(p => ({ ...p, money: HOUSE_BAILOUT_AMOUNT }));
           setPlayers([...playerQueue, ...bailedOut]);
           const nextNotifs: Record<number, { id: string; title: string; message: string; icon: string }> = {};
@@ -3645,7 +4745,14 @@ export function App() {
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
-    setSettings({ topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' });
+    setSettings({
+      topic: GRAMMAR_TOPICS[0],
+      level: CEFR_LEVELS[2],
+      theme: THEMES[0],
+      challengeFormat: 'binary',
+      mixedFormats: ALL_QUESTION_TYPES,
+    });
+    setMixedFormatSetupWarning(null);
     mixedFormatIndexRef.current = 0;
     setCustomTopic('');
     setCustomTheme('');
@@ -3746,8 +4853,18 @@ export function App() {
       setPlayers(parsed.players || []);
       setSettings(
         parsed.settings
-          ? { ...parsed.settings, challengeFormat: parsed.settings.challengeFormat || 'binary' }
-          : { topic: GRAMMAR_TOPICS[0], level: CEFR_LEVELS[2], theme: THEMES[0], challengeFormat: 'binary' }
+          ? {
+              ...parsed.settings,
+              challengeFormat: parsed.settings.challengeFormat || 'binary',
+              mixedFormats: getEffectiveMixedFormats(parsed.settings.mixedFormats),
+            }
+          : {
+              topic: GRAMMAR_TOPICS[0],
+              level: CEFR_LEVELS[2],
+              theme: THEMES[0],
+              challengeFormat: 'binary',
+              mixedFormats: ALL_QUESTION_TYPES,
+            }
       );
       setCustomTopic(parsed.customTopic || '');
       setCustomTheme(parsed.customTheme || '');
@@ -3790,14 +4907,104 @@ export function App() {
     }
   }, [pendingLoadGame, playSound]);
 
+  const handleLoadCloudRoster = useCallback((roster: CloudRoster, mode: 'fresh' | 'saved') => {
+    const startStack = mode === 'fresh' ? (roster.startingCash || startingCash) : startingCash;
+    if (mode === 'fresh' && roster.startingCash) {
+      setStartingCash(roster.startingCash);
+      setTempStartingCash(String(roster.startingCash));
+    }
+    const loadedPlayers: Player[] = (roster.players || []).map((s, idx) => ({
+      id: s.id || Date.now() + idx,
+      name: s.name,
+      avatar: s.avatar || '🎰',
+      money: mode === 'saved' ? (typeof s.money === 'number' ? s.money : startStack) : startStack,
+      winStreak: mode === 'saved' ? (typeof s.winStreak === 'number' ? s.winStreak : 0) : 0,
+      effects: [],
+      history: [],
+    }));
+    setPlayers(loadedPlayers);
+    setActiveCloudRoster({ id: roster.id, className: roster.name });
+    if (step !== 'PLAYER_SETUP') {
+      setStep('PLAYER_SETUP');
+    }
+    playSound('success');
+  }, [startingCash, step, playSound]);
+
+  const buildCurrentFullGameState = useCallback(() => {
+    return {
+      step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+      currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+      powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+      sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+    };
+  }, [
+    step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+    currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+    powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+    sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+  ]);
+
+  const handleApplyCloudFullGameState = useCallback((parsed: any) => {
+    try {
+      setStep(parsed.step);
+      setPlayers(parsed.players);
+      setSettings({
+        ...parsed.settings,
+        challengeFormat: parsed.settings?.challengeFormat || 'binary',
+        mixedFormats: getEffectiveMixedFormats(parsed.settings?.mixedFormats),
+      });
+      setNextRoundSettings(
+        parsed.nextRoundSettings
+          ? {
+              ...parsed.nextRoundSettings,
+              challengeFormat: parsed.nextRoundSettings.challengeFormat || 'binary',
+              mixedFormats: getEffectiveMixedFormats(parsed.nextRoundSettings.mixedFormats),
+            }
+          : null
+      );
+      setCustomTopic(parsed.customTopic || '');
+      setCustomTheme(parsed.customTheme || '');
+      setGameMode(parsed.gameMode || 'lastPlayer');
+      setTotalRounds(parsed.totalRounds || 10);
+      setTargetAmount(parsed.targetAmount || 2000);
+      setCurrentRound(parsed.currentRound || 0);
+      setCurrentSentence(parsed.currentSentence || null);
+      setPastSentences(parsed.pastSentences || []);
+      setPastMistakes(parsed.pastMistakes || []);
+      setBets(parsed.bets || {});
+      setHints(parsed.hints || {});
+      setRoundResults(parsed.roundResults || []);
+      setWinner(parsed.winner || null);
+      setPowerUpsUsedThisRound(parsed.powerUpsUsedThisRound || {});
+      setActivePowerUps(parsed.activePowerUps || {});
+      setHighlightedPhrase(parsed.highlightedPhrase || {});
+      setAvailablePowerUps(parsed.availablePowerUps || Object.keys(POWER_UPS) as PowerUpKey[]);
+      setSelectedPowerUps(parsed.selectedPowerUps || Object.keys(POWER_UPS) as PowerUpKey[]);
+      setRoundSpending(parsed.roundSpending || {});
+      setSentenceBatch(parsed.sentenceBatch || []);
+      setRoundHistory(parsed.roundHistory || []);
+      if (parsed.startingCash && typeof parsed.startingCash === 'number' && parsed.startingCash > 0) {
+        setStartingCash(parsed.startingCash);
+        setTempStartingCash(String(parsed.startingCash));
+      }
+      setTurnTimerSeconds(
+        typeof parsed.turnTimerSeconds === 'number' && parsed.turnTimerSeconds >= 0
+          ? parsed.turnTimerSeconds
+          : 0
+      );
+      setTurnTimers(parsed.turnTimers || {});
+      setTeacherRevealOverride(parsed.teacherRevealOverride || false);
+      setAutoStartNextTimer(parsed.autoStartNextTimer ?? true);
+      playSound('success');
+    } catch (e) {
+      console.error('Failed to apply cloud game state:', e);
+      setError({ title: 'Cloud Restore Failed', message: 'Could not restore the saved cloud table state.' });
+    }
+  }, [playSound]);
+
   const handleSaveGameClick = useCallback(async () => {
     try {
-      const gameState = { 
-        step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
-        currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
-        powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
-        sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
-      }; 
+      const gameState = buildCurrentFullGameState(); 
       const jsonStr = JSON.stringify(gameState, null, 2);
       const dateStr = new Date().toISOString().split('T')[0];
       const defaultFilename = `grammar-casino-save-${dateStr}.json`;
@@ -3846,7 +5053,7 @@ export function App() {
       console.error("Failed to save game:", e);
       setError({ title: "Save Failed", message: "Could not save the game." });
     }
-  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer, playSound]);
+  }, [buildCurrentFullGameState, playSound]);
 
   const handleSimplifyExplanation = useCallback(async () => {
     if (!currentSentence || simplifiedExplanation.loading || simplifiedExplanation.text) return;
@@ -3928,11 +5135,18 @@ export function App() {
                     ♠
                   </span>
                   <div>
-                    <h2 className="text-lg sm:text-xl font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
-                      VIP Table Registry
-                    </h2>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-lg sm:text-xl font-serif font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
+                        VIP Table Registry
+                      </h2>
+                      {activeCloudRoster && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-extrabold bg-amber-500/20 text-amber-800 dark:text-[#fef08a] border border-[#d4af37]/50">
+                          ☁️ {activeCloudRoster.className}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                      Register solo or gather challenger seats around the baize
+                      Register solo, load a Cloud Class Roster, or gather seats around the baize
                     </p>
                   </div>
                 </div>
@@ -4065,6 +5279,16 @@ export function App() {
                   >
                     <span>🎮</span>
                     <span>Join Room</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCloudModal('rosters')}
+                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
+                    title="Open Cloud Classroom Rosters, Session Reports & Cloud Sentence Bank"
+                  >
+                    <span>☁️</span>
+                    <span>Cloud Rosters</span>
                   </button>
                 </div>
               </div>
@@ -4204,10 +5428,20 @@ export function App() {
                 playSound={playSound}
                 variant="outline-gold"
                 className="text-sm py-4 px-5 flex items-center gap-2"
-                title="Load Saved Game"
+                title="Load Saved Game File (.json)"
               >
                 <span>📂</span>
-                <span className="hidden sm:inline">Load Table</span>
+                <span className="hidden sm:inline">Load File</span>
+              </ActionButton>
+              <ActionButton
+                onClick={() => handleOpenCloudModal('rosters')}
+                playSound={playSound}
+                variant="outline-gold"
+                className="text-sm py-4 px-5 flex items-center gap-2"
+                title="Open Cloud Rosters, Saved Sessions & Sentence Bank"
+              >
+                <span>☁️</span>
+                <span className="hidden sm:inline">Cloud Vault</span>
               </ActionButton>
             </div>
           </div> 
@@ -4271,7 +5505,7 @@ export function App() {
               <>
                 <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative animate-fade-in">
                   {[
-                    { title: "I. Grammatical Domain", subtitle: "Choose the linguistic rulebook for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom grammar topic..." },
+                    { title: "I. Language Domain", subtitle: "Choose a grammar rule, collocations, or a custom lexical topic for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom lexical or grammar topic (e.g., School Subjects, Places in Town, Inversion)..." },
                     { title: "II. Stakes & Proficiency (CEFR)", subtitle: "Select syntactic complexity and mistake subtlety", items: CEFR_LEVELS, settingKey: 'level' },
                     { title: "III. Salon Atmosphere & Theme", subtitle: "Flavor the AI-generated narratives", items: THEMES, settingKey: 'theme', customKey: 'customTheme', customValue: customTheme, setCustomValue: setCustomTheme, customPlaceholder: "Enter custom narrative theme..." }
                   ].map(section => (
@@ -4283,7 +5517,7 @@ export function App() {
                         <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
                       </div>
 
-                      <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
+                      <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length === 9 ? 'sm:grid-cols-3' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
                         {section.items.map(item => {
                           const isActive = settings[section.settingKey as keyof Settings] === item;
                           return (
@@ -4324,7 +5558,36 @@ export function App() {
                         </div>
                       )}
                       {section.customKey && settings[section.settingKey as keyof Settings] === (section.settingKey === 'topic' ? "My own choice" : "Custom ✍️") && (
-                        <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} className="mt-3.5" />
+                        <div className="mt-3.5 space-y-2.5 animate-fade-in">
+                          <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} />
+                          {section.settingKey === 'topic' && (
+                            <div className="p-3 rounded-xl felt-well flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-serif uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mr-1">
+                                Quick Lexical Topics:
+                              </span>
+                              {QUICK_LEXICAL_TOPICS.map(lex => {
+                                const isPicked = (section.customValue || '').trim().toLowerCase() === lex.toLowerCase();
+                                return (
+                                  <button
+                                    key={lex}
+                                    type="button"
+                                    onClick={() => {
+                                      playSound('click');
+                                      section.setCustomValue!(lex);
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-serif transition-all cursor-pointer border ${
+                                      isPicked
+                                        ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] font-extrabold shadow-sm'
+                                        : 'bg-white/70 dark:bg-black/30 text-slate-800 dark:text-amber-100/85 border-[#d4af37]/40 hover:border-[#d4af37]'
+                                    }`}
+                                  >
+                                    {lex}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}
@@ -4350,7 +5613,12 @@ export function App() {
                             type="button"
                             onClick={() => {
                               playSound('click');
-                              setSettings(s => ({ ...s, challengeFormat: fmt.id }));
+                              setMixedFormatSetupWarning(null);
+                              setSettings(s => ({
+                                ...s,
+                                challengeFormat: fmt.id,
+                                mixedFormats: getEffectiveMixedFormats(s.mixedFormats),
+                              }));
                             }}
                             className={`p-4 rounded-xl border-2 text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
                               isSelected
@@ -4378,11 +5646,125 @@ export function App() {
                         );
                       })}
                     </div>
-                    {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'mixed') && (
+
+                    {/* Customizable Mixed Shoe Format Selector */}
+                    {settings.challengeFormat === 'mixed' && (() => {
+                      const activeMixed = getEffectiveMixedFormats(settings.mixedFormats);
+                      const toggleMixedItem = (qType: QuestionType) => {
+                        const isIncluded = activeMixed.includes(qType);
+                        if (isIncluded) {
+                          if (activeMixed.length <= 1) {
+                            playSound('error');
+                            setMixedFormatSetupWarning('At least 1 challenge format must remain active in the Mixed Shoe.');
+                            return;
+                          }
+                          playSound('click');
+                          setMixedFormatSetupWarning(null);
+                          setSettings(s => ({
+                            ...s,
+                            mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) && q !== qType),
+                          }));
+                        } else {
+                          playSound('click');
+                          setMixedFormatSetupWarning(null);
+                          setSettings(s => ({
+                            ...s,
+                            mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) || q === qType),
+                          }));
+                        }
+                      };
+
+                      return (
+                        <div className="mt-4 p-4 sm:p-5 rounded-xl felt-well border-2 border-[#d4af37]/60 space-y-3 animate-fade-in">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] flex items-center gap-2">
+                                <span>🎛️</span>
+                                <span>Customize Mixed Shoe Challenges</span>
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono-casino font-bold bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
+                                  {activeMixed.length} of 5 Selected
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 dark:text-amber-200/75 mt-0.5">
+                                Toggle which of the 5 challenge formats are dealt in the Mixed Shoe rotation:
+                              </p>
+                            </div>
+                            {activeMixed.length < 5 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  playSound('click');
+                                  setMixedFormatSetupWarning(null);
+                                  setSettings(s => ({ ...s, mixedFormats: ALL_QUESTION_TYPES }));
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-serif font-bold uppercase tracking-wider bg-amber-500/20 hover:bg-amber-500/30 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] transition-all cursor-pointer"
+                              >
+                                Select All 5
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
+                            {CHALLENGE_FORMATS.filter((c): c is typeof CHALLENGE_FORMATS[number] & { id: QuestionType } => c.id !== 'mixed').map(subFmt => {
+                              const isChecked = activeMixed.includes(subFmt.id);
+                              return (
+                                <button
+                                  key={subFmt.id}
+                                  type="button"
+                                  onClick={() => toggleMixedItem(subFmt.id)}
+                                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                                    isChecked
+                                      ? 'bg-emerald-500/20 dark:bg-emerald-950/60 border-emerald-400 text-slate-900 dark:text-emerald-100 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                                      : 'bg-white/50 dark:bg-black/30 border-slate-300/60 dark:border-slate-800 text-slate-500 dark:text-slate-400 opacity-70 hover:opacity-100'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-xl select-none shrink-0">{subFmt.icon}</span>
+                                    <span className="font-serif font-bold text-xs uppercase tracking-wider truncate">
+                                      {subFmt.shortLabel}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-black shrink-0 border ${
+                                      isChecked
+                                        ? 'bg-emerald-500 text-[#051a0f] border-emerald-300 shadow-sm'
+                                        : 'bg-transparent border-slate-400/50 dark:border-slate-600'
+                                    }`}
+                                  >
+                                    {isChecked ? '✓' : ''}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {mixedFormatSetupWarning && (
+                            <div className="text-xs font-serif text-amber-900 dark:text-amber-200 bg-amber-500/15 border border-[#d4af37]/50 rounded-lg px-3 py-1.5 flex items-center gap-2">
+                              <span>⚠️</span>
+                              <span>{mixedFormatSetupWarning}</span>
+                            </div>
+                          )}
+
+                          <div className="text-xs font-serif text-slate-700 dark:text-amber-100/85 flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#d4af37]/20">
+                            <span className="font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">Rotation Order:</span>
+                            <span>
+                              {activeMixed
+                                .map(q => {
+                                  const found = CHALLENGE_FORMATS.find(f => f.id === q);
+                                  return found ? `${found.icon} ${found.shortLabel}` : q;
+                                })
+                                .join('  →  ')}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'wordFormation' || settings.challengeFormat === 'keyWordTransformation' || settings.challengeFormat === 'mixed') && (
                       <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-serif text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
                         <span>ℹ️</span>
                         <span>
-                          <strong>Cloze House Rules:</strong> Clean 1:1 base payouts. <em>Split Bet</em> lets you pick 2 options/words (50% each) or stack 1 option twice (Multiple-Choice) / enter 1 word (Open Cloze) for a full 100% payout. <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
+                          <strong>Cloze &amp; Transformation House Rules:</strong> Clean 1:1 base payouts on Cloze &amp; Word Formation; <strong>Key Word Transformation</strong> awards <strong>1× Wager</strong> for 1/2 mark (partial) and <strong>2× Wager</strong> for 2/2 marks (full transformation)! <em>Split Bet</em> lets you hedge 2 options/phrases (50% each) or stack 1 for full payout. <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
                         </span>
                       </div>
                     )}
@@ -4426,6 +5808,11 @@ export function App() {
                       </span>
                       <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 font-serif font-bold text-emerald-900 dark:text-emerald-200">
                         {currentFormatObj.icon} {currentFormatObj.label}
+                        {settings.challengeFormat === 'mixed' && (
+                          <span className="ml-1 opacity-90">
+                            ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join(' ')})
+                          </span>
+                        )}
                       </span>
                     </div>
                     <button
@@ -4708,7 +6095,7 @@ export function App() {
         case 'IN_GAME': { 
             const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze';
+            const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
 
             const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
                 const playerBet = bets[p.id];
@@ -4720,10 +6107,29 @@ export function App() {
                       ? (playerBet?.splitOptions?.length ?? 0) >= 1
                       : Boolean(playerBet?.selectedOption?.trim());
                 }
-                if (currentQuestionType === 'openCloze') {
-                    return hasSplitBet
-                      ? Boolean(playerBet?.splitClozeAnswers?.[0]?.trim() || playerBet?.splitClozeAnswers?.[1]?.trim())
-                      : Boolean(playerBet?.clozeAnswer?.trim());
+                if (currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation') {
+                    const baseNorm = currentQuestionType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
+                    if (hasSplitBet) {
+                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
+                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
+                      if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) return false;
+                      return Boolean(w1 || w2);
+                    }
+                    const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
+                    if (baseNorm && w && w === baseNorm) return false;
+                    return Boolean(w);
+                }
+                if (currentQuestionType === 'keyWordTransformation') {
+                    const keyWord = currentSentence?.baseWord;
+                    if (hasSplitBet) {
+                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
+                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
+                      if (!w1 && !w2) return false;
+                      if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
+                      if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
+                      return true;
+                    }
+                    return isValidKeyWordTransformationPhrase(playerBet?.clozeAnswer, keyWord);
                 }
                 if (hasSplitBet) {
                      return true;
@@ -4736,7 +6142,7 @@ export function App() {
             const mpLockedCount = unfrozenActivePlayers.filter(p => {
               if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
               const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-              return isBetCompleteForQuestionType(bets[p.id], currentQuestionType, hasSplit);
+              return isBetCompleteForQuestionType(bets[p.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
             }).length;
             const allMpPlayersLocked = unfrozenActivePlayers.length > 0 && mpLockedCount === unfrozenActivePlayers.length;
             const canRevealResults = mpRoomCode
@@ -4763,9 +6169,13 @@ export function App() {
               : currentSentence?.text || '';
 
             if (isClozeRound && sentenceHtml) {
+              const inlineBaseWordBadge =
+                currentQuestionType === 'wordFormation' && currentSentence?.baseWord
+                  ? ` <span class="inline-block px-2.5 py-0.5 mx-1 rounded-md bg-amber-500/25 dark:bg-amber-400/20 border border-[#d4af37]/70 text-amber-950 dark:text-[#fef08a] font-mono-casino font-black not-italic tracking-wider text-[0.78em] align-middle select-none shadow-sm">(${currentSentence.baseWord.toUpperCase()})</span>`
+                  : '';
               sentenceHtml = sentenceHtml.replace(
                 /_{3,}/g,
-                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic tracking-widest text-center select-none">_____</span>`
+                `<span class="inline-block min-w-[3.5rem] sm:min-w-[4.5rem] px-2 py-0.5 mx-1 rounded-md bg-amber-500/15 dark:bg-amber-400/15 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic tracking-widest text-center select-none">_____</span>${inlineBaseWordBadge}`
               );
             }
 
@@ -4784,7 +6194,11 @@ export function App() {
               ? '🔠 Multiple-Choice Cloze'
               : currentQuestionType === 'openCloze'
                 ? '✍️ Open Cloze'
-                : '⚖️ Valid or Flawed';
+                : currentQuestionType === 'wordFormation'
+                  ? '🧬 Word Formation'
+                  : currentQuestionType === 'keyWordTransformation'
+                    ? '🔑 Key Word Transformation'
+                    : '⚖️ Valid or Flawed';
 
             return ( 
               <div className="w-full max-w-5xl animate-fade-in p-2 md:p-4"> 
@@ -4856,7 +6270,15 @@ export function App() {
                                       <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isCopied ? 'Copied' : 'Copy'}</span>
                                     </button>
                                     <button 
-                                      onClick={() => speakText(currentSentence.text)} 
+                                      onClick={() =>
+                                        speakText(
+                                          currentQuestionType === 'keyWordTransformation'
+                                            ? `${currentSentence.leadInSentence ? `Lead-in sentence: ${currentSentence.leadInSentence}. ` : ''}Key word: ${currentSentence.baseWord || ''}. Target sentence: ${currentSentence.text}`
+                                            : currentQuestionType === 'wordFormation' && currentSentence.baseWord
+                                              ? `${currentSentence.text}. Base word: ${currentSentence.baseWord}.`
+                                              : currentSentence.text
+                                        )
+                                      } 
                                       disabled={isSpeaking}
                                       className={`text-amber-900 dark:text-amber-200/80 hover:text-amber-700 dark:hover:text-[#fef08a] transition-all flex items-center gap-1.5 bg-amber-100/70 dark:bg-black/45 border border-[#d4af37]/40 hover:border-[#d4af37] px-2.5 py-1 rounded-full shadow-sm text-xs cursor-pointer ${isSpeaking ? 'opacity-50 cursor-not-allowed' : ''}`}
                                       title="Read sentence aloud"
@@ -4865,6 +6287,27 @@ export function App() {
                                       <span className="text-[10px] font-serif font-bold uppercase tracking-wider">{isSpeaking ? 'Speaking...' : 'Listen'}</span>
                                     </button>
                                 </div>
+
+                                {currentQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence && (
+                                  <div className="w-full max-w-3xl mx-auto mb-3 px-4 py-2.5 rounded-xl bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/45 text-center space-y-2">
+                                    <div className="text-[10px] sm:text-xs font-serif font-bold uppercase tracking-[0.2em] text-amber-800 dark:text-amber-300/85">
+                                      Lead-In Sentence (Keep Similar Meaning)
+                                    </div>
+                                    <p className="text-base sm:text-xl md:text-2xl font-editorial text-slate-800 dark:text-amber-100">
+                                      &ldquo;{currentSentence.leadInSentence}&rdquo;
+                                    </p>
+                                    {currentSentence.baseWord && (
+                                      <div className="pt-1 flex items-center justify-center gap-2 flex-wrap">
+                                        <span className="px-3.5 py-1 rounded-lg bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-mono-casino font-black text-sm sm:text-base tracking-[0.2em] uppercase shadow-md border border-[#fef9c3]">
+                                          🔑 KEY WORD: {currentSentence.baseWord.toUpperCase()}
+                                        </span>
+                                        <span className="text-[11px] font-serif font-semibold text-amber-900 dark:text-amber-200/80">
+                                          (Use 2–6 words including this exact word · 1 Mark = 1× · 2 Marks = 2×)
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
 
                                 <p 
                                   className={`${sentenceTextClass} text-slate-900 dark:text-amber-50 font-editorial italic text-center px-3 sm:px-12 md:px-16 pt-2 sm:pt-4 drop-shadow-sm`}
@@ -4910,9 +6353,24 @@ export function App() {
                                       <span className="text-[#d4af37] select-none">•</span>
                                       <span className="inline-flex items-center gap-1 text-emerald-800 dark:text-emerald-300 font-bold">
                                         <span>{activeFormatConfig.icon}</span>
-                                        <span>{activeFormatConfig.shortLabel}</span>
-                                        {nextFormatConfig && nextFormatConfig.id !== activeFormatConfig.id && (
-                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">Next: {nextFormatConfig.shortLabel}</span>
+                                        <span>
+                                          {activeFormatConfig.shortLabel}
+                                          {activeFormatConfig.id === 'mixed' && (
+                                            <span className="ml-0.5 text-[10px] opacity-90">
+                                              ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
+                                            </span>
+                                          )}
+                                        </span>
+                                        {nextFormatConfig && (
+                                          nextFormatConfig.id !== activeFormatConfig.id ||
+                                          (nextFormatConfig.id === 'mixed' &&
+                                            getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
+                                              getEffectiveMixedFormats(settings.mixedFormats).join(','))
+                                        ) && (
+                                          <span className="text-[9px] bg-amber-500 text-black px-1.5 rounded-full font-mono-casino font-bold">
+                                            Next: {nextFormatConfig.shortLabel}
+                                            {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
+                                          </span>
                                         )}
                                       </span>
                                       <span className="text-[#d4af37] select-none">•</span>
@@ -5009,16 +6467,31 @@ export function App() {
                                         type="button"
                                         onClick={() => handleOpenSettingsModal('format')}
                                         className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-serif text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to change Challenge Format (Valid/Flawed, Multiple-Choice Cloze, Open Cloze, Mixed Shoe)"
+                                        title="Click to change Challenge Format (Valid/Flawed, Multiple-Choice Cloze, Open Cloze, Word Formation, Mixed Shoe)"
                                       >
                                         <span className="flex items-center gap-1">
                                           <span>{activeFormatConfig.icon}</span>
-                                          <span className="font-bold">{activeFormatConfig.shortLabel}</span>
+                                          <span className="font-bold">
+                                            {activeFormatConfig.shortLabel}
+                                            {activeFormatConfig.id === 'mixed' && (
+                                              <span className="ml-1 text-[10px] opacity-90">
+                                                ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
+                                              </span>
+                                            )}
+                                          </span>
                                         </span>
-                                        {nextFormatConfig && nextFormatConfig.id !== activeFormatConfig.id && (
+                                        {nextFormatConfig && (
+                                          nextFormatConfig.id !== activeFormatConfig.id ||
+                                          (nextFormatConfig.id === 'mixed' &&
+                                            getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
+                                              getEffectiveMixedFormats(settings.mixedFormats).join(','))
+                                        ) && (
                                           <span className="bg-amber-500 text-black text-[9px] font-mono-casino font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
                                             <span>Next:</span>
-                                            <span>{nextFormatConfig.shortLabel}</span>
+                                            <span>
+                                              {nextFormatConfig.shortLabel}
+                                              {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
+                                            </span>
                                           </span>
                                         )}
                                         <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
@@ -5088,6 +6561,9 @@ export function App() {
                                         {(Object.keys(POWER_UPS) as PowerUpKey[]).map(key => {
                                           const isActive = selectedPowerUps.includes(key);
                                           const isDisabledInCloze = isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(key);
+                                          const isDisabledInBinary = !isClozeRound && BINARY_DISABLED_POWER_UPS.includes(key);
+                                          const isDisabledInSolo = !mpRoomCode && MP_ONLY_POWER_UPS.includes(key);
+                                          const isFormatDisabled = isDisabledInCloze || isDisabledInBinary || isDisabledInSolo;
                                           const powerUp = POWER_UPS[key];
                                           
                                           return (
@@ -5099,6 +6575,14 @@ export function App() {
                                                 isDisabledInCloze ? (
                                                   <div className="flex items-center gap-1 font-semibold text-amber-300">
                                                     <span>🚫 Disabled on Cloze Hands</span>
+                                                  </div>
+                                                ) : isDisabledInBinary ? (
+                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
+                                                    <span>🚫 Cloze Hands Only (MC / Open Cloze)</span>
+                                                  </div>
+                                                ) : isDisabledInSolo ? (
+                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
+                                                    <span>🚫 Live Multiplayer Only</span>
                                                   </div>
                                                 ) : (
                                                   <div className={`flex items-center gap-1 font-semibold ${isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -5115,7 +6599,7 @@ export function App() {
                                                   handleTogglePowerUpInDeck(key);
                                                 }}
                                                 className={`relative p-0.5 rounded transition-all duration-150 cursor-pointer select-none group focus:outline-none ${
-                                                  isDisabledInCloze
+                                                  isFormatDisabled
                                                     ? 'opacity-25 grayscale cursor-not-allowed'
                                                     : isActive 
                                                       ? 'opacity-100 hover:scale-130 filter drop-shadow-sm' 
@@ -5124,14 +6608,18 @@ export function App() {
                                                 title={
                                                   isDisabledInCloze
                                                     ? `${powerUp.name} - Disabled on Cloze hands`
-                                                    : `${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`
+                                                    : isDisabledInBinary
+                                                      ? `${powerUp.name} - Multiple-Choice & Open Cloze hands only`
+                                                      : isDisabledInSolo
+                                                        ? `${powerUp.name} - Live QR Multiplayer only`
+                                                        : `${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`
                                                 }
-                                                aria-label={`${powerUp.name} (${isDisabledInCloze ? 'disabled on cloze' : isActive ? 'active' : 'deactivated'})`}
+                                                aria-label={`${powerUp.name} (${isFormatDisabled ? 'disabled for current mode' : isActive ? 'active' : 'deactivated'})`}
                                               >
                                                 <span className="text-sm md:text-base inline-block">
                                                   {powerUp.icon}
                                                 </span>
-                                                {(!isActive || isDisabledInCloze) && (
+                                                {(!isActive || isFormatDisabled) && (
                                                   <span className="absolute inset-0 flex items-center justify-center text-rose-500 font-bold text-xs pointer-events-none drop-shadow">
                                                     ✕
                                                   </span>
@@ -5325,7 +6813,7 @@ export function App() {
                       const hasSplit = playerActive.some(pu => pu.type === 'SPLIT_BET');
                       const isBetReady = mpSeat
                         ? mpSeat.lockedIn
-                        : isBetCompleteForQuestionType(bets[player.id], currentQuestionType, hasSplit);
+                        : isBetCompleteForQuestionType(bets[player.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
                       const isBankrupt = player.money <= 0;
 
                       return (
@@ -5412,7 +6900,7 @@ export function App() {
                               {isBankrupt ? (
                                 <>
                                   <span>💸</span>
-                                  <span>Awaiting Next-Round Bailout</span>
+                                  <span>{gameMode === 'lastPlayer' ? 'Eliminated (Bankrupt)' : 'Awaiting Next-Round Bailout'}</span>
                                 </>
                               ) : isFrozen ? (
                                 <>
@@ -5457,11 +6945,74 @@ export function App() {
                       const betCapAmount = playerCaps.length > 0 
                         ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
                         : (isBetCapped ? 50 : BET_CAP_AMOUNT);
+                      const playerHighRollers = allActive.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
+                      const isHighRoller = playerHighRollers.length > 0;
+                      const minBetAmount = isHighRoller
+                        ? Math.min(
+                            player.money,
+                            Math.max(
+                              1,
+                              playerHighRollers.reduce(
+                                (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
+                                Math.ceil(player.money * 0.5)
+                              )
+                            )
+                          )
+                        : 0;
+                      const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
+                      let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
+                      if (scalpelPu && currentSentence) {
+                        if (currentQuestionType === 'multipleChoice') {
+                          scalpelHint = { eliminatedOptions: scalpelPu.eliminatedOptions || [] };
+                        } else if (currentQuestionType === 'openCloze' && currentSentence.correctAnswer) {
+                          const word = currentSentence.correctAnswer.trim();
+                          if (word.length > 0) {
+                            const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+                            scalpelHint = {
+                              clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
+                            };
+                          }
+                        } else if (currentQuestionType === 'wordFormation' && currentSentence.correctAnswer) {
+                          const word = currentSentence.correctAnswer.trim();
+                          if (word.length > 0) {
+                            if (word.length <= 3) {
+                              const rest = Array(Math.max(0, word.length - 1)).fill('_').join(' ');
+                              scalpelHint = {
+                                clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
+                              };
+                            } else {
+                              const middleCount = Math.max(1, word.length - 3);
+                              const middle = Array(middleCount).fill('_').join(' ');
+                              const lastTwo = `${word[word.length - 2]} ${word[word.length - 1]}`;
+                              scalpelHint = {
+                                clozeMask: `${word[0]} ${middle} ${lastTwo} (${word.length} letters)`,
+                              };
+                            }
+                          }
+                        } else if (currentQuestionType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+                          const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
+                          if (words.length > 0) {
+                            if (words.length <= 2) {
+                              scalpelHint = {
+                                clozeMask: `${words.length} words: ${words[0]} ___`,
+                              };
+                            } else {
+                              const middle = Array(words.length - 2).fill('___').join(' ');
+                              scalpelHint = {
+                                clozeMask: `${words.length} words: ${words[0]} ${middle} ${words[words.length - 1]}`,
+                              };
+                            }
+                          }
+                        }
+                      }
                       const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
                       const myActive = playerActive[0]; 
                       const playerTimer = turnTimers[player.id];
                       const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
                       const mpSeat = mpSeats[player.id];
+                      const audiencePollFeed = playerActive.some(pu => pu.type === 'AUDIENCE_POLL')
+                        ? buildAudiencePollSummary(players, bets, activePowerUps, currentSentence, player.id)
+                        : null;
                       
                       return (
                         <div key={player.id} className="space-y-2">
@@ -5494,6 +7045,10 @@ export function App() {
                             activePowerUp={myActive} 
                             isBetCapped={isBetCapped} 
                             betCapAmount={betCapAmount}
+                            isHighRoller={isHighRoller}
+                            minBetAmount={minBetAmount}
+                            scalpelHint={scalpelHint}
+                            audiencePollFeed={audiencePollFeed}
                             isFrozen={isFrozen}
                             activePowerUps={playerActive} 
                             usedPowerUps={powerUpsUsedThisRound[player.id] || []}
@@ -5502,6 +7057,7 @@ export function App() {
                             currentSentenceText={currentSentence?.text}
                             questionType={currentQuestionType}
                             options={currentSentence?.options}
+                            baseWord={currentSentence?.baseWord}
                             onChangeAvatar={handleOpenAvatarModal}
                             onUpdateName={handleUpdatePlayerName}
                             targetAmount={gameMode === 'targetAmount' ? (typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount) : undefined}
@@ -5562,13 +7118,14 @@ export function App() {
         case 'RESULTS': {
             const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
             const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+            const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
             const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
             const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
-            const isEliminationVictory = !mpRoomCode && players.length > 1 && activePlayers.length <= 1;
-            const isAllBankrupt = !mpRoomCode && activePlayers.length === 0;
+            const isEliminationVictory = !isBailoutEnabled && players.length > 1 && activePlayers.length <= 1;
+            const isAllBankrupt = !isBailoutEnabled && activePlayers.length === 0;
             const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || isAllBankrupt;
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze';
+            const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
             const nextFormatObj = CHALLENGE_FORMATS.find(f => f.id === (nextRoundSettings?.challengeFormat || settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
 
             return ( 
@@ -5634,6 +7191,9 @@ export function App() {
                                 // Read the full completed sentence on the Results screen!
                                 const fullCompleted = currentSentence.correction || currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer || '');
                                 const parts = [
+                                    resultQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence
+                                      ? `Lead-in sentence: ${currentSentence.leadInSentence}`
+                                      : null,
                                     fullCompleted,
                                     `Explanation: ${currentSentence.explanation}`
                                 ].filter(Boolean);
@@ -5655,17 +7215,33 @@ export function App() {
                           </button>
                       </div>
 
+                      {resultQuestionType === 'keyWordTransformation' && currentSentence?.leadInSentence && (
+                        <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-[#d4af37]/40">
+                          <div className="text-[10px] font-serif font-bold uppercase tracking-widest text-amber-800 dark:text-amber-300/80 mb-0.5">
+                            Lead-In Sentence {currentSentence.baseWord ? `· 🔑 Key Word: ${currentSentence.baseWord.toUpperCase()}` : ''}
+                          </div>
+                          <div className="text-base sm:text-lg font-editorial text-slate-800 dark:text-amber-100">
+                            &ldquo;{currentSentence.leadInSentence}&rdquo;
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-2xl sm:text-3xl font-editorial text-slate-900 dark:text-amber-50 italic leading-relaxed mb-6">
                         &ldquo;{currentSentence?.text}&rdquo;
+                        {resultQuestionType === 'wordFormation' && currentSentence?.baseWord && (
+                          <span className="inline-block ml-2 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] font-mono-casino font-black not-italic tracking-wider text-base sm:text-lg align-middle">
+                            ({currentSentence.baseWord.toUpperCase()})
+                          </span>
+                        )}
                       </p>
                       
                       {isResultCloze && currentSentence?.correction && (
                           <div className="felt-well p-4 sm:p-5 rounded-xl border-l-4 !border-l-emerald-500 mb-4">
                               <div className="flex flex-wrap items-center justify-between gap-2 text-amber-900 dark:text-[#fef08a] font-serif font-bold uppercase text-xs tracking-widest mb-1.5">
                                   <span>✦ Completed Sentence</span>
-                                  {resultQuestionType === 'openCloze' && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
+                                  {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
                                       <span className="font-mono-casino text-emerald-800 dark:text-emerald-300 font-semibold normal-case bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30 text-xs">
-                                          Accepted Words: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
+                                          Accepted {resultQuestionType === 'wordFormation' ? 'Forms' : resultQuestionType === 'keyWordTransformation' ? 'Phrases' : 'Words'}: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
                                       </span>
                                   )}
                               </div>
@@ -5730,7 +7306,7 @@ export function App() {
                         <tbody className="text-slate-800 dark:text-slate-200 divide-y divide-[#d4af37]/15">
                         {[...roundResults].sort((a, b) => b.newTotal - a.newTotal).map((result, index) => {
                             const player = players.find(p => p.name === result.name);
-                            const isWinner = result.outcomeText.includes('Win') || result.outcomeText.includes('Hit');
+                            const isWinner = result.outcomeText.includes('Win') || result.outcomeText.includes('Hit') || (result.marksAwarded !== undefined && result.marksAwarded >= 1);
                             return (
                             <tr key={result.name} className={`hover:bg-amber-500/10 transition-colors ${isWinner ? 'bg-emerald-500/10' : ''}`}>
                               <td className="p-4 sm:p-5 font-mono-casino text-xs sm:text-sm text-amber-800/70 dark:text-[#d4af37]/80 font-bold">
@@ -5754,8 +7330,21 @@ export function App() {
                                   </span>
                               </td>
                               <td className="p-4 sm:p-5">
-                                  <div className={`font-serif text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                                    {result.outcomeText}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className={`font-serif text-sm font-bold uppercase tracking-wide ${isWinner ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                      {result.outcomeText}
+                                    </div>
+                                    {result.marksAwarded !== undefined && (
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono-casino font-black uppercase tracking-wider border ${
+                                        result.marksAwarded === 2
+                                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-800 dark:text-emerald-200'
+                                          : result.marksAwarded === 1
+                                            ? 'bg-amber-500/20 border-amber-400 text-amber-800 dark:text-amber-200'
+                                            : 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
+                                      }`}>
+                                        {result.marksAwarded}/2 Marks
+                                      </span>
+                                    )}
                                   </div>
                                   {result.playerAnswerDisplay && result.playerAnswerDisplay !== result.outcomeText && (
                                     <div className="text-xs font-mono-casino text-slate-600 dark:text-amber-100/80 mt-0.5">
@@ -5837,7 +7426,7 @@ export function App() {
                 )}
                 
                 <div className="mt-8 flex flex-wrap justify-between items-center gap-4 pb-10 relative w-full">
-                  <div className="flex-1 flex justify-start">
+                  <div className="flex-1 flex justify-start gap-2 flex-wrap">
                     {roundHistory.length > 0 && (
                       <ActionButton
                         onClick={() => { playSound('click'); setShowReportCardModal(true); }}
@@ -5849,6 +7438,15 @@ export function App() {
                         <span>Ledger ({roundHistory.length})</span>
                       </ActionButton>
                     )}
+                    <ActionButton
+                      onClick={() => handleOpenCloudModal('reports')}
+                      variant="outline-gold"
+                      className="text-xs py-2.5 px-4 flex items-center gap-2"
+                      title="Save or Load Session Report & Table State in Cloud"
+                    >
+                      <span>☁️</span>
+                      <span>Cloud Save</span>
+                    </ActionButton>
                   </div>
                   <ActionButton onClick={handleNextRound} playSound={playSound} variant="gold" className="text-lg sm:text-xl py-4 px-12 tracking-[0.15em]">
                       {isGameOver ? 'SETTLE ACCOUNTS & FINISH 🏁' : 'DEAL NEXT HAND ➡️'}
@@ -5942,9 +7540,13 @@ export function App() {
               />
             </div>
 
-            <div className="mt-10">
+            <div className="mt-10 flex flex-wrap justify-center items-center gap-4">
                 <ActionButton onClick={handleRestartGame} playSound={playSound} variant="gold" className="text-lg py-4 px-12 tracking-[0.15em]">
                     🔄 Open New Table
+                </ActionButton>
+                <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="outline-gold" className="text-sm py-4 px-6 flex items-center gap-2">
+                    <span>☁️</span>
+                    <span>Save Session / Roster to Cloud</span>
                 </ActionButton>
             </div>
           </div>
@@ -6015,6 +7617,16 @@ export function App() {
             </button>
           )}
 
+          <button
+            type="button"
+            onClick={() => handleOpenCloudModal(step === 'PLAYER_SETUP' ? 'rosters' : 'reports')}
+            className="h-11 px-3.5 flex items-center gap-2 rounded-full bg-amber-50/95 dark:bg-[#051c10]/95 border border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a] transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer font-serif text-xs font-extrabold uppercase tracking-wider"
+            title="Open Teacher Cloud Vault (Class Rosters, Session Reports & Cloud Sentence Bank)"
+          >
+            <span>☁️</span>
+            <span className="hidden sm:inline">Cloud</span>
+          </button>
+
           {!desktopStatus.isDesktop && (
             <button
               type="button"
@@ -6027,7 +7639,7 @@ export function App() {
               title={
                 isTeacherAiUnlocked
                   ? 'Live Gemini AI Unlocked (Teacher Mode) — Click to lock or manage Teacher PIN'
-                  : 'Offline Curated Bank Mode (0 API usage) — Click to enter Teacher PIN for Live AI'
+                  : 'Offline Curated Bank Mode (0 API usage) — Click to enter Teacher PIN or Sign In with Google for Live AI'
               }
             >
               <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
@@ -6170,8 +7782,10 @@ export function App() {
                   {players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).length > 0 ?
                    (players.filter(p => p.id !== showTargetModal.playerId && p.money > 0).map(p => {
                       const targetActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                      const hasShield = targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
-                      const alreadyAttacked = Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+                      const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(showTargetModal.powerUp);
+                      const ignoresShield = showTargetModal.powerUp === 'COPYCAT';
+                      const hasShield = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                      const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
                       const isShielded = hasShield || alreadyAttacked;
                       return ( 
                       <ActionButton 
@@ -6443,43 +8057,74 @@ export function App() {
             )}
 
             {!isTeacherAiUnlocked ? (
-              <form onSubmit={handleUnlockTeacherPin} className="space-y-3 pt-1">
-                <div>
-                  <label className="block text-xs font-serif font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
-                    Enter Teacher PIN to Unlock Live AI
-                  </label>
-                  <input
-                    type="password"
-                    value={teacherPinInput}
-                    onChange={(e) => setTeacherPinInput(e.target.value)}
-                    placeholder="Enter Teacher PIN..."
-                    autoFocus
-                    className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-mono-casino text-base tracking-widest"
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-2.5 pt-2">
+              <div className="space-y-4 pt-1">
+                {/* Option 1: Google Sign-In */}
+                <div className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-serif font-bold uppercase tracking-wider text-slate-800 dark:text-[#fef08a]">
+                      Option 1 · Verified Teacher Google Account
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-amber-200/70">
+                      Sign in with your Google Teacher account to unlock Live AI &amp; Cloud Vault
+                    </div>
+                  </div>
                   <ActionButton
                     type="button"
-                    onClick={() => setShowTeacherPinModal(false)}
-                    playSound={playSound}
-                    variant="outline-gold"
-                    className="py-2.5 px-4 text-xs"
-                  >
-                    Stay in Offline Mode
-                  </ActionButton>
-                  <ActionButton
-                    type="submit"
+                    onClick={handleSignInWithGoogle}
                     playSound={playSound}
                     variant="gold"
-                    disabled={!teacherPinInput.trim() || isVerifyingTeacherPin}
-                    className="py-2.5 px-6 text-xs"
+                    disabled={isSigningInGoogle || isVerifyingTeacherPin}
+                    className="py-2 px-4 text-xs"
                   >
-                    {isVerifyingTeacherPin ? 'Verifying...' : '🔑 Unlock Live AI'}
+                    {isSigningInGoogle ? 'Signing In...' : '🔐 Sign In with Google'}
                   </ActionButton>
                 </div>
-              </form>
+
+                {/* Option 2: Teacher PIN */}
+                <form onSubmit={handleUnlockTeacherPin} className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-xs font-serif font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
+                      Option 2 · Enter Teacher PIN to Unlock Live AI
+                    </label>
+                    <input
+                      type="password"
+                      value={teacherPinInput}
+                      onChange={(e) => setTeacherPinInput(e.target.value)}
+                      placeholder="Enter Teacher PIN..."
+                      autoFocus
+                      className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-mono-casino text-base tracking-widest"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                    <ActionButton
+                      type="button"
+                      onClick={() => setShowTeacherPinModal(false)}
+                      playSound={playSound}
+                      variant="outline-gold"
+                      className="py-2.5 px-4 text-xs"
+                    >
+                      Stay in Offline Mode
+                    </ActionButton>
+                    <ActionButton
+                      type="submit"
+                      playSound={playSound}
+                      variant="gold"
+                      disabled={!teacherPinInput.trim() || isVerifyingTeacherPin}
+                      className="py-2.5 px-6 text-xs"
+                    >
+                      {isVerifyingTeacherPin ? 'Verifying...' : '🔑 Unlock with PIN'}
+                    </ActionButton>
+                  </div>
+                </form>
+              </div>
             ) : (
               <div className="space-y-4 pt-1">
+                {teacherGoogleEmail && (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                    <span>Signed in as <strong>{teacherGoogleEmail}</strong></span>
+                    <span className="text-[10px] uppercase tracking-wider font-mono-casino px-2 py-0.5 rounded bg-emerald-500/20">Google Verified</span>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-between gap-2.5">
                   <ActionButton
                     type="button"
@@ -6491,17 +8136,31 @@ export function App() {
                     🔒 Lock &amp; Switch to Offline Mode
                   </ActionButton>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setShowChangePinForm((prev) => !prev);
-                      setTeacherPinNotice(null);
-                    }}
-                    className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
-                  >
-                    {showChangePinForm ? 'Cancel PIN Change' : '⚙️ Change Teacher PIN'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <ActionButton
+                      type="button"
+                      onClick={() => {
+                        setShowTeacherPinModal(false);
+                        setShowCloudModal(true);
+                      }}
+                      playSound={playSound}
+                      variant="outline-gold"
+                      className="py-2 px-3.5 text-xs"
+                    >
+                      ☁️ Open Cloud Vault
+                    </ActionButton>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound('click');
+                        setShowChangePinForm((prev) => !prev);
+                        setTeacherPinNotice(null);
+                      }}
+                      className="text-xs font-serif font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
+                    >
+                      {showChangePinForm ? 'Cancel PIN Change' : '⚙️ Change PIN'}
+                    </button>
+                  </div>
                 </div>
 
                 {showChangePinForm && (
@@ -6551,6 +8210,31 @@ export function App() {
             )}
           </div>
         </Modal>
+      )}
+      {showCloudModal && (
+        <CloudManagerModal
+          isOpen={showCloudModal}
+          onClose={() => setShowCloudModal(false)}
+          initialTab={cloudModalTab}
+          players={players}
+          startingCash={startingCash}
+          settings={settings}
+          gameMode={gameMode}
+          totalRounds={totalRounds}
+          targetAmount={targetAmount}
+          currentRound={currentRound}
+          roundHistory={roundHistory}
+          winner={winner}
+          fullGameState={buildCurrentFullGameState()}
+          activeRosterId={activeCloudRoster?.id || null}
+          activeRosterName={activeCloudRoster?.className || ''}
+          onLoadRoster={handleLoadCloudRoster}
+          onLoadFullGameState={handleApplyCloudFullGameState}
+          onActiveRosterUpdated={(id, name) => setActiveCloudRoster({ id, className: name })}
+          playSound={playSound}
+          teacherEmail={teacherGoogleEmail}
+          onSignInGoogle={handleSignInWithGoogle}
+        />
       )}
     </>
   );

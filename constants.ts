@@ -1,4 +1,14 @@
-import { PowerUp, PowerUpKey, WheelItem, GrammarTopic, CEFRLevel, Theme, ChallengeFormat } from './types';
+import { PowerUp, PowerUpKey, WheelItem, GrammarTopic, CEFRLevel, Theme, ChallengeFormat, QuestionType } from './types';
+
+export const ALL_QUESTION_TYPES: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'];
+
+export const getEffectiveMixedFormats = (mixedFormats?: QuestionType[]): QuestionType[] => {
+  if (!Array.isArray(mixedFormats) || mixedFormats.length === 0) {
+    return ALL_QUESTION_TYPES;
+  }
+  const filtered = ALL_QUESTION_TYPES.filter(q => mixedFormats.includes(q));
+  return filtered.length > 0 ? filtered : ALL_QUESTION_TYPES;
+};
 
 export const LOCAL_STORAGE_KEY = 'grammarCasinoGameState';
 export const INITIAL_PLAYER_MONEY = 1000;
@@ -275,7 +285,7 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
   },
   SECOND_CHANCE: {
     name: "Second Chance",
-    description: "Auto-revives you with $100 the next time you hit $0.",
+    description: "Auto-revives you with $300 the next time you hit $0.",
     icon: "👼",
     requiresTarget: false,
   },
@@ -302,11 +312,94 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
     description: "Swap your entire bankroll with a chosen rival.",
     icon: "🔄",
     requiresTarget: true,
+  },
+  SCALPEL: {
+    name: "50/50 Scalpel",
+    description: "Eliminates 2 wrong options in Multiple-Choice, reveals first letter & length in Open Cloze, reveals prefix/suffix letters in Word Formation, or reveals word count & boundary words in Key Word Transformation.",
+    icon: "✂️",
+    requiresTarget: false,
+  },
+  PEEKABOO: {
+    name: "Peekaboo",
+    description: "Secretly spy on a chosen rival's live answer and bet amount on your screen (Multiplayer only).",
+    icon: "🕵️",
+    requiresTarget: true,
+  },
+  COPYCAT: {
+    name: "Copycat",
+    description: "If your chosen target wins this round, you earn +50% of their winnings; if they lose, you lose $100.",
+    icon: "🪞",
+    requiresTarget: true,
+  },
+  BLOOD_PACT: {
+    name: "Blood Pact",
+    description: "Links you and a rival: if both win, both get +50% payout; if one misses, the loser pays $100 to the winner.",
+    icon: "🤝",
+    requiresTarget: true,
+  },
+  CROWD_SURFER: {
+    name: "Crowd Surfer",
+    description: "Gain +10% bonus winnings for every other player at the table who also gets the question right.",
+    icon: "📢",
+    requiresTarget: false,
+  },
+  HIGH_ROLLER: {
+    name: "High Roller",
+    description: "Forces one rival's minimum bet this round to be at least 50% of their current bankroll.",
+    icon: "🔥",
+    requiresTarget: true,
+  },
+  DOUBLE_OR_NOTHING: {
+    name: "Double or Nothing",
+    description: "Win 3× (+200% payout, requires valid correction if flawed in Binary mode), or lose 1.5× your bet if wrong.",
+    icon: "🎲",
+    requiresTarget: false,
+  },
+  BOOMERANG: {
+    name: "Boomerang",
+    description: "Concealed trap: reflects any offensive targeted power-up used against you this round back at the attacker.",
+    icon: "🪃",
+    requiresTarget: false,
+  },
+  PICKPOCKET: {
+    name: "Pickpocket",
+    description: "Instantly steals 20% of a chosen rival's current bankroll and adds it to yours.",
+    icon: "🕵️‍♂️",
+    requiresTarget: true,
+  },
+  AUDIENCE_POLL: {
+    name: "Ask the Table",
+    description: "Reveals a live anonymized poll of all answers and average bet from other players this round.",
+    icon: "📊",
+    requiresTarget: false,
+  },
+  UNDERDOG: {
+    name: "Underdog Surge",
+    description: "Win a 2.5× comeback payout (+150% winnings) if you are in the bottom half of the standings (or trailing the leader).",
+    icon: "🚀",
+    requiresTarget: false,
+  },
+  SCAVENGER: {
+    name: "Dead Pool Scavenger",
+    description: "Scoop up 25% of every losing bet lost by other players to the House this round (up to +$500).",
+    icon: "🦅",
+    requiresTarget: false,
   }
 };
 
 export const GRAMMAR_TOPICS: GrammarTopic[] = [
-  'Tenses', 'Prepositions', 'Articles', 'Conditionals', 'Modals', 'Phrasal Verbs', 'Reported Speech', 'My own choice'
+  'Tenses', 'Prepositions', 'Articles', 'Conditionals', 'Modals', 'Phrasal Verbs', 'Reported Speech', 'Collocations', 'My own choice'
+];
+
+export const QUICK_LEXICAL_TOPICS: string[] = [
+  'School Subjects',
+  'Places in Town',
+  'Food & Cooking',
+  'Travel & Transport',
+  'Jobs & Professions',
+  'Daily Routines',
+  'Sports & Hobbies',
+  'Health & Body',
 ];
 
 export const CEFR_LEVELS: CEFRLevel[] = [
@@ -378,6 +471,9 @@ export const THEMES: Theme[] = [
 ];
 
 export const CLOZE_DISABLED_POWER_UPS: PowerUpKey[] = ['CORRECTION_BOUNTY', 'GRAMMAR_GOGGLES'];
+export const BINARY_DISABLED_POWER_UPS: PowerUpKey[] = ['SCALPEL'];
+export const MP_ONLY_POWER_UPS: PowerUpKey[] = ['PEEKABOO'];
+export const NON_OFFENSIVE_TARGETED_POWER_UPS: PowerUpKey[] = ['PEEKABOO', 'COPYCAT'];
 
 export interface ChallengeFormatOption {
   id: ChallengeFormat;
@@ -410,10 +506,24 @@ export const CHALLENGE_FORMATS: ChallengeFormatOption[] = [
     icon: '✍️',
   },
   {
+    id: 'wordFormation',
+    label: 'Word Formation',
+    shortLabel: 'Word Form',
+    subtitle: 'Cambridge style — transform the base word in parentheses to fit the gap',
+    icon: '🧬',
+  },
+  {
+    id: 'keyWordTransformation',
+    label: 'Key Word Transformation',
+    shortLabel: 'Key Word (Part 4)',
+    subtitle: 'Cambridge Part 4 — rewrite the sentence using the given KEY WORD in 2–6 words (1 or 2 marks)',
+    icon: '🔑',
+  },
+  {
     id: 'mixed',
     label: 'Mixed Shoe',
     shortLabel: 'Mixed Shoe',
-    subtitle: 'Rotates between Valid/Flawed, Multiple-Choice Cloze, and Open Cloze each hand',
+    subtitle: 'Rotates across your selected challenge formats hand by hand (all 5 active by default)',
     icon: '🔀',
   },
 ];
@@ -426,5 +536,6 @@ export const TOPIC_SUBTYPES: Record<string, string[]> = {
   'Articles':        ['Definite article (the)','Indefinite article (a/an)','Zero article','Generic reference','Specific reference'],
   'Phrasal Verbs':   ['Separable transitive','Inseparable transitive','Intransitive','Three-part phrasal verbs'],
   'Reported Speech': ['Reported statements','Reported questions','Reported commands','Tense backshift','Reporting verbs'],
+  'Collocations':    ['Verb + Noun (make/do/take/have)','Adjective + Noun collocations','Verb + Preposition collocations','Adverb + Adjective collocations','Fixed idiomatic expressions'],
   'Mixed Grammar':   ['Subject-verb agreement','Pronoun reference','Parallelism','Dangling modifiers','Run-on sentences','Sentence fragments'],
 };

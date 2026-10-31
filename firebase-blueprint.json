@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Multiplayer Classroom Room",
+      "description": "Real-time state and sanitized per-student views for a 4-letter QR multiplayer classroom room.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "description": "4-character uppercase room code" },
+        "locked": { "type": "boolean", "description": "Whether new student joins are locked" },
+        "viewsJson": { "type": "string", "description": "JSON-encoded map of playerId to sanitized PlayerViewPayload" },
+        "joinResponsesJson": { "type": "string", "description": "JSON-encoded map of clientId to join response metadata" },
+        "kickedPlayerIds": { "type": "array", "items": { "type": "number" }, "description": "List of kicked player IDs" },
+        "updatedAt": { "type": "number", "description": "Epoch timestamp in ms" }
+      },
+      "required": ["code", "locked", "updatedAt"]
+    },
+    "RoomIntent": {
+      "title": "Student Room Intent",
+      "description": "Per-student join request or betting/power-up action sent to the Host table.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "Unique student device token" },
+        "type": { "type": "string", "description": "JOIN_REQUEST or STUDENT_INTENT" },
+        "payloadJson": { "type": "string", "description": "JSON-encoded join or intent payload" },
+        "updatedAt": { "type": "number", "description": "Epoch timestamp in ms" }
+      },
+      "required": ["clientId", "type", "payloadJson", "updatedAt"]
+    },
+    "CloudRoster": {
+      "title": "Classroom Roster",
+      "description": "Saved classroom student roster with names, avatars, and bankrolls for Fresh Start or Tournament Resume.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Class or tournament roster name" },
+        "notes": { "type": "string", "description": "Optional class notes or period label" },
+        "startingCash": { "type": "number", "description": "Default starting stack for this class" },
+        "playersJson": { "type": "string", "description": "JSON-encoded array of roster players (name, avatar, money, winStreak)" },
+        "playerCount": { "type": "number", "description": "Number of students in the roster" },
+        "updatedBy": { "type": "string", "description": "Teacher identifier (Google email or Teacher PIN)" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" },
+        "updatedAt": { "type": "number", "description": "Last update timestamp in ms" }
+      },
+      "required": ["name", "startingCash", "playersJson", "playerCount", "createdAt", "updatedAt"]
+    },
+    "SessionReport": {
+      "title": "Classroom Session Report & Cloud Save",
+      "description": "Saved game session report card and optional resumable full game state.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Session title" },
+        "topic": { "type": "string", "description": "Grammar topic" },
+        "level": { "type": "string", "description": "CEFR level" },
+        "theme": { "type": "string", "description": "Narrative theme" },
+        "gameMode": { "type": "string", "description": "Game mode (lastPlayer, rounds, targetAmount)" },
+        "roundsPlayed": { "type": "number", "description": "Number of hands completed" },
+        "playerCount": { "type": "number", "description": "Number of players at the table" },
+        "winnerName": { "type": "string", "description": "Champion or leading player name" },
+        "winnerAvatar": { "type": "string", "description": "Champion avatar emoji" },
+        "winnerMoney": { "type": "number", "description": "Champion bankroll" },
+        "playersJson": { "type": "string", "description": "JSON-encoded player standings" },
+        "roundHistoryJson": { "type": "string", "description": "JSON-encoded RoundHistoryRecord array" },
+        "fullGameStateJson": { "type": "string", "description": "Optional JSON-encoded full game state for resuming mid-game" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in ms" }
+      },
+      "required": ["title", "topic", "level", "roundsPlayed", "playerCount", "playersJson", "roundHistoryJson", "createdAt"]
+    },
+    "CuratedSentence": {
+      "title": "Cloud Curated Sentence",
+      "description": "Verified AI-generated grammar challenge archived to the shared Cloud Sentence Bank.",
+      "type": "object",
+      "properties": {
+        "topic": { "type": "string", "description": "Grammar topic" },
+        "level": { "type": "string", "description": "CEFR level (A1-C2)" },
+        "questionType": { "type": "string", "description": "binary, multipleChoice, or openCloze" },
+        "text": { "type": "string", "description": "Challenge sentence text" },
+        "isCorrect": { "type": "boolean", "description": "Whether sentence is grammatically valid (binary mode)" },
+        "correction": { "type": "string", "description": "Corrected or completed sentence" },
+        "explanation": { "type": "string", "description": "Pedagogical grammar explanation" },
+        "grammarPhrase": { "type": "string", "description": "Target grammar phrase for Grammar Goggles" },
+        "errorPhrase": { "type": "string", "description": "Erroneous phrase if flawed" },
+        "mistakeType": { "type": "string", "description": "Short descriptor of error mechanism" },
+        "correctAnswer": { "type": "string", "description": "Target word for cloze modes" },
+        "acceptedAnswers": { "type": "array", "items": { "type": "string" }, "description": "Accepted single-word answers for open cloze" },
+        "options": { "type": "array", "items": { "type": "string" }, "description": "4 options for multiple-choice cloze" },
+        "subtype": { "type": "string", "description": "Optional grammar subtype" },
+        "createdAt": { "type": "number", "description": "Epoch timestamp in ms" }
+      },
+      "required": ["topic", "level", "questionType", "text", "isCorrect", "correction", "explanation", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomCode}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Active multiplayer classroom rooms indexed by 4-letter room code"
+    },
+    "/rooms/{roomCode}/intents/{clientId}": {
+      "schema": { "$ref": "#/entities/RoomIntent" },
+      "description": "Individual student join requests and game intents"
+    },
+    "/rosters/{rosterId}": {
+      "schema": { "$ref": "#/entities/CloudRoster" },
+      "description": "Saved classroom rosters for Fresh Start or Tournament Resume"
+    },
+    "/session_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/SessionReport" },
+      "description": "Saved classroom game reports and resumable table states"
+    },
+    "/curated_sentences/{sentenceId}": {
+      "schema": { "$ref": "#/entities/CuratedSentence" },
+      "description": "Auto-growing cloud bank of AI-generated grammar sentences"
+    }
+  }
+}

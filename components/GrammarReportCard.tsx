@@ -203,15 +203,20 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
     history.forEach((round) => {
       const qType = round.sentence.questionType || 'binary';
-      const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+      const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation';
       if (isCloze) {
-        const modeLabel = qType === 'multipleChoice' ? 'MULTIPLE-CHOICE CLOZE' : 'OPEN CLOZE';
+        const modeLabel =
+          qType === 'multipleChoice'
+            ? 'MULTIPLE-CHOICE CLOZE'
+            : qType === 'wordFormation'
+              ? `WORD FORMATION (${round.sentence.baseWord || 'ROOT'})`
+              : 'OPEN CLOZE';
         report += `[Round ${round.round}] [${modeLabel}] - Official Answer: "${round.sentence.correctAnswer || ''}"\n`;
-        report += `Prompt: "${round.sentence.text}"\n`;
+        report += `Prompt: "${round.sentence.text}"${qType === 'wordFormation' && round.sentence.baseWord ? ` (${round.sentence.baseWord})` : ''}\n`;
         if (qType === 'multipleChoice' && round.sentence.options) {
           report += `Options: ${round.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${opt}`).join(' | ')}\n`;
         }
-        if (qType === 'openCloze' && round.sentence.acceptedAnswers && round.sentence.acceptedAnswers.length > 0) {
+        if ((qType === 'openCloze' || qType === 'wordFormation') && round.sentence.acceptedAnswers && round.sentence.acceptedAnswers.length > 0) {
           report += `Accepted Answers: ${round.sentence.acceptedAnswers.join(', ')}\n`;
         }
         if (round.sentence.correction) {
@@ -550,7 +555,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             filteredHistory.map((record) => {
               const isExpanded = expandedRounds[record.round] ?? true;
               const qType = record.sentence.questionType || 'binary';
-              const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+              const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
               const hasError = !isCloze && !record.sentence.isCorrect;
               const anyPlayerLost = record.playerResults.some(pr => !pr.isWin);
 
@@ -577,7 +582,15 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
                       {isCloze ? (
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
-                          <span>{qType === 'multipleChoice' ? '🔤 Multiple-Choice' : '✍️ Open Cloze'}</span>
+                          <span>
+                            {qType === 'multipleChoice'
+                              ? '🔤 Multiple-Choice'
+                              : qType === 'wordFormation'
+                                ? `🧬 Word Form (${record.sentence.baseWord || 'ROOT'})`
+                                : qType === 'keyWordTransformation'
+                                  ? `🔑 Key Word (${record.sentence.baseWord || 'KEY'})`
+                                  : '✍️ Open Cloze'}
+                          </span>
                         </span>
                       ) : (
                         <span
@@ -624,9 +637,35 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                       {/* Sentence Comparison Box */}
                       <div className="space-y-3">
                         <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-                          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-                            {isCloze ? 'Cloze Challenge Prompt' : 'Original Sentence'}
+                          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
+                            <span>
+                              {qType === 'keyWordTransformation'
+                                ? 'Key Word Transformation Prompt (Part 4)'
+                                : qType === 'wordFormation'
+                                  ? 'Word Formation Challenge Prompt'
+                                  : isCloze
+                                    ? 'Cloze Challenge Prompt'
+                                    : 'Original Sentence'}
+                            </span>
+                            {qType === 'wordFormation' && record.sentence.baseWord && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-mono">
+                                Base Word: ({record.sentence.baseWord})
+                              </span>
+                            )}
+                            {qType === 'keyWordTransformation' && record.sentence.baseWord && (
+                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-mono">
+                                🔑 KEY WORD: {record.sentence.baseWord}
+                              </span>
+                            )}
                           </div>
+                          {qType === 'keyWordTransformation' && record.sentence.leadInSentence && (
+                            <div className="mb-2 p-2.5 rounded-md bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-sm md:text-base font-serif italic text-slate-800 dark:text-amber-100">
+                              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 block not-italic mb-0.5">
+                                Lead-in Sentence:
+                              </span>
+                              "{record.sentence.leadInSentence}"
+                            </div>
+                          )}
                           <div className="text-base md:text-lg font-serif text-slate-900 dark:text-slate-100 leading-relaxed">
                             "{record.sentence.text}"
                           </div>
@@ -658,9 +697,9 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                 <span>✅</span>
                                 <span>Official Answer: "{record.sentence.correctAnswer}"</span>
                               </span>
-                              {qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
+                              {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
                                 <span className="font-mono text-emerald-800 dark:text-emerald-300 font-medium normal-case bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 text-[11px]">
-                                  Accepted Synonyms: {record.sentence.acceptedAnswers.join(', ')}
+                                  Accepted Forms: {record.sentence.acceptedAnswers.join(' | ')}
                                 </span>
                               )}
                             </div>
@@ -733,15 +772,30 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                                   <span>{pr.playerAvatar}</span>
                                   <span className="truncate">{pr.playerName}</span>
                                 </div>
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                    pr.isWin
-                                      ? 'bg-emerald-200 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100'
-                                      : 'bg-rose-200 dark:bg-rose-800 text-rose-900 dark:text-rose-100'
-                                  }`}
-                                >
-                                  {pr.isWin ? 'Won' : 'Lost'}
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  {qType === 'keyWordTransformation' && pr.marksAwarded !== undefined && (
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                        pr.marksAwarded === 2
+                                          ? 'bg-amber-200 dark:bg-amber-800 text-amber-950 dark:text-amber-100'
+                                          : pr.marksAwarded === 1
+                                            ? 'bg-cyan-200 dark:bg-cyan-800 text-cyan-950 dark:text-cyan-100'
+                                            : 'bg-rose-200/70 dark:bg-rose-900/60 text-rose-900 dark:text-rose-200'
+                                      }`}
+                                    >
+                                      {pr.marksAwarded}/2 Marks
+                                    </span>
+                                  )}
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      pr.isWin
+                                        ? 'bg-emerald-200 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100'
+                                        : 'bg-rose-200 dark:bg-rose-800 text-rose-900 dark:text-rose-100'
+                                    }`}
+                                  >
+                                    {pr.isWin ? 'Won' : 'Lost'}
+                                  </span>
+                                </div>
                               </div>
 
                               <div className="flex items-center justify-between gap-2 text-slate-600 dark:text-slate-400">

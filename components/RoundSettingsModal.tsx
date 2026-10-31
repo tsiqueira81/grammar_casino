@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Settings, CEFRLevel, SoundEffect, ChallengeFormat } from '../types';
-import { GRAMMAR_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS } from '../constants';
+import { Settings, CEFRLevel, SoundEffect, ChallengeFormat, QuestionType } from '../types';
+import { GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import ActionButton from './ActionButton';
 import {
   isDesktopApp,
@@ -27,6 +27,7 @@ interface RoundSettingsModalProps {
 }
 
 const EXTENDED_GRAMMAR_TOPICS = [
+  { name: 'Collocations', icon: '🤝', desc: 'Make vs do, verb+noun, adj+noun & idiomatic pairings' },
   { name: 'Comparatives and Superlatives', icon: '⚖️', desc: 'As...as, -er/-est, more/most, irregular forms' },
   { name: 'Conditionals', icon: '🔀', desc: 'Zero, First, Second, Third, and Mixed conditionals' },
   { name: 'Tenses', icon: '⏳', desc: 'Present, Past, Future, Perfect, and Continuous forms' },
@@ -38,7 +39,7 @@ const EXTENDED_GRAMMAR_TOPICS = [
   { name: 'Reported Speech', icon: '💬', desc: 'Tense backshifting, reported questions & commands' },
   { name: 'Relative Clauses', icon: '🔗', desc: 'Defining vs non-defining, who, which, that, where' },
   { name: 'Gerunds and Infinitives', icon: '🎯', desc: 'Verb + -ing vs to-infinitive, meaning shifts' },
-  { name: 'Subject-Verb Agreement', icon: '🤝', desc: 'Singular/plural harmony, collective nouns, inverted' },
+  { name: 'Subject-Verb Agreement', icon: '🏛️', desc: 'Singular/plural harmony, collective nouns, inverted' },
 ];
 
 export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
@@ -68,6 +69,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
   const [selectedFormat, setSelectedFormat] = useState<ChallengeFormat>(
     nextSettings.challengeFormat || currentSettings.challengeFormat || 'binary'
   );
+  const [selectedMixedFormats, setSelectedMixedFormats] = useState<QuestionType[]>(
+    getEffectiveMixedFormats(nextSettings.mixedFormats || currentSettings.mixedFormats)
+  );
+  const [mixedFormatWarning, setMixedFormatWarning] = useState<string | null>(null);
   const [customThemeInput, setCustomThemeInput] = useState(
     !THEMES.includes(nextSettings.theme as any) ? nextSettings.theme : ''
   );
@@ -94,6 +99,8 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       setSelectedLevel(nextSettings.level || currentSettings.level);
       setSelectedTheme(nextSettings.theme || currentSettings.theme);
       setSelectedFormat(nextSettings.challengeFormat || currentSettings.challengeFormat || 'binary');
+      setSelectedMixedFormats(getEffectiveMixedFormats(nextSettings.mixedFormats || currentSettings.mixedFormats));
+      setMixedFormatWarning(null);
 
       const isTopicCustom = !EXTENDED_GRAMMAR_TOPICS.some(t => t.name === nextSettings.topic) && !GRAMMAR_TOPICS.includes(nextSettings.topic as any);
       setIsCustomTopicMode(isTopicCustom);
@@ -118,6 +125,25 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
   const resolvedTopic = isCustomTopicMode ? (customTopicInput.trim() || 'Custom Grammar') : selectedTopic;
   const resolvedTheme = isCustomThemeMode ? (customThemeInput.trim() ? `Custom: ${customThemeInput.trim()} ✍️` : 'Custom ✍️') : selectedTheme;
+  const effectiveMixedFormats = getEffectiveMixedFormats(selectedMixedFormats);
+
+  const handleToggleMixedFormatItem = (qType: QuestionType) => {
+    const isIncluded = effectiveMixedFormats.includes(qType);
+    if (isIncluded) {
+      if (effectiveMixedFormats.length <= 1) {
+        playSound('error');
+        setMixedFormatWarning('At least 1 challenge format must remain active in the Mixed Shoe.');
+        return;
+      }
+      playSound('click');
+      setMixedFormatWarning(null);
+      setSelectedMixedFormats(ALL_QUESTION_TYPES.filter(q => effectiveMixedFormats.includes(q) && q !== qType));
+    } else {
+      playSound('click');
+      setMixedFormatWarning(null);
+      setSelectedMixedFormats(ALL_QUESTION_TYPES.filter(q => effectiveMixedFormats.includes(q) || q === qType));
+    }
+  };
 
   const handleSaveForNext = () => {
     playSound('success');
@@ -126,6 +152,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       level: selectedLevel,
       theme: resolvedTheme,
       challengeFormat: selectedFormat,
+      mixedFormats: effectiveMixedFormats,
     });
   };
 
@@ -137,6 +164,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
         level: selectedLevel,
         theme: resolvedTheme,
         challengeFormat: selectedFormat,
+        mixedFormats: effectiveMixedFormats,
       });
     }
   };
@@ -242,7 +270,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               }`}
             >
               <span>📚</span>
-              <span>Topic</span>
+              <span>Domain</span>
               {resolvedTopic !== currentSettings.topic && (
                 <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
               )}
@@ -315,14 +343,14 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
           {/* Modal Body / Tab Content */}
           <div className="flex-1 overflow-y-auto p-5 text-slate-800 dark:text-slate-100 modal-content-scroll">
-            {/* TOPIC TAB */}
+            {/* TOPIC / LANGUAGE DOMAIN TAB */}
             {activeTab === 'topic' && (
               <div>
                 <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-serif">
-                  Select a grammar focus for subsequent rounds, or enter your own custom rule:
+                  Select a Language Domain (grammar or collocations) for subsequent rounds, or enter a custom lexical/grammar topic:
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto pr-1">
                   {EXTENDED_GRAMMAR_TOPICS.map((top) => {
                     const isSelected = !isCustomTopicMode && selectedTopic === top.name;
                     return (
@@ -355,7 +383,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   })}
                 </div>
 
-                {/* Custom Topic Input */}
+                {/* Custom Lexical or Grammar Topic Input */}
                 <div className="mt-4 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
                   <div
                     onClick={() => {
@@ -368,10 +396,15 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         : 'bg-white dark:bg-black/20 border-dashed border-amber-300 dark:border-amber-800/60 hover:border-amber-400'
                     }`}
                   >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-base">✍️</span>
-                      <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
-                        Custom Grammar Target:
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">✍️</span>
+                        <span className="text-xs font-serif font-bold text-slate-900 dark:text-amber-200">
+                          Custom Lexical or Grammar Preference:
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 dark:text-amber-200/60 font-serif">
+                        Vocabulary or Grammar
                       </span>
                     </div>
                     <input
@@ -382,9 +415,36 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         if (!isCustomTopicMode) setIsCustomTopicMode(true);
                       }}
                       onFocus={() => setIsCustomTopicMode(true)}
-                      placeholder="e.g. Inversion with Seldom / Hardly, Subjunctive Mood, Cleft Sentences..."
+                      placeholder="e.g. School Subjects, Places in Town, Food & Cooking, Inversion..."
                       className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-serif uppercase tracking-wider text-slate-500 dark:text-amber-200/60 mr-1">
+                        Quick Lexis:
+                      </span>
+                      {QUICK_LEXICAL_TOPICS.map((lex) => {
+                        const isQuickActive = isCustomTopicMode && customTopicInput.trim().toLowerCase() === lex.toLowerCase();
+                        return (
+                          <button
+                            key={lex}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playSound('click');
+                              setIsCustomTopicMode(true);
+                              setCustomTopicInput(lex);
+                            }}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-serif transition-all cursor-pointer border ${
+                              isQuickActive
+                                ? 'bg-amber-500 text-black border-amber-400 font-bold'
+                                : 'bg-amber-50/60 dark:bg-black/30 text-slate-700 dark:text-amber-100/80 border-amber-300/60 dark:border-amber-800/50 hover:border-amber-400'
+                            }`}
+                          >
+                            {lex}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -515,34 +575,121 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   {CHALLENGE_FORMATS.map((fmt) => {
                     const isSelected = selectedFormat === fmt.id;
                     return (
-                      <button
-                        key={fmt.id}
-                        type="button"
-                        onClick={() => {
-                          playSound('click');
-                          setSelectedFormat(fmt.id);
-                        }}
-                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
-                          isSelected
-                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
-                            : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
-                        }`}
-                      >
-                        <span className="text-2xl mt-0.5 select-none">{fmt.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className={`font-serif font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
-                              {fmt.label}
-                            </span>
-                            {isSelected && (
-                              <span className="text-amber-500 font-bold text-base select-none">✓</span>
-                            )}
+                      <div key={fmt.id} className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playSound('click');
+                            setSelectedFormat(fmt.id);
+                          }}
+                          className={`w-full p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                            isSelected
+                              ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
+                              : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
+                          }`}
+                        >
+                          <span className="text-2xl mt-0.5 select-none">{fmt.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`font-serif font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
+                                {fmt.label}
+                              </span>
+                              {isSelected && (
+                                <span className="text-amber-500 font-bold text-base select-none">✓</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                              {fmt.subtitle}
+                            </p>
                           </div>
-                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
-                            {fmt.subtitle}
-                          </p>
-                        </div>
-                      </button>
+                        </button>
+
+                        {/* Customizable Mixed Shoe Format Picker */}
+                        {fmt.id === 'mixed' && isSelected && (
+                          <div className="p-3.5 rounded-xl border border-amber-400/50 dark:border-amber-700/60 bg-amber-50/60 dark:bg-black/35 space-y-2.5 animate-fade-in">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <div className="text-xs font-serif font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                                  <span>🎛️</span>
+                                  <span>Customize Mixed Shoe Rotation</span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 border border-amber-500/40 text-amber-900 dark:text-amber-300">
+                                    {effectiveMixedFormats.length} of 5 Active
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                                  Select which challenge formats are dealt in the Mixed Shoe rotation:
+                                </p>
+                              </div>
+                              {effectiveMixedFormats.length < 5 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    playSound('click');
+                                    setMixedFormatWarning(null);
+                                    setSelectedMixedFormats(ALL_QUESTION_TYPES);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-serif font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
+                                >
+                                  Select All 5
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {CHALLENGE_FORMATS.filter((c): c is typeof CHALLENGE_FORMATS[number] & { id: QuestionType } => c.id !== 'mixed').map((subFmt) => {
+                                const isChecked = effectiveMixedFormats.includes(subFmt.id);
+                                return (
+                                  <button
+                                    key={subFmt.id}
+                                    type="button"
+                                    onClick={() => handleToggleMixedFormatItem(subFmt.id)}
+                                    className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                                      isChecked
+                                        ? 'bg-emerald-500/15 dark:bg-emerald-950/50 border-emerald-500/70 text-slate-900 dark:text-emerald-100 shadow-sm'
+                                        : 'bg-white/60 dark:bg-black/25 border-slate-300/70 dark:border-slate-800 text-slate-500 dark:text-slate-400 opacity-75 hover:opacity-100'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-lg select-none">{subFmt.icon}</span>
+                                      <span className="font-serif font-bold text-xs truncate">
+                                        {subFmt.shortLabel}
+                                      </span>
+                                    </div>
+                                    <span
+                                      className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0 border ${
+                                        isChecked
+                                          ? 'bg-emerald-500 text-black border-emerald-300'
+                                          : 'bg-transparent border-slate-400/50 dark:border-slate-600'
+                                      }`}
+                                    >
+                                      {isChecked ? '✓' : ''}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {mixedFormatWarning && (
+                              <div className="text-[11px] font-serif text-amber-800 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                                <span>⚠️</span>
+                                <span>{mixedFormatWarning}</span>
+                              </div>
+                            )}
+
+                            <div className="text-[11px] font-serif text-slate-600 dark:text-amber-200/80 flex items-center gap-1.5 pt-0.5">
+                              <span className="font-bold text-amber-900 dark:text-amber-300">Active Cycle:</span>
+                              <span>
+                                {effectiveMixedFormats
+                                  .map(q => {
+                                    const found = CHALLENGE_FORMATS.find(f => f.id === q);
+                                    return found ? `${found.icon} ${found.shortLabel}` : q;
+                                  })
+                                  .join(' → ')}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -815,7 +962,13 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                 🎭 {resolvedTheme}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50">
-                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.icon || '🎯'} {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.shortLabel || 'Valid / Flawed'}
+                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.icon || '🎯'}{' '}
+                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.shortLabel || 'Valid / Flawed'}
+                {selectedFormat === 'mixed' && (
+                  <span className="ml-0.5 text-[10px] opacity-90">
+                    ({effectiveMixedFormats.map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
+                  </span>
+                )}
               </span>
             </div>
             <div className="text-[11px] text-amber-700 dark:text-amber-400/80 italic">

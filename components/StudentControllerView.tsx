@@ -10,6 +10,7 @@ import {
   PlayerViewPayload,
   StudentIntent,
   isBetCompleteForQuestionType,
+  isValidKeyWordTransformationPhrase,
 } from '../utils/multiplayerProtocol';
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
@@ -129,14 +130,40 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               ? Math.min(nextView.me.money, nextView.betCapAmount)
               : nextView.me.money
           );
+          const minAllowed = nextView.isHighRoller
+            ? Math.min(maxAllowed, Math.max(1, nextView.minBetAmount))
+            : 0;
+          let updated = prev;
           if (
-            prev.bet !== undefined &&
-            prev.bet !== '' &&
-            Number(prev.bet) > maxAllowed
+            updated.bet !== undefined &&
+            updated.bet !== '' &&
+            Number(updated.bet) > maxAllowed
           ) {
-            return { ...prev, bet: maxAllowed > 0 ? maxAllowed : '' };
+            updated = { ...updated, bet: maxAllowed > 0 ? maxAllowed : '' };
+          } else if (
+            minAllowed > 0 &&
+            (updated.bet === undefined || updated.bet === '' || Number(updated.bet) < minAllowed)
+          ) {
+            updated = { ...updated, bet: minAllowed };
           }
-          return prev;
+          // If 50/50 Scalpel eliminated a currently selected MC option, clear it locally too
+          const eliminated = (nextView.scalpelHint?.eliminatedOptions || []).map(o =>
+            o.trim().toLowerCase()
+          );
+          if (eliminated.length > 0) {
+            if (updated.selectedOption && eliminated.includes(updated.selectedOption.trim().toLowerCase())) {
+              updated = { ...updated, selectedOption: undefined };
+            }
+            if (Array.isArray(updated.splitOptions) && updated.splitOptions.length > 0) {
+              const filtered = updated.splitOptions.filter(
+                o => !eliminated.includes(o.trim().toLowerCase())
+              );
+              if (filtered.length !== updated.splitOptions.length) {
+                updated = { ...updated, splitOptions: filtered };
+              }
+            }
+          }
+          return updated;
         });
       }
 
@@ -307,29 +334,68 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
     const qType: QuestionType = view.sentence?.questionType || 'binary';
     const hasSplitBet = view.myActivePowerUps.some((pu) => pu.type === 'SPLIT_BET');
+    const minRequiredWager = view.isHighRoller && view.minBetAmount > 0 ? view.minBetAmount : 1;
 
     const hasValidWager =
       localBet.bet !== undefined &&
       localBet.bet !== '' &&
       !isNaN(Number(localBet.bet)) &&
-      Number(localBet.bet) > 0;
+      Number(localBet.bet) >= minRequiredWager;
+
+    const cleanBaseLower = (view.sentence?.baseWord || '').trim().toLowerCase();
+    const isUnchangedBaseWord =
+      qType === 'wordFormation' &&
+      Boolean(cleanBaseLower) &&
+      (hasSplitBet
+        ? [localBet.splitClozeAnswers?.[0], localBet.splitClozeAnswers?.[1]].some(
+            (w) => Boolean(w?.trim()) && w!.trim().toLowerCase() === cleanBaseLower
+          )
+        : Boolean(localBet.clozeAnswer?.trim()) &&
+          localBet.clozeAnswer!.trim().toLowerCase() === cleanBaseLower);
+
+    const isInvalidKwtAnswer =
+      qType === 'keyWordTransformation' &&
+      (hasSplitBet
+        ? [localBet.splitClozeAnswers?.[0], localBet.splitClozeAnswers?.[1]].some(
+            (w) => Boolean(w?.trim()) && !isValidKeyWordTransformationPhrase(w, view.sentence?.baseWord)
+          )
+        : Boolean(localBet.clozeAnswer?.trim()) &&
+          !isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord));
 
     let hasValidAnswer = false;
     if (qType === 'multipleChoice') {
       hasValidAnswer = hasSplitBet
         ? (localBet.splitOptions?.length || 0) >= 1
         : Boolean(localBet.selectedOption?.trim());
-    } else if (qType === 'openCloze') {
+    } else if (qType === 'keyWordTransformation') {
       hasValidAnswer = hasSplitBet
-        ? Boolean(localBet.splitClozeAnswers?.[0]?.trim() || localBet.splitClozeAnswers?.[1]?.trim())
-        : Boolean(localBet.clozeAnswer?.trim());
+        ? (isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[0], view.sentence?.baseWord) &&
+            (!localBet.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))) ||
+          (!localBet.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))
+        : isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord);
+    } else if (qType === 'openCloze' || qType === 'wordFormation') {
+      const isWordOk = (w?: string) => {
+        const trimmed = (w || '').trim().toLowerCase();
+        if (!trimmed) return false;
+        if (qType === 'wordFormation' && cleanBaseLower && trimmed === cleanBaseLower) return false;
+        return true;
+      };
+      hasValidAnswer = hasSplitBet
+        ? isWordOk(localBet.splitClozeAnswers?.[0]) || isWordOk(localBet.splitClozeAnswers?.[1])
+        : isWordOk(localBet.clozeAnswer);
     } else {
       hasValidAnswer = hasSplitBet
         ? true
         : localBet.opinion === 'correct' || localBet.opinion === 'incorrect';
     }
 
-    if (!hasValidAnswer || !hasValidWager || !isBetCompleteForQuestionType(localBet, qType, hasSplitBet)) {
+    if (
+      !hasValidAnswer ||
+      !hasValidWager ||
+      isUnchangedBaseWord ||
+      isInvalidKwtAnswer ||
+      !isBetCompleteForQuestionType(localBet, qType, hasSplitBet, view.sentence?.baseWord)
+    ) {
       playSound('error');
       if ('vibrate' in navigator) {
         try {
@@ -339,12 +405,22 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
       let message = '';
       let missingField: 'answer' | 'wager' | 'both' = 'both';
-      if (!hasValidAnswer && !hasValidWager) {
+      if (isUnchangedBaseWord) {
+        missingField = 'answer';
+        message = `Hold on! "${(view.sentence?.baseWord || '').toUpperCase()}" is the unchanged base word. Transform its form (e.g. add a prefix or suffix) before locking in!`;
+      } else if (isInvalidKwtAnswer) {
+        missingField = 'answer';
+        message = `Hold on! Use 2 to 6 words and include the exact unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
+      } else if (!hasValidAnswer && !hasValidWager) {
         missingField = 'both';
         if (qType === 'multipleChoice') {
           message = hasSplitBet
             ? 'Hold on! Pick 2 options (50/50) or tap 1 option twice for 100% (2×), and enter a wager amount before locking in.'
             : 'Hold on! Choose an option (A–D) in Step 1 and enter a wager amount in Step 2 before locking in.';
+        } else if (qType === 'keyWordTransformation') {
+          message = `Hold on! Complete the gap in 2–6 words using "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" unchanged in Step 1 and enter a wager in Step 2.`;
+        } else if (qType === 'wordFormation') {
+          message = `Hold on! Transform (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) in Step 1 and enter a wager amount in Step 2 before locking in.`;
         } else if (qType === 'openCloze') {
           message = hasSplitBet
             ? 'Hold on! Type at least 1 candidate word in Step 1 and enter a wager amount in Step 2 before locking in.'
@@ -358,6 +434,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           message = hasSplitBet
             ? 'Step 1 Incomplete: Pick 2 options (50/50) or tap the same option twice for 100% (2×) before locking in!'
             : 'Step 1 Incomplete: Please choose an option (A, B, C, or D) before locking in!';
+        } else if (qType === 'keyWordTransformation') {
+          message = `Step 1 Incomplete: Type 2 to 6 words including the unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
+        } else if (qType === 'wordFormation') {
+          message = `Step 1 Incomplete: Please transform the base word (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) to fit the gap before locking in!`;
         } else if (qType === 'openCloze') {
           message = hasSplitBet
             ? 'Step 1 Incomplete: Please type at least 1 candidate word before locking in!'
@@ -367,18 +447,21 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         }
       } else {
         missingField = 'wager';
-        message = 'Step 2 Incomplete: Please enter a wager amount ($1 or more, or tap a quick chip) before locking in!';
+        message =
+          view.isHighRoller && view.minBetAmount > 0
+            ? `🔥 High Roller Fever Active: Your minimum wager this round is $${view.minBetAmount.toLocaleString()} (50% of your bankroll)!`
+            : 'Step 2 Incomplete: Please enter a wager amount ($1 or more, or tap a quick chip) before locking in!';
       }
 
       setLockWarning({ message, missingField });
 
       // Scroll to and focus the specific control that needs doing
       window.requestAnimationFrame(() => {
-        if (!hasValidAnswer) {
+        if (!hasValidAnswer || isUnchangedBaseWord || isInvalidKwtAnswer) {
           answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
           if (qType === 'multipleChoice') {
             firstOptionBtnRef.current?.focus();
-          } else if (qType === 'openCloze') {
+          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
             if (hasSplitBet) {
               const targetInput = !localBet.splitClozeAnswers?.[0]?.trim()
                 ? splitWord1InputRef.current
@@ -530,7 +613,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // Derived State for Active Student Controller
   // ============================================================================
   const qType: QuestionType = view.sentence?.questionType || 'binary';
-  const isClozeRound = qType === 'multipleChoice' || qType === 'openCloze';
+  const isClozeRound = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
   const hasSplitBet = view.myActivePowerUps.some((pu) => pu.type === 'SPLIT_BET');
   const maxAllowedBet = view.isBetCapped
     ? Math.min(view.me.money, view.betCapAmount)
@@ -546,9 +629,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     );
   }
   if (isClozeRound && sentenceHtml) {
+    const inlineBaseBadge =
+      qType === 'wordFormation' && view.sentence?.baseWord
+        ? ` <span class="inline-block px-2 py-0.5 rounded bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] text-amber-950 dark:text-[#fef08a] font-mono-casino font-black text-xs sm:text-sm tracking-widest not-italic align-middle">(${view.sentence.baseWord.toUpperCase()})</span>`
+        : '';
     sentenceHtml = sentenceHtml.replace(
       /_{3,}/g,
-      `<span class="inline-block min-w-[3.2rem] px-2 py-0.5 mx-1 rounded bg-amber-500/20 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic">_____</span>`
+      `<span class="inline-block min-w-[3.2rem] px-2 py-0.5 mx-1 rounded bg-amber-500/20 border-b-2 border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-mono-casino font-bold not-italic">_____</span>${inlineBaseBadge}`
     );
   }
 
@@ -686,8 +773,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               />
             )}
 
-            {/* Status Banner if Frozen or Capped */}
-            {view.isFrozen && (
+            {/* Status Banner if Frozen or Bankrupt */}
+            {view.me.money <= 0 ? (
+              <div className="p-4 rounded-2xl bg-rose-500/20 border-2 border-rose-400 text-center space-y-1">
+                <div className="text-2xl">💸</div>
+                <div className="text-sm font-serif font-extrabold uppercase tracking-wider text-rose-900 dark:text-rose-200">
+                  {view.gameMode === 'lastPlayer' ? 'Eliminated (Bankrupt)!' : 'Bankrupt This Hand!'}
+                </div>
+                <div className="text-xs text-rose-800 dark:text-rose-100/80">
+                  {view.gameMode === 'lastPlayer'
+                    ? 'You are out of funds in High-Roller Survival. Watch the remaining contenders battle it out!'
+                    : 'You are out of funds for this hand and will receive a $150 House Bailout next round.'}
+                </div>
+              </div>
+            ) : view.isFrozen ? (
               <div className="p-4 rounded-2xl bg-cyan-500/20 border-2 border-cyan-400 text-center space-y-1">
                 <div className="text-2xl">❄️</div>
                 <div className="text-sm font-serif font-extrabold uppercase tracking-wider text-cyan-900 dark:text-cyan-200">
@@ -697,7 +796,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   You were hit by a freeze effect and must sit out Hand #{view.round}.
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Sentence Card */}
             <div className="glass-panel rounded-2xl p-4 sm:p-5 border-2 border-[#d4af37] shadow-xl space-y-3">
@@ -710,7 +809,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     ? '🔠 MC Cloze'
                     : qType === 'openCloze'
                       ? '✍️ Open Cloze'
-                      : '⚖️ Valid / Flawed'}
+                      : qType === 'wordFormation'
+                        ? '🧬 Word Form'
+                        : qType === 'keyWordTransformation'
+                          ? '🔑 Key Word (Part 4)'
+                          : '⚖️ Valid / Flawed'}
                 </span>
               </div>
 
@@ -722,14 +825,36 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   </div>
                 </div>
               ) : (
-                <p
-                  className="text-lg sm:text-xl font-editorial italic text-slate-900 dark:text-amber-50 leading-relaxed text-center py-2"
-                  dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
-                />
+                <div className="space-y-2.5 py-1">
+                  {qType === 'keyWordTransformation' && view.sentence.leadInSentence && (
+                    <div className="p-3 rounded-xl felt-well border border-[#d4af37]/40 text-center space-y-1">
+                      <div className="text-[10px] font-serif uppercase tracking-widest text-amber-800 dark:text-[#d4af37] font-bold">
+                        Lead-In Sentence
+                      </div>
+                      <p className="text-base sm:text-lg font-editorial italic text-slate-900 dark:text-amber-50 leading-snug">
+                        &ldquo;{view.sentence.leadInSentence}&rdquo;
+                      </p>
+                      {view.sentence.baseWord && (
+                        <div className="pt-1 flex items-center justify-center gap-2">
+                          <span className="text-[10px] font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-amber-200">
+                            🔑 Key Word:
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-md bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-mono-casino font-black text-xs sm:text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                            {view.sentence.baseWord.toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p
+                    className="text-lg sm:text-xl font-editorial italic text-slate-900 dark:text-amber-50 leading-relaxed text-center py-1"
+                    dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
+                  />
+                </div>
               )}
 
               {/* Active Power-Ups & Effects Row */}
-              {(view.myActivePowerUps.length > 0 || view.me.effects.length > 0 || view.isBetCapped) && (
+              {(view.myActivePowerUps.length > 0 || view.me.effects.length > 0 || view.isBetCapped || view.isHighRoller) && (
                 <div className="pt-2 border-t border-[#d4af37]/20 flex flex-wrap items-center gap-1.5 text-xs">
                   {view.myActivePowerUps.map((pu, idx) => (
                     <span
@@ -743,6 +868,93 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     <span className="px-2.5 py-0.5 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-800 dark:text-rose-200 font-semibold">
                       🧢 Max Bet ${view.betCapAmount}
                     </span>
+                  )}
+                  {view.isHighRoller && (
+                    <span className="px-2.5 py-0.5 rounded-lg bg-orange-500/25 border border-orange-400/60 text-orange-900 dark:text-orange-200 font-semibold">
+                      🔥 High Roller: Min Bet ${view.minBetAmount}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 50/50 Scalpel Open Cloze Clue */}
+              {view.scalpelHint?.clozeMask && (
+                <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs text-cyan-950 dark:text-cyan-100">
+                  <strong className="font-serif uppercase tracking-wider flex items-center gap-1.5">
+                    <span>✂️</span>
+                    <span>50/50 Scalpel Clue:</span>
+                  </strong>
+                  <span className="font-mono-casino font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/25 border border-cyan-400/50 tracking-wider">
+                    {view.scalpelHint.clozeMask}
+                  </span>
+                </div>
+              )}
+
+              {/* Peekaboo Live Spy Feed */}
+              {view.peekabooSpyFeed && view.peekabooSpyFeed.length > 0 && (
+                <div className="p-3 rounded-xl bg-indigo-500/15 border border-indigo-400/50 space-y-1.5 text-xs text-indigo-950 dark:text-indigo-100">
+                  <div className="font-serif font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
+                    <span>🕵️ Peekaboo Live Spyglass</span>
+                    <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-indigo-500/25">
+                      LIVE FEED
+                    </span>
+                  </div>
+                  {view.peekabooSpyFeed.map(spy => (
+                    <div
+                      key={spy.targetId}
+                      className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-indigo-400/25"
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <span>{spy.targetAvatar}</span>
+                        <span>{spy.targetName}</span>
+                        <span className="text-[10px] font-mono-casino opacity-80">
+                          {spy.lockedIn ? '🔒 Locked' : '✏️ Drafting'}
+                        </span>
+                      </div>
+                      <div className="font-mono-casino font-bold text-right">
+                        <span className="text-amber-700 dark:text-[#fef08a] mr-2">
+                          {spy.answerSummary}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-black/20 border border-indigo-400/40">
+                          {spy.betAmount !== '' ? `$${Number(spy.betAmount).toLocaleString()}` : '$0'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ask the Table Live Anonymized Poll Feed */}
+              {view.audiencePollFeed && (
+                <div className="p-3 rounded-xl bg-sky-500/15 border border-sky-400/50 space-y-2 text-xs text-sky-950 dark:text-sky-100">
+                  <div className="font-serif font-extrabold uppercase tracking-wider text-sky-800 dark:text-sky-300 flex items-center justify-between gap-2">
+                    <span>📊 Ask the Table · Live Poll</span>
+                    <span className="text-[10px] font-mono-casino px-1.5 py-0.5 rounded bg-sky-500/25">
+                      {view.audiencePollFeed.summaryText}
+                    </span>
+                  </div>
+                  {view.audiencePollFeed.breakdown.length > 0 && (
+                    <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-sky-400/25">
+                      {view.audiencePollFeed.breakdown.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2 rounded-lg bg-black/15 border border-sky-400/30 flex flex-col gap-1"
+                        >
+                          <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
+                            <span className="truncate">{item.label}</span>
+                            <span className="font-mono-casino text-amber-700 dark:text-[#fef08a] shrink-0">
+                              {item.percent}%
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-black/25 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 rounded-full transition-all duration-300"
+                              style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
@@ -759,7 +971,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
 
             {/* Answer Selection Controls */}
-            {!view.isFrozen && view.sentence && (() => {
+            {!view.isFrozen && view.me.money > 0 && view.sentence && (() => {
               const highlightAnswerMissing =
                 lockWarning?.missingField === 'answer' || lockWarning?.missingField === 'both';
               const highlightWagerMissing =
@@ -887,110 +1099,241 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {/* Format B: Multiple Choice Cloze */}
                     {qType === 'multipleChoice' && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {(view.sentence.options || []).map((opt, idx) => {
-                          const letter = ['A', 'B', 'C', 'D'][idx] || '';
-                          const splitList = localBet.splitOptions || [];
-                          const isSelected = hasSplitBet
-                            ? splitList.includes(opt)
-                            : localBet.selectedOption === opt;
-                          const isDoubleStacked =
-                            hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
-
-                          return (
-                            <button
-                              key={opt}
-                              ref={idx === 0 ? firstOptionBtnRef : undefined}
-                              type="button"
-                              onClick={() => {
-                                if (hasSplitBet) {
-                                  let next: string[];
-                                  if (splitList.length === 0) {
-                                    next = [opt];
-                                  } else if (splitList.length === 1) {
-                                    next = [splitList[0], opt];
-                                  } else if (splitList.includes(opt)) {
-                                    next = splitList.filter((o) => o !== opt);
-                                  } else {
-                                    next = [splitList[1], opt];
-                                  }
-                                  updateBetField('splitOptions', next);
-                                } else {
-                                  updateBetField('selectedOption', opt);
-                                }
-                              }}
-                              className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-serif font-bold text-sm transition-all cursor-pointer flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
-                                isSelected
-                                  ? 'bg-emerald-600 text-white border-emerald-300 shadow-md'
-                                  : highlightAnswerMissing
-                                    ? 'felt-well text-slate-800 dark:text-amber-50 border-rose-400'
-                                    : 'felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
-                              }`}
-                            >
-                              <span>
-                                <strong className="font-mono-casino mr-2">{letter}.</strong>
-                                {opt}
-                              </span>
-                              {isDoubleStacked && (
-                                <span className="text-[10px] font-mono-casino bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
-                                  2×
-                                </span>
-                              )}
-                            </button>
+                        {(() => {
+                          const eliminatedSet = new Set(
+                            (view.scalpelHint?.eliminatedOptions || []).map((o) =>
+                              o.trim().toLowerCase()
+                            )
                           );
-                        })}
+                          return (view.sentence.options || []).map((opt, idx) => {
+                            const letter = ['A', 'B', 'C', 'D'][idx] || '';
+                            const isEliminatedOpt = eliminatedSet.has(opt.trim().toLowerCase());
+                            const splitList = localBet.splitOptions || [];
+                            const isSelected = hasSplitBet
+                              ? splitList.includes(opt)
+                              : localBet.selectedOption === opt;
+                            const isDoubleStacked =
+                              hasSplitBet && splitList.length === 2 && splitList[0] === opt && splitList[1] === opt;
+
+                            return (
+                              <button
+                                key={opt}
+                                ref={idx === 0 ? firstOptionBtnRef : undefined}
+                                type="button"
+                                disabled={isEliminatedOpt}
+                                onClick={() => {
+                                  if (isEliminatedOpt) return;
+                                  if (hasSplitBet) {
+                                    let next: string[];
+                                    if (splitList.length === 0) {
+                                      next = [opt];
+                                    } else if (splitList.length === 1) {
+                                      next = [splitList[0], opt];
+                                    } else if (splitList.includes(opt)) {
+                                      next = splitList.filter((o) => o !== opt);
+                                    } else {
+                                      next = [splitList[1], opt];
+                                    }
+                                    updateBetField('splitOptions', next);
+                                  } else {
+                                    updateBetField('selectedOption', opt);
+                                  }
+                                }}
+                                className={`min-h-[52px] px-4 py-2.5 rounded-xl border-2 text-left font-serif font-bold text-sm transition-all flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-[#d4af37] ${
+                                  isEliminatedOpt
+                                    ? 'opacity-40 grayscale cursor-not-allowed bg-slate-900/30 border-rose-500/40 text-slate-400 line-through'
+                                    : isSelected
+                                      ? 'cursor-pointer bg-emerald-600 text-white border-emerald-300 shadow-md'
+                                      : highlightAnswerMissing
+                                        ? 'cursor-pointer felt-well text-slate-800 dark:text-amber-50 border-rose-400'
+                                        : 'cursor-pointer felt-well text-slate-800 dark:text-amber-50 border-[#d4af37]/40'
+                                }`}
+                              >
+                                <span className={isEliminatedOpt ? 'line-through' : ''}>
+                                  <strong className="font-mono-casino mr-2">{letter}.</strong>
+                                  {opt}
+                                </span>
+                                {isEliminatedOpt ? (
+                                  <span className="text-[10px] font-mono-casino bg-rose-500/25 text-rose-200 px-1.5 py-0.5 rounded font-black no-underline">
+                                    ✂️ Cut
+                                  </span>
+                                ) : isDoubleStacked ? (
+                                  <span className="text-[10px] font-mono-casino bg-amber-400 text-black px-1.5 py-0.5 rounded font-black">
+                                    2×
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                     )}
 
-                    {/* Format C: Open Cloze */}
-                    {qType === 'openCloze' && (
-                      <div className="space-y-2.5">
-                        {hasSplitBet ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Format C, D & E: Open Cloze, Word Formation & Key Word Transformation */}
+                    {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                      const cleanBase = (view.sentence?.baseWord || '').trim().toLowerCase();
+                      const isUnchangedBase =
+                        qType === 'wordFormation' &&
+                        Boolean(cleanBase) &&
+                        (hasSplitBet
+                          ? [localBet.splitClozeAnswers?.[0], localBet.splitClozeAnswers?.[1]].some(
+                              (w) => Boolean(w?.trim()) && w!.trim().toLowerCase() === cleanBase
+                            )
+                          : Boolean(localBet.clozeAnswer?.trim()) &&
+                            localBet.clozeAnswer!.trim().toLowerCase() === cleanBase);
+
+                      const kwtCheck = (() => {
+                        const raw = (localBet.clozeAnswer || '').trim();
+                        const words = raw ? raw.split(/\s+/).filter(Boolean) : [];
+                        const escaped = cleanBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const hasKeyWord = cleanBase
+                          ? new RegExp(`\\b${escaped}\\b`, 'i').test(raw)
+                          : true;
+                        const isValidCount = words.length >= 2 && words.length <= 6;
+                        return { raw, wordCount: words.length, hasKeyWord, isValidCount };
+                      })();
+
+                      return (
+                        <div className="space-y-2.5">
+                          {qType === 'wordFormation' && view.sentence?.baseWord && (
+                            <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                                <span>🧬</span>
+                                <span>Base Word to Transform:</span>
+                              </span>
+                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-mono-casino font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                                ({view.sentence.baseWord.toUpperCase()})
+                              </span>
+                            </div>
+                          )}
+                          {qType === 'keyWordTransformation' && view.sentence?.baseWord && (
+                            <div className="p-2.5 rounded-xl bg-amber-500/15 border border-[#d4af37] flex items-center justify-between gap-2">
+                              <div className="text-left">
+                                <span className="text-[11px] font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100 flex items-center gap-1.5">
+                                  <span>🔑</span>
+                                  <span>Key Word (Do Not Change):</span>
+                                </span>
+                                <span className="text-[10px] text-slate-600 dark:text-amber-200/75 block">
+                                  2–6 words · 1 Mark (1×) or 2 Marks (2×)
+                                </span>
+                              </div>
+                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border border-[#d4af37] font-mono-casino font-black text-sm tracking-widest text-amber-950 dark:text-[#fef08a]">
+                                {view.sentence.baseWord.toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          {hasSplitBet ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <input
+                                ref={splitWord1InputRef}
+                                type="text"
+                                maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                value={localBet.splitClozeAnswers?.[0] || ''}
+                                onChange={(e) =>
+                                  updateBetField('splitClozeAnswers', [
+                                    qType === 'keyWordTransformation'
+                                      ? e.target.value.replace(/\s{2,}/g, ' ')
+                                      : e.target.value.replace(/\s+/g, ''),
+                                    localBet.splitClozeAnswers?.[1] || '',
+                                  ])
+                                }
+                                placeholder={
+                                  qType === 'keyWordTransformation' && view.sentence?.baseWord
+                                    ? `2–6 words using ${view.sentence.baseWord.toUpperCase()} (50%)`
+                                    : qType === 'wordFormation' && view.sentence?.baseWord
+                                      ? `Derived form #1 of ${view.sentence.baseWord.toUpperCase()} (50%)`
+                                      : 'Candidate Word #1 (50%)'
+                                }
+                                className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
+                                  highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
+                                }`}
+                              />
+                              <input
+                                ref={splitWord2InputRef}
+                                type="text"
+                                maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                value={localBet.splitClozeAnswers?.[1] || ''}
+                                onChange={(e) =>
+                                  updateBetField('splitClozeAnswers', [
+                                    localBet.splitClozeAnswers?.[0] || '',
+                                    qType === 'keyWordTransformation'
+                                      ? e.target.value.replace(/\s{2,}/g, ' ')
+                                      : e.target.value.replace(/\s+/g, ''),
+                                  ])
+                                }
+                                placeholder={
+                                  qType === 'keyWordTransformation' && view.sentence?.baseWord
+                                    ? `2nd phrase using ${view.sentence.baseWord.toUpperCase()} (50%)`
+                                    : qType === 'wordFormation' && view.sentence?.baseWord
+                                      ? `Derived form #2 of ${view.sentence.baseWord.toUpperCase()} (50%)`
+                                      : 'Candidate Word #2 (50%)'
+                                }
+                                className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
+                                  highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
+                                }`}
+                              />
+                            </div>
+                          ) : (
                             <input
-                              ref={splitWord1InputRef}
+                              ref={clozeWordInputRef}
                               type="text"
-                              value={localBet.splitClozeAnswers?.[0] || ''}
+                              maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                              value={localBet.clozeAnswer || ''}
                               onChange={(e) =>
-                                updateBetField('splitClozeAnswers', [
-                                  e.target.value,
-                                  localBet.splitClozeAnswers?.[1] || '',
-                                ])
+                                updateBetField(
+                                  'clozeAnswer',
+                                  qType === 'keyWordTransformation'
+                                    ? e.target.value.replace(/\s{2,}/g, ' ')
+                                    : e.target.value.replace(/\s+/g, '')
+                                )
                               }
-                              placeholder="Candidate Word #1 (50%)"
-                              className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
-                                highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
+                              placeholder={
+                                qType === 'keyWordTransformation' && view.sentence?.baseWord
+                                  ? `Type 2–6 words including ${view.sentence.baseWord.toUpperCase()}...`
+                                  : qType === 'wordFormation' && view.sentence?.baseWord
+                                    ? `Transform (${view.sentence.baseWord.toUpperCase()}) to fit the gap...`
+                                    : 'Type the single missing word...'
+                              }
+                              className={`w-full min-h-[50px] px-4 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-base font-bold text-slate-900 dark:text-white focus:outline-none ${
+                                highlightAnswerMissing || isUnchangedBase ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/60 focus:border-[#d4af37]'
                               }`}
                             />
-                            <input
-                              ref={splitWord2InputRef}
-                              type="text"
-                              value={localBet.splitClozeAnswers?.[1] || ''}
-                              onChange={(e) =>
-                                updateBetField('splitClozeAnswers', [
-                                  localBet.splitClozeAnswers?.[0] || '',
-                                  e.target.value,
-                                ])
-                              }
-                              placeholder="Candidate Word #2 (50%)"
-                              className={`w-full min-h-[48px] px-3.5 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none ${
-                                highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/50 focus:border-[#d4af37]'
-                              }`}
-                            />
-                          </div>
-                        ) : (
-                          <input
-                            ref={clozeWordInputRef}
-                            type="text"
-                            value={localBet.clozeAnswer || ''}
-                            onChange={(e) => updateBetField('clozeAnswer', e.target.value)}
-                            placeholder="Type the single missing word..."
-                            className={`w-full min-h-[50px] px-4 rounded-xl bg-white/90 dark:bg-black/50 border-2 text-base font-bold text-slate-900 dark:text-white focus:outline-none ${
-                              highlightAnswerMissing ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-[#d4af37]/60 focus:border-[#d4af37]'
-                            }`}
-                          />
-                        )}
-                      </div>
-                    )}
+                          )}
+                          {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-serif">
+                              <span
+                                className={`px-2 py-0.5 rounded font-bold border ${
+                                  kwtCheck.hasKeyWord
+                                    ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                                    : 'bg-rose-500/15 text-rose-800 dark:text-rose-200 border-rose-500/50'
+                                }`}
+                              >
+                                {kwtCheck.hasKeyWord
+                                  ? `✓ Key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" included`
+                                  : `⚠️ Include unchanged "${(view.sentence?.baseWord || 'KEY').toUpperCase()}"`}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded font-mono-casino font-bold border ${
+                                  kwtCheck.isValidCount
+                                    ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                                    : 'bg-amber-500/20 text-amber-900 dark:text-amber-200 border-amber-500/50'
+                                }`}
+                              >
+                                {kwtCheck.wordCount} / 2–6 words
+                              </span>
+                            </div>
+                          )}
+                          {isUnchangedBase && (
+                            <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-serif font-bold flex items-center gap-2">
+                              <span>⚠️</span>
+                              <span>
+                                You typed the unchanged base word <strong>({(view.sentence?.baseWord || '').toUpperCase()})</strong>. Transform its form (e.g. add a prefix or suffix) to lock in!
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Wager Amount Controls */}
@@ -1014,7 +1357,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
                       </div>
                       <span className="text-xs font-mono-casino text-amber-800 dark:text-[#fef08a] tabular-nums">
-                        Max: ${maxAllowedBet.toLocaleString()}
+                        {view.isHighRoller ? `Min: $${view.minBetAmount.toLocaleString()} · ` : ''}Max: ${maxAllowedBet.toLocaleString()}
                       </span>
                     </div>
 
@@ -1030,7 +1373,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           pattern="[0-9]*"
                           value={localBet.bet ?? ''}
                           onChange={(e) => updateBetField('bet', e.target.value)}
-                          placeholder="0"
+                          placeholder={view.isHighRoller ? String(view.minBetAmount) : '0'}
                           className={`w-full min-h-[48px] pl-8 pr-3 rounded-xl bg-white/90 dark:bg-black/50 border-2 font-mono-casino font-black text-lg text-slate-900 dark:text-[#fef08a] tabular-nums focus:outline-none ${
                             highlightWagerMissing
                               ? 'border-rose-500 ring-2 ring-rose-500/35'
@@ -1043,9 +1386,26 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {/* Quick Chip Buttons */}
                     <div className="grid grid-cols-4 gap-2">
                       {[
-                        { label: '$50', val: Math.min(50, maxAllowedBet) },
-                        { label: '25%', val: Math.floor(maxAllowedBet * 0.25) },
-                        { label: '50%', val: Math.floor(maxAllowedBet * 0.5) },
+                        {
+                          label: view.isHighRoller ? `MIN ($${view.minBetAmount})` : '$50',
+                          val: view.isHighRoller
+                            ? Math.min(maxAllowedBet, view.minBetAmount)
+                            : Math.min(50, maxAllowedBet),
+                        },
+                        {
+                          label: '25%',
+                          val: Math.max(
+                            view.isHighRoller ? view.minBetAmount : 0,
+                            Math.floor(maxAllowedBet * 0.25)
+                          ),
+                        },
+                        {
+                          label: '50%',
+                          val: Math.max(
+                            view.isHighRoller ? view.minBetAmount : 0,
+                            Math.floor(maxAllowedBet * 0.5)
+                          ),
+                        },
                         { label: 'ALL IN', val: maxAllowedBet },
                       ].map((preset) => (
                         <button
@@ -1113,8 +1473,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       : 'glass-panel border-[#d4af37]'
                 }`}
               >
-                <div className="text-xs font-serif uppercase tracking-[0.25em] font-bold opacity-80">
-                  Hand #{view.round} Settlement
+                <div className="text-xs font-serif uppercase tracking-[0.25em] font-bold opacity-80 flex items-center justify-center gap-2">
+                  <span>Hand #{view.round} Settlement</span>
+                  {qType === 'keyWordTransformation' && view.myRoundResult.marksAwarded !== undefined && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono-casino bg-amber-400/30 border border-amber-300/60 text-amber-100">
+                      {view.myRoundResult.marksAwarded}/2 Marks
+                    </span>
+                  )}
                 </div>
                 <div className="text-3xl font-mono-casino font-black tabular-nums">
                   {view.myRoundResult.amountChanged > 0
@@ -1398,7 +1763,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       </main>
 
       {/* Sticky Bottom CTA Bar during IN_GAME */}
-      {view.step === 'IN_GAME' && !view.isFrozen && (
+      {view.step === 'IN_GAME' && !view.isFrozen && view.me.money > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-30 p-3 bg-gradient-to-t from-black/90 via-black/70 to-transparent">
           <div className="max-w-xl mx-auto">
             <button

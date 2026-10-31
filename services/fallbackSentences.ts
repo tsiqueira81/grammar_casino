@@ -1,4 +1,4 @@
-import { GeneratedSentence, CEFRLevel, Settings, QuestionType } from '../types';
+import { GeneratedSentence, CEFRLevel, Settings, QuestionType, GrammarTopic } from '../types';
 
 interface CuratedEntry extends GeneratedSentence {
   topic: string;
@@ -427,6 +427,152 @@ export const CURATED_SENTENCE_BANK: CuratedEntry[] = [
     grammarPhrase: 'argued that the evidence presented had been unlawfully obtained',
     errorPhrase: '',
     mistakeType: ''
+  },
+
+  // --- COLLOCATIONS ---
+  {
+    topic: 'Collocations',
+    level: 'A1',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'I always make my homework in the afternoon after school.',
+    isCorrect: false,
+    correction: 'I always do my homework in the afternoon after school.',
+    explanation: 'In English, the noun "homework" collocates with the verb "do" ("do homework"), not "make".',
+    grammarPhrase: 'make my homework',
+    errorPhrase: 'make my homework',
+    mistakeType: 'make vs do collocation'
+  },
+  {
+    topic: 'Collocations',
+    level: 'A1',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'We usually have breakfast together at seven o\'clock.',
+    isCorrect: true,
+    correction: 'We usually have breakfast together at seven o\'clock.',
+    explanation: '"Have breakfast" is a natural verb + noun collocation for eating a morning meal.',
+    grammarPhrase: 'have breakfast together',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'A2',
+    subtype: 'Adjective + Noun collocations',
+    text: 'We stayed indoors because there was a very strong rain all afternoon.',
+    isCorrect: false,
+    correction: 'We stayed indoors because there was heavy rain all afternoon.',
+    explanation: 'In English, "rain" collocates with "heavy" ("heavy rain"), whereas "strong" collocates with "wind".',
+    grammarPhrase: 'a very strong rain',
+    errorPhrase: 'strong rain',
+    mistakeType: 'adjective + noun collocation'
+  },
+  {
+    topic: 'Collocations',
+    level: 'A2',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'Please take a photo of the castle before the sun goes down.',
+    isCorrect: true,
+    correction: 'Please take a photo of the castle before the sun goes down.',
+    explanation: '"Take a photo" is the standard English collocation for capturing a picture with a camera.',
+    grammarPhrase: 'take a photo of the castle',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'B1',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'Everyone does mistakes when they are learning a foreign language.',
+    isCorrect: false,
+    correction: 'Everyone makes mistakes when they are learning a foreign language.',
+    explanation: 'The noun "mistakes" collocates with the verb "make" ("make a mistake"), never "do".',
+    grammarPhrase: 'Everyone does mistakes',
+    errorPhrase: 'does mistakes',
+    mistakeType: 'verb + noun collocation'
+  },
+  {
+    topic: 'Collocations',
+    level: 'B1',
+    subtype: 'Verb + Preposition collocations',
+    text: 'All passengers must pay close attention to the safety demonstration before takeoff.',
+    isCorrect: true,
+    correction: 'All passengers must pay close attention to the safety demonstration before takeoff.',
+    explanation: '"Pay close attention to" is a strong, natural verb + adjective + noun + preposition collocation.',
+    grammarPhrase: 'pay close attention to',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    subtype: 'Adverb + Adjective collocations',
+    text: 'The coaching staff was bitterly disappointed with the team\'s performance in the final.',
+    isCorrect: true,
+    correction: 'The coaching staff was bitterly disappointed with the team\'s performance in the final.',
+    explanation: '"Bitterly disappointed" is an authentic adverb + adjective intensifying collocation.',
+    grammarPhrase: 'bitterly disappointed with',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'The sudden frost made severe damage to the regional citrus orchards.',
+    isCorrect: false,
+    correction: 'The sudden frost did severe damage to the regional citrus orchards.',
+    explanation: 'The noun "damage" collocates with "do" or "cause" ("do/cause damage"), not "make".',
+    grammarPhrase: 'made severe damage to',
+    errorPhrase: 'made severe damage',
+    mistakeType: 'make vs do collocation with damage'
+  },
+  {
+    topic: 'Collocations',
+    level: 'C1',
+    subtype: 'Adjective + Noun collocations',
+    text: 'The two rival factions finally reached a begrudging consensus after midnight.',
+    isCorrect: true,
+    correction: 'The two rival factions finally reached a begrudging consensus after midnight.',
+    explanation: '"Reach a consensus" is the standard formal collocation for arriving at shared agreement.',
+    grammarPhrase: 'reached a begrudging consensus',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'C1',
+    subtype: 'Adverb + Adjective collocations',
+    text: 'The lead investigator remained Utterly aware of the political risks involved in the probe.',
+    isCorrect: false,
+    correction: 'The lead investigator remained acutely aware of the political risks involved in the probe.',
+    explanation: '"Aware" collocates naturally with "acutely", "fully", or " painfully" ("acutely aware"), whereas "utterly" collocates with extreme negative/absolute adjectives like "impossible" or "exhausted".',
+    grammarPhrase: 'remained Utterly aware of',
+    errorPhrase: 'Utterly aware',
+    mistakeType: 'adverb + adjective collocation mismatch'
+  },
+  {
+    topic: 'Collocations',
+    level: 'C2',
+    subtype: 'Fixed idiomatic expressions',
+    text: 'His remarks cast serious doubt on the authenticity of the newly discovered manuscript.',
+    isCorrect: true,
+    correction: 'His remarks cast serious doubt on the authenticity of the newly discovered manuscript.',
+    explanation: '"Cast doubt on" is an idiomatic, high-register verb + noun + preposition collocation.',
+    grammarPhrase: 'cast serious doubt on',
+    errorPhrase: '',
+    mistakeType: ''
+  },
+  {
+    topic: 'Collocations',
+    level: 'C2',
+    subtype: 'Verb + Noun (make/do/take/have)',
+    text: 'The central bank\'s abrupt announcement inflicted havoc on currency markets across the continent.',
+    isCorrect: false,
+    correction: 'The central bank\'s abrupt announcement wreaked havoc on currency markets across the continent.',
+    explanation: 'The fixed high-register collocation is "wreak havoc on" (or "play havoc with"), not "inflict havoc on".',
+    grammarPhrase: 'inflicted havoc on currency markets',
+    errorPhrase: 'inflicted havoc',
+    mistakeType: 'high-register verb + noun collocation'
   }
 ];
 
@@ -629,6 +775,94 @@ const CURATED_CLOZE_BANK: CuratedClozeEntry[] = [
     correctAnswer: 'having',
     acceptedAnswers: ['having', 'ever'],
     options: ['having', 'have', 'to', 'had']
+  },
+  {
+    topic: 'Collocations',
+    level: 'A1',
+    text: 'Don\'t forget to _____ your bed before you go to school this morning.',
+    correction: 'Don\'t forget to make your bed before you go to school this morning.',
+    explanation: '"Make your bed" is the fixed verb + noun collocation for tidying sheets and blankets.',
+    grammarPhrase: 'make your bed',
+    correctAnswer: 'make',
+    acceptedAnswers: ['make'],
+    options: ['make', 'do', 'take', 'put']
+  },
+  {
+    topic: 'Collocations',
+    level: 'A2',
+    text: 'Our flight was delayed for two hours because of _____ fog around the airport.',
+    correction: 'Our flight was delayed for two hours because of thick fog around the airport.',
+    explanation: '"Thick fog" (or "dense/heavy fog") is the natural adjective + noun collocation for low-visibility fog.',
+    grammarPhrase: 'because of thick fog',
+    correctAnswer: 'thick',
+    acceptedAnswers: ['thick', 'dense', 'heavy'],
+    options: ['thick', 'strong', 'tall', 'loud']
+  },
+  {
+    topic: 'Collocations',
+    level: 'B1',
+    text: 'Could you _____ me a favor and water my plants while I\'m away on vacation?',
+    correction: 'Could you do me a favor and water my plants while I\'m away on vacation?',
+    explanation: '"Do someone a favor" is a classic verb + noun collocation ("do", never "make").',
+    grammarPhrase: 'do me a favor',
+    correctAnswer: 'do',
+    acceptedAnswers: ['do', 'grant'],
+    options: ['do', 'make', 'give', 'take']
+  },
+  {
+    topic: 'Collocations',
+    level: 'B1',
+    text: 'She _____ a deep breath before stepping onto the brightly lit theater stage.',
+    correction: 'She took a deep breath before stepping onto the brightly lit theater stage.',
+    explanation: '"Take a deep breath" is the standard collocation (past tense: "took a deep breath").',
+    grammarPhrase: 'took a deep breath',
+    correctAnswer: 'took',
+    acceptedAnswers: ['took', 'drew'],
+    options: ['took', 'made', 'did', 'kept']
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    text: 'The new documentary raises serious _____ about how social media algorithms shape attention.',
+    correction: 'The new documentary raises serious questions about how social media algorithms shape attention.',
+    explanation: '"Raise questions" (or "raise concerns/doubts") is a strong verb + noun collocation.',
+    grammarPhrase: 'raises serious questions about',
+    correctAnswer: 'questions',
+    acceptedAnswers: ['questions', 'concerns', 'doubts', 'issues'],
+    options: ['questions', 'inquiries', 'askings', 'answers']
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    text: 'I am _____ aware that the deadline is tight, but quality must remain our top priority.',
+    correction: 'I am fully aware that the deadline is tight, but quality must remain our top priority.',
+    explanation: '"Fully aware" (or "well/acutely aware") is the standard adverb + adjective collocation.',
+    grammarPhrase: 'am fully aware that',
+    correctAnswer: 'fully',
+    acceptedAnswers: ['fully', 'well', 'acutely', 'completely', 'quite'],
+    options: ['fully', 'heavily', 'strongly', 'hardly']
+  },
+  {
+    topic: 'Collocations',
+    level: 'C1',
+    text: 'The protracted trade dispute has _____ a heavy toll on small manufacturing firms.',
+    correction: 'The protracted trade dispute has taken a heavy toll on small manufacturing firms.',
+    explanation: '"Take a heavy toll on" is an idiomatic C1 collocation meaning to cause severe damage or wear.',
+    grammarPhrase: 'taken a heavy toll on',
+    correctAnswer: 'taken',
+    acceptedAnswers: ['taken', 'exacted'],
+    options: ['taken', 'made', 'done', 'put']
+  },
+  {
+    topic: 'Collocations',
+    level: 'C2',
+    text: 'The sudden deregulation of the sector _____ havoc with long-standing supply chains.',
+    correction: 'The sudden deregulation of the sector played havoc with long-standing supply chains.',
+    explanation: '"Play havoc with" (or "wreak havoc on") is the idiomatic mastery-level collocation for causing widespread disruption.',
+    grammarPhrase: 'played havoc with',
+    correctAnswer: 'played',
+    acceptedAnswers: ['played', 'wrought', 'wreaked'],
+    options: ['played', 'made', 'took', 'gave']
   }
 ];
 
@@ -639,6 +873,659 @@ function shuffleArray<T>(arr: T[]): T[] {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+const CLOUD_SENTENCE_STORAGE_KEY = 'grammar_casino_cloud_sentences_v1';
+
+function getDynamicCloudEntries(): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export interface CuratedWordFormationEntry {
+  topic: GrammarTopic | string;
+  level: CEFRLevel;
+  text: string;
+  correction: string;
+  explanation: string;
+  grammarPhrase: string;
+  baseWord: string;
+  correctAnswer: string;
+  acceptedAnswers: string[];
+}
+
+export const CURATED_WORD_FORMATION_BANK: CuratedWordFormationEntry[] = [
+  {
+    topic: 'Tenses',
+    level: 'A1',
+    text: 'My older brother is a very good _____ who works at the city school.',
+    correction: 'My older brother is a very good teacher who works at the city school.',
+    explanation: 'We add the suffix "-er" to the verb "teach" to form the person noun "teacher".',
+    grammarPhrase: 'very good teacher',
+    baseWord: 'TEACH',
+    correctAnswer: 'teacher',
+    acceptedAnswers: ['teacher'],
+  },
+  {
+    topic: 'Prepositions',
+    level: 'A1',
+    text: 'Please drive _____ because the roads are wet after the rain.',
+    correction: 'Please drive carefully because the roads are wet after the rain.',
+    explanation: 'To describe how someone drives, we turn "care" into the adjective "careful" and add "-ly" to form the adverb "carefully".',
+    grammarPhrase: 'Please drive carefully',
+    baseWord: 'CARE',
+    correctAnswer: 'carefully',
+    acceptedAnswers: ['carefully'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'A1',
+    text: 'Our new neighbor is always very _____ and greets everyone with a big smile.',
+    correction: 'Our new neighbor is always very friendly and greets everyone with a big smile.',
+    explanation: 'Adding "-ly" to the noun "friend" forms the adjective "friendly" to describe a person.',
+    grammarPhrase: 'always very friendly',
+    baseWord: 'FRIEND',
+    correctAnswer: 'friendly',
+    acceptedAnswers: ['friendly'],
+  },
+  {
+    topic: 'Articles',
+    level: 'A2',
+    text: 'Making a final _____ about which university to attend took her several weeks.',
+    correction: 'Making a final decision about which university to attend took her several weeks.',
+    explanation: 'After the adjective "final", we need a singular noun: the verb "decide" becomes "decision".',
+    grammarPhrase: 'Making a final decision',
+    baseWord: 'DECIDE',
+    correctAnswer: 'decision',
+    acceptedAnswers: ['decision'],
+  },
+  {
+    topic: 'Modals',
+    level: 'A2',
+    text: 'It is completely _____ to finish such a huge project in just one hour.',
+    correction: 'It is completely impossible to finish such a huge project in just one hour.',
+    explanation: 'The context requires the negative prefix "im-" before "possible" to mean "not possible".',
+    grammarPhrase: 'is completely impossible',
+    baseWord: 'POSSIBLE',
+    correctAnswer: 'impossible',
+    acceptedAnswers: ['impossible'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'A2',
+    text: 'Regular exercise and fresh food can make a big _____ to your daily energy levels.',
+    correction: 'Regular exercise and fresh food can make a big difference to your daily energy levels.',
+    explanation: '"Make a difference" is a classic collocation requiring the noun form "difference" from "different".',
+    grammarPhrase: 'make a big difference',
+    baseWord: 'DIFFERENT',
+    correctAnswer: 'difference',
+    acceptedAnswers: ['difference'],
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B1',
+    text: 'If you do not dress warmly, you will feel very _____ during the mountain hike.',
+    correction: 'If you do not dress warmly, you will feel very uncomfortable during the mountain hike.',
+    explanation: 'We add the negative prefix "un-" and adjective suffix "-able" to "comfort" to form "uncomfortable".',
+    grammarPhrase: 'feel very uncomfortable',
+    baseWord: 'COMFORT',
+    correctAnswer: 'uncomfortable',
+    acceptedAnswers: ['uncomfortable'],
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'B1',
+    text: 'To our great _____, the train arrived right on time despite the snowstorm.',
+    correction: 'To our great amazement, the train arrived right on time despite the snowstorm.',
+    explanation: 'After the possessive "our" and adjective "great", we need the abstract noun "amazement" formed with the suffix "-ment".',
+    grammarPhrase: 'our great amazement',
+    baseWord: 'AMAZE',
+    correctAnswer: 'amazement',
+    acceptedAnswers: ['amazement'],
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'B1',
+    text: 'The tour guide apologized for the _____ caused by the sudden change in schedule.',
+    correction: 'The tour guide apologized for the inconvenience caused by the sudden change in schedule.',
+    explanation: 'We add the negative prefix "in-" and change "-t" to "-ce" to form the noun "inconvenience".',
+    grammarPhrase: 'for the inconvenience',
+    baseWord: 'CONVENIENT',
+    correctAnswer: 'inconvenience',
+    acceptedAnswers: ['inconvenience'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'B1',
+    text: 'She had a strong _____ that her team would win the championship trophy.',
+    correction: 'She had a strong belief that her team would win the championship trophy.',
+    explanation: 'The collocation "a strong belief" requires transforming the verb "believe" into its noun form "belief".',
+    grammarPhrase: 'a strong belief',
+    baseWord: 'BELIEVE',
+    correctAnswer: 'belief',
+    acceptedAnswers: ['belief'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'B2',
+    text: 'The rescue team searched _____ for three days before finally locating the lost hikers.',
+    correction: 'The rescue team searched tirelessly for three days before finally locating the lost hikers.',
+    explanation: 'We combine the suffix "-less" (without tiring) and "-ly" to form the adverb "tirelessly" modifying "searched".',
+    grammarPhrase: 'team searched tirelessly',
+    baseWord: 'TIRE',
+    correctAnswer: 'tirelessly',
+    acceptedAnswers: ['tirelessly'],
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B2',
+    text: 'Without proper _____, even the finest laboratory equipment will eventually break down.',
+    correction: 'Without proper maintenance, even the finest laboratory equipment will eventually break down.',
+    explanation: 'After the adjective "proper", the verb "maintain" undergoes an internal spelling shift to form the noun "maintenance".',
+    grammarPhrase: 'Without proper maintenance',
+    baseWord: 'MAINTAIN',
+    correctAnswer: 'maintenance',
+    acceptedAnswers: ['maintenance'],
+  },
+  {
+    topic: 'Modals',
+    level: 'B2',
+    text: 'Workers must wear protective helmets at all times to ensure their _____ on the construction site.',
+    correction: 'Workers must wear protective helmets at all times to ensure their safety on the construction site.',
+    explanation: 'Following the possessive determiner "their", the adjective "safe" becomes the abstract noun "safety".',
+    grammarPhrase: 'ensure their safety',
+    baseWord: 'SAFE',
+    correctAnswer: 'safety',
+    acceptedAnswers: ['safety'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    text: 'The documentary raised public _____ of the dangers of plastic pollution in our oceans.',
+    correction: 'The documentary raised public awareness of the dangers of plastic pollution in our oceans.',
+    explanation: '"Raise public awareness" is a fixed B2 collocation requiring the noun "awareness" from the adjective "aware".',
+    grammarPhrase: 'raised public awareness',
+    baseWord: 'AWARE',
+    correctAnswer: 'awareness',
+    acceptedAnswers: ['awareness'],
+  },
+  {
+    topic: 'Prepositions',
+    level: 'C1',
+    text: 'Despite several attempts to negotiate a truce, the two rival factions remained _____ opposed.',
+    correction: 'Despite several attempts to negotiate a truce, the two rival factions remained irreconcilably opposed.',
+    explanation: 'Modifying the participle "opposed" requires the negative prefix "ir-" and adverb suffix "-ably" ("irreconcilably").',
+    grammarPhrase: 'remained irreconcilably opposed',
+    baseWord: 'RECONCILE',
+    correctAnswer: 'irreconcilably',
+    acceptedAnswers: ['irreconcilably'],
+  },
+  {
+    topic: 'Articles',
+    level: 'C1',
+    text: 'The sudden _____ of the ancient manuscript baffled historians across the continent.',
+    correction: 'The sudden disappearance of the ancient manuscript baffled historians across the continent.',
+    explanation: 'We add both the negative prefix "dis-" and the noun suffix "-ance" to "appear" to form "disappearance".',
+    grammarPhrase: 'The sudden disappearance',
+    baseWord: 'APPEAR',
+    correctAnswer: 'disappearance',
+    acceptedAnswers: ['disappearance'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'C1',
+    text: 'The committee expressed its _____ gratitude to the volunteers who worked through the night.',
+    correction: 'The committee expressed its heartfelt gratitude to the volunteers who worked through the night.',
+    explanation: '"Heartfelt gratitude" is an advanced C1 collocation formed by compounding "heart" with "felt".',
+    grammarPhrase: 'its heartfelt gratitude',
+    baseWord: 'HEART',
+    correctAnswer: 'heartfelt',
+    acceptedAnswers: ['heartfelt'],
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'C2',
+    text: 'The senator dismissed the allegations as completely _____ and demanded a formal retraction.',
+    correction: 'The senator dismissed the allegations as completely unsubstantiated and demanded a formal retraction.',
+    explanation: 'From "substance", we form the negative participial adjective "unsubstantiated" (not supported by evidence).',
+    grammarPhrase: 'as completely unsubstantiated',
+    baseWord: 'SUBSTANCE',
+    correctAnswer: 'unsubstantiated',
+    acceptedAnswers: ['unsubstantiated'],
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'C2',
+    text: 'His _____ refusal to compromise ultimately alienated even his most loyal allies.',
+    correction: 'His obstinate refusal to compromise ultimately alienated even his most loyal allies.',
+    explanation: 'Before the noun "refusal", the abstract noun "obstinacy" shifts to the attributive adjective "obstinate".',
+    grammarPhrase: 'His obstinate refusal',
+    baseWord: 'OBSTINACY',
+    correctAnswer: 'obstinate',
+    acceptedAnswers: ['obstinate'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'C2',
+    text: 'The company faced _____ criticism after independent auditors uncovered widespread financial irregularities.',
+    correction: 'The company facedunprecedented criticism after independent auditors uncovered widespread financial irregularities.'.replace('facedunprecedented', 'faced unprecedented'),
+    explanation: '"Unprecedented criticism" is a high-register collocation formed with the negative prefix "un-" and suffix "-ed" from "precedent".',
+    grammarPhrase: 'faced unprecedented criticism',
+    baseWord: 'PRECEDENT',
+    correctAnswer: 'unprecedented',
+    acceptedAnswers: ['unprecedented'],
+  },
+];
+
+interface CuratedKeyWordTransformationEntry {
+  topic: string;
+  level: CEFRLevel;
+  leadInSentence: string;
+  baseWord: string;
+  text: string;
+  correction: string;
+  explanation: string;
+  grammarPhrase: string;
+  correctAnswer: string;
+  acceptedAnswers: string[];
+  mark1Parts: string[];
+  mark2Parts: string[];
+}
+
+export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationEntry[] = [
+  // --- TENSES ---
+  {
+    topic: 'Tenses',
+    level: 'A1',
+    leadInSentence: 'Sarah started playing the piano three years ago.',
+    baseWord: 'FOR',
+    text: 'Sarah _____ three years.',
+    correction: 'Sarah has played the piano for three years.',
+    explanation: 'Use the present perfect ("has played the piano") + "for" to show an action that began in the past and continues up to now.',
+    grammarPhrase: 'has played the piano for',
+    correctAnswer: 'has played the piano for',
+    acceptedAnswers: ['has played the piano for', 'has been playing the piano for', 'has played piano for'],
+    mark1Parts: ['has played the piano', 'has been playing the piano', 'has played piano'],
+    mark2Parts: ['for'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'A2',
+    leadInSentence: 'The last time I saw Marcus was in 2021.',
+    baseWord: 'SEEN',
+    text: 'I _____ 2021.',
+    correction: 'I have not seen Marcus since 2021.',
+    explanation: 'Transform "The last time I saw X was in..." into the negative present perfect ("have not seen X") + "since" + the starting point in time.',
+    grammarPhrase: 'have not seen Marcus since',
+    correctAnswer: 'have not seen Marcus since',
+    acceptedAnswers: ['have not seen Marcus since', "haven't seen Marcus since"],
+    mark1Parts: ['have not seen Marcus', "haven't seen Marcus"],
+    mark2Parts: ['since'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'B1',
+    leadInSentence: 'This is the first time I have ever eaten sushi.',
+    baseWord: 'NEVER',
+    text: 'I _____ before.',
+    correction: 'I have never eaten sushi before.',
+    explanation: '"This is the first time I have ever..." corresponds to the present perfect with "never" ("have never eaten sushi") before "before".',
+    grammarPhrase: 'have never eaten sushi',
+    correctAnswer: 'have never eaten sushi',
+    acceptedAnswers: ['have never eaten sushi', "'ve never eaten sushi", 'have never tried sushi'],
+    mark1Parts: ['have never', "'ve never"],
+    mark2Parts: ['eaten sushi', 'tried sushi'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'B2',
+    leadInSentence: 'When did they buy their country house?',
+    baseWord: 'LONG',
+    text: 'How _____ their country house?',
+    correction: 'How long have they had their country house?',
+    explanation: 'Questions about duration up to the present use "How long have they had / owned..." instead of the stative verb "buy".',
+    grammarPhrase: 'long have they had',
+    correctAnswer: 'long have they had',
+    acceptedAnswers: ['long have they had', 'long have they owned'],
+    mark1Parts: ['long have they'],
+    mark2Parts: ['had', 'owned'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'C1',
+    leadInSentence: 'The train left the platform just before we reached the station.',
+    baseWord: 'SOONER',
+    text: 'No _____ the station than the train left the platform.',
+    correction: 'No sooner had we reached the station than the train left the platform.',
+    explanation: '"No sooner" at the start of a clause triggers past perfect auxiliary inversion ("sooner had we reached / arrived at") paired with "than".',
+    grammarPhrase: 'sooner had we reached',
+    correctAnswer: 'sooner had we reached',
+    acceptedAnswers: ['sooner had we reached', 'sooner had we arrived at', 'sooner had we got to'],
+    mark1Parts: ['sooner had we'],
+    mark2Parts: ['reached', 'arrived at', 'got to'],
+  },
+  {
+    topic: 'Tenses',
+    level: 'C2',
+    leadInSentence: 'We only realized how treacherous the mountain pass was after the blizzard began.',
+    baseWord: 'DID',
+    text: 'Not until the blizzard _____ how treacherous the mountain pass was.',
+    correction: 'Not until the blizzard began did we realize how treacherous the mountain pass was.',
+    explanation: 'Fronted "Not until + past clause" triggers subject-auxiliary inversion ("did we realize / realise") in the main clause.',
+    grammarPhrase: 'began did we realize',
+    correctAnswer: 'began did we realize',
+    acceptedAnswers: ['began did we realize', 'began did we realise', 'started did we realize', 'started did we realise'],
+    mark1Parts: ['began', 'started'],
+    mark2Parts: ['did we realize', 'did we realise'],
+  },
+
+  // --- CONDITIONALS ---
+  {
+    topic: 'Conditionals',
+    level: 'A2',
+    leadInSentence: 'You will miss the bus if you do not leave right now.',
+    baseWord: 'UNLESS',
+    text: 'You will miss the bus _____ right now.',
+    correction: 'You will miss the bus unless you leave right now.',
+    explanation: '"Unless" means "if ... not" and takes an affirmative present simple verb ("unless you leave") in a first conditional.',
+    grammarPhrase: 'unless you leave',
+    correctAnswer: 'unless you leave',
+    acceptedAnswers: ['unless you leave', 'unless you go'],
+    mark1Parts: ['unless'],
+    mark2Parts: ['you leave', 'you go'],
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B1',
+    leadInSentence: 'I do not have enough free time, so I cannot learn Italian.',
+    baseWord: 'WOULD',
+    text: 'If I had more free time, _____ Italian.',
+    correction: 'If I had more free time, I would learn Italian.',
+    explanation: 'In a second conditional describing an unreal present situation, the main clause uses "I would + bare infinitive" ("I would learn").',
+    grammarPhrase: 'I would learn',
+    correctAnswer: 'I would learn',
+    acceptedAnswers: ['I would learn', 'I would study'],
+    mark1Parts: ['I would'],
+    mark2Parts: ['learn', 'study'],
+  },
+  {
+    topic: 'Conditionals',
+    level: 'B2',
+    leadInSentence: 'We got lost because we did not bring a map with us.',
+    baseWord: 'HAVE',
+    text: 'If we had brought a map with us, we _____ lost.',
+    correction: 'If we had brought a map with us, we would not have got lost.',
+    explanation: 'Third conditionals express unreal past outcomes using "would not have + past participle" ("would not have got / gotten").',
+    grammarPhrase: 'would not have got',
+    correctAnswer: 'would not have got',
+    acceptedAnswers: [
+      'would not have got',
+      "wouldn't have got",
+      'would not have gotten',
+      "wouldn't have gotten",
+    ],
+    mark1Parts: ['would not have', "wouldn't have"],
+    mark2Parts: ['got', 'gotten'],
+  },
+  {
+    topic: 'Conditionals',
+    level: 'C1',
+    leadInSentence: 'Without the lifeguard’s swift intervention, the swimmer would have drowned.',
+    baseWord: 'FOR',
+    text: 'Had _____ the lifeguard’s swift intervention, the swimmer would have drowned.',
+    correction: 'Had it not been for the lifeguard’s swift intervention, the swimmer would have drowned.',
+    explanation: '"Had it not been for" is the inverted third-conditional equivalent of "Without" or "If it had not been for".',
+    grammarPhrase: 'it not been for',
+    correctAnswer: 'it not been for',
+    acceptedAnswers: ['it not been for'],
+    mark1Parts: ['it not been'],
+    mark2Parts: ['for'],
+  },
+
+  // --- MODALS ---
+  {
+    topic: 'Modals',
+    level: 'A2',
+    leadInSentence: 'It is not necessary for visitors to book tickets in advance.',
+    baseWord: 'HAVE',
+    text: 'Visitors _____ book tickets in advance.',
+    correction: 'Visitors do not have to book tickets in advance.',
+    explanation: 'Lack of necessity is expressed with "do not have to" ("don\'t have to").',
+    grammarPhrase: 'do not have to',
+    correctAnswer: 'do not have to',
+    acceptedAnswers: ['do not have to', "don't have to"],
+    mark1Parts: ['do not', "don't"],
+    mark2Parts: ['have to'],
+  },
+  {
+    topic: 'Modals',
+    level: 'B1',
+    leadInSentence: 'I am sure that Clara is still at the office because her coat is here.',
+    baseWord: 'MUST',
+    text: 'Clara _____ at the office because her coat is here.',
+    correction: 'Clara must still be at the office because her coat is here.',
+    explanation: 'Present logical certainty ("I am sure that...") is expressed with the modal of deduction "must + bare infinitive" ("must still be" / "must be").',
+    grammarPhrase: 'must still be',
+    correctAnswer: 'must still be',
+    acceptedAnswers: ['must still be', 'must be'],
+    mark1Parts: ['must'],
+    mark2Parts: ['still be', 'be'],
+  },
+  {
+    topic: 'Modals',
+    level: 'B2',
+    leadInSentence: 'It was a mistake for you to lend Julian so much money.',
+    baseWord: 'OUGHT',
+    text: 'You _____ Julian so much money.',
+    correction: 'You ought not to have lent Julian so much money.',
+    explanation: 'Past criticism or regret with "ought" uses "ought not to have + past participle" ("ought not to have lent").',
+    grammarPhrase: 'ought not to have lent',
+    correctAnswer: 'ought not to have lent',
+    acceptedAnswers: ['ought not to have lent', "oughtn't to have lent"],
+    mark1Parts: ['ought not to', "oughtn't to"],
+    mark2Parts: ['have lent'],
+  },
+  {
+    topic: 'Modals',
+    level: 'C1',
+    leadInSentence: 'It is impossible that Julian leaked the confidential report by accident.',
+    baseWord: 'HAVE',
+    text: 'Julian _____ the confidential report by accident.',
+    correction: 'Julian cannot have leaked the confidential report by accident.',
+    explanation: 'Negative certainty about a past action uses "cannot / can\'t / could not have + past participle".',
+    grammarPhrase: 'cannot have leaked',
+    correctAnswer: 'cannot have leaked',
+    acceptedAnswers: ['cannot have leaked', "can't have leaked", 'could not have leaked', "couldn't have leaked"],
+    mark1Parts: ['cannot have', "can't have", 'could not have', "couldn't have"],
+    mark2Parts: ['leaked'],
+  },
+
+  // --- REPORTED SPEECH ---
+  {
+    topic: 'Reported Speech',
+    level: 'B1',
+    leadInSentence: '"Where did you park the rental car?" Elena asked me.',
+    baseWord: 'HAD',
+    text: 'Elena asked me where _____ the rental car.',
+    correction: 'Elena asked me where I had parked the rental car.',
+    explanation: 'Reported wh-questions use statement word order (subject before auxiliary) and backshift past simple to past perfect ("I had parked").',
+    grammarPhrase: 'I had parked',
+    correctAnswer: 'I had parked',
+    acceptedAnswers: ['I had parked', 'I had left'],
+    mark1Parts: ['I had'],
+    mark2Parts: ['parked', 'left'],
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'B2',
+    leadInSentence: '"I did not copy the essay from the internet," Leo said.',
+    baseWord: 'DENIED',
+    text: 'Leo _____ the essay from the internet.',
+    correction: 'Leo denied copying the essay from the internet.',
+    explanation: 'The reporting verb "deny" is followed by a gerund ("denied copying" / "denied having copied") rather than an infinitive.',
+    grammarPhrase: 'denied copying',
+    correctAnswer: 'denied copying',
+    acceptedAnswers: ['denied copying', 'denied having copied', 'denied that he had copied'],
+    mark1Parts: ['denied'],
+    mark2Parts: ['copying', 'having copied', 'that he had copied'],
+  },
+  {
+    topic: 'Reported Speech',
+    level: 'C1',
+    leadInSentence: '"You really should consult a tax specialist before signing," my lawyer said to me.',
+    baseWord: 'ADVISED',
+    text: 'My lawyer _____ a tax specialist before signing.',
+    correction: 'My lawyer advised me to consult a tax specialist before signing.',
+    explanation: '"Advise" takes an object pronoun + full infinitive ("advised me to consult").',
+    grammarPhrase: 'advised me to consult',
+    correctAnswer: 'advised me to consult',
+    acceptedAnswers: ['advised me to consult', 'advised me to see'],
+    mark1Parts: ['advised me'],
+    mark2Parts: ['to consult', 'to see'],
+  },
+
+  // --- PHRASAL VERBS ---
+  {
+    topic: 'Phrasal Verbs',
+    level: 'B1',
+    leadInSentence: 'The outdoor concert was cancelled because of the torrential rain.',
+    baseWord: 'CALLED',
+    text: 'The outdoor concert _____ because of the torrential rain.',
+    correction: 'The outdoor concert was called off because of the torrential rain.',
+    explanation: 'The phrasal verb "call off" means "cancel", used here in the past simple passive ("was called off").',
+    grammarPhrase: 'was called off',
+    correctAnswer: 'was called off',
+    acceptedAnswers: ['was called off', 'got called off'],
+    mark1Parts: ['was called', 'got called'],
+    mark2Parts: ['off'],
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'B2',
+    leadInSentence: 'I cannot tolerate the noise from the construction site any longer.',
+    baseWord: 'PUT',
+    text: 'I cannot _____ the noise from the construction site any longer.',
+    correction: 'I cannot put up with the noise from the construction site any longer.',
+    explanation: 'The three-part phrasal verb "put up with" means "tolerate" or "endure".',
+    grammarPhrase: 'put up with',
+    correctAnswer: 'put up with',
+    acceptedAnswers: ['put up with'],
+    mark1Parts: ['put up'],
+    mark2Parts: ['with'],
+  },
+  {
+    topic: 'Phrasal Verbs',
+    level: 'C1',
+    leadInSentence: 'Nobody could think of a workable solution to the supply crisis.',
+    baseWord: 'COME',
+    text: 'Nobody managed _____ a workable solution to the supply crisis.',
+    correction: 'Nobody managed to come up with a workable solution to the supply crisis.',
+    explanation: '"Manage" requires a to-infinitive ("to come"), and "come up with" means to think of or produce an idea or solution.',
+    grammarPhrase: 'to come up with',
+    correctAnswer: 'to come up with',
+    acceptedAnswers: ['to come up with'],
+    mark1Parts: ['to come'],
+    mark2Parts: ['up with'],
+  },
+
+  // --- PREPOSITIONS & COLLOCATIONS ---
+  {
+    topic: 'Prepositions',
+    level: 'B1',
+    leadInSentence: 'My sister prefers reading historical novels to watching television.',
+    baseWord: 'RATHER',
+    text: 'My sister would _____ watch television.',
+    correction: 'My sister would rather read historical novels than watch television.',
+    explanation: '"Would rather + bare infinitive ... than + bare infinitive" expresses preference.',
+    grammarPhrase: 'rather read historical novels than',
+    correctAnswer: 'rather read historical novels than',
+    acceptedAnswers: ['rather read historical novels than'],
+    mark1Parts: ['rather read historical novels'],
+    mark2Parts: ['than'],
+  },
+  {
+    topic: 'Prepositions',
+    level: 'B2',
+    leadInSentence: 'Despite the heavy traffic, we arrived at the airport on time.',
+    baseWord: 'SPITE',
+    text: 'We arrived at the airport on time _____ the heavy traffic.',
+    correction: 'We arrived at the airport on time in spite of the heavy traffic.',
+    explanation: '"In spite of" is the three-word prepositional phrase equivalent of "despite".',
+    grammarPhrase: 'in spite of',
+    correctAnswer: 'in spite of',
+    acceptedAnswers: ['in spite of'],
+    mark1Parts: ['in spite'],
+    mark2Parts: ['of'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'B2',
+    leadInSentence: 'She did not pay any attention to the safety instructions.',
+    baseWord: 'NOTICE',
+    text: 'She _____ the safety instructions.',
+    correction: 'She took no notice of the safety instructions.',
+    explanation: 'The fixed collocation "take no notice of" (or "did not take any notice of") means to pay no attention to.',
+    grammarPhrase: 'took no notice of',
+    correctAnswer: 'took no notice of',
+    acceptedAnswers: ['took no notice of', 'did not take any notice of', "didn't take any notice of"],
+    mark1Parts: ['took no notice', 'did not take any notice', "didn't take any notice"],
+    mark2Parts: ['of'],
+  },
+  {
+    topic: 'Collocations',
+    level: 'C1',
+    leadInSentence: 'The new director has no intention of resigning before her contract expires.',
+    baseWord: 'INTENTION',
+    text: 'The new director has _____ before her contract expires.',
+    correction: 'The new director has no intention of stepping down before her contract expires.',
+    explanation: '"Have no intention of + -ing" pairs the noun collocation "no intention" with the preposition "of" and a gerund.',
+    grammarPhrase: 'no intention of resigning',
+    correctAnswer: 'no intention of resigning',
+    acceptedAnswers: ['no intention of resigning', 'no intention of stepping down', 'no intention of quitting'],
+    mark1Parts: ['no intention'],
+    mark2Parts: ['of resigning', 'of stepping down', 'of quitting'],
+  },
+  {
+    topic: 'Articles',
+    level: 'B1',
+    leadInSentence: 'As you practice more, playing the violin becomes easier.',
+    baseWord: 'THE',
+    text: 'The more you practice, _____ playing the violin becomes.',
+    correction: 'The more you practice, the easier playing the violin becomes.',
+    explanation: 'Double comparatives ("The more..., the easier...") require the definite article "the" before both comparative clauses.',
+    grammarPhrase: 'the easier',
+    correctAnswer: 'the easier',
+    acceptedAnswers: ['the easier'],
+    mark1Parts: ['the'],
+    mark2Parts: ['easier'],
+  },
+];
+
+export function getStaticBankCounts(): {
+  binaryCount: number;
+  clozeCount: number;
+  wordFormationCount: number;
+  keyWordTransformationCount: number;
+  totalCount: number;
+} {
+  return {
+    binaryCount: CURATED_SENTENCE_BANK.length,
+    clozeCount: CURATED_CLOZE_BANK.length,
+    wordFormationCount: CURATED_WORD_FORMATION_BANK.length,
+    keyWordTransformationCount: CURATED_KEY_WORD_TRANSFORMATION_BANK.length,
+    totalCount:
+      CURATED_SENTENCE_BANK.length +
+      CURATED_CLOZE_BANK.length +
+      CURATED_WORD_FORMATION_BANK.length +
+      CURATED_KEY_WORD_TRANSFORMATION_BANK.length,
+  };
 }
 
 export function getCuratedSentence(
@@ -652,14 +1539,179 @@ export function getCuratedSentence(
   const { topic, level, challengeFormat } = settings;
   const resolvedType: QuestionType =
     questionType ||
-    (challengeFormat === 'multipleChoice' || challengeFormat === 'openCloze' || challengeFormat === 'binary'
+    (challengeFormat === 'multipleChoice' ||
+    challengeFormat === 'openCloze' ||
+    challengeFormat === 'wordFormation' ||
+    challengeFormat === 'keyWordTransformation' ||
+    challengeFormat === 'binary'
       ? challengeFormat
-      : (['binary', 'multipleChoice', 'openCloze'] as QuestionType[])[Math.floor(Math.random() * 3)]);
+      : (['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'] as QuestionType[])[
+          Math.floor(Math.random() * 5)
+        ]);
 
   const pastTextSet = new Set(pastSentences.map(s => s.trim().toLowerCase()));
+  const cloudEntries = getDynamicCloudEntries();
+
+  if (resolvedType === 'keyWordTransformation') {
+    const cloudKwt: CuratedKeyWordTransformationEntry[] = cloudEntries
+      .filter(
+        c =>
+          c.questionType === 'keyWordTransformation' &&
+          c.text &&
+          c.correctAnswer &&
+          c.baseWord &&
+          c.leadInSentence
+      )
+      .map(c => ({
+        topic: c.topic || 'General',
+        level: (c.level as CEFRLevel) || 'B1',
+        leadInSentence: String(c.leadInSentence),
+        baseWord: String(c.baseWord).toUpperCase(),
+        text: c.text,
+        correction: c.correction || c.text,
+        explanation: c.explanation || '',
+        grammarPhrase: c.grammarPhrase || '',
+        correctAnswer: c.correctAnswer!,
+        acceptedAnswers:
+          Array.isArray(c.acceptedAnswers) && c.acceptedAnswers.length > 0 ? c.acceptedAnswers : [c.correctAnswer!],
+        mark1Parts: Array.isArray(c.mark1Parts) ? c.mark1Parts : [],
+        mark2Parts: Array.isArray(c.mark2Parts) ? c.mark2Parts : [],
+      }));
+
+    const combinedKwtBank = [...cloudKwt, ...CURATED_KEY_WORD_TRANSFORMATION_BANK];
+
+    let kwtCandidates = combinedKwtBank.filter(entry => {
+      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+        return false;
+      }
+      if (level && entry.level !== level) {
+        return false;
+      }
+      return !pastTextSet.has(entry.text.trim().toLowerCase());
+    });
+
+    if (kwtCandidates.length === 0) {
+      kwtCandidates = combinedKwtBank.filter(entry => {
+        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+          return false;
+        }
+        return !pastTextSet.has(entry.text.trim().toLowerCase());
+      });
+    }
+
+    if (kwtCandidates.length === 0) {
+      kwtCandidates = combinedKwtBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
+    }
+
+    if (kwtCandidates.length === 0) {
+      kwtCandidates = combinedKwtBank;
+    }
+
+    const picked =
+      kwtCandidates[Math.floor(Math.random() * kwtCandidates.length)] || CURATED_KEY_WORD_TRANSFORMATION_BANK[0];
+    return {
+      text: picked.text,
+      leadInSentence: picked.leadInSentence,
+      isCorrect: true,
+      correction: picked.correction,
+      explanation: picked.explanation,
+      grammarPhrase: picked.grammarPhrase,
+      errorPhrase: '',
+      mistakeType: '',
+      questionType: 'keyWordTransformation',
+      baseWord: picked.baseWord,
+      correctAnswer: picked.correctAnswer,
+      acceptedAnswers: picked.acceptedAnswers,
+      mark1Parts: picked.mark1Parts,
+      mark2Parts: picked.mark2Parts,
+    };
+  }
+
+  if (resolvedType === 'wordFormation') {
+    const cloudWf: CuratedWordFormationEntry[] = cloudEntries
+      .filter(c => c.questionType === 'wordFormation' && c.text && c.correctAnswer && c.baseWord)
+      .map(c => ({
+        topic: c.topic || 'General',
+        level: (c.level as CEFRLevel) || 'B1',
+        text: c.text,
+        correction: c.correction || c.text,
+        explanation: c.explanation || '',
+        grammarPhrase: c.grammarPhrase || '',
+        baseWord: String(c.baseWord).toUpperCase(),
+        correctAnswer: c.correctAnswer,
+        acceptedAnswers:
+          Array.isArray(c.acceptedAnswers) && c.acceptedAnswers.length > 0 ? c.acceptedAnswers : [c.correctAnswer],
+      }));
+
+    const combinedWfBank = [...cloudWf, ...CURATED_WORD_FORMATION_BANK];
+
+    let wfCandidates = combinedWfBank.filter(entry => {
+      if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+        return false;
+      }
+      if (level && entry.level !== level) {
+        return false;
+      }
+      return !pastTextSet.has(entry.text.trim().toLowerCase());
+    });
+
+    if (wfCandidates.length === 0) {
+      wfCandidates = combinedWfBank.filter(entry => {
+        if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
+          return false;
+        }
+        return !pastTextSet.has(entry.text.trim().toLowerCase());
+      });
+    }
+
+    if (wfCandidates.length === 0) {
+      wfCandidates = combinedWfBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
+    }
+
+    if (wfCandidates.length === 0) {
+      wfCandidates = combinedWfBank;
+    }
+
+    const picked = wfCandidates[Math.floor(Math.random() * wfCandidates.length)] || CURATED_WORD_FORMATION_BANK[0];
+    return {
+      text: picked.text,
+      isCorrect: true,
+      correction: picked.correction,
+      explanation: picked.explanation,
+      grammarPhrase: picked.grammarPhrase,
+      errorPhrase: '',
+      mistakeType: '',
+      questionType: 'wordFormation',
+      baseWord: picked.baseWord,
+      correctAnswer: picked.correctAnswer,
+      acceptedAnswers: picked.acceptedAnswers,
+    };
+  }
 
   if (resolvedType === 'multipleChoice' || resolvedType === 'openCloze') {
-    let clozeCandidates = CURATED_CLOZE_BANK.filter(entry => {
+    const cloudCloze: CuratedClozeEntry[] = cloudEntries
+      .filter(
+        c =>
+          (c.questionType === 'multipleChoice' || c.questionType === 'openCloze') &&
+          c.text &&
+          c.correctAnswer &&
+          (resolvedType !== 'multipleChoice' || (Array.isArray(c.options) && c.options.length >= 2))
+      )
+      .map(c => ({
+        topic: c.topic || 'General',
+        level: (c.level as CEFRLevel) || 'B1',
+        text: c.text,
+        correction: c.correction || c.text,
+        explanation: c.explanation || '',
+        grammarPhrase: c.grammarPhrase || '',
+        correctAnswer: c.correctAnswer,
+        acceptedAnswers: Array.isArray(c.acceptedAnswers) && c.acceptedAnswers.length > 0 ? c.acceptedAnswers : [c.correctAnswer],
+        options: Array.isArray(c.options) && c.options.length >= 2 ? c.options : [c.correctAnswer, 'that', 'which', 'what'],
+      }));
+
+    const combinedClozeBank = [...cloudCloze, ...CURATED_CLOZE_BANK];
+
+    let clozeCandidates = combinedClozeBank.filter(entry => {
       if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
         return false;
       }
@@ -670,7 +1722,7 @@ export function getCuratedSentence(
     });
 
     if (clozeCandidates.length === 0) {
-      clozeCandidates = CURATED_CLOZE_BANK.filter(entry => {
+      clozeCandidates = combinedClozeBank.filter(entry => {
         if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
           return false;
         }
@@ -679,11 +1731,11 @@ export function getCuratedSentence(
     }
 
     if (clozeCandidates.length === 0) {
-      clozeCandidates = CURATED_CLOZE_BANK.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
+      clozeCandidates = combinedClozeBank.filter(entry => !pastTextSet.has(entry.text.trim().toLowerCase()));
     }
 
     if (clozeCandidates.length === 0) {
-      clozeCandidates = CURATED_CLOZE_BANK;
+      clozeCandidates = combinedClozeBank;
     }
 
     const picked = clozeCandidates[Math.floor(Math.random() * clozeCandidates.length)] || CURATED_CLOZE_BANK[0];
@@ -702,10 +1754,26 @@ export function getCuratedSentence(
     };
   }
 
+  const cloudBinary: CuratedEntry[] = cloudEntries
+    .filter(c => (!c.questionType || c.questionType === 'binary') && c.text)
+    .map(c => ({
+      topic: c.topic || 'General',
+      level: (c.level as CEFRLevel) || 'B1',
+      subtype: c.subtype || undefined,
+      text: c.text,
+      isCorrect: Boolean(c.isCorrect),
+      correction: c.correction || c.text,
+      explanation: c.explanation || '',
+      grammarPhrase: c.grammarPhrase || '',
+      errorPhrase: c.errorPhrase || '',
+      mistakeType: c.mistakeType || '',
+    }));
+
+  const combinedBinaryBank = [...cloudBinary, ...CURATED_SENTENCE_BANK];
   const pastMistakesSet = new Set(pastMistakes.map(m => m.trim().toLowerCase()));
 
   // 1. Try matching both topic and level
-  let candidates = CURATED_SENTENCE_BANK.filter(entry => {
+  let candidates = combinedBinaryBank.filter(entry => {
     if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
       return false;
     }
@@ -729,7 +1797,7 @@ export function getCuratedSentence(
 
   // 2. If no exact match, broaden to match topic regardless of level
   if (candidates.length === 0) {
-    candidates = CURATED_SENTENCE_BANK.filter(entry => {
+    candidates = combinedBinaryBank.filter(entry => {
       if (topic && topic !== 'My own choice' && entry.topic.toLowerCase() !== topic.toLowerCase()) {
         return false;
       }
@@ -742,7 +1810,7 @@ export function getCuratedSentence(
 
   // 3. If still empty, broaden to any unplayed sentence matching correctness
   if (candidates.length === 0) {
-    candidates = CURATED_SENTENCE_BANK.filter(entry => {
+    candidates = combinedBinaryBank.filter(entry => {
       if (forceCorrect !== null && entry.isCorrect !== forceCorrect) {
         return false;
       }
@@ -752,7 +1820,7 @@ export function getCuratedSentence(
 
   // 4. Final fallback if everything has been played
   if (candidates.length === 0) {
-    candidates = CURATED_SENTENCE_BANK.filter(entry => {
+    candidates = combinedBinaryBank.filter(entry => {
       if (forceCorrect !== null) return entry.isCorrect === forceCorrect;
       return true;
     });

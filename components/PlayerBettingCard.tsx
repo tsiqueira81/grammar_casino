@@ -6,6 +6,7 @@ import PowerUpTooltip from './PowerUpTooltip';
 import { QuickChipTray, WagerChipsDisplay } from './ChipStacks';
 import { TimerAvatarRing, TurnTimerControls, useTurnCountdown } from './TurnTimer';
 import { HINT_COST, POWERUP_COST, BET_CAP_AMOUNT, POWER_UPS } from '../constants';
+import { isValidKeyWordTransformationPhrase, AudiencePollSummary } from '../utils/multiplayerProtocol';
 
 interface PlayerBettingCardProps {
   player: Player;
@@ -22,6 +23,13 @@ interface PlayerBettingCardProps {
   usedPowerUps?: UsedPowerUp[]; 
   isBetCapped: boolean;
   betCapAmount?: number;
+  isHighRoller?: boolean;
+  minBetAmount?: number;
+  scalpelHint?: {
+    eliminatedOptions?: string[];
+    clozeMask?: string;
+  } | null;
+  audiencePollFeed?: AudiencePollSummary | null;
   isFrozen?: boolean;
   onUpdateMoney?: (playerId: number, newAmount: number) => void;
   currentSentenceText?: string;
@@ -30,6 +38,7 @@ interface PlayerBettingCardProps {
   targetAmount?: number;
   questionType?: QuestionType;
   options?: string[];
+  baseWord?: string;
   // --- Betting turn timer ---
   timerEnabled?: boolean;
   turnTimer?: PlayerTurnTimer;
@@ -59,6 +68,10 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   usedPowerUps = [],
   isBetCapped,
   betCapAmount = BET_CAP_AMOUNT,
+  isHighRoller = false,
+  minBetAmount = 0,
+  scalpelHint = null,
+  audiencePollFeed = null,
   isFrozen = false,
   onUpdateMoney,
   currentSentenceText,
@@ -67,6 +80,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   targetAmount,
   questionType = 'binary',
   options = [],
+  baseWord,
   timerEnabled = false,
   turnTimer,
   turnDurationMs = 0,
@@ -82,6 +96,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const isEliminated = player.money <= 0;
   const isBlocked = isEliminated || isFrozen || !canAct;
   const effectiveBetCap = isBetCapped ? betCapAmount : Infinity;
+  const effectiveMinBet = isHighRoller ? Math.min(player.money, Math.max(1, minBetAmount)) : 0;
 
   const { remainingMs, fraction, isWarning } = useTurnCountdown(
     timerEnabled ? turnTimer : undefined,
@@ -161,20 +176,29 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
     }
   };
 
-  // Whenever player's current funds change, ensure bet amount does not exceed funds limit
+  // Whenever player's current funds change, ensure bet amount stays within [effectiveMinBet, maxLimit]
   React.useEffect(() => {
-    if (bet?.bet !== undefined && bet?.bet !== '') {
-      const currentBetNum = Number(bet.bet);
-      if (!isNaN(currentBetNum)) {
-        const maxLimit = isBetCapped ? Math.min(Math.max(0, player.money), effectiveBetCap) : Math.max(0, player.money);
-        if (player.money <= 0 && currentBetNum !== 0) {
-          onBetChange(player.id, 'bet', 0);
-        } else if (currentBetNum > maxLimit) {
-          onBetChange(player.id, 'bet', maxLimit);
-        }
+    if (player.money <= 0) {
+      if (bet?.bet !== undefined && bet?.bet !== '' && Number(bet.bet) !== 0) {
+        onBetChange(player.id, 'bet', 0);
+      }
+      return;
+    }
+    const maxLimit = isBetCapped ? Math.min(Math.max(0, player.money), effectiveBetCap) : Math.max(0, player.money);
+    if (isHighRoller && effectiveMinBet > 0) {
+      const currentBetNum = bet?.bet !== undefined && bet?.bet !== '' ? Number(bet.bet) : 0;
+      if (isNaN(currentBetNum) || currentBetNum < effectiveMinBet) {
+        onBetChange(player.id, 'bet', Math.min(maxLimit, effectiveMinBet));
+        return;
       }
     }
-  }, [player.money, isBetCapped, effectiveBetCap, player.id, bet?.bet, onBetChange]);
+    if (bet?.bet !== undefined && bet?.bet !== '') {
+      const currentBetNum = Number(bet.bet);
+      if (!isNaN(currentBetNum) && currentBetNum > maxLimit) {
+        onBetChange(player.id, 'bet', maxLimit);
+      }
+    }
+  }, [player.money, isBetCapped, effectiveBetCap, isHighRoller, effectiveMinBet, player.id, bet?.bet, onBetChange]);
 
   const handleOpinionClick = (opinion: 'correct' | 'incorrect') => {
     if (isBlocked) return;
@@ -185,7 +209,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
     if (isBlocked) return;
     const val = e.target.value.replace(/[^\d]/g, '');
     if (val === '') {
-      onBetChange(player.id, 'bet', '');
+      onBetChange(player.id, 'bet', isHighRoller && effectiveMinBet > 0 ? effectiveMinBet : '');
       return;
     }
     const num = parseInt(val, 10);
@@ -206,13 +230,16 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
     if (isBetCapped && next > effectiveBetCap) {
       next = effectiveBetCap;
     }
+    if (isHighRoller && next < effectiveMinBet) {
+      next = effectiveMinBet;
+    }
     next = Math.min(next, player.money);
     onBetChange(player.id, 'bet', next);
   };
 
   const handleClearBet = () => {
     if (isBlocked) return;
-    onBetChange(player.id, 'bet', '');
+    onBetChange(player.id, 'bet', isHighRoller && effectiveMinBet > 0 ? effectiveMinBet : '');
   };
 
   const handleAllIn = () => {
@@ -278,6 +305,15 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const hasSavings = activePowerUps.some(p => p.type === 'SAVINGS_ACCOUNT');
   const hasCorrectionBounty = activePowerUps.some(p => p.type === 'CORRECTION_BOUNTY');
   const hasLoneWolf = activePowerUps.some(p => p.type === 'LONE_WOLF');
+  const hasScalpel = activePowerUps.some(p => p.type === 'SCALPEL');
+  const hasCopycat = activePowerUps.some(p => p.type === 'COPYCAT');
+  const hasBloodPact = activePowerUps.some(p => p.type === 'BLOOD_PACT');
+  const hasCrowdSurfer = activePowerUps.some(p => p.type === 'CROWD_SURFER');
+  const hasDoubleOrNothing = activePowerUps.some(p => p.type === 'DOUBLE_OR_NOTHING');
+  const hasBoomerang = activePowerUps.some(p => p.type === 'BOOMERANG');
+  const hasAudiencePoll = activePowerUps.some(p => p.type === 'AUDIENCE_POLL');
+  const hasUnderdog = activePowerUps.some(p => p.type === 'UNDERDOG');
+  const hasScavenger = activePowerUps.some(p => p.type === 'SCAVENGER');
 
   // Split Bet Logic helpers
   const splitPercent = bet?.splitCorrectPercent ?? 50;
@@ -285,36 +321,97 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const splitCorrectAmount = Math.floor(actualBetAmount * (splitPercent / 100));
   const splitIncorrectAmount = actualBetAmount - splitCorrectAmount;
 
+  const cleanBaseLower = (baseWord || '').trim().toLowerCase();
+  const isUnchangedBaseWord =
+    questionType === 'wordFormation' &&
+    Boolean(cleanBaseLower) &&
+    (hasSplitBet
+      ? [bet?.splitClozeAnswers?.[0], bet?.splitClozeAnswers?.[1]].some(
+          w => Boolean(w?.trim()) && w!.trim().toLowerCase() === cleanBaseLower
+        )
+      : Boolean(bet?.clozeAnswer?.trim()) && bet!.clozeAnswer!.trim().toLowerCase() === cleanBaseLower);
+
+  const inspectKwtPhrase = (raw?: string) => {
+    const trimmed = (raw || '').trim();
+    const words = trimmed ? trimmed.split(/\s+/).filter(Boolean) : [];
+    const wordCount = words.length;
+    const escapedBase = cleanBaseLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const hasKeyWord = cleanBaseLower
+      ? new RegExp(`\\b${escapedBase}\\b`, 'i').test(trimmed)
+      : true;
+    const isValidCount = wordCount >= 2 && wordCount <= 6;
+    return {
+      trimmed,
+      wordCount,
+      hasKeyWord,
+      isValidCount,
+      isValid: Boolean(trimmed) && hasKeyWord && isValidCount,
+    };
+  };
+
+  const isInvalidKwtPhrase =
+    questionType === 'keyWordTransformation' &&
+    (hasSplitBet
+      ? [bet?.splitClozeAnswers?.[0], bet?.splitClozeAnswers?.[1]].some(
+          w => Boolean(w?.trim()) && !isValidKeyWordTransformationPhrase(w, baseWord)
+        )
+      : Boolean(bet?.clozeAnswer?.trim()) && !isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord));
+
   const handleAttemptLockNow = () => {
     // Only warn & block when the player still has time left on their clock and can place a bet
     if (!isFrozen && !isEliminated && remainingMs > 0) {
-      const hasValidWager = typeof bet?.bet === 'number' && !isNaN(bet.bet) && bet.bet > 0;
+      const minRequired = isHighRoller && effectiveMinBet > 0 ? effectiveMinBet : 1;
+      const hasValidWager = typeof bet?.bet === 'number' && !isNaN(bet.bet) && bet.bet >= minRequired;
       let hasValidAnswer = false;
       if (questionType === 'multipleChoice') {
         hasValidAnswer = hasSplitBet
           ? (bet?.splitOptions?.length || 0) >= 1
           : Boolean(bet?.selectedOption?.trim());
-      } else if (questionType === 'openCloze') {
+      } else if (questionType === 'keyWordTransformation') {
         hasValidAnswer = hasSplitBet
-          ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim())
-          : Boolean(bet?.clozeAnswer?.trim());
+          ? (isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[0], baseWord) &&
+              (!bet?.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))) ||
+            (!bet?.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))
+          : isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord);
+      } else if (questionType === 'openCloze' || questionType === 'wordFormation') {
+        const isWordOk = (w?: string) => {
+          const trimmed = (w || '').trim().toLowerCase();
+          if (!trimmed) return false;
+          if (questionType === 'wordFormation' && cleanBaseLower && trimmed === cleanBaseLower) return false;
+          return true;
+        };
+        hasValidAnswer = hasSplitBet
+          ? isWordOk(bet?.splitClozeAnswers?.[0]) || isWordOk(bet?.splitClozeAnswers?.[1])
+          : isWordOk(bet?.clozeAnswer);
       } else {
         hasValidAnswer = hasSplitBet
           ? true
           : (bet?.opinion === 'correct' || bet?.opinion === 'incorrect');
       }
 
-      if (!hasValidAnswer || !hasValidWager) {
+      if (!hasValidAnswer || !hasValidWager || isUnchangedBaseWord || isInvalidKwtPhrase) {
         playSound('error');
 
         let message = '';
         let missingField: 'answer' | 'wager' | 'both' = 'both';
-        if (!hasValidAnswer && !hasValidWager) {
+        if (isUnchangedBaseWord) {
+          missingField = 'answer';
+          message = `Hold on! "${(baseWord || '').toUpperCase()}" is the unchanged base word. Transform its form (e.g. add a prefix or suffix) before locking!`;
+        } else if (isInvalidKwtPhrase) {
+          missingField = 'answer';
+          message = `Hold on! Your Key Word Transformation must use 2 to 6 words and include the exact unchanged key word "${(baseWord || 'KEY').toUpperCase()}" before locking!`;
+        } else if (!hasValidAnswer && !hasValidWager) {
           missingField = 'both';
           if (questionType === 'multipleChoice') {
             message = hasSplitBet
               ? 'Hold on! Pick 2 options (50/50) or click 1 option twice for 100% (2×), and enter a wager amount before locking.'
               : 'Hold on! Choose an option (A–D) and enter a wager amount before locking your bet.';
+          } else if (questionType === 'keyWordTransformation') {
+            message = `Hold on! Complete the gap in 2–6 words using "${(baseWord || 'KEY').toUpperCase()}" unchanged, and enter a wager amount before locking.`;
+          } else if (questionType === 'wordFormation') {
+            message = hasSplitBet
+              ? `Hold on! Transform (${(baseWord || 'ROOT').toUpperCase()}) into 1 or 2 derived forms and enter a wager amount before locking.`
+              : `Hold on! Transform (${(baseWord || 'ROOT').toUpperCase()}) to fit the gap and enter a wager amount before locking.`;
           } else if (questionType === 'openCloze') {
             message = hasSplitBet
               ? 'Hold on! Type 1 word (100% wager) or 2 candidate words (50% each) and enter a wager amount before locking.'
@@ -328,6 +425,10 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
             message = hasSplitBet
               ? 'Please pick 2 options (50/50) or click the same option twice for 100% (2×) before locking!'
               : 'Please choose an option (A, B, C, or D) before locking your bet!';
+          } else if (questionType === 'keyWordTransformation') {
+            message = `Please type 2 to 6 words including the unchanged key word "${(baseWord || 'KEY').toUpperCase()}" before locking!`;
+          } else if (questionType === 'wordFormation') {
+            message = `Please transform the base word (${(baseWord || 'ROOT').toUpperCase()}) to fit the gap before locking!`;
           } else if (questionType === 'openCloze') {
             message = hasSplitBet
               ? 'Please type at least 1 candidate word before locking your bet!'
@@ -344,11 +445,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
 
         // Move focus to the missing item
         window.requestAnimationFrame(() => {
-          if (!hasValidAnswer) {
+          if (!hasValidAnswer || isUnchangedBaseWord || isInvalidKwtPhrase) {
             if (questionType === 'multipleChoice') {
               firstOptionBtnRef.current?.focus();
               firstOptionBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } else if (questionType === 'openCloze') {
+            } else if (questionType === 'openCloze' || questionType === 'wordFormation' || questionType === 'keyWordTransformation') {
               if (hasSplitBet) {
                 const targetInput = !bet?.splitClozeAnswers?.[0]?.trim()
                   ? splitWord1InputRef.current
@@ -678,6 +779,86 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </span>
                 </PowerUpTooltip>
               )}
+              {isHighRoller && (
+                <PowerUpTooltip icon="🔥" name="High Roller" description={`Forced minimum bet of $${effectiveMinBet.toLocaleString()} (50% of bankroll) this round.`} placement="bottom">
+                  <span className="px-2 py-0.5 bg-orange-500/25 border border-orange-500 text-orange-950 dark:text-orange-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110 shadow-sm animate-pulse">
+                    <span>🔥</span>
+                    <span>High Roller (Min ${effectiveMinBet})</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasScalpel && (
+                <PowerUpTooltip powerUpKey="SCALPEL" placement="bottom">
+                  <span className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-400/60 text-cyan-900 dark:text-cyan-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>✂️</span>
+                    <span>50/50 Scalpel</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasCopycat && (
+                <PowerUpTooltip powerUpKey="COPYCAT" placement="bottom">
+                  <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-400/60 text-violet-900 dark:text-violet-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🪞</span>
+                    <span>Copycat</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasBloodPact && (
+                <PowerUpTooltip powerUpKey="BLOOD_PACT" placement="bottom">
+                  <span className="px-2 py-0.5 bg-rose-500/20 border border-rose-400/60 text-rose-900 dark:text-rose-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🤝</span>
+                    <span>Blood Pact</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasCrowdSurfer && (
+                <PowerUpTooltip powerUpKey="CROWD_SURFER" placement="bottom">
+                  <span className="px-2 py-0.5 bg-teal-500/20 border border-teal-400/60 text-teal-900 dark:text-teal-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>📢</span>
+                    <span>Crowd Surfer</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasDoubleOrNothing && (
+                <PowerUpTooltip powerUpKey="DOUBLE_OR_NOTHING" placement="bottom">
+                  <span className="px-2 py-0.5 bg-amber-500/25 border border-amber-400 text-amber-950 dark:text-[#fef08a] text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🎲</span>
+                    <span>3× or -1.5×</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasBoomerang && (
+                <PowerUpTooltip powerUpKey="BOOMERANG" placement="bottom">
+                  <span className="px-2 py-0.5 bg-lime-500/20 border border-lime-400/60 text-lime-900 dark:text-lime-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🪃</span>
+                    <span>Boomerang</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasAudiencePoll && (
+                <PowerUpTooltip powerUpKey="AUDIENCE_POLL" placement="bottom">
+                  <span className="px-2 py-0.5 bg-sky-500/20 border border-sky-400/60 text-sky-900 dark:text-sky-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>📊</span>
+                    <span>Ask the Table</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasUnderdog && (
+                <PowerUpTooltip powerUpKey="UNDERDOG" placement="bottom">
+                  <span className="px-2 py-0.5 bg-orange-500/20 border border-orange-400/60 text-orange-900 dark:text-orange-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🚀</span>
+                    <span>Underdog (2.5×)</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
+              {hasScavenger && (
+                <PowerUpTooltip powerUpKey="SCAVENGER" placement="bottom">
+                  <span className="px-2 py-0.5 bg-amber-600/20 border border-amber-500/60 text-amber-950 dark:text-amber-200 text-[10px] uppercase font-bold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
+                    <span>🦅</span>
+                    <span>Scavenger (25%)</span>
+                  </span>
+                </PowerUpTooltip>
+              )}
            </div>
         </div>
       </div>
@@ -714,6 +895,43 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               >
                 OK
               </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {audiencePollFeed && (
+        <div className="mb-5 p-3.5 rounded-xl bg-sky-500/15 border border-sky-400/50 space-y-2 text-xs text-sky-950 dark:text-sky-100 animate-fade-in">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-serif font-extrabold uppercase tracking-wider text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+              <span>📊</span>
+              <span>Ask the Table · Live Anonymized Poll</span>
+            </span>
+            <span className="text-[11px] font-mono-casino font-bold px-2 py-0.5 rounded bg-sky-500/20 border border-sky-400/40">
+              {audiencePollFeed.summaryText}
+            </span>
+          </div>
+          {audiencePollFeed.breakdown.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              {audiencePollFeed.breakdown.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="p-2 rounded-lg bg-white/70 dark:bg-black/35 border border-sky-400/35 flex flex-col justify-between gap-1"
+                >
+                  <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
+                    <span className="truncate">{item.label}</span>
+                    <span className="font-mono-casino text-sky-700 dark:text-sky-300 shrink-0">
+                      {item.percent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-sky-950/20 dark:bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -763,8 +981,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         : bet?.selectedOption !== o
                     )
                   );
+                  const eliminatedSet = new Set(
+                    (scalpelHint?.eliminatedOptions || []).map(o => o.trim().toLowerCase())
+                  );
                   return optionItems.map((opt, idx) => {
                     const letter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
+                    const isEliminatedOpt = eliminatedSet.has(opt.trim().toLowerCase());
                     const optPickCount = hasSplitBet && Array.isArray(bet?.splitOptions)
                       ? bet!.splitOptions!.filter(o => o === opt).length
                       : 0;
@@ -778,9 +1000,9 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         key={`${letter}-${opt}`}
                         ref={idx === firstUnpickedIdx ? firstOptionBtnRef : undefined}
                         type="button"
-                        disabled={isBlocked}
+                        disabled={isBlocked || isEliminatedOpt}
                         onClick={() => {
-                          if (isBlocked) return;
+                          if (isBlocked || isEliminatedOpt) return;
                           if (hasSplitBet) {
                             const currentList = Array.isArray(bet?.splitOptions) ? [...bet!.splitOptions!] : [];
                             const countForOpt = currentList.filter(o => o === opt).length;
@@ -804,14 +1026,16 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             onBetChange(player.id, 'selectedOption', opt);
                           }
                         }}
-                        className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-serif transition-all duration-200 border-2 flex items-center justify-between gap-3 cursor-pointer select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
-                          isPicked
-                            ? hasSplitBet
-                              ? isStacked2x
-                                ? 'bg-gradient-to-b from-amber-500/25 via-indigo-800/35 to-indigo-950/70 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.4)] scale-[1.01]'
-                                : 'bg-gradient-to-b from-indigo-600/25 via-indigo-800/30 to-indigo-950/60 border-indigo-400 text-indigo-950 dark:text-indigo-100 shadow-[0_0_20px_rgba(99,102,241,0.35)] scale-[1.01]'
-                              : 'bg-gradient-to-b from-amber-500/25 via-amber-700/30 to-amber-950/60 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.35)] scale-[1.01]'
-                            : 'felt-well border-[#d4af37]/30 text-slate-800 dark:text-amber-50/85 hover:border-[#d4af37] hover:bg-amber-500/10'
+                        className={`relative overflow-hidden py-3.5 px-4 rounded-xl font-serif transition-all duration-200 border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                          isEliminatedOpt
+                            ? 'opacity-40 grayscale cursor-not-allowed bg-slate-900/20 border-rose-500/40 text-slate-500 dark:text-slate-400 line-through'
+                            : isPicked
+                              ? hasSplitBet
+                                ? isStacked2x
+                                  ? 'cursor-pointer bg-gradient-to-b from-amber-500/25 via-indigo-800/35 to-indigo-950/70 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.4)] scale-[1.01]'
+                                  : 'cursor-pointer bg-gradient-to-b from-indigo-600/25 via-indigo-800/30 to-indigo-950/60 border-indigo-400 text-indigo-950 dark:text-indigo-100 shadow-[0_0_20px_rgba(99,102,241,0.35)] scale-[1.01]'
+                                : 'cursor-pointer bg-gradient-to-b from-amber-500/25 via-amber-700/30 to-amber-950/60 border-[#d4af37] text-amber-950 dark:text-[#fef08a] shadow-[0_0_22px_rgba(212,175,55,0.35)] scale-[1.01]'
+                              : 'cursor-pointer felt-well border-[#d4af37]/30 text-slate-800 dark:text-amber-50/85 hover:border-[#d4af37] hover:bg-amber-500/10'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -826,11 +1050,15 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           }`}>
                             {letter}
                           </span>
-                          <span className="text-base sm:text-lg font-editorial font-bold truncate">
+                          <span className={`text-base sm:text-lg font-editorial font-bold truncate ${isEliminatedOpt ? 'line-through' : ''}`}>
                             {opt}
                           </span>
                         </div>
-                        {isPicked && (
+                        {isEliminatedOpt ? (
+                          <span className="text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/40 shrink-0 no-underline">
+                            ✂️ Cut
+                          </span>
+                        ) : isPicked ? (
                           <span className={`text-[10px] font-mono-casino font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${
                             hasSplitBet
                               ? isStacked2x
@@ -840,7 +1068,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           }`}>
                             {hasSplitBet ? (isStacked2x ? '100% (2×)' : '50%') : '✓ Pick'}
                           </span>
-                        )}
+                        ) : null}
                       </button>
                     );
                   });
@@ -880,6 +1108,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <span>House Limit active: Wager capped at ${effectiveBetCap}.</span>
                   </div>
                 )}
+                {isHighRoller && (
+                  <div className="text-xs font-semibold text-orange-900 dark:text-orange-200 flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/15 border border-orange-500/40 rounded-lg">
+                    <span>🔥</span>
+                    <span>High Roller Fever: Minimum wager locked at ${effectiveMinBet.toLocaleString()} (50% of bankroll).</span>
+                  </div>
+                )}
               </div>
 
               <QuickChipTray
@@ -906,9 +1140,51 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 />
               )}
             </>
-          ) : questionType === 'openCloze' ? (
+          ) : (questionType === 'openCloze' || questionType === 'wordFormation' || questionType === 'keyWordTransformation') ? (
             <>
-              {/* Open Cloze (Cambridge Single-Word Gap) */}
+              {/* Open Cloze, Word Formation & Key Word Transformation */}
+              {questionType === 'wordFormation' && baseWord && (
+                <div className="p-3 rounded-xl bg-amber-500/15 border-2 border-[#d4af37] flex flex-wrap items-center justify-between gap-2 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🧬</span>
+                    <span className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
+                      Base Word to Transform:
+                    </span>
+                  </div>
+                  <span className="px-3 py-1 rounded-lg bg-amber-400/30 dark:bg-amber-500/25 border border-[#d4af37] font-mono-casino font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
+                    ({baseWord.toUpperCase()})
+                  </span>
+                </div>
+              )}
+              {questionType === 'keyWordTransformation' && baseWord && (
+                <div className="p-3 rounded-xl bg-amber-500/15 border-2 border-[#d4af37] flex flex-wrap items-center justify-between gap-2 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🔑</span>
+                    <div>
+                      <div className="text-xs font-serif font-extrabold uppercase tracking-wider text-amber-950 dark:text-amber-100">
+                        Key Word (Do Not Change):
+                      </div>
+                      <div className="text-[10px] font-sans text-slate-600 dark:text-amber-200/75">
+                        Use 2–6 words · 1 Mark = 1× Payout · 2 Marks = 2× Payout
+                      </div>
+                    </div>
+                  </div>
+                  <span className="px-3.5 py-1 rounded-lg bg-amber-400/35 dark:bg-amber-500/30 border-2 border-[#d4af37] font-mono-casino font-black text-sm sm:text-base tracking-widest text-amber-950 dark:text-[#fef08a]">
+                    {baseWord.toUpperCase()}
+                  </span>
+                </div>
+              )}
+              {scalpelHint?.clozeMask && (
+                <div className="p-3 rounded-xl bg-cyan-500/15 border border-cyan-400/50 flex items-center justify-between gap-2 text-xs font-serif text-cyan-950 dark:text-cyan-200">
+                  <span className="font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <span>✂️</span>
+                    <span>50/50 Scalpel Clue:</span>
+                  </span>
+                  <span className="font-mono-casino font-extrabold text-sm px-2.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/40 tracking-wider">
+                    {scalpelHint.clozeMask}
+                  </span>
+                </div>
+              )}
               {hasSplitBet ? (() => {
                 const w1 = (bet?.splitClozeAnswers?.[0] || '').trim();
                 const w2 = (bet?.splitClozeAnswers?.[1] || '').trim();
@@ -917,11 +1193,15 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   (!w1 && Boolean(w2)) ||
                   (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
                 return (
-                  <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing ? 'ring-2 ring-rose-500' : ''}`}>
+                  <div className={`p-4 sm:p-5 bg-gradient-to-br from-indigo-50/90 to-slate-100/90 dark:from-[#0f0c29]/90 dark:to-[#061810]/90 border border-indigo-400/50 rounded-xl shadow-inner space-y-3 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500' : ''}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs sm:text-sm font-serif font-extrabold uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
                         <span>⚖️</span>
-                        <span>Split Hedge · 1 Word (100% Payout) or 2 Words (50% Each)</span>
+                        <span>
+                          {questionType === 'keyWordTransformation'
+                            ? 'Split Hedge · 1 Phrase (100% Wager) or 2 Phrases (50% Each)'
+                            : 'Split Hedge · 1 Word (100% Payout) or 2 Words (50% Each)'}
+                        </span>
                       </span>
                       <span className={`text-[11px] font-mono-casino font-bold px-2 py-0.5 rounded border ${
                         isSingleOrSameWord
@@ -930,15 +1210,15 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       }`}>
                         {isSingleOrSameWord
                           ? `100% Wager ($${actualBetAmount.toLocaleString()})`
-                          : `$${Math.floor(actualBetAmount / 2).toLocaleString()} / word (50% each)`}
+                          : `$${Math.floor(actualBetAmount / 2).toLocaleString()} / slot (50% each)`}
                       </span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
                           {isSingleOrSameWord && Boolean(w1) && !w2
-                            ? 'Candidate Word #1 (100% Wager)'
-                            : 'Candidate Word #1 (50%)'}
+                            ? 'Candidate #1 (100% Wager)'
+                            : 'Candidate #1 (50%)'}
                         </label>
                         <input
                           ref={splitWord1InputRef}
@@ -946,23 +1226,32 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           value={bet?.splitClozeAnswers?.[0] || ''}
                           onChange={(e) => {
                             if (isBlocked) return;
-                            const singleWord = e.target.value.replace(/\s+/g, '');
+                            const val =
+                              questionType === 'keyWordTransformation'
+                                ? e.target.value.replace(/\s{2,}/g, ' ')
+                                : e.target.value.replace(/\s+/g, '');
                             const second = bet?.splitClozeAnswers?.[1] || '';
-                            onBetChange(player.id, 'splitClozeAnswers', [singleWord, second]);
+                            onBetChange(player.id, 'splitClozeAnswers', [val, second]);
                           }}
                           disabled={isBlocked}
-                          placeholder="First single word..."
-                          maxLength={32}
+                          placeholder={
+                            questionType === 'keyWordTransformation' && baseWord
+                              ? `2–6 words using ${baseWord.toUpperCase()}...`
+                              : questionType === 'wordFormation' && baseWord
+                                ? `Derived form #1 of ${baseWord.toUpperCase()}...`
+                                : 'First single word...'
+                          }
+                          maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
                           className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
                         />
                       </div>
                       <div>
                         <label className="block text-[10px] font-serif uppercase tracking-widest text-indigo-800 dark:text-indigo-300 font-bold mb-1">
                           {isSingleOrSameWord && Boolean(w2) && !w1
-                            ? 'Candidate Word #2 (100% Wager)'
+                            ? 'Candidate #2 (100% Wager)'
                             : isSingleOrSameWord && Boolean(w1) && Boolean(w2)
-                            ? 'Candidate Word #2 (Same Word · 100%)'
-                            : 'Candidate Word #2 (Optional · 50% Split)'}
+                            ? 'Candidate #2 (Same · 100%)'
+                            : 'Candidate #2 (Optional · 50% Split)'}
                         </label>
                         <input
                           ref={splitWord2InputRef}
@@ -971,12 +1260,19 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           onChange={(e) => {
                             if (isBlocked) return;
                             const first = bet?.splitClozeAnswers?.[0] || '';
-                            const singleWord = e.target.value.replace(/\s+/g, '');
-                            onBetChange(player.id, 'splitClozeAnswers', [first, singleWord]);
+                            const val =
+                              questionType === 'keyWordTransformation'
+                                ? e.target.value.replace(/\s{2,}/g, ' ')
+                                : e.target.value.replace(/\s+/g, '');
+                            onBetChange(player.id, 'splitClozeAnswers', [first, val]);
                           }}
                           disabled={isBlocked}
-                          placeholder="Optional 2nd word (blank = 100%)..."
-                          maxLength={32}
+                          placeholder={
+                            questionType === 'keyWordTransformation'
+                              ? 'Optional 2nd phrase (blank = 100%)...'
+                              : 'Optional 2nd word (blank = 100%)...'
+                          }
+                          maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
                           className="w-full h-11 px-3.5 rounded-xl bg-white/90 dark:bg-[#03140b]/90 border border-indigo-400/60 text-slate-900 dark:text-amber-50 font-editorial font-bold text-base focus:outline-none focus:border-[#fef08a]"
                         />
                       </div>
@@ -984,14 +1280,26 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </div>
                 );
               })() : (
-                <div className={`p-4 felt-well rounded-xl border-2 border-[#d4af37]/50 space-y-2 ${highlightAnswerMissing ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
-                  <div className="flex items-center justify-between">
+                <div className={`p-4 felt-well rounded-xl border-2 border-[#d4af37]/50 space-y-2 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
+                  <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-serif font-extrabold uppercase tracking-widest text-amber-900 dark:text-[#fef08a] flex items-center gap-1.5">
-                      <span>✍️</span>
-                      <span>Type the Missing Word (Single-Word Gap)</span>
+                      <span>
+                        {questionType === 'keyWordTransformation'
+                          ? '🔑'
+                          : questionType === 'wordFormation'
+                            ? '🧬'
+                            : '✍️'}
+                      </span>
+                      <span>
+                        {questionType === 'keyWordTransformation'
+                          ? `Complete the Gap Using "${(baseWord || 'KEY').toUpperCase()}"`
+                          : questionType === 'wordFormation'
+                            ? `Transform (${(baseWord || 'ROOT').toUpperCase()}) to Fit the Gap`
+                            : 'Type the Missing Word (Single-Word Gap)'}
+                      </span>
                     </label>
-                    <span className="text-[10px] font-mono-casino uppercase tracking-wider text-slate-500 dark:text-amber-200/60">
-                      1 Word Only
+                    <span className="text-[10px] font-mono-casino uppercase tracking-wider text-slate-500 dark:text-amber-200/60 shrink-0">
+                      {questionType === 'keyWordTransformation' ? '2–6 Words' : '1 Word Only'}
                     </span>
                   </div>
                   <input
@@ -1000,14 +1308,59 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     value={bet?.clozeAnswer || ''}
                     onChange={(e) => {
                       if (isBlocked) return;
-                      const singleWord = e.target.value.replace(/\s+/g, '');
-                      onBetChange(player.id, 'clozeAnswer', singleWord);
+                      const val =
+                        questionType === 'keyWordTransformation'
+                          ? e.target.value.replace(/\s{2,}/g, ' ')
+                          : e.target.value.replace(/\s+/g, '');
+                      onBetChange(player.id, 'clozeAnswer', val);
                     }}
                     disabled={isBlocked}
-                    placeholder="Type the single missing word for _____..."
-                    maxLength={32}
+                    placeholder={
+                      questionType === 'keyWordTransformation' && baseWord
+                        ? `Type 2 to 6 words including ${baseWord.toUpperCase()}...`
+                        : questionType === 'wordFormation' && baseWord
+                          ? `Type a derived form of (${baseWord.toUpperCase()})...`
+                          : 'Type the single missing word for _____...'
+                    }
+                    maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
                     className="w-full h-12 px-4 rounded-xl bg-amber-50/80 dark:bg-[#03150b]/90 border border-[#d4af37]/60 text-slate-900 dark:text-amber-50 placeholder-slate-400 dark:placeholder-amber-200/35 focus:outline-none focus:border-[#ca8a04] dark:focus:border-[#fef08a] focus:ring-2 focus:ring-[#ca8a04]/25 transition-all text-lg font-editorial font-bold shadow-inner"
                   />
+                  {questionType === 'keyWordTransformation' && (() => {
+                    const check = inspectKwtPhrase(bet?.clozeAnswer);
+                    if (!check.trimmed) return null;
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] font-serif">
+                        <span
+                          className={`px-2 py-0.5 rounded font-bold border ${
+                            check.hasKeyWord
+                              ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                              : 'bg-rose-500/15 text-rose-800 dark:text-rose-200 border-rose-500/50'
+                          }`}
+                        >
+                          {check.hasKeyWord
+                            ? `✓ Key word "${(baseWord || 'KEY').toUpperCase()}" included`
+                            : `⚠️ Must include unchanged "${(baseWord || 'KEY').toUpperCase()}"`}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded font-mono-casino font-bold border ${
+                            check.isValidCount
+                              ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-900 dark:text-amber-200 border-amber-500/50'
+                          }`}
+                        >
+                          {check.wordCount} / 2–6 words
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {isUnchangedBaseWord && (
+                <div className="px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 text-xs font-serif font-bold flex items-center gap-2 animate-fade-in">
+                  <span>⚠️</span>
+                  <span>
+                    You typed the unchanged base word <strong>({(baseWord || '').toUpperCase()})</strong>. Change its form (e.g. add a prefix or suffix) to lock in!
+                  </span>
                 </div>
               )}
 
@@ -1042,6 +1395,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg">
                     <span>🧢</span>
                     <span>House Limit active: Wager capped at ${effectiveBetCap}.</span>
+                  </div>
+                )}
+                {isHighRoller && (
+                  <div className="text-xs font-semibold text-orange-900 dark:text-orange-200 flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/15 border border-orange-500/40 rounded-lg">
+                    <span>🔥</span>
+                    <span>High Roller Fever: Minimum wager locked at ${effectiveMinBet.toLocaleString()} (50% of bankroll).</span>
                   </div>
                 )}
               </div>
@@ -1259,6 +1618,12 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     <span>House Limit active: Wager capped at ${effectiveBetCap}.</span>
                   </div>
                 )}
+                {isHighRoller && (
+                  <div className="text-xs font-semibold text-orange-900 dark:text-orange-200 flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/15 border border-orange-500/40 rounded-lg">
+                    <span>🔥</span>
+                    <span>High Roller Fever: Minimum wager locked at ${effectiveMinBet.toLocaleString()} (50% of bankroll).</span>
+                  </div>
+                )}
               </div>
 
               {/* Quick Chip Tray for rapid betting */}
@@ -1413,12 +1778,25 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               </span>
             ) : timerEnabled && timerStatus === 'idle' ? (
               <span className="text-amber-700 dark:text-amber-400/80 italic">Awaiting Turn...</span>
+            ) : isUnchangedBaseWord ? (
+              <span className="text-rose-500 font-bold uppercase tracking-wider">
+                Transform ({(baseWord || '').toUpperCase()})...
+              </span>
+            ) : isInvalidKwtPhrase ? (
+              <span className="text-rose-500 font-bold uppercase tracking-wider">
+                Use 2–6 words + {(baseWord || 'KEY').toUpperCase()}...
+              </span>
             ) : (
               questionType === 'multipleChoice'
                 ? (typeof bet?.bet === 'number' && (hasSplitBet ? (bet?.splitOptions?.length || 0) >= 1 : Boolean(bet?.selectedOption)))
-                : questionType === 'openCloze'
-                  ? (typeof bet?.bet === 'number' && (hasSplitBet ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim()) : Boolean(bet?.clozeAnswer?.trim())))
-                  : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number'))
+                : questionType === 'keyWordTransformation'
+                  ? (typeof bet?.bet === 'number' && (hasSplitBet
+                      ? (isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[0], baseWord) && (!bet?.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))) ||
+                        (!bet?.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))
+                      : isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord)))
+                  : (questionType === 'openCloze' || questionType === 'wordFormation')
+                    ? (typeof bet?.bet === 'number' && (hasSplitBet ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim()) : Boolean(bet?.clozeAnswer?.trim())))
+                    : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number'))
             ) ? (
               <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1">
                 <span>●</span> {timerEnabled ? 'Wager Placed' : 'Wager Locked'}

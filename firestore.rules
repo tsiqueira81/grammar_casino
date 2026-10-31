@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: check basic string bounds
+    function isBoundedString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    // 1. Live Classroom Multiplayer Rooms (QR Code Join & Real-Time Sync)
+    match /rooms/{roomCode} {
+      allow read: if roomCode.size() >= 3 && roomCode.size() <= 12;
+      allow create, update: if roomCode.size() >= 3 && roomCode.size() <= 12
+        && request.resource.data.code == roomCode
+        && request.resource.data.locked is bool
+        && request.resource.data.updatedAt is number
+        && (!('viewsJson' in request.resource.data) || isBoundedString(request.resource.data.viewsJson, 0, 600000))
+        && (!('joinResponsesJson' in request.resource.data) || isBoundedString(request.resource.data.joinResponsesJson, 0, 250000));
+      allow delete: if roomCode.size() >= 3 && roomCode.size() <= 12;
+
+      // Per-student intents (unauthenticated student phones write to their own clientId doc)
+      match /intents/{clientId} {
+        allow read: if true;
+        allow create, update: if isBoundedString(clientId, 4, 80)
+          && request.resource.data.clientId == clientId
+          && isBoundedString(request.resource.data.type, 2, 40)
+          && isBoundedString(request.resource.data.payloadJson, 2, 20000)
+          && request.resource.data.updatedAt is number;
+        allow delete: if isBoundedString(clientId, 4, 80);
+      }
+    }
+
+    // 2. Cloud Classroom Rosters (Supports both Google Sign-In and Teacher PIN workflows)
+    match /rosters/{rosterId} {
+      allow read: if true;
+      allow create, update: if isBoundedString(rosterId, 3, 100)
+        && isBoundedString(request.resource.data.name, 1, 100)
+        && request.resource.data.startingCash is number
+        && request.resource.data.startingCash >= 1
+        && request.resource.data.startingCash <= 1000000
+        && isBoundedString(request.resource.data.playersJson, 2, 250000)
+        && request.resource.data.playerCount is number
+        && request.resource.data.createdAt is number
+        && request.resource.data.updatedAt is number;
+      allow delete: if isBoundedString(rosterId, 3, 100);
+    }
+
+    // 3. Cloud Session Reports & Resumable Saves
+    match /session_reports/{reportId} {
+      allow read: if true;
+      allow create, update: if isBoundedString(reportId, 3, 100)
+        && isBoundedString(request.resource.data.title, 1, 160)
+        && isBoundedString(request.resource.data.topic, 1, 100)
+        && isBoundedString(request.resource.data.level, 1, 20)
+        && request.resource.data.roundsPlayed is number
+        && request.resource.data.playerCount is number
+        && isBoundedString(request.resource.data.playersJson, 2, 250000)
+        && isBoundedString(request.resource.data.roundHistoryJson, 2, 700000)
+        && (!('fullGameStateJson' in request.resource.data) || isBoundedString(request.resource.data.fullGameStateJson, 0, 800000))
+        && request.resource.data.createdAt is number;
+      allow delete: if isBoundedString(reportId, 3, 100);
+    }
+
+    // 4. Auto-Growing Cloud Sentence Bank
+    match /curated_sentences/{sentenceId} {
+      allow read: if true;
+      allow create, update: if isBoundedString(sentenceId, 3, 120)
+        && isBoundedString(request.resource.data.topic, 1, 100)
+        && isBoundedString(request.resource.data.level, 1, 10)
+        && isBoundedString(request.resource.data.questionType, 1, 30)
+        && isBoundedString(request.resource.data.text, 5, 1000)
+        && request.resource.data.isCorrect is bool
+        && isBoundedString(request.resource.data.correction, 1, 1000)
+        && isBoundedString(request.resource.data.explanation, 5, 2500)
+        && request.resource.data.createdAt is number;
+      allow delete: if isBoundedString(sentenceId, 3, 120);
+    }
+  }
+}

@@ -1,5 +1,13 @@
 import { MultiplayerSeat, PlayerViewPayload, StudentIntent } from '../utils/multiplayerProtocol';
-import { getSavedTeacherPin, isDesktopApp } from './geminiService';
+import { getSavedTeacherPin, isDesktopApp, isTeacherPinUnlocked } from './geminiService';
+import {
+  upsertFirestoreRoomState,
+  deleteFirestoreRoom,
+  listenToFirestoreRoomIntents,
+  sendFirestoreStudentIntent,
+  listenToFirestoreRoom,
+  FirestoreJoinResponseItem,
+} from './firebaseService';
 
 export interface HostEventPayload {
   id: string;
@@ -431,7 +439,7 @@ class CloudRoomRelay {
 }
 
 // ============================================================================
-// Teacher Host Room Controller (Cloud WSS Relay + Local Server Dual Engine)
+// Teacher Host Room Controller (Firestore Relay + Cloud WSS + Local Server)
 // ============================================================================
 export class HostRoomController {
   public code: string;
@@ -441,6 +449,11 @@ export class HostRoomController {
   private cloudRelay: CloudRoomRelay;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private firestoreFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private firestoreUnsubscribe: (() => void) | null = null;
+  private firestoreConnected = false;
+  private firestoreJoinResponses: Record<string, FirestoreJoinResponseItem> = {};
+  private kickedPlayerIds: number[] = [];
   private destroyed = false;
   private seenEventIds = new Set<string>();
   private latestViews: Record<number, PlayerViewPayload> = {};
@@ -448,7 +461,7 @@ export class HostRoomController {
   private onConnectionChange?: (connected: boolean) => void;
   private localWsConnected = false;
 
-  // Authoritative Host Seat Registry (supports Cloud/Netlify + Local Server seamlessly)
+  // Authoritative Host Seat Registry (supports Firestore + Cloud/Netlify + Local Server seamlessly)
   private roomLocked = false;
   private nextPlayerId = 101;
   private seatsByPlayerId = new Map<number, MultiplayerSeat>();
@@ -472,14 +485,52 @@ export class HostRoomController {
     );
     this.cloudRelay.subscribe(`${TOPIC_PREFIX}/${this.code}/to-host`);
 
+    // Initialize Firestore room state and listen to student intent docs
+    this.scheduleFirestoreFlush(0);
+    this.firestoreUnsubscribe = listenToFirestoreRoomIntents(
+      this.code,
+      (clientId, msg) => {
+        if (msg && typeof msg === 'object') {
+          this.handleCloudMessage('firestore', { ...msg, clientId });
+        }
+      },
+      (connected) => {
+        this.firestoreConnected = connected;
+        this.updateOverallConnectionStatus();
+      }
+    );
+
     if (this.localServerAvailable) {
       this.connectLocalWs();
       this.startFallbackPolling();
     }
   }
 
+  private scheduleFirestoreFlush(delayMs = 100) {
+    if (this.destroyed) return;
+    if (this.firestoreFlushTimer) {
+      clearTimeout(this.firestoreFlushTimer);
+    }
+    this.firestoreFlushTimer = setTimeout(() => {
+      this.firestoreFlushTimer = null;
+      if (this.destroyed) return;
+      void upsertFirestoreRoomState({
+        code: this.code,
+        locked: this.roomLocked,
+        views: this.latestViews,
+        joinResponses: this.firestoreJoinResponses,
+        kickedPlayerIds: this.kickedPlayerIds,
+      }).then((ok) => {
+        if (ok && !this.firestoreConnected) {
+          this.firestoreConnected = true;
+          this.updateOverallConnectionStatus();
+        }
+      });
+    }, delayMs);
+  }
+
   private updateOverallConnectionStatus() {
-    const isOnline = this.localWsConnected || this.cloudRelay.isConnected;
+    const isOnline = this.localWsConnected || this.firestoreConnected || this.cloudRelay.isConnected;
     this.onConnectionChange?.(isOnline);
   }
 
@@ -488,35 +539,37 @@ export class HostRoomController {
     onConnectionChange?: (connected: boolean) => void
   ): Promise<HostRoomController> {
     const savedPin = getSavedTeacherPin();
-    if (!isDesktopApp() && !savedPin) {
-      throw new Error('Teacher PIN required to host a Live Classroom Room.');
+    if (!isDesktopApp() && !isTeacherPinUnlocked()) {
+      throw new Error('Teacher PIN or Google Sign-In required to host a Live Classroom Room.');
     }
 
-    // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Cloud Relay
-    const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(savedPin ? { 'x-teacher-pin': savedPin } : {}),
-      },
-      body: JSON.stringify({ teacherPin: savedPin }),
-    });
+    // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore + Cloud Relay
+    if (savedPin && savedPin !== 'google_verified') {
+      const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-teacher-pin': savedPin,
+        },
+        body: JSON.stringify({ teacherPin: savedPin }),
+      });
 
-    if (res.status === 401 || res.status === 403) {
-      throw new Error((res.data as any)?.error || 'Teacher PIN required to host a Live Classroom Room.');
+      if (res.status === 401 || res.status === 403) {
+        throw new Error((res.data as any)?.error || 'Teacher PIN required to host a Live Classroom Room.');
+      }
+
+      if (res.ok && res.isJson && res.data?.code && res.data?.hostToken) {
+        return new HostRoomController(
+          res.data.code,
+          res.data.hostToken,
+          true,
+          onEvent,
+          onConnectionChange
+        );
+      }
     }
 
-    if (res.ok && res.isJson && res.data?.code && res.data?.hostToken) {
-      return new HostRoomController(
-        res.data.code,
-        res.data.hostToken,
-        true,
-        onEvent,
-        onConnectionChange
-      );
-    }
-
-    // Static host (Netlify / Electron / GitHub Pages) -> generate room code directly in Host browser
+    // Static host (Netlify / Electron / Google-verified without local server) -> generate room code directly
     const generatedCode = generateRoomCode();
     const generatedToken = generateToken('host');
     return new HostRoomController(
@@ -535,7 +588,8 @@ export class HostRoomController {
       const clientId = String(msg.clientId || '');
       const cleanName = String(msg.name || '').trim().slice(0, 20);
       const avatar = String(msg.avatar || '🦊');
-      const reconnectToken = String(msg.reconnectToken || '').trim();
+      const reconnectToken = String(msg.reconnectToken || clientId || '').trim();
+      const requestId = String(msg.requestId || Date.now());
       const replyTopic = `${TOPIC_PREFIX}/${this.code}/to-client/${clientId}`;
 
       if (!clientId || !cleanName) return;
@@ -564,14 +618,32 @@ export class HostRoomController {
         existingSeat.lastSeen = Date.now();
         if (cleanName) existingSeat.name = cleanName;
         if (avatar) existingSeat.avatar = avatar;
+        if (reconnectToken) existingSeat.reconnectToken = reconnectToken;
+        this.kickedPlayerIds = this.kickedPlayerIds.filter((id) => id !== existingSeat!.playerId);
 
         this.handleIncomingEvent({
-          id: `cloud_reconn_${existingSeat.playerId}_${msg.requestId || Date.now()}`,
+          id: `cloud_reconn_${existingSeat.playerId}_${requestId}`,
           type: 'STUDENT_RECONNECTED',
           seat: { ...existingSeat },
           playerId: existingSeat.playerId,
           timestamp: Date.now(),
         });
+
+        this.firestoreJoinResponses[clientId] = {
+          ok: true,
+          code: this.code,
+          requestId,
+          seat: {
+            seatId: existingSeat.seatId,
+            playerId: existingSeat.playerId,
+            name: existingSeat.name,
+            avatar: existingSeat.avatar,
+            connected: true,
+            lockedIn: existingSeat.lockedIn,
+            lastSeen: existingSeat.lastSeen,
+          },
+        };
+        this.scheduleFirestoreFlush(30);
 
         this.cloudRelay.publish(replyTopic, {
           type: 'CLOUD_JOIN_RESPONSE',
@@ -584,6 +656,14 @@ export class HostRoomController {
       }
 
       if (this.roomLocked) {
+        this.firestoreJoinResponses[clientId] = {
+          ok: false,
+          code: this.code,
+          requestId,
+          error: 'This room is locked by the teacher.',
+        };
+        this.scheduleFirestoreFlush(30);
+
         this.cloudRelay.publish(replyTopic, {
           type: 'CLOUD_JOIN_RESPONSE',
           ok: false,
@@ -598,7 +678,7 @@ export class HostRoomController {
         playerId,
         name: cleanName,
         avatar,
-        reconnectToken: generateToken('seat'),
+        reconnectToken: reconnectToken || generateToken('seat'),
         connected: true,
         lockedIn: false,
         lastSeen: Date.now(),
@@ -606,12 +686,28 @@ export class HostRoomController {
       this.seatsByPlayerId.set(playerId, newSeat);
 
       this.handleIncomingEvent({
-        id: `cloud_join_${playerId}_${msg.requestId || Date.now()}`,
+        id: `cloud_join_${playerId}_${requestId}`,
         type: 'STUDENT_JOINED',
         seat: { ...newSeat },
         playerId,
         timestamp: Date.now(),
       });
+
+      this.firestoreJoinResponses[clientId] = {
+        ok: true,
+        code: this.code,
+        requestId,
+        seat: {
+          seatId: newSeat.seatId,
+          playerId: newSeat.playerId,
+          name: newSeat.name,
+          avatar: newSeat.avatar,
+          connected: true,
+          lockedIn: false,
+          lastSeen: newSeat.lastSeen,
+        },
+      };
+      this.scheduleFirestoreFlush(30);
 
       this.cloudRelay.publish(replyTopic, {
         type: 'CLOUD_JOIN_RESPONSE',
@@ -622,12 +718,12 @@ export class HostRoomController {
       });
     } else if (msg.type === 'CLOUD_STUDENT_INTENT') {
       const playerId = Number(msg.playerId);
-      const token = String(msg.reconnectToken || '');
+      const token = String(msg.reconnectToken || msg.clientId || '');
       const intent = msg.intent as StudentIntent;
       if (!playerId || !intent) return;
 
       const seat = this.seatsByPlayerId.get(playerId);
-      if (seat && seat.reconnectToken !== token) return;
+      if (seat && seat.reconnectToken && token && seat.reconnectToken !== token) return;
       if (seat) {
         seat.connected = true;
         seat.lastSeen = Date.now();
@@ -647,7 +743,7 @@ export class HostRoomController {
       const playerId = Number(msg.playerId);
       const token = String(msg.reconnectToken || '');
       const seat = this.seatsByPlayerId.get(playerId);
-      if (seat && seat.reconnectToken && seat.reconnectToken !== token) {
+      if (seat && seat.reconnectToken && token && seat.reconnectToken !== token) {
         this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${playerId}`, {
           type: 'KICKED',
           playerId,
@@ -761,7 +857,10 @@ export class HostRoomController {
   public async pushViews(views: Record<number, PlayerViewPayload>) {
     this.latestViews = views;
 
-    // 1. Always broadcast each player's view over the Cloud WSS Relay (supports Netlify & cross-domain phones)
+    // 1. Coalesce and push single document update to Firestore (1 write per state change)
+    this.scheduleFirestoreFlush(80);
+
+    // 2. Broadcast each player's view over the Cloud WSS Relay
     Object.entries(views).forEach(([pidStr, view]) => {
       const pid = Number(pidStr);
       this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${pid}`, {
@@ -771,7 +870,7 @@ export class HostRoomController {
       });
     });
 
-    // 2. Also push to local server if available
+    // 3. Also push to local server if available
     if (!this.localServerAvailable) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -792,6 +891,7 @@ export class HostRoomController {
 
   public async setRoomLocked(locked: boolean) {
     this.roomLocked = locked;
+    this.scheduleFirestoreFlush(30);
     if (this.localServerAvailable) {
       await this.syncHttp({ locked });
     }
@@ -800,6 +900,10 @@ export class HostRoomController {
   public async kickPlayer(playerId: number) {
     this.seatsByPlayerId.delete(playerId);
     delete this.latestViews[playerId];
+    if (!this.kickedPlayerIds.includes(playerId)) {
+      this.kickedPlayerIds.push(playerId);
+    }
+    this.scheduleFirestoreFlush(20);
     this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/view/${playerId}`, {
       type: 'KICKED',
       playerId,
@@ -813,6 +917,7 @@ export class HostRoomController {
     for (const seat of this.seatsByPlayerId.values()) {
       seat.lockedIn = false;
     }
+    this.scheduleFirestoreFlush(50);
     if (this.localServerAvailable) {
       await this.syncHttp({ resetLocks: true });
     }
@@ -847,6 +952,17 @@ export class HostRoomController {
 
   public destroy() {
     this.destroyed = true;
+    if (this.firestoreFlushTimer) {
+      clearTimeout(this.firestoreFlushTimer);
+      this.firestoreFlushTimer = null;
+    }
+    if (this.firestoreUnsubscribe) {
+      try {
+        this.firestoreUnsubscribe();
+      } catch {}
+      this.firestoreUnsubscribe = null;
+    }
+    void deleteFirestoreRoom(this.code);
     this.cloudRelay.destroy();
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -859,14 +975,19 @@ export class HostRoomController {
 }
 
 // ============================================================================
-// Student Device Room Controller (Cloud WSS Relay + Local Server Fallback)
+// Student Device Room Controller (Firestore Relay + Cloud WSS + Local Server)
 // ============================================================================
 export class StudentRoomController {
   public code: string;
   public seat: MultiplayerSeat;
+  private clientId: string;
   private localServerAvailable: boolean;
   private ws: WebSocket | null = null;
   private cloudRelay: CloudRoomRelay;
+  private firestoreUnsubscribe: (() => void) | null = null;
+  private firestoreConnected = false;
+  private firestoreBetDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastDeliveredViewJson = '';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -878,6 +999,7 @@ export class StudentRoomController {
   constructor(
     code: string,
     seat: MultiplayerSeat,
+    clientId: string,
     initialView: PlayerViewPayload | null,
     localServerAvailable: boolean,
     cloudRelay: CloudRoomRelay,
@@ -887,6 +1009,7 @@ export class StudentRoomController {
   ) {
     this.code = code;
     this.seat = seat;
+    this.clientId = clientId;
     this.localServerAvailable = localServerAvailable;
     this.cloudRelay = cloudRelay;
     this.onViewUpdate = onViewUpdate;
@@ -896,8 +1019,29 @@ export class StudentRoomController {
     // Subscribe to per-seat Cloud Relay view updates
     this.cloudRelay.subscribe(`${TOPIC_PREFIX}/${this.code}/view/${this.seat.playerId}`);
 
+    // Subscribe to Firestore Room onSnapshot for firewall-proof real-time updates
+    this.firestoreUnsubscribe = listenToFirestoreRoom(
+      this.code,
+      (roomSnap) => {
+        if (this.destroyed) return;
+        if (roomSnap.kickedPlayerIds.includes(this.seat.playerId)) {
+          this.onKicked();
+          this.destroy();
+          return;
+        }
+        const myView = roomSnap.views[this.seat.playerId];
+        if (myView) {
+          this.deliverViewUpdate(myView);
+        }
+      },
+      (connected) => {
+        this.firestoreConnected = connected;
+        this.updateOverallConnectionStatus();
+      }
+    );
+
     if (initialView) {
-      setTimeout(() => this.onViewUpdate(initialView), 0);
+      setTimeout(() => this.deliverViewUpdate(initialView), 0);
     } else {
       // Request immediate view sync from Host over Cloud Relay
       this.requestCloudViewSync();
@@ -910,8 +1054,18 @@ export class StudentRoomController {
     setTimeout(() => this.updateOverallConnectionStatus(), 50);
   }
 
+  private deliverViewUpdate(view: PlayerViewPayload) {
+    if (this.destroyed || !view) return;
+    try {
+      const serialized = JSON.stringify(view);
+      if (serialized === this.lastDeliveredViewJson) return;
+      this.lastDeliveredViewJson = serialized;
+    } catch {}
+    this.onViewUpdate(view);
+  }
+
   private updateOverallConnectionStatus() {
-    const isOnline = this.localWsConnected || this.cloudRelay.isConnected;
+    const isOnline = this.localWsConnected || this.firestoreConnected || this.cloudRelay.isConnected;
     this.onConnectionChange?.(isOnline);
   }
 
@@ -936,13 +1090,12 @@ export class StudentRoomController {
     const cleanCode = params.code.trim().toUpperCase();
     const cleanName = params.name.trim();
     const avatar = params.avatar;
-    const reconnectToken = params.reconnectToken || '';
+    const clientId = params.reconnectToken?.trim() || generateToken('stu');
+    const reconnectToken = clientId;
 
-    // Establish Cloud WSS Relay immediately so we can join either via local server or Cloud Relay (Netlify)
     let studentControllerRef: StudentRoomController | null = null;
     let joinResolved = false;
 
-    const clientId = generateToken('stu');
     const requestId = generateToken('req');
     const replyTopic = `${TOPIC_PREFIX}/${cleanCode}/to-client/${clientId}`;
 
@@ -980,14 +1133,16 @@ export class StudentRoomController {
 
     const sendCloudJoinRequest = () => {
       if (joinResolved) return;
-      cloudRelay.publish(`${TOPIC_PREFIX}/${cleanCode}/to-host`, {
+      const joinPayload = {
         type: 'CLOUD_JOIN_REQUEST',
         clientId,
         requestId,
         name: cleanName,
         avatar,
         reconnectToken,
-      });
+      };
+      cloudRelay.publish(`${TOPIC_PREFIX}/${cleanCode}/to-host`, joinPayload);
+      void sendFirestoreStudentIntent(cleanCode, clientId, 'JOIN_REQUEST', joinPayload);
     };
 
     // 1. Try local Express server first if we are on an Express-backed host
@@ -1003,7 +1158,7 @@ export class StudentRoomController {
         code: cleanCode,
         name: cleanName,
         avatar,
-        reconnectToken,
+        reconnectToken: params.reconnectToken || '',
       }),
     });
 
@@ -1012,6 +1167,7 @@ export class StudentRoomController {
       studentControllerRef = new StudentRoomController(
         localRes.data.code || cleanCode,
         localRes.data.seat,
+        localRes.data.seat.reconnectToken || clientId,
         localRes.data.view || null,
         true,
         cloudRelay,
@@ -1028,10 +1184,26 @@ export class StudentRoomController {
       throw new Error(localRes.data.error);
     }
 
-    // 2. Otherwise (e.g., hosted on Netlify where /api/mp/room/join returns HTML, or cross-domain join),
-    // join via the Cloud WSS Relay!
+    // 2. Otherwise (e.g., hosted on Netlify, or cross-network phone join),
+    // listen to Firestore room snapshot AND MQTT Cloud Relay simultaneously!
+    const joinFirestoreUnsub = listenToFirestoreRoom(cleanCode, (roomSnap) => {
+      if (joinResolved) return;
+      const resp = roomSnap.joinResponses?.[clientId];
+      if (!resp) return;
+      if (resp.ok && resp.seat) {
+        const resolvedSeat: MultiplayerSeat = {
+          ...resp.seat,
+          reconnectToken,
+        };
+        const initialView = roomSnap.views?.[resp.seat.playerId] || null;
+        resolveCloudJoin?.({ seat: resolvedSeat, view: initialView });
+      } else if (!resp.ok && resp.error) {
+        rejectCloudJoin?.(new Error(resp.error));
+      }
+    });
+
     sendCloudJoinRequest();
-    const retryInterval = setInterval(sendCloudJoinRequest, 900);
+    const retryInterval = setInterval(sendCloudJoinRequest, 1500);
 
     try {
       const cloudResult = await Promise.race([
@@ -1044,17 +1216,19 @@ export class StudentRoomController {
                   `Room "${cleanCode}" was not found or the Host table is offline. Please verify the 4-letter code on the projector.`
                 )
               ),
-            7500
+            8500
           )
         ),
       ]);
 
       clearInterval(retryInterval);
+      joinFirestoreUnsub();
       joinResolved = true;
 
       studentControllerRef = new StudentRoomController(
         cleanCode,
         cloudResult.seat,
+        cloudResult.seat.reconnectToken || clientId,
         cloudResult.view,
         false,
         cloudRelay,
@@ -1065,6 +1239,7 @@ export class StudentRoomController {
       return studentControllerRef;
     } catch (err) {
       clearInterval(retryInterval);
+      joinFirestoreUnsub();
       joinResolved = true;
       cloudRelay.destroy();
       throw err;
@@ -1074,7 +1249,7 @@ export class StudentRoomController {
   public handleCloudMessage(msg: any) {
     if (this.destroyed || !msg) return;
     if (msg.type === 'PLAYER_VIEW' && msg.view) {
-      this.onViewUpdate(msg.view);
+      this.deliverViewUpdate(msg.view);
     } else if (msg.type === 'KICKED') {
       this.onKicked();
       this.destroy();
@@ -1111,7 +1286,7 @@ export class StudentRoomController {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'PLAYER_VIEW' && msg.view) {
-            this.onViewUpdate(msg.view);
+            this.deliverViewUpdate(msg.view);
           } else if (msg.type === 'KICKED') {
             this.onKicked();
             this.destroy();
@@ -1130,7 +1305,7 @@ export class StudentRoomController {
       };
 
       ws.onerror = () => {
-        // Cloud Relay + HTTP fallback handle continuity
+        // Firestore + Cloud Relay + HTTP fallback handle continuity
       };
     } catch {
       if (!this.destroyed && this.localServerAvailable) {
@@ -1143,9 +1318,9 @@ export class StudentRoomController {
     this.pollTimer = setInterval(async () => {
       if (this.destroyed) return;
 
-      // Always send a lightweight heartbeat / view sync over Cloud Relay if local WS is not open
       const wsOpen = this.ws && this.ws.readyState === WebSocket.OPEN;
-      if (!wsOpen) {
+      // Only request MQTT view sync if neither Local WS nor Firestore onSnapshot is active
+      if (!wsOpen && !this.firestoreConnected) {
         this.requestCloudViewSync();
       }
 
@@ -1166,7 +1341,7 @@ export class StudentRoomController {
         return;
       }
       if (res.ok && res.data?.view) {
-        this.onViewUpdate(res.data.view);
+        this.deliverViewUpdate(res.data.view);
       }
     }, 2500);
   }
@@ -1175,16 +1350,37 @@ export class StudentRoomController {
     if (this.destroyed) return;
     const intentId = generateToken('int');
 
-    // 1. Always publish intent over Cloud WSS Relay (instant delivery on Netlify & cross-domain)
-    this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/to-host`, {
+    const intentEnvelope = {
       type: 'CLOUD_STUDENT_INTENT',
       intentId,
+      clientId: this.clientId,
       playerId: this.seat.playerId,
       reconnectToken: this.seat.reconnectToken,
       intent,
-    });
+    };
 
-    // 2. Also send via local server if available
+    // 1. Always publish intent over Cloud WSS Relay
+    this.cloudRelay.publish(`${TOPIC_PREFIX}/${this.code}/to-host`, intentEnvelope);
+
+    // 2. Write intent to Firestore (debounced for draft SET_BET / SET_FULL_BET to conserve Spark free-tier writes, immediate for LOCK_IN / power-ups / hints)
+    if (intent.type === 'SET_BET' || intent.type === 'SET_FULL_BET') {
+      if (this.firestoreBetDebounceTimer) {
+        clearTimeout(this.firestoreBetDebounceTimer);
+      }
+      this.firestoreBetDebounceTimer = setTimeout(() => {
+        this.firestoreBetDebounceTimer = null;
+        if (this.destroyed) return;
+        void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', intentEnvelope);
+      }, 280);
+    } else {
+      if (this.firestoreBetDebounceTimer) {
+        clearTimeout(this.firestoreBetDebounceTimer);
+        this.firestoreBetDebounceTimer = null;
+      }
+      void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', intentEnvelope);
+    }
+
+    // 3. Also send via local server if available
     if (!this.localServerAvailable) return;
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -1214,6 +1410,16 @@ export class StudentRoomController {
 
   public destroy() {
     this.destroyed = true;
+    if (this.firestoreBetDebounceTimer) {
+      clearTimeout(this.firestoreBetDebounceTimer);
+      this.firestoreBetDebounceTimer = null;
+    }
+    if (this.firestoreUnsubscribe) {
+      try {
+        this.firestoreUnsubscribe();
+      } catch {}
+      this.firestoreUnsubscribe = null;
+    }
     this.cloudRelay.destroy();
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);

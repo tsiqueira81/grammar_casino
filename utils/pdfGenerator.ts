@@ -456,8 +456,9 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
   roundsToRender.forEach((record) => {
     const qType = record.sentence.questionType || 'binary';
-    const isCloze = qType === 'multipleChoice' || qType === 'openCloze';
+    const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
     const isError = !isCloze && !record.sentence.isCorrect;
+    const cleanLeadIn = cleanText(record.sentence.leadInSentence || '');
     const cleanSentenceText = cleanText(record.sentence.text);
     const cleanCorrectionText = cleanText(record.sentence.correction);
     const cleanExplanationText = cleanText(record.sentence.explanation);
@@ -465,19 +466,28 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     const cleanErrorPhrase = cleanText(record.sentence.errorPhrase || '');
     const cleanMistakeType = cleanText(record.sentence.mistakeType || '');
     const cleanOfficialAnswer = cleanText(record.sentence.correctAnswer || '');
+    const cleanBaseWord = cleanText(record.sentence.baseWord || '');
 
     const optionsLine = (qType === 'multipleChoice' && record.sentence.options)
       ? `Options: ${record.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${cleanText(opt)}`).join('   ')}`
-      : (qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0)
-        ? `Accepted Answers: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}`
-        : '';
+      : (qType === 'keyWordTransformation')
+        ? `KEY WORD: [${cleanBaseWord || 'KEY'}]${record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0 ? `   |   Accepted: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(' / ')}` : ''}`
+        : (qType === 'wordFormation')
+          ? `Base Word: (${cleanBaseWord || 'ROOT'})${record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0 ? `   |   Accepted Forms: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}` : ''}`
+          : (qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0)
+            ? `Accepted Answers: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}`
+            : '';
 
     const mistakeLine = (isError && cleanErrorPhrase)
       ? `Identified Mistake: "${cleanErrorPhrase}"${cleanMistakeType ? ` (${cleanMistakeType})` : ''}`
       : '';
 
+    const promptDisplay = (qType === 'keyWordTransformation' && cleanLeadIn)
+      ? `Lead-in: "${cleanLeadIn}"  ->  Target: "${cleanSentenceText}"`
+      : `"${cleanSentenceText}"`;
+
     // Measure every block with its exact font & size so wrapped lines never overflow innerWidth
-    const splitOriginal = wrapText(`"${cleanSentenceText}"`, innerWidth, 8, 'italic');
+    const splitOriginal = wrapText(promptDisplay, innerWidth, 8, 'italic');
     const splitOptions = optionsLine ? wrapText(optionsLine, innerWidth, 7.2, 'bold') : [];
     const splitMistake = mistakeLine ? wrapText(mistakeLine, innerWidth, 7.5, 'bold') : [];
     const splitCorrection = ((isError || isCloze) && cleanCorrectionText)
@@ -487,7 +497,10 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
     const studentSummaryParts = record.playerResults.map(pr => {
       const pName = cleanText(pr.playerName);
-      const outcome = pr.isWin ? `Won +$${pr.amountChanged}` : `Lost -$${Math.abs(pr.amountChanged)}`;
+      const marksLabel = (qType === 'keyWordTransformation' && pr.marksAwarded !== undefined)
+        ? ` (${pr.marksAwarded}/2M)`
+        : '';
+      const outcome = pr.isWin ? `Won${marksLabel} +$${pr.amountChanged}` : `Lost${marksLabel} -$${Math.abs(pr.amountChanged)}`;
       const vote = cleanText(pr.playerAnswerDisplay || pr.opinion.toUpperCase());
       let extra = '';
       if (!isCloze && pr.userCorrection?.trim()) {
@@ -560,7 +573,16 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     doc.text(safeBadgeText, marginX + contentWidth - innerPaddingRight, cardHeaderY, { align: 'right' });
 
     // Header line inside card (left side, bounded so it never touches the right badge)
-    const modePrefix = qType === 'multipleChoice' ? ' - MULTIPLE-CHOICE CLOZE' : qType === 'openCloze' ? ' - OPEN CLOZE' : '';
+    const modePrefix =
+      qType === 'multipleChoice'
+        ? ' - MULTIPLE-CHOICE CLOZE'
+        : qType === 'keyWordTransformation'
+          ? ` - KEY WORD TRANSFORMATION (${cleanBaseWord || 'KEY'})`
+          : qType === 'wordFormation'
+            ? ` - WORD FORMATION (${cleanBaseWord || 'ROOT'})`
+            : qType === 'openCloze'
+              ? ' - OPEN CLOZE'
+              : '';
     const rawLeftHeader = `ROUND ${record.round} - ${cleanTopic.toUpperCase()} (${record.level})${modePrefix}`;
     const safeLeftHeader = fitSingleLine(rawLeftHeader, Math.max(60, innerWidth - badgeWidth - 4), 8.5, 'bold');
     doc.setFont('helvetica', 'bold');

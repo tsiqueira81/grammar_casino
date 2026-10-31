@@ -31,13 +31,79 @@ try {
 function verifyPinMatch(candidate: string): boolean {
   const cleanCandidate = String(candidate || '').trim();
   if (!cleanCandidate || !activeTeacherPin) return false;
-  return cleanCandidate === activeTeacherPin;
+  const bufA = Buffer.from(cleanCandidate, 'utf-8');
+  const bufB = Buffer.from(activeTeacherPin, 'utf-8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Strict PIN Brute-Force Lockout (5 failed attempts per 15 minutes per IP)
+interface PinAttemptState {
+  failedCount: number;
+  firstFailedAt: number;
+  lockedUntil: number;
+}
+
+const PIN_MAX_FAILED_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+const PIN_LOCKOUT_MS = 15 * 60 * 1000;
+const pinAttemptsByIp = new Map<string, PinAttemptState>();
+
+function getClientIp(req: Request): string {
+  return (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+}
+
+function checkPinLockout(ip: string): { locked: boolean; retryAfterSec?: number } {
+  const state = pinAttemptsByIp.get(ip);
+  if (!state) return { locked: false };
+  const now = Date.now();
+  if (state.lockedUntil > now) {
+    return {
+      locked: true,
+      retryAfterSec: Math.ceil((state.lockedUntil - now) / 1000),
+    };
+  }
+  if (now - state.firstFailedAt > PIN_WINDOW_MS) {
+    pinAttemptsByIp.delete(ip);
+  }
+  return { locked: false };
+}
+
+function recordPinOutcome(ip: string, success: boolean): { locked: boolean; retryAfterSec?: number } {
+  if (success) {
+    pinAttemptsByIp.delete(ip);
+    return { locked: false };
+  }
+  const now = Date.now();
+  let state = pinAttemptsByIp.get(ip);
+  if (!state || now - state.firstFailedAt > PIN_WINDOW_MS) {
+    state = { failedCount: 1, firstFailedAt: now, lockedUntil: 0 };
+  } else {
+    state.failedCount += 1;
+  }
+  if (state.failedCount >= PIN_MAX_FAILED_ATTEMPTS) {
+    state.lockedUntil = now + PIN_LOCKOUT_MS;
+  }
+  pinAttemptsByIp.set(ip, state);
+  if (state.lockedUntil > now) {
+    return {
+      locked: true,
+      retryAfterSec: Math.ceil((state.lockedUntil - now) / 1000),
+    };
+  }
+  return { locked: false };
 }
 
 function isTeacherAuthorized(req: Request, payload?: any): boolean {
+  const ip = getClientIp(req);
+  if (checkPinLockout(ip).locked) return false;
   const headerPin = req.headers['x-teacher-pin'];
   const rawPin = Array.isArray(headerPin) ? headerPin[0] : headerPin || payload?.teacherPin || '';
-  return verifyPinMatch(String(rawPin));
+  const candidate = String(rawPin).trim();
+  if (!candidate) return false;
+  const matched = verifyPinMatch(candidate);
+  recordPinOutcome(ip, matched);
+  return matched;
 }
 
 // --- Rate Limiting & Abuse Protection ---
@@ -375,9 +441,104 @@ const openClozeSentenceSchema = {
   required: ["correction", "correctAnswer", "text", "explanation", "grammarPhrase", "acceptedAnswers"],
 };
 
-function getSentenceSchema(questionType: "binary" | "multipleChoice" | "openCloze") {
+const wordFormationSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    correction: {
+      type: Type.STRING,
+      description: "Step 1: Write the FULL, 100% grammatically complete sentence first (with NO blanks).",
+    },
+    baseWord: {
+      type: Type.STRING,
+      description: "Step 2: The root/stem word in UPPERCASE (e.g. 'DECIDE', 'FORTUNATE', 'FRIEND', 'RELY') from which 'correctAnswer' is morphologically derived. MUST NOT be identical to 'correctAnswer'.",
+    },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "Step 3: Choose ONE single derived word from 'correction' (e.g. 'decision', 'unfortunately', 'friendship', 'unreliable') formed from 'baseWord'.",
+    },
+    text: {
+      type: Type.STRING,
+      description: "Step 4: Copy 'correction' word-for-word and replace ONLY 'correctAnswer' with '_____'. Do NOT write '(BASEWORD)' inside 'text' (the UI renders the baseWord badge automatically).",
+    },
+    explanation: {
+      type: Type.STRING,
+      description: "A clear, plain-English 1-2 sentence explanation of how the base word is transformed (e.g. which prefix/suffix or part of speech is needed and why).",
+    },
+    grammarPhrase: { type: Type.STRING, description: "The 3-5 word phrase from the completed sentence around the gap." },
+    acceptedAnswers: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Array of all valid single-word derivations of 'baseWord' that fit the gap (including US/UK spelling variants like -ize/-ise).",
+    },
+  },
+  required: ["correction", "baseWord", "correctAnswer", "text", "explanation", "grammarPhrase", "acceptedAnswers"],
+};
+
+const keyWordTransformationSentenceSchema = {
+  type: Type.OBJECT,
+  properties: {
+    leadInSentence: {
+      type: Type.STRING,
+      description: "Step 1: The original complete lead-in sentence whose meaning must be preserved.",
+    },
+    baseWord: {
+      type: Type.STRING,
+      description: "Step 2: The single given KEY WORD in UPPERCASE (e.g. 'SEEN', 'UNLESS', 'RATHER', 'SPITE', 'HAD') that students MUST include WITHOUT changing its form.",
+    },
+    correction: {
+      type: Type.STRING,
+      description: "Step 3: The FULL, 100% grammatically complete second sentence (with NO blanks) that has the same meaning as 'leadInSentence' and contains 'baseWord'.",
+    },
+    correctAnswer: {
+      type: Type.STRING,
+      description: "Step 4: The exact 2-to-6 word phrase from 'correction' (containing 'baseWord' unchanged) that fills the blank '_____'.",
+    },
+    text: {
+      type: Type.STRING,
+      description: "Step 5: Copy 'correction' word-for-word and replace ONLY 'correctAnswer' with '_____'. Must have words before and/or after '_____' to frame the transformation.",
+    },
+    mark1Parts: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Step 6: The first scoring half of the target phrase (1 mark in Cambridge Part 4), including contraction variants (e.g. ['have not seen', \"haven't seen\"]).",
+    },
+    mark2Parts: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Step 7: The second scoring half of the target phrase (1 mark in Cambridge Part 4), such as ['since'] or ['to consult']. Combining a mark1Part + mark2Part equals a full 2-mark answer.",
+    },
+    acceptedAnswers: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "Array of all valid 2-to-6 word phrases (containing 'baseWord' unchanged, including contraction variants) that earn the full 2/2 marks.",
+    },
+    explanation: {
+      type: Type.STRING,
+      description: "A clear, plain-English 1-2 sentence explanation of the two grammatical components required around the key word.",
+    },
+    grammarPhrase: { type: Type.STRING, description: "The 3-6 word phrase from 'correction' containing the transformation." },
+  },
+  required: [
+    "leadInSentence",
+    "baseWord",
+    "correction",
+    "correctAnswer",
+    "text",
+    "mark1Parts",
+    "mark2Parts",
+    "acceptedAnswers",
+    "explanation",
+    "grammarPhrase",
+  ],
+};
+
+function getSentenceSchema(
+  questionType: "binary" | "multipleChoice" | "openCloze" | "wordFormation" | "keyWordTransformation"
+) {
   if (questionType === "multipleChoice") return multipleChoiceSentenceSchema;
   if (questionType === "openCloze") return openClozeSentenceSchema;
+  if (questionType === "wordFormation") return wordFormationSentenceSchema;
+  if (questionType === "keyWordTransformation") return keyWordTransformationSentenceSchema;
   return binarySentenceSchema;
 }
 
@@ -694,6 +855,154 @@ function enforceOpenClozeIntegrity(data: any) {
   data.acceptedAnswers = Array.from(normalizedSet);
 }
 
+/**
+ * Guarantees that a Word Formation challenge has a clean uppercase `baseWord`,
+ * a single-word `correctAnswer` that is NOT identical to `baseWord`, no duplicate
+ * `(BASEWORD)` baked into `text`, and US/UK spelling variants in `acceptedAnswers`.
+ */
+function enforceWordFormationIntegrity(data: any) {
+  let rawBase = String(data.baseWord || "")
+    .replace(/[()[\]{}'"]/g, "")
+    .trim()
+    .split(/\s+/)[0] || "FORM";
+  rawBase = rawBase.toUpperCase();
+
+  // Strip any inline `(BASEWORD)` that the model might have accidentally placed inside `text`
+  if (typeof data.text === "string" && rawBase) {
+    const inlineParenRe = new RegExp(`(_{2,})\\s*\\(\\s*${escapeRegExp(rawBase)}\\s*\\)`, "i");
+    data.text = data.text.replace(inlineParenRe, "$1");
+  }
+
+  enforceOpenClozeIntegrity(data);
+
+  const primaryLower = String(data.correctAnswer || "").trim().toLowerCase();
+  if (primaryLower && rawBase.toLowerCase() === primaryLower) {
+    // Derive a clean stem if the model accidentally set baseWord === correctAnswer
+    const stripSuffixes = ["fully", "lessly", "ingly", "edly", "ment", "tion", "sion", "ness", "able", "ible", "less", "ful", "ive", "ous", "al", "ly", "er", "or", "ed", "ing"];
+    for (const suf of stripSuffixes) {
+      if (primaryLower.length > suf.length + 2 && primaryLower.endsWith(suf)) {
+        rawBase = primaryLower.slice(0, -suf.length).toUpperCase();
+        break;
+      }
+    }
+  }
+  data.baseWord = rawBase;
+
+  // Expand US/UK spelling variants in acceptedAnswers and ensure baseWord itself is excluded
+  const expanded = new Set<string>();
+  const currentList: string[] = Array.isArray(data.acceptedAnswers) ? data.acceptedAnswers : [];
+  if (primaryLower) currentList.unshift(primaryLower);
+
+  const addWithVariants = (word: string) => {
+    const w = word.trim().toLowerCase();
+    if (!w || w.includes(" ") || w === rawBase.toLowerCase()) return;
+    expanded.add(w);
+    if (w.includes("ize")) expanded.add(w.replace(/ize/g, "ise"));
+    if (w.includes("ise")) expanded.add(w.replace(/ise/g, "ize"));
+    if (w.includes("ization")) expanded.add(w.replace(/ization/g, "isation"));
+    if (w.includes("isation")) expanded.add(w.replace(/isation/g, "ization"));
+    if (w.includes("yze")) expanded.add(w.replace(/yze/g, "yse"));
+    if (w.includes("yse")) expanded.add(w.replace(/yse/g, "yze"));
+    if (w.includes("our")) expanded.add(w.replace(/our/g, "or"));
+    if (w.endsWith("ourite")) expanded.add(w.replace(/ourite$/, "orite"));
+    if (w.endsWith("orite")) expanded.add(w.replace(/orite$/, "ourite"));
+    if (w.endsWith("elled")) expanded.add(w.replace(/elled$/, "eled"));
+    if (w.endsWith("eled")) expanded.add(w.replace(/eled$/, "elled"));
+    if (w.endsWith("elling")) expanded.add(w.replace(/elling$/, "eling"));
+    if (w.endsWith("eling")) expanded.add(w.replace(/eling$/, "elling"));
+    if (w.endsWith("eller")) expanded.add(w.replace(/eller$/, "eler"));
+    if (w.endsWith("eler")) expanded.add(w.replace(/eler$/, "eller"));
+  };
+
+  currentList.forEach(addWithVariants);
+  data.acceptedAnswers = Array.from(expanded);
+}
+
+/**
+ * Guarantees that a Key Word Transformation (Cambridge Part 4) challenge has:
+ * - A clean `leadInSentence`
+ * - An uppercase single-word `baseWord` (the unchangeable KEY WORD)
+ * - A 2-to-6 word `correctAnswer` that contains `baseWord` as a whole word
+ * - A gapped `text` where replacing `_____` with `correctAnswer` produces `correction`
+ * - Populated `mark1Parts`, `mark2Parts`, and `acceptedAnswers`
+ */
+function enforceKeyWordTransformationIntegrity(data: any) {
+  const leadIn = String(data.leadInSentence || "").replace(/\s+/g, " ").trim();
+  let rawBase = String(data.baseWord || "")
+    .replace(/[()[\]{}'"]/g, "")
+    .trim()
+    .split(/\s+/)[0] || "KEY";
+  rawBase = rawBase.toUpperCase();
+
+  let corr = String(data.correction || "").replace(/\s+/g, " ").trim();
+  let txt = String(data.text || "").replace(/\s+/g, " ").trim();
+  let answer = String(data.correctAnswer || "").replace(/\s+/g, " ").trim();
+
+  if (/_{2,}/.test(txt)) {
+    txt = txt.replace(/_{2,}/, "_____");
+  }
+
+  // Strip any accidental `(BASEWORD)` from `txt`
+  if (txt && rawBase) {
+    const inlineParenRe = new RegExp(`(_{2,})\\s*\\(\\s*${escapeRegExp(rawBase)}\\s*\\)`, "i");
+    txt = txt.replace(inlineParenRe, "$1");
+  }
+
+  // Ensure `txt` with `answer` replacing `_____` matches `corr`
+  if (answer && corr) {
+    const filled = txt.replace(/_{2,}/, answer).replace(/\s+/g, " ").trim();
+    if (filled.toLowerCase() !== corr.toLowerCase()) {
+      const phraseRe = new RegExp(escapeRegExp(answer), "i");
+      if (phraseRe.test(corr)) {
+        txt = corr.replace(phraseRe, (m) => {
+          answer = m;
+          return "_____";
+        });
+      } else if (/_{2,}/.test(txt)) {
+        corr = filled;
+      }
+    }
+  }
+
+  // Ensure `baseWord` actually appears in `answer`; if not, pick a key word from `answer`
+  const keyRe = new RegExp(`(^|[^a-zA-Z])${escapeRegExp(rawBase)}([^a-zA-Z]|$)`, "i");
+  const answerWords = answer.split(/\s+/).filter(Boolean);
+  if (!keyRe.test(answer) && answerWords.length >= 2) {
+    const candidateKey = answerWords.find((w) => w.replace(/[^a-zA-Z]/g, "").length >= 3) || answerWords[0];
+    rawBase = candidateKey.replace(/[^a-zA-Z]/g, "").toUpperCase() || rawBase;
+  }
+
+  // Populate mark1Parts & mark2Parts if missing
+  let mark1Parts: string[] = Array.isArray(data.mark1Parts)
+    ? data.mark1Parts.map((s: any) => String(s || "").trim()).filter(Boolean)
+    : [];
+  let mark2Parts: string[] = Array.isArray(data.mark2Parts)
+    ? data.mark2Parts.map((s: any) => String(s || "").trim()).filter(Boolean)
+    : [];
+
+  if ((mark1Parts.length === 0 || mark2Parts.length === 0) && answerWords.length >= 2) {
+    const mid = Math.ceil(answerWords.length / 2);
+    mark1Parts = [answerWords.slice(0, mid).join(" ")];
+    mark2Parts = [answerWords.slice(mid).join(" ")];
+  }
+
+  const rawAccepted: string[] = Array.isArray(data.acceptedAnswers)
+    ? data.acceptedAnswers.map((s: any) => String(s || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+  const acceptedSet = new Set<string>();
+  if (answer) acceptedSet.add(answer);
+  rawAccepted.forEach((a) => acceptedSet.add(a));
+
+  data.leadInSentence = leadIn;
+  data.baseWord = rawBase;
+  data.correction = corr;
+  data.text = txt;
+  data.correctAnswer = answer;
+  data.mark1Parts = mark1Parts;
+  data.mark2Parts = mark2Parts;
+  data.acceptedAnswers = Array.from(acceptedSet);
+}
+
 const verificationSchema = {
   type: Type.OBJECT,
   properties: {
@@ -711,11 +1020,15 @@ const batchClozeVerificationSchema = {
       items: {
         type: Type.OBJECT,
         properties: {
-          word: { type: Type.STRING, description: "The candidate single word being evaluated." },
-          isCorrect: { type: Type.BOOLEAN, description: "Whether this single word is grammatically and contextually valid in the blank." },
-          feedback: { type: Type.STRING, description: "Brief one-sentence explanation of why the word fits or does not fit." },
+          word: { type: Type.STRING, description: "The candidate word or phrase being evaluated." },
+          isCorrect: { type: Type.BOOLEAN, description: "True if marks >= 1 (for Key Word Transformation) or if the single word fits the gap." },
+          marks: {
+            type: Type.INTEGER,
+            description: "For Key Word Transformation: 2 for fully correct, 1 for partially correct (one structural half + unchanged key word), 0 for incorrect. For single-word Cloze: 1 if correct, 0 if incorrect.",
+          },
+          feedback: { type: Type.STRING, description: "Brief one-sentence explanation of why the submission earned 2, 1, or 0 marks." },
         },
-        required: ["word", "isCorrect", "feedback"],
+        required: ["word", "isCorrect", "marks", "feedback"],
       },
     },
   },
@@ -789,31 +1102,92 @@ async function handleGeminiRequest(req: Request, res: Response) {
         const theme = String(settings.theme || "Everyday Life").slice(0, 80);
         const profile = CEFR_PROFILES[level] || CEFR_PROFILES.B1;
 
+        const STANDARD_GRAMMAR_SET = new Set([
+          "tenses",
+          "prepositions",
+          "articles",
+          "conditionals",
+          "modals",
+          "phrasal verbs",
+          "reported speech",
+          "comparatives and superlatives",
+          "passive voice",
+          "relative clauses",
+          "gerunds and infinitives",
+          "subject-verb agreement",
+          "mixed grammar",
+        ]);
+        const normalizedTopicLower = topic.trim().toLowerCase();
+        const isCollocationDomain =
+          normalizedTopicLower === "collocations" || normalizedTopicLower.includes("collocation");
+        const isCustomDomain = !STANDARD_GRAMMAR_SET.has(normalizedTopicLower) && !isCollocationDomain;
+
         const formatSetting = requestedQuestionType || settings.challengeFormat || "binary";
-        const resolvedQuestionType: "binary" | "multipleChoice" | "openCloze" =
-          formatSetting === "multipleChoice" || formatSetting === "openCloze" || formatSetting === "binary"
+        const resolvedQuestionType:
+          | "binary"
+          | "multipleChoice"
+          | "openCloze"
+          | "wordFormation"
+          | "keyWordTransformation" =
+          formatSetting === "multipleChoice" ||
+          formatSetting === "openCloze" ||
+          formatSetting === "wordFormation" ||
+          formatSetting === "keyWordTransformation" ||
+          formatSetting === "binary"
             ? formatSetting
-            : (["binary", "multipleChoice", "openCloze"] as const)[Math.floor(Math.random() * 3)];
+            : (
+                [
+                  "binary",
+                  "multipleChoice",
+                  "openCloze",
+                  "wordFormation",
+                  "keyWordTransformation",
+                ] as const
+              )[Math.floor(Math.random() * 5)];
 
         const recentSentences = Array.isArray(pastSentences) ? pastSentences.slice(-25).map((s) => String(s).slice(0, 250)) : [];
         const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 120)) : [];
 
-        const subtypeClause = subtype ? `\nThe grammatical focus MUST specifically be: ${String(subtype).slice(0, 100)}.` : "";
+        const subtypeClause = subtype ? `\nThe specific focus within "${topic}" MUST be: ${String(subtype).slice(0, 100)}.` : "";
         const avoidSentencesClause = recentSentences.length > 0 ? `\nDO NOT repeat any of the following sentences: ${JSON.stringify(recentSentences)}` : "";
         const avoidMistakesClause =
           recentMistakes.length > 0
-            ? `\n=== STRICT RULE: NEVER REPEAT THE SAME MISTAKE / GAP TARGET ===\nThe following specific mistakes or target phrases have ALREADY been tested in this game:\n${JSON.stringify(recentMistakes)}\nChoose a completely different grammatical sub-rule or mechanism within "${topic}".`
+            ? `\n=== STRICT RULE: NEVER REPEAT THE SAME MISTAKE / GAP TARGET ===\nThe following specific mistakes, collocations, or vocabulary targets have ALREADY been tested in this game:\n${JSON.stringify(recentMistakes)}\nChoose a completely different target word, collocation, or sub-rule within "${topic}".`
             : "";
+
+        const domainGuidanceMultipleChoice = isCollocationDomain
+          ? `\n=== COLLOCATIONS DOMAIN FOCUS ===\n- Design the sentence so that "correctAnswer" is the collocating word in a natural English collocation (e.g., verb + noun like "make a mistake" / "do homework" / "take a risk", adjective + noun like "heavy rain" / "thick fog", or adverb + adjective like "bitterly disappointed" / "fully aware") calibrated to CEFR ${level}.\n- The 3 distractors in "options" MUST be competing near-synonym verbs/adjectives/adverbs that learners commonly confuse in that collocation (e.g., ["make", "do", "take", "have"] or ["heavy", "strong", "big", "hard"]).`
+          : isCustomDomain
+          ? `\n=== CUSTOM LANGUAGE / LEXICAL DOMAIN FOCUS ("${topic}") ===\n- Determine whether "${topic}" is a lexical/vocabulary category (such as "school subjects", "places in town", "food and cooking", "jobs", etc.) or a specific grammar structure.\n- If "${topic}" is a lexical/vocabulary topic: write a rich, context-clue sentence where "correctAnswer" is a specific vocabulary item belonging to "${topic}" (e.g., "chemistry" or "geography" for "school subjects"; "library", "bakery", or "pharmacy" for "places in town"), and the 3 distractors in "options" are 3 OTHER vocabulary items from the exact same category "${topic}" that do NOT fit the contextual clue in the sentence!\n- If "${topic}" is a grammar rule: test that exact grammar rule in the blank with 3 plausible grammatical distractors.`
+          : "";
+
+        const domainGuidanceOpenCloze = isCollocationDomain
+          ? `\n=== COLLOCATIONS DOMAIN FOCUS ===\n- Design the sentence so that the single missing word ("correctAnswer") completes a classic English collocation (e.g., "make", "do", "take", "pay", "heavy", "deep", "aware", "favor", "attention") appropriate for CEFR ${level}.`
+          : isCustomDomain
+          ? `\n=== CUSTOM LANGUAGE / LEXICAL DOMAIN FOCUS ("${topic}") ===\n- Determine whether "${topic}" is a lexical/vocabulary category (such as "school subjects", "places in town", "animals", "professions") or a specific grammar structure.\n- If "${topic}" is a lexical/vocabulary topic: write a clear, context-rich sentence that unmistakably points to ONE single-word vocabulary item from "${topic}" as "correctAnswer" (for example, for "places in town": "We went to the _____ to borrow three novels for the weekend" -> "library"; for "school subjects": "In _____ class today, we used microscopes to study plant cells" -> "biology"), and list any valid single-word synonyms in "acceptedAnswers".`
+          : "";
+
+        const domainGuidanceBinary = isCollocationDomain
+          ? `\n=== COLLOCATIONS DOMAIN FOCUS ===\n- If generating an INCORRECT sentence: include a classic collocation error where a learner uses the wrong collocating verb, adjective, adverb, or preposition (e.g., "do a mistake" instead of "make a mistake", "strong rain" instead of "heavy rain", "make homework" instead of "do homework", "inflict havoc" instead of "wreak havoc") calibrated to CEFR ${level}.\n- If generating a CORRECT sentence: showcase a natural, authentic collocation used accurately.`
+          : isCustomDomain
+          ? `\n=== CUSTOM LANGUAGE / LEXICAL DOMAIN FOCUS ("${topic}") ===\n- Determine whether "${topic}" is a lexical/vocabulary category (such as "school subjects", "places in town", etc.) or a specific grammar rule.\n- If "${topic}" is a lexical/vocabulary topic:\n  * For an INCORRECT sentence: use a vocabulary item from "${topic}" that clearly contradicts the action/definition in the sentence OR use a broken lexical collocation (e.g., for "places in town": "She went to the butcher's to mail a parcel and buy stamps", corrected to "post office"; for "school subjects": "In history class, we mixed acids in test tubes to observe chemical reactions", corrected to "chemistry"). Set "errorPhrase" to the wrong vocabulary word/phrase and "mistakeType" to "wrong lexical choice (${topic})".\n  * For a CORRECT sentence: use a vocabulary item from "${topic}" accurately and naturally in context.`
+          : "";
+
+        const domainGuidanceWordFormation = isCollocationDomain
+          ? `\n=== COLLOCATIONS DOMAIN FOCUS (WORD FORMATION) ===\n- Design the sentence so that "correctAnswer" is a derived noun, adjective, adverb, or verb that completes a natural English collocation (e.g., "make a big _____ (DIFFERENT)" -> "difference", "raise public _____ (AWARE)" -> "awareness", "_____ (BITTER) disappointed" -> "bitterly", "a strong _____ (BELIEVE)" -> "belief") calibrated to CEFR ${level}.`
+          : isCustomDomain
+          ? `\n=== CUSTOM LANGUAGE / LEXICAL DOMAIN FOCUS ("${topic}") ===\n- Connect the sentence and the derived word in the gap to the topic "${topic}" (for example, deriving a profession, specialist noun, adjective, or adverb related to "${topic}", such as "HISTORIAN" from "HISTORY", "SCIENTIFIC" from "SCIENCE", "BAKERY" from "BAKE", "MEDICAL" from "MEDICINE").`
+          : "";
 
         let prompt = "";
 
         if (resolvedQuestionType === "multipleChoice") {
           prompt = `You are a master English teacher designing a 4-option Multiple-Choice Cloze challenge for a Grammar Casino game.
 Settings:
-- Grammar Topic: "${topic}"
+- Language Domain: "${topic}"
 - CEFR Level: "${level}"
 - Theme: "${theme}"
-${subtypeClause}
+${subtypeClause}${domainGuidanceMultipleChoice}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
@@ -822,7 +1196,7 @@ ${avoidSentencesClause}
 ${avoidMistakesClause}
 
 === MULTIPLE-CHOICE CLOZE STRICT RULES ===
-1. STEP 1 ("correction"): First, write a FULL, 100% grammatically complete sentence with NO blanks.
+1. STEP 1 ("correction"): First, write a FULL, 100% grammatically and lexically complete sentence with NO blanks.
 2. STEP 2 ("correctAnswer"): Pick ONLY the exact missing word (prefer a SINGLE word whenever possible) from "correction" that tests "${topic}". NEVER include surrounding words from the sentence in "correctAnswer".
 3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY "correctAnswer" with an exact 5-underscore blank: "_____".
    - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
@@ -831,7 +1205,7 @@ ${avoidMistakesClause}
      * RIGHT: text = "She has _____ in Madrid", options = ["lived", "live", "living", "lives"] (OR text = "She _____ in Madrid", options = ["has lived", "have lived", "lived", "is living"]).
      * WRONG: text = "He is good _____ playing chess", options = ["good at", "good in", "good on", "good for"] ("good" is already in the sentence!).
      * RIGHT: text = "He is good _____ playing chess", options = ["at", "in", "on", "for"].
-4. STEP 4 ("options"): Set "options" to an array of 4 distinct strings (1 "correctAnswer" + 3 plausible grammatical distractors testing "${topic}" at CEFR ${level}), in randomized order.
+4. STEP 4 ("options"): Set "options" to an array of 4 distinct strings (1 "correctAnswer" + 3 plausible distractors testing "${topic}" at CEFR ${level}), in randomized order.
    - Every option MUST contain ONLY the word(s) that fill "_____", NEVER words that already appear in the given sentence.
    - NEVER pick random words from elsewhere in the sentence as distractors.
 5. STEP 5 ("explanation"): Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why the correct option fits.
@@ -841,7 +1215,63 @@ Respond ONLY with valid JSON matching the schema.`;
         } else if (resolvedQuestionType === "openCloze") {
           prompt = `You are a master Cambridge English examiner designing an Open Cloze (Use of English Part 2) challenge for a Grammar Casino game.
 Settings:
-- Grammar Topic: "${topic}"
+- Language Domain: "${topic}"
+- CEFR Level: "${level}"
+- Theme: "${theme}"
+${subtypeClause}${domainGuidanceOpenCloze}
+
+=== CEFR LEVEL REQUIREMENTS (${level}) ===
+- SYNTAX (${profile.targetLength}): ${profile.syntax}
+- LEXIS & VOCABULARY: ${profile.lexis}
+${avoidSentencesClause}
+${avoidMistakesClause}
+
+=== CAMBRIDGE OPEN CLOZE STRICT RULES ===
+1. STEP 1 ("correction"): First, write a FULL, 100% grammatically and lexically complete sentence with NO blanks. Double-check multi-word phrasal verbs, collocations, and dependent prepositions (e.g., "look forward to visiting", "come up with", "put up with", "run out of", "insist on going") to ensure NO preposition or particle is missing in "correction".
+2. STEP 2 ("correctAnswer"): Pick ONE SINGLE WORD from "correction" that tests "${topic}" (lowercase, unless it is at the start of the sentence or "I"). Never put two or more words in "correctAnswer".
+3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY that single "correctAnswer" word with an exact 5-underscore blank: "_____".
+   - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
+   - NEVER replace a two-word phrase (like "forward to" or "up with") with a single "_____". For example, if testing "look forward to visiting", "text" MUST be either "I look _____ to visiting" (answer: "forward") OR "I look forward _____ visiting" (answer: "to") — NEVER "I look _____ visiting".
+4. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word alternatives that fit the blank (all lowercase, trimmed, single words only).
+5. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.
+6. Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
+
+Respond ONLY with valid JSON matching the schema.`;
+        } else if (resolvedQuestionType === "wordFormation") {
+          prompt = `You are a master Cambridge English examiner designing a Word Formation (Use of English Part 3) challenge for a Grammar Casino game.
+Settings:
+- Language Domain: "${topic}"
+- CEFR Level: "${level}"
+- Theme: "${theme}"
+${subtypeClause}${domainGuidanceWordFormation}
+
+=== CEFR LEVEL REQUIREMENTS (${level}) ===
+- SYNTAX (${profile.targetLength}): ${profile.syntax}
+- LEXIS & VOCABULARY: ${profile.lexis}
+- MORPHOLOGICAL COMPLEXITY BY LEVEL:
+  * A1–A2: Clear, high-frequency suffixes or prefixes (e.g., TEACH -> teacher, CARE -> carefully, FRIEND -> friendly, DECIDE -> decision, POSSIBLE -> impossible, HAPPY -> happiness).
+  * B1–B2: Multi-step derivations, negative prefixes + suffixes, or internal vowel/consonant shifts (e.g., COMFORT -> uncomfortable, AMAZE -> amazement, MAINTAIN -> maintenance, TIRE -> tirelessly, LONG -> length, BELIEVE -> belief).
+  * C1–C2: Sophisticated academic/idiomatic derivations, double affixes, or compound stems (e.g., RECONCILE -> irreconcilably, SUBSTANCE -> unsubstantiated, PRECEDENT -> unprecedented, APPEAR -> disappearance, OUTRAGE -> outrageously).
+${avoidSentencesClause}
+${avoidMistakesClause}
+
+=== CAMBRIDGE WORD FORMATION STRICT RULES ===
+1. STEP 1 ("correction"): First, write a FULL, 100% grammatically and lexically complete sentence with NO blanks.
+2. STEP 2 ("baseWord"): Provide the single root/base word in UPPERCASE (e.g., "DECIDE", "COMFORT", "RECONCILE").
+3. STEP 3 ("correctAnswer"): Pick the single derived word from "correction" that is morphologically formed from "baseWord".
+   - CRITICAL: "correctAnswer" MUST be a single word and MUST NOT be identical to "baseWord" (students must always transform the base word's form!).
+4. STEP 4 ("text"): Copy "correction" word-for-word and replace ONLY "correctAnswer" with an exact 5-underscore blank: "_____".
+   - Do NOT put "(BASEWORD)" inside "text" — the UI displays "(BASEWORD)" automatically!
+   - Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
+5. STEP 5 ("acceptedAnswers"): List all valid single-word derivations of "baseWord" that fit the gap (including US/UK spelling variants like "-ize"/"-ise" or "-our"/"-or"). Never include the unchanged "baseWord".
+6. STEP 6 ("explanation"): Write a clear, plain-English 1-2 sentence explanation showing how "baseWord" is transformed into "correctAnswer" (which prefix/suffix or part-of-speech change is required and why).
+7. STEP 7 ("grammarPhrase"): Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
+
+Respond ONLY with valid JSON matching the schema.`;
+        } else if (resolvedQuestionType === "keyWordTransformation") {
+          prompt = `You are a master Cambridge English examiner designing a Key Word Transformation (Use of English Part 4) challenge for a Grammar Casino game.
+Settings:
+- Language Domain: "${topic}"
 - CEFR Level: "${level}"
 - Theme: "${theme}"
 ${subtypeClause}
@@ -852,15 +1282,20 @@ ${subtypeClause}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
-=== CAMBRIDGE OPEN CLOZE STRICT RULES ===
-1. STEP 1 ("correction"): First, write a FULL, 100% grammatically complete sentence with NO blanks. Double-check multi-word phrasal verbs and dependent prepositions (e.g., "look forward to visiting", "come up with", "put up with", "run out of", "insist on going") to ensure NO preposition or particle is missing in "correction".
-2. STEP 2 ("correctAnswer"): Pick ONE SINGLE WORD from "correction" that tests "${topic}" (lowercase, unless it is at the start of the sentence or "I"). Never put two or more words in "correctAnswer".
-3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY that single "correctAnswer" word with an exact 5-underscore blank: "_____".
-   - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
-   - NEVER replace a two-word phrase (like "forward to" or "up with") with a single "_____". For example, if testing "look forward to visiting", "text" MUST be either "I look _____ to visiting" (answer: "forward") OR "I look forward _____ visiting" (answer: "to") — NEVER "I look _____ visiting".
-4. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word alternatives that fit the blank (all lowercase, trimmed, single words only).
-5. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.
-6. Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
+=== CAMBRIDGE KEY WORD TRANSFORMATION (PART 4) STRICT RULES ===
+1. STEP 1 ("leadInSentence"): Write a complete, natural lead-in sentence.
+2. STEP 2 ("baseWord"): Provide ONE given KEY WORD in UPPERCASE (e.g. "SEEN", "UNLESS", "SPITE", "RATHER", "DENIED", "SOONER", "HAVE"). Students MUST NOT change this key word in any way.
+3. STEP 3 ("correction"): Write the FULL, 100% grammatically complete second sentence (with NO blanks) that expresses the same meaning as "leadInSentence" and includes "baseWord" unchanged.
+4. STEP 4 ("correctAnswer"): Extract the exact 2-to-6 word target phrase from "correction" that contains "baseWord" and tests "${topic}".
+   - CRITICAL: "correctAnswer" MUST be between 2 and 6 words long and MUST contain "baseWord" as an unaltered whole word!
+5. STEP 5 ("text"): Copy "correction" word-for-word and replace ONLY "correctAnswer" with an exact 5-underscore blank: "_____".
+   - Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
+6. STEP 6 ("mark1Parts" & "mark2Parts"): Split "correctAnswer" into the two distinct grammatical halves that each earn 1 mark in Cambridge grading:
+   - "mark1Parts": Array of valid strings for the 1st mark (first structural half of the answer, e.g. ["have not seen", "haven't seen"]).
+   - "mark2Parts": Array of valid strings for the 2nd mark (second structural half of the answer, e.g. ["Marcus since", "since"]).
+7. STEP 7 ("acceptedAnswers"): List all valid 2-to-6 word phrases (including contraction variants) that earn the full 2/2 marks.
+8. STEP 8 ("explanation"): Write a clear, plain-English 1-2 sentence explanation of both grammatical components required for the 2 marks.
+9. STEP 9 ("grammarPhrase"): Set "grammarPhrase" to the 3-6 word phrase from "correction" around the transformation.
 
 Respond ONLY with valid JSON matching the schema.`;
         } else {
@@ -868,16 +1303,16 @@ Respond ONLY with valid JSON matching the schema.`;
             forceCorrect === null
               ? "Generate an incorrect sentence 60% of the time and a correct one 40% of the time."
               : forceCorrect
-              ? "The sentence MUST be grammatically correct."
-              : "The sentence MUST contain a grammatical error.";
+              ? "The sentence MUST be 100% correct (both grammatically and lexically)."
+              : "The sentence MUST contain an error testing the selected Language Domain.";
 
-          prompt = `You are a master English teacher and linguistics expert designing a grammar challenge for a Grammar Casino game.
+          prompt = `You are a master English teacher and linguistics expert designing a challenge for a Grammar Casino game.
 Settings:
-- Grammar Topic: "${topic}"
+- Language Domain: "${topic}"
 - CEFR Level: "${level}"
 - Theme: "${theme}"
 
-${correctnessInstruction}${subtypeClause}
+${correctnessInstruction}${subtypeClause}${domainGuidanceBinary}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 The sentence MUST strictly conform to the linguistic, syntactic, and pedagogical profile of CEFR Level ${level}:
@@ -887,7 +1322,7 @@ The sentence MUST strictly conform to the linguistic, syntactic, and pedagogical
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
-grammarPhrase MUST be an exact substring of the generated sentence (3-6 words) representing the core grammatical feature.
+grammarPhrase MUST be an exact substring of the generated sentence (3-6 words) representing the core grammatical, collocation, or lexical feature being tested.
 errorPhrase MUST be the exact erroneous snippet if the sentence is incorrect, or empty string if correct.
 mistakeType MUST be a short descriptor (2-4 words) of the error type if incorrect, or empty string if correct.
 explanation MUST be a clear, plain-English 1-2 sentence explanation of why the sentence is right or wrong (easy for students to understand without heavy linguistic jargon).
@@ -923,33 +1358,57 @@ Respond ONLY with valid JSON matching the schema.`;
         } else if (resolvedQuestionType === "openCloze") {
           generatedData.isCorrect = true;
           enforceOpenClozeIntegrity(generatedData);
+        } else if (resolvedQuestionType === "wordFormation") {
+          generatedData.isCorrect = true;
+          enforceWordFormationIntegrity(generatedData);
+        } else if (resolvedQuestionType === "keyWordTransformation") {
+          generatedData.isCorrect = true;
+          enforceKeyWordTransformationIntegrity(generatedData);
         }
 
         return res.status(200).json(generatedData);
       }
 
       case "getHint": {
-        const { sentence, topic, level, questionType } = payload;
+        const { sentence, topic, level, questionType, baseWord } = payload;
         if (!sentence || typeof sentence !== "string" || !topic || typeof topic !== "string") {
           return res.status(400).json({ error: "Missing required 'sentence' or 'topic' parameters." });
         }
 
         const safeSentence = sentence.slice(0, 500);
         const safeTopic = topic.slice(0, 100);
+        const safeBaseWord = baseWord ? String(baseWord).slice(0, 40).toUpperCase() : "";
         const levelContext = level ? `The student's CEFR level is ${String(level).slice(0, 5)}. Adapt the hint subtlety to this level.` : "";
-        const isCloze = questionType === "multipleChoice" || questionType === "openCloze" || safeSentence.includes("_____");
+        const isCloze =
+          questionType === "multipleChoice" ||
+          questionType === "openCloze" ||
+          questionType === "wordFormation" ||
+          questionType === "keyWordTransformation" ||
+          safeSentence.includes("_____");
 
-        const prompt = isCloze
-          ? `A player in a grammar game is looking at this cloze sentence with a blank: "${safeSentence}".
-The grammar topic being tested is "${safeTopic}".
+        const prompt =
+          questionType === "keyWordTransformation"
+            ? `A player in a language game is solving this Cambridge Key Word Transformation (Part 4) sentence: "${safeSentence}" using the unchangeable key word "${safeBaseWord || "KEY"}".
+The language domain is "${safeTopic}".
 ${levelContext}
-Give a very short, subtle, one-sentence grammatical clue about what part of speech, tense, or grammatical rule governs the missing word in "_____". NEVER reveal the exact missing word itself.
+Give a very short, subtle, one-sentence clue about the grammatical structure or collocation needed with "${safeBaseWord || "the key word"}" to complete "_____" in 2 to 6 words. NEVER reveal the exact full answer phrase.
 Respond ONLY with the hint text.`
-          : `A player in a grammar game is looking at this sentence: "${safeSentence}".
-The grammar topic being tested is "${safeTopic}".
+            : questionType === "wordFormation"
+            ? `A player in a language game is solving this Cambridge Word Formation sentence: "${safeSentence}" with base word (${safeBaseWord || "ROOT"}).
+The language domain is "${safeTopic}".
 ${levelContext}
-Give a very short, cryptic, one-sentence hint about what might be wrong. Don't give away the answer.
-For example, if the error is a wrong tense, you could say "Think about when this action happened."
+Give a very short, subtle, one-sentence clue about what part of speech (noun, verb, adjective, adverb) or prefix/suffix transformation (e.g. negative prefix, person noun, plural noun) is needed for "${safeBaseWord || "the base word"}" to fit "_____". NEVER reveal the exact derived answer word itself.
+Respond ONLY with the hint text.`
+            : isCloze
+            ? `A player in a language game is looking at this cloze sentence with a blank: "${safeSentence}".
+The language domain being tested is "${safeTopic}".
+${levelContext}
+Give a very short, subtle, one-sentence clue about the grammatical rule, collocation partner, or lexical meaning that governs the missing word in "_____". NEVER reveal the exact missing word itself.
+Respond ONLY with the hint text.`
+            : `A player in a language game is looking at this sentence: "${safeSentence}".
+The language domain being tested is "${safeTopic}".
+${levelContext}
+Give a very short, cryptic, one-sentence hint about what might be wrong (whether grammatical, a collocation mismatch, or a wrong lexical choice). Don't give away the answer.
 If the sentence is actually correct, your hint could be "Sometimes, things are just as they seem."
 Respond ONLY with the hint text.`;
 
@@ -981,14 +1440,14 @@ Respond ONLY with the hint text.`;
           return res.status(400).json({ error: "Missing sentence verification parameters." });
         }
 
-        const prompt = `You are a fair but strict judge in a grammar game.
-The original, incorrect sentence was: "${originalSentence.slice(0, 500)}"
+        const prompt = `You are a fair but strict judge in an English language and grammar game.
+The original, flawed sentence was: "${originalSentence.slice(0, 500)}"
 The intended correct version is: "${intendedCorrection.slice(0, 500)}"
 A player submitted this correction: "${userCorrection.slice(0, 500)}"
 
 Your task is to evaluate if the player's correction is a valid fix.
-A "valid fix" means it's grammatically correct and fixes the main error, even if it's slightly different from the intended correction.
-However, if the player's correction introduces a *new* grammatical error, it is NOT a valid fix.
+A "valid fix" means it is grammatically and lexically natural and fixes the main error (whether a grammatical mistake, a collocation error, or an inaccurate vocabulary word), even if it uses a different valid synonym or phrasing than the intended correction.
+However, if the player's correction introduces a *new* grammatical or lexical error, it is NOT a valid fix.
 Respond ONLY with the JSON object matching the provided schema.`;
 
         const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
@@ -1009,7 +1468,17 @@ Respond ONLY with the JSON object matching the provided schema.`;
       }
 
       case "verifyOpenClozeBatch": {
-        const { sentenceWithBlank, intendedAnswer, acceptedAnswers = [], candidateWords = [] } = payload;
+        const {
+          sentenceWithBlank,
+          intendedAnswer,
+          acceptedAnswers = [],
+          candidateWords = [],
+          questionType: batchQuestionType,
+          baseWord: batchBaseWord,
+          leadInSentence = "",
+          mark1Parts = [],
+          mark2Parts = [],
+        } = payload;
         if (!sentenceWithBlank || typeof sentenceWithBlank !== "string" || !Array.isArray(candidateWords)) {
           return res.status(400).json({ error: "Missing parameters for verifyOpenClozeBatch." });
         }
@@ -1017,7 +1486,7 @@ Respond ONLY with the JSON object matching the provided schema.`;
         const uniqueWords = Array.from(
           new Set(
             candidateWords
-              .map((w: any) => String(w || "").trim())
+              .map((w: any) => String(w || "").trim().replace(/\s+/g, " "))
               .filter((w: string) => w.length > 0)
           )
         ).slice(0, 30);
@@ -1026,7 +1495,49 @@ Respond ONLY with the JSON object matching the provided schema.`;
           return res.status(200).json({ results: {} });
         }
 
-        const prompt = `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
+        const safeBase = batchBaseWord ? String(batchBaseWord).trim().toUpperCase().slice(0, 50) : "";
+        const isKeyWordTransformation = batchQuestionType === "keyWordTransformation";
+        const isWordFormation = !isKeyWordTransformation && (batchQuestionType === "wordFormation" || Boolean(safeBase));
+
+        const prompt = isKeyWordTransformation
+          ? `You are a Cambridge English Use of English Part 4 (Key Word Transformation) examiner grading student submissions on a 0, 1, or 2 mark scale.
+Lead-in sentence: "${String(leadInSentence || "").slice(0, 400)}"
+Given KEY WORD (MUST NOT be changed): "${safeBase}"
+Second sentence with blank: "${sentenceWithBlank.slice(0, 500)}"
+Primary 2-mark target phrase: "${String(intendedAnswer || "").slice(0, 120)}"
+Known 2-mark accepted phrases: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
+1st Mark structural half (mark1Parts): ${JSON.stringify((Array.isArray(mark1Parts) ? mark1Parts : []).slice(0, 10))}
+2nd Mark structural half (mark2Parts): ${JSON.stringify((Array.isArray(mark2Parts) ? mark2Parts : []).slice(0, 10))}
+
+Evaluate each of the following student-submitted candidate phrases:
+${JSON.stringify(uniqueWords)}
+
+STRICT CAMBRIDGE PART 4 (0 / 1 / 2 MARKS) GRADING RULES:
+1. The submission MUST contain the exact unaltered KEY WORD "${safeBase}" (case-insensitive) and be between 2 and 6 words long. If it omits or alters "${safeBase}" or is outside 2–6 words, award marks: 0, isCorrect: false.
+2. Award marks: 2, isCorrect: true if the phrase is 100% grammatically accurate, fits "_____", and preserves the meaning of the lead-in sentence (both structural halves around the key word are correct).
+3. Award marks: 1, isCorrect: true if the student included "${safeBase}" unchanged and got ONE of the two grammatical halves right (e.g. matches mark1Parts OR mark2Parts, or has one minor mistake in only one half of the target structure). Explain clearly in feedback which half earned 1/2 mark and what the full 2/2 answer is.
+4. Award marks: 0, isCorrect: false if neither structural half is correct.
+
+Respond ONLY with valid JSON matching the schema.`
+          : isWordFormation
+          ? `You are a Cambridge English Use of English Part 3 (Word Formation) examiner grading student submissions.
+Sentence with blank: "${sentenceWithBlank.slice(0, 500)}"
+Base/root word in parentheses: "${safeBase}"
+Primary intended derived word: "${String(intendedAnswer || "").slice(0, 60)}"
+Known accepted derived words: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
+
+Evaluate each of the following student-submitted candidate words:
+${JSON.stringify(uniqueWords)}
+
+STRICT WORD FORMATION RULES:
+1. Gaps require a SINGLE WORD only. If a candidate contains spaces, mark isCorrect: false, marks: 0.
+2. The candidate word MUST be a valid morphological derivation (inflection, prefix, suffix, or compound) of the base word "${safeBase}". A synonym from a different word family is NOT allowed in Word Formation.
+3. The candidate word MUST NOT be identical to the unchanged base word "${safeBase}".
+4. Accept both British and American English spelling variants (e.g. -ise/-ize, -our/-or, -ll-/-l-) if the word is correctly derived from "${safeBase}" and fits the sentence grammatically and semantically (set marks: 1 when isCorrect is true, 0 when false).
+5. Provide a brief 1-sentence feedback for each word.
+
+Respond ONLY with valid JSON matching the schema.`
+          : `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
 Sentence with blank: "${sentenceWithBlank.slice(0, 500)}"
 Primary intended single word: "${String(intendedAnswer || "").slice(0, 60)}"
 Known accepted single words: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
@@ -1035,8 +1546,8 @@ Evaluate each of the following student-submitted candidate words:
 ${JSON.stringify(uniqueWords)}
 
 STRICT RULES:
-1. Open Cloze gaps require a SINGLE WORD only. If a candidate contains multiple words (spaces), mark isCorrect: false.
-2. Mark isCorrect: true ONLY if inserting the single word into "_____" produces a 100% grammatically accurate, natural, and contextually coherent English sentence.
+1. Open Cloze gaps require a SINGLE WORD only. If a candidate contains multiple words (spaces), mark isCorrect: false, marks: 0.
+2. Mark isCorrect: true, marks: 1 ONLY if inserting the single word into "_____" produces a 100% grammatically accurate, natural, and contextually coherent English sentence.
 3. Provide a brief 1-sentence feedback for each word.
 
 Respond ONLY with valid JSON matching the schema.`;
@@ -1055,12 +1566,15 @@ Respond ONLY with valid JSON matching the schema.`;
 
         const jsonText = response.text ? response.text.trim() : "";
         const parsed = JSON.parse(jsonText);
-        const results: Record<string, { isCorrect: boolean; feedback: string }> = {};
+        const results: Record<string, { isCorrect: boolean; marks: 0 | 1 | 2; feedback: string }> = {};
         if (Array.isArray(parsed?.evaluations)) {
           parsed.evaluations.forEach((ev: any) => {
             if (ev && typeof ev.word === "string") {
-              results[ev.word.trim().toLowerCase()] = {
-                isCorrect: Boolean(ev.isCorrect),
+              const rawMarks = typeof ev.marks === "number" ? ev.marks : ev.isCorrect ? (isKeyWordTransformation ? 2 : 1) : 0;
+              const clampedMarks = (rawMarks >= 2 ? 2 : rawMarks === 1 ? 1 : 0) as 0 | 1 | 2;
+              results[ev.word.trim().replace(/\s+/g, " ").toLowerCase()] = {
+                isCorrect: isKeyWordTransformation ? clampedMarks >= 1 : Boolean(ev.isCorrect),
+                marks: clampedMarks,
                 feedback: String(ev.feedback || ""),
               };
             }
@@ -1114,8 +1628,8 @@ Respond ONLY with valid JSON matching the schema.`;
           return res.status(400).json({ error: "Missing 'text' parameter for speech generation." });
         }
 
-        const safeText = text.slice(0, 600);
-        const cacheKey = `tts:${safeText}`;
+        const safeText = text.slice(0, 600).trim();
+        const cacheKey = `tts_v2:${safeText}`;
 
         const cached = responseCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
@@ -1125,7 +1639,20 @@ Respond ONLY with valid JSON matching the schema.`;
         const base64Audio = await callWithModelRotation(TTS_MODELS, async (ai, model) => {
           const response = await ai.models.generateContent({
             model,
-            contents: [{ parts: [{ text: safeText }] }],
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: safeText,
+                    speechMetadata: {
+                      style:
+                        "Clear, warm, articulate English teacher. Read only the exact text naturally and stop cleanly in silence with no trailing breath or sound.",
+                    },
+                  } as any,
+                ],
+              },
+            ],
             config: {
               responseModalities: [Modality.AUDIO],
               speechConfig: {
@@ -1164,9 +1691,7 @@ Respond ONLY with valid JSON matching the schema.`;
   }
 }
 
-// Support both endpoint paths used in web & Netlify legacy redirects
 app.post("/api/gemini", handleGeminiRequest);
-app.post("/.netlify/functions/gemini", handleGeminiRequest);
 
 // Teacher PIN Auth & Status Endpoints
 app.get("/api/teacher-auth/status", (req, res) => {
@@ -1177,28 +1702,51 @@ app.get("/api/teacher-auth/status", (req, res) => {
 });
 
 app.post("/api/teacher-auth/verify", (req, res) => {
-  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
-  const rateCheck = checkRateLimit(clientIp);
-  if (!rateCheck.allowed) {
-    return res.status(429).json({ valid: false, error: "Too many attempts. Please wait a moment." });
+  const clientIp = getClientIp(req);
+  const lockout = checkPinLockout(clientIp);
+  if (lockout.locked) {
+    const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
+    return res.status(429).json({
+      valid: false,
+      error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
+    });
   }
   const candidate = String(req.body?.pin || "").trim();
   const valid = verifyPinMatch(candidate);
+  const outcome = recordPinOutcome(clientIp, valid);
   if (!valid) {
+    if (outcome.locked) {
+      return res.status(429).json({
+        valid: false,
+        error: "Too many failed PIN attempts. Locked for 15 minutes.",
+      });
+    }
     return res.status(401).json({ valid: false, error: "Incorrect Teacher PIN." });
   }
   return res.json({ valid: true });
 });
 
 app.post("/api/teacher-auth/change-pin", (req, res) => {
-  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
-  const rateCheck = checkRateLimit(clientIp);
-  if (!rateCheck.allowed) {
-    return res.status(429).json({ ok: false, error: "Too many attempts. Please wait a moment." });
+  const clientIp = getClientIp(req);
+  const lockout = checkPinLockout(clientIp);
+  if (lockout.locked) {
+    const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
+    return res.status(429).json({
+      ok: false,
+      error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
+    });
   }
   const currentPin = String(req.body?.currentPin || "").trim();
   const newPin = String(req.body?.newPin || "").trim();
-  if (!verifyPinMatch(currentPin)) {
+  const currentValid = verifyPinMatch(currentPin);
+  const outcome = recordPinOutcome(clientIp, currentValid);
+  if (!currentValid) {
+    if (outcome.locked) {
+      return res.status(429).json({
+        ok: false,
+        error: "Too many failed PIN attempts. Locked for 15 minutes.",
+      });
+    }
     return res.status(401).json({ ok: false, error: "Current Teacher PIN is incorrect." });
   }
   if (newPin.length < 4 || newPin.length > 32) {
@@ -1211,6 +1759,79 @@ app.post("/api/teacher-auth/change-pin", (req, res) => {
     console.warn("Could not persist .teacher-pin.json to disk, updated in memory:", err);
   }
   return res.json({ ok: true });
+});
+
+let cachedGoogleCerts: { certs: Record<string, string>; expiresAt: number } | null = null;
+
+async function getGoogleSecureTokenCerts(): Promise<Record<string, string>> {
+  if (cachedGoogleCerts && Date.now() < cachedGoogleCerts.expiresAt) {
+    return cachedGoogleCerts.certs;
+  }
+  const resp = await fetch(
+    "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+  );
+  if (!resp.ok) {
+    throw new Error("Failed to fetch Google public certificates.");
+  }
+  const certs = (await resp.json()) as Record<string, string>;
+  cachedGoogleCerts = {
+    certs,
+    expiresAt: Date.now() + 60 * 60 * 1000, // cache 1 hour
+  };
+  return certs;
+}
+
+app.post("/api/teacher-auth/google-verify", async (req, res) => {
+  try {
+    const idToken = String(req.body?.idToken || "").trim();
+    const parts = idToken.split(".");
+    if (!idToken || parts.length !== 3) {
+      return res.status(400).json({ valid: false, error: "Invalid Google ID token." });
+    }
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf-8"));
+    const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+
+    // 1. Verify cryptographic signature using Google's official public X.509 certs
+    const certs = await getGoogleSecureTokenCerts();
+    const cert = certs[header?.kid];
+    if (!cert || header?.alg !== "RS256") {
+      return res.status(401).json({ valid: false, error: "Unrecognized token signature key." });
+    }
+    const verifier = crypto.createVerify("RSA-SHA256");
+    verifier.update(`${headerB64}.${payloadB64}`);
+    verifier.end();
+    const signatureValid = verifier.verify(cert, Buffer.from(signatureB64, "base64url"));
+    if (!signatureValid) {
+      return res.status(401).json({ valid: false, error: "Invalid token signature." });
+    }
+
+    // 2. Verify Firebase project audience, issuer, expiration, and exact Teacher email
+    const email = String(claims?.email || "").trim().toLowerCase();
+    const emailVerified = Boolean(claims?.email_verified);
+    const exp = Number(claims?.exp || 0) * 1000;
+    const aud = String(claims?.aud || "");
+    const iss = String(claims?.iss || "");
+
+    if (
+      !emailVerified ||
+      email !== "teacher.siqueira@gmail.com" ||
+      exp < Date.now() ||
+      aud !== "cool-citadel-456408-k5" ||
+      iss !== "https://securetoken.google.com/cool-citadel-456408-k5"
+    ) {
+      return res.status(403).json({
+        valid: false,
+        error: "Access denied: Only teacher.siqueira@gmail.com can unlock Live AI via Google Sign-In.",
+      });
+    }
+
+    const clientIp = getClientIp(req);
+    recordPinOutcome(clientIp, true);
+    return res.json({ valid: true, sessionPin: activeTeacherPin });
+  } catch (err) {
+    return res.status(400).json({ valid: false, error: "Could not verify Google ID token." });
+  }
 });
 
 // Health check endpoint
