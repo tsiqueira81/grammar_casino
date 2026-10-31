@@ -717,6 +717,24 @@ export function App() {
     });
   };
 
+  // Projector mode: solid text and bigger small labels for reading from the back of a classroom.
+  const [isProjectorMode, setIsProjectorMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('grammar_casino_projector_mode') === 'on';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('projector', isProjectorMode);
+    try {
+      localStorage.setItem('grammar_casino_projector_mode', isProjectorMode ? 'on' : 'off');
+    } catch {
+      // Storage can be blocked (private window); the mode still works for this visit.
+    }
+  }, [isProjectorMode]);
+
   useEffect(() => {
     const savedTheme = localStorage.getItem('grammar_casino_theme');
     if (savedTheme === 'light') {
@@ -4953,7 +4971,7 @@ export function App() {
                     </div>
 
                     <div className="p-4 sm:p-5 rounded-xl felt-well border-purple-400/40 dark:border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="space-y-1.5 flex-1 min-w-0 w-full">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="text-2xl filter drop-shadow select-none">🎴</span>
                           <span className="font-serif font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
@@ -6896,9 +6914,27 @@ export function App() {
             aria-label={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
             title={isDarkMode ? "Switch to Ivory Day Salon" : "Switch to Emerald Night Salon"}
           > 
-            {isDarkMode ? '☀️' : '🌙'} 
+            {isDarkMode ? '☀️' : '🌙'}
           </button>
-          
+
+          <button
+            type="button"
+            onClick={() => {
+              playSound('click');
+              setIsProjectorMode(prev => !prev);
+            }}
+            className={`hidden sm:flex text-lg w-11 h-11 items-center justify-center rounded-full border transition-all shadow-[0_4px_15px_rgba(0,0,0,0.4)] hover:scale-105 backdrop-blur-md cursor-pointer ${
+              isProjectorMode
+                ? 'bg-amber-400 border-amber-200 text-slate-950 ring-2 ring-amber-300/70'
+                : 'bg-amber-50/90 dark:bg-[#051c10]/90 border-[#d4af37]/60 hover:border-[#fef08a] text-amber-900 dark:text-[#fef08a]'
+            }`}
+            aria-pressed={isProjectorMode}
+            aria-label="Projector mode: larger, solid text for the back of the room"
+            title={isProjectorMode ? 'Projector mode is on: click for normal text' : 'Projector mode: larger, solid text for the back of the room'}
+          >
+            📽️
+          </button>
+
           {audioReady && (
             <button 
               onClick={() => { 

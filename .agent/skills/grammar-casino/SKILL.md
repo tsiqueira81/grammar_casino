@@ -87,3 +87,9 @@ There are 3 question types (`QuestionType`: `'binary' | 'multipleChoice' | 'open
   * **Text Models (`TEXT_MODELS`)**: `["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]` (with `ThinkingLevel.LOW` applied when `gemini-3.8-flash` is selected).
   * **Audio / TTS Models (`TTS_MODELS`)**: `["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]` using voice `"Kore"` (returns base64 raw 24kHz 16-bit mono PCM audio decoded via `pcmToAudioBuffer`), with automatic fallback to the browser's native Web Speech API (`window.speechSynthesis`) when in Offline Mode or if TTS quota is reached.
 
+
+## 6. Projector Mode (readability theme)
+
+* The 📽️ button in the top-right bar toggles the `projector` class on `<html>` (saved in `localStorage` as `grammar_casino_projector_mode`). It is hidden below the `sm` breakpoint because phones don't need it.
+* The rules live at the end of the `<style>` block in `index.html`: small text (`text-[8px]` to `text-[11px]`, `text-xs`) gets a minimum size, faded small text loses its `opacity-*`, and every translucent text colour (`text-amber-200/60`, `dark:text-amber-100/80`, ...) is replaced with a solid one.
+* The colour rules are an explicit list. **If you add a new translucent text class (`text-<colour>/<alpha>`), add a matching projector rule**, or that text will stay faded in projector mode. Light-theme rules use `html.projector:not(.dark)`, dark-theme rules use `html.projector.dark .dark\:...`, and elements with a `hover:text-*` class are only overridden while not hovered.

@@ -397,6 +397,126 @@
         background: linear-gradient(90deg, #991b1b 0%, #ca8a04 50%, #065f46 100%);
         border-radius: 999px;
       }
+
+      /* ===== Projector mode (📽️ button, top right) =====
+         Readability boost for the back of a classroom: faded text becomes solid,
+         tiny labels get a minimum size. Generated from the list of translucent
+         text classes in the components; add a line here if you add a new one. */
+      html.projector .text-\[8px\],
+      html.projector .text-\[9px\],
+      html.projector .text-\[10px\] { font-size: 12.5px !important; }
+      html.projector .text-\[11px\] { font-size: 13px !important; }
+      html.projector .text-xs { font-size: 0.875rem !important; line-height: 1.25rem !important; }
+
+      html.projector :is(.text-\[8px\], .text-\[9px\], .text-\[10px\], .text-\[11px\], .text-xs, .text-sm):is(.opacity-50, .opacity-60, .opacity-65, .opacity-70, .opacity-75, .opacity-80, .opacity-85, .opacity-90) {
+        opacity: 1 !important;
+      }
+
+      html.projector:not(.dark) .placeholder-slate-400::placeholder { color: #475569 !important; }
+      html.projector.dark .dark\:placeholder-amber-200\/35::placeholder { color: rgba(253, 230, 138, 0.75) !important; }
+
+      html.projector:not(.dark) .text-amber-900\/70:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-900\/70[class*="hover:text-"]:not(:hover) { color: #78350f !important; }
+      html.projector:not(.dark) .text-amber-900\/80:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-900\/80[class*="hover:text-"]:not(:hover) { color: #78350f !important; }
+      html.projector:not(.dark) .text-amber-800\/70:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-800\/70[class*="hover:text-"]:not(:hover) { color: #78350f !important; }
+      html.projector:not(.dark) .text-amber-800\/75:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-800\/75[class*="hover:text-"]:not(:hover) { color: #78350f !important; }
+      html.projector:not(.dark) .text-amber-800\/80:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-800\/80[class*="hover:text-"]:not(:hover) { color: #78350f !important; }
+      html.projector:not(.dark) .text-\[\#ca8a04\]\/70:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-\[\#ca8a04\]\/70[class*="hover:text-"]:not(:hover) { color: #92400e !important; }
+      html.projector:not(.dark) .text-rose-900\/75:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-rose-900\/75[class*="hover:text-"]:not(:hover) { color: #881337 !important; }
+      html.projector:not(.dark) .text-emerald-900\/75:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-emerald-900\/75[class*="hover:text-"]:not(:hover) { color: #064e3b !important; }
+      html.projector:not(.dark) .text-\[\#1c0a04\]\/85:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-\[\#1c0a04\]\/85[class*="hover:text-"]:not(:hover) { color: #1c0a04 !important; }
+      html.projector.dark .text-\[\#1c0a04\]\/85:not([class*="dark:text-"]):not([class*="hover:text-"]),
+      html.projector.dark .text-\[\#1c0a04\]\/85:not([class*="dark:text-"])[class*="hover:text-"]:not(:hover) { color: #1c0a04 !important; }
+      html.projector:not(.dark) .text-\[\#1c0a04\]\/80:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-\[\#1c0a04\]\/80[class*="hover:text-"]:not(:hover) { color: #1c0a04 !important; }
+      html.projector.dark .text-\[\#1c0a04\]\/80:not([class*="dark:text-"]):not([class*="hover:text-"]),
+      html.projector.dark .text-\[\#1c0a04\]\/80:not([class*="dark:text-"])[class*="hover:text-"]:not(:hover) { color: #1c0a04 !important; }
+      html.projector:not(.dark) .text-\[\#d4af37\]\/60:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-\[\#d4af37\]\/60[class*="hover:text-"]:not(:hover) { color: #b45309 !important; }
+      html.projector.dark .text-\[\#d4af37\]\/60:not([class*="dark:text-"]):not([class*="hover:text-"]),
+      html.projector.dark .text-\[\#d4af37\]\/60:not([class*="dark:text-"])[class*="hover:text-"]:not(:hover) { color: #d4af37 !important; }
+      html.projector:not(.dark) .text-\[\#d4af37\]\/50:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-\[\#d4af37\]\/50[class*="hover:text-"]:not(:hover) { color: #b45309 !important; }
+      html.projector.dark .text-\[\#d4af37\]\/50:not([class*="dark:text-"]):not([class*="hover:text-"]),
+      html.projector.dark .text-\[\#d4af37\]\/50:not([class*="dark:text-"])[class*="hover:text-"]:not(:hover) { color: #d4af37 !important; }
+      html.projector:not(.dark) .text-slate-400:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-slate-400[class*="hover:text-"]:not(:hover) { color: #475569 !important; }
+      html.projector:not(.dark) .text-slate-500:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-slate-500[class*="hover:text-"]:not(:hover) { color: #334155 !important; }
+      html.projector:not(.dark) .text-slate-600:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-slate-600[class*="hover:text-"]:not(:hover) { color: #1e293b !important; }
+      html.projector:not(.dark) .text-amber-600:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-amber-600[class*="hover:text-"]:not(:hover) { color: #92400e !important; }
+      html.projector:not(.dark) .text-emerald-600:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-emerald-600[class*="hover:text-"]:not(:hover) { color: #065f46 !important; }
+      html.projector:not(.dark) .text-rose-600:not([class*="hover:text-"]),
+      html.projector:not(.dark) .text-rose-600[class*="hover:text-"]:not(:hover) { color: #9f1239 !important; }
+      html.projector .text-rose-300\/80:not([class*="hover:text-"]),
+      html.projector .text-rose-300\/80[class*="hover:text-"]:not(:hover) { color: #fecdd3 !important; }
+      html.projector .text-amber-300\/80:not([class*="hover:text-"]),
+      html.projector .text-amber-300\/80[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-200\/50:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/50[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-200\/60:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/60[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-200\/70:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/70[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-200\/75:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/75[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-200\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/80[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-200\/85:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/85[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-200\/90:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-200\/90[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-100\/70:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-100\/70[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-100\/75:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-100\/75[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-100\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-100\/80[class*="hover:text-"]:not(:hover) { color: #fef3c7 !important; }
+      html.projector.dark .dark\:text-amber-100\/85:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-100\/85[class*="hover:text-"]:not(:hover) { color: #fffbeb !important; }
+      html.projector.dark .dark\:text-amber-100\/90:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-100\/90[class*="hover:text-"]:not(:hover) { color: #fffbeb !important; }
+      html.projector.dark .dark\:text-amber-50\/85:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-50\/85[class*="hover:text-"]:not(:hover) { color: #fffbeb !important; }
+      html.projector.dark .dark\:text-amber-50\/90:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-50\/90[class*="hover:text-"]:not(:hover) { color: #fffbeb !important; }
+      html.projector.dark .dark\:text-amber-300\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-300\/80[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-300\/85:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-300\/85[class*="hover:text-"]:not(:hover) { color: #fde68a !important; }
+      html.projector.dark .dark\:text-amber-400\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-amber-400\/80[class*="hover:text-"]:not(:hover) { color: #fcd34d !important; }
+      html.projector.dark .dark\:text-\[\#d4af37\]\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-\[\#d4af37\]\/80[class*="hover:text-"]:not(:hover) { color: #fcd34d !important; }
+      html.projector.dark .dark\:text-\[\#ca8a04\]\/60:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-\[\#ca8a04\]\/60[class*="hover:text-"]:not(:hover) { color: #facc15 !important; }
+      html.projector.dark .dark\:text-slate-300\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-slate-300\/80[class*="hover:text-"]:not(:hover) { color: #e2e8f0 !important; }
+      html.projector.dark .dark\:text-rose-300\/65:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-rose-300\/65[class*="hover:text-"]:not(:hover) { color: #fecdd3 !important; }
+      html.projector.dark .dark\:text-rose-100\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-rose-100\/80[class*="hover:text-"]:not(:hover) { color: #ffe4e6 !important; }
+      html.projector.dark .dark\:text-emerald-300\/65:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-emerald-300\/65[class*="hover:text-"]:not(:hover) { color: #a7f3d0 !important; }
+      html.projector.dark .dark\:text-emerald-300\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-emerald-300\/80[class*="hover:text-"]:not(:hover) { color: #a7f3d0 !important; }
+      html.projector.dark .dark\:text-cyan-100\/80:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-cyan-100\/80[class*="hover:text-"]:not(:hover) { color: #cffafe !important; }
+      html.projector.dark .dark\:text-slate-400:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-slate-400[class*="hover:text-"]:not(:hover) { color: #e2e8f0 !important; }
+      html.projector.dark .dark\:text-slate-500:not([class*="hover:text-"]),
+      html.projector.dark .dark\:text-slate-500[class*="hover:text-"]:not(:hover) { color: #cbd5e1 !important; }
     </style>
   <script type="importmap">
 {
