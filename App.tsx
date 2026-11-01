@@ -11,7 +11,8 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw } from 'lucide-react';
+import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
 import Modal from './components/Modal';
@@ -397,6 +398,7 @@ export function App() {
   const [editingPlayerNameInSetup, setEditingPlayerNameInSetup] = useState('');
   const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY);
   const [isEditingStartingCash, setIsEditingStartingCash] = useState(false);
+  const [isLobbyMenuOpen, setIsLobbyMenuOpen] = useState(false);
   const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY));
   const [showWheelModal, setShowWheelModal] = useState<{ playerId: number } | null>(null);
   const [usedSubtypes, setUsedSubtypes] = useState<string[]>([]);
@@ -475,7 +477,7 @@ export function App() {
   const [teacherPinInput, setTeacherPinInput] = useState<string>('');
   const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
   const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
-  const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
   const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
   const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
   const pendingOpenCloudTabAfterPinRef = useRef<CloudManagerTab | null>(null);
@@ -580,7 +582,7 @@ export function App() {
       playSound('error');
       setTeacherPinNotice({
         type: 'error',
-        text: `Signed in as ${res.user.email}. Only teacher.siqueira@gmail.com automatically unlocks Teacher Mode without a PIN.`,
+        text: `Signed in as ${res.user.email}. Only teacher.siqueira@gmail.com unlocks without a PIN, so enter the PIN instead.`,
       });
       return;
     }
@@ -608,7 +610,7 @@ export function App() {
     }
     setTeacherPinNotice({
       type: 'success',
-      text: `Verified via Google (${res.user.email})! Live Gemini AI, QR Room Hosting & Cloud Vault are unlocked.`,
+      text: `Signed in with Google as ${res.user.email}. The live room, AI sentences and cloud saves are on.`,
     });
   };
 
@@ -639,11 +641,11 @@ export function App() {
       }
       setTeacherPinNotice({
         type: 'success',
-        text: 'Teacher PIN verified! Live Gemini AI & Live Room Hosting are unlocked for this session. The Cloud Vault needs your Google sign-in.',
+        text: 'PIN accepted. The live room and AI sentences are on for this game. Cloud saves need the Google sign-in.',
       });
     } else {
       playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || 'Incorrect Teacher PIN.' });
+      setTeacherPinNotice({ type: 'error', text: res.error || "That PIN didn't work. Try again." });
     }
   };
 
@@ -670,7 +672,7 @@ export function App() {
     setMpStudentPendingWheel({});
     setMpStudentNotifications({});
     setShowMpLobbyModal(false);
-    setTeacherPinNotice({ type: 'success', text: 'Locked! Switched to Offline Curated Bank Mode (0 Gemini API usage).' });
+    setTeacherPinNotice({ type: 'success', text: 'Locked. The game now uses the offline bank.' });
   };
 
   const handleChangeTeacherPin = async (e: React.FormEvent) => {
@@ -687,10 +689,10 @@ export function App() {
       setTeacherPinInput('');
       setNewTeacherPinInput('');
       setShowChangePinForm(false);
-      setTeacherPinNotice({ type: 'success', text: 'Teacher PIN updated! Keep your new PIN safe.' });
+      setTeacherPinNotice({ type: 'success', text: 'PIN changed. Keep the new PIN safe.' });
     } else {
       playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || 'Could not update Teacher PIN.' });
+      setTeacherPinNotice({ type: 'error', text: res.error || "The PIN wasn't changed. Try again." });
     }
   };
 
@@ -727,6 +729,25 @@ export function App() {
       return false;
     }
   });
+
+  // Calm mode: one switch that turns the table's motion off (the deal, pulses, count-ups,
+  // confetti). Phones in a live room follow it too.
+  const [isCalmMode, setIsCalmMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('grammar_casino_calm_mode') === 'on';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('gc-calm', isCalmMode);
+    try {
+      localStorage.setItem('grammar_casino_calm_mode', isCalmMode ? 'on' : 'off');
+    } catch {
+      // Storage can be blocked (private window); the mode still works for this visit.
+    }
+  }, [isCalmMode]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('projector', isProjectorMode);
@@ -3228,8 +3249,8 @@ export function App() {
       setNewTeacherPinInput('');
       setShowChangePinForm(false);
       setTeacherPinNotice({
-        type: 'error',
-        text: 'Teacher PIN required to host a Live Classroom Room (QR). Enter your PIN below to unlock.',
+        type: 'info',
+        text: 'Opening a live room needs the teacher PIN. Enter it below.',
       });
       setShowTeacherPinModal(true);
       return;
@@ -3321,9 +3342,11 @@ export function App() {
       studentNotifications: mpStudentNotifications,
       roundTimer: isTurnTimerEnabled ? mpRoundTimer : undefined,
       turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
+      calmMode: isCalmMode,
     });
     mpControllerRef.current.pushViews(views);
   }, [
+    isCalmMode,
     mpRoomCode,
     mpRoomLocked,
     step,
@@ -4236,101 +4259,162 @@ export function App() {
     
   const renderStepContent = () => {
     switch(step) {
-        case 'PLAYER_SETUP': return ( 
-          <div className="w-full max-w-4xl text-center p-4 animate-fade-in"> 
-            {/* Ornate Monte Carlo Casino Crest & Header */}
-            <div className="flex flex-col items-center mb-8">
-              <div className="inline-flex items-center gap-3 px-4 py-1.5 rounded-full bg-amber-500/10 dark:bg-black/40 border border-[#d4af37]/40 mb-4 shadow-sm">
-                <span className="text-[#d4af37] text-xs tracking-widest">♠ ♥</span>
-                <span className="text-[11px] font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#fef08a] font-bold">
-                  Salon Privé · Est. Monte Carlo
-                </span>
-                <span className="text-[#d4af37] text-xs tracking-widest">♦ ♣</span>
-              </div>
+        case 'PLAYER_SETUP': {
+          const canHostRoom = isTeacherAiUnlocked || desktopStatus.isDesktop;
+          const phonesConnected = Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length;
+          return (
+          <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-8 animate-gc-fade">
+            {/* A smaller logo and one line */}
+            <header className="text-center mb-8">
+              <h1 className="font-logo text-gc-gold text-[40px] sm:text-[56px] leading-none font-semibold tracking-[0.06em]">
+                Grammar Casino
+              </h1>
+              <p className="mt-3 text-gc-lead text-gc-quiet">Place your bets on English grammar.</p>
+            </header>
 
-              <h1 className="text-5xl sm:text-6xl md:text-7xl font-black text-gold mb-3 title-glow tracking-wider font-display">
-                GRAMMAR CASINO
-              </h1> 
-
-              <div className="flex items-center justify-center gap-3 w-full max-w-lg my-1">
-                <div className="h-[1px] bg-gradient-to-r from-transparent via-[#d4af37] to-[#d4af37] flex-1 opacity-70"></div>
-                <span className="text-[#d4af37] text-sm select-none">❖</span>
-                <div className="h-[1px] bg-gradient-to-l from-transparent via-[#d4af37] to-[#d4af37] flex-1 opacity-70"></div>
-              </div>
-
-              <p className="text-xs sm:text-sm md:text-base text-amber-900/80 dark:text-amber-200/85 mt-2 font-sans uppercase tracking-[0.25em] font-semibold">
-                Bet Your Knowledge &middot; Risk Your Stack &middot; Master English
-              </p>
-            </div>
-            
-            {/* VIP Table Guest Registry */}
-            <div className="glass-panel rounded-2xl p-6 sm:p-8 relative mb-8 text-left overflow-hidden">
-              {/* Decorative Corner Brass Brackets */}
-              <div className="pointer-events-none absolute top-2.5 left-2.5 w-4 h-4 border-t-2 border-l-2 border-[#d4af37]/50 rounded-tl-sm" />
-              <div className="pointer-events-none absolute top-2.5 right-2.5 w-4 h-4 border-t-2 border-r-2 border-[#d4af37]/50 rounded-tr-sm" />
-              <div className="pointer-events-none absolute bottom-2.5 left-2.5 w-4 h-4 border-b-2 border-l-2 border-[#d4af37]/50 rounded-bl-sm" />
-              <div className="pointer-events-none absolute bottom-2.5 right-2.5 w-4 h-4 border-b-2 border-r-2 border-[#d4af37]/50 rounded-br-sm" />
-
-              {/* Registry Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-6 border-b border-[#d4af37]/30">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-lg bg-[#d4af37]/15 border border-[#d4af37]/40 flex items-center justify-center text-amber-700 dark:text-[#fef08a] text-sm font-sans font-bold">
-                    ♠
+            {/* Two ways to play */}
+            <div className="grid md:grid-cols-2 gap-4 mb-4">
+              <section className="gc-surface rounded-gc-lg p-5 sm:p-6 flex flex-col gap-4" aria-labelledby="lobby-local-title">
+                <div className="flex items-start gap-3.5">
+                  <span className="w-11 h-11 shrink-0 rounded-full bg-gc-gold/15 text-gc-money grid place-items-center">
+                    <Monitor className="w-5 h-5" aria-hidden="true" />
                   </span>
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-lg sm:text-xl font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
-                        VIP Table Registry
-                      </h2>
-                      {activeCloudRoster && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-extrabold bg-amber-500/20 text-amber-800 dark:text-[#fef08a] border border-[#d4af37]/50">
-                          ☁️ {activeCloudRoster.className}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                      Register solo, load a Cloud Class Roster, or gather seats around the baize
+                    <h2 id="lobby-local-title" className="text-gc-lead font-bold text-gc-ink">Play on this screen</h2>
+                    <p className="text-gc-small text-gc-quiet">Add each player by name. Everyone bets on the projector.</p>
+                  </div>
+                </div>
+                <div className="flex gap-2.5 mt-auto">
+                  <TextInput
+                    ref={playerNameInputRef}
+                    value={newPlayerName}
+                    onChange={(e) => setNewPlayerName(e.target.value)}
+                    onKeyDown={handlePlayerNameKeyDown}
+                    placeholder="Player name"
+                    aria-label="Player name"
+                    maxLength={20}
+                    className="h-12 flex-1 min-w-0 text-gc-body"
+                  />
+                  <ActionButton
+                    onClick={handleAddPlayer}
+                    playSound={playSound}
+                    variant="ghost"
+                    className="h-12 px-5 text-gc-body font-bold shrink-0"
+                  >
+                    <span className="inline-flex items-center gap-1.5"><Plus className="w-4 h-4 shrink-0" aria-hidden="true" />Add player</span>
+                  </ActionButton>
+                </div>
+              </section>
+
+              <section className="gc-surface rounded-gc-lg p-5 sm:p-6 flex flex-col gap-4" aria-labelledby="lobby-live-title">
+                <div className="flex items-start gap-3.5">
+                  <span className="w-11 h-11 shrink-0 rounded-full bg-gc-gold/15 text-gc-money grid place-items-center">
+                    <Smartphone className="w-5 h-5" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 id="lobby-live-title" className="text-gc-lead font-bold text-gc-ink">Open a live room for phones</h2>
+                    <p className="text-gc-small text-gc-quiet">
+                      {mpRoomCode
+                        ? 'Students scan the QR code or type the room code on their phones.'
+                        : 'Students join with a code or QR code and bet on their own phones.'}
                     </p>
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-2.5 mt-auto">
+                  {mpRoomCode ? (
+                    <>
+                      <span className="h-12 px-4 inline-flex items-center gap-2 rounded-gc-sm bg-gc-win/10 border border-gc-win/30 text-gc-ink font-bold tabular-nums">
+                        <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-gc-win' : 'bg-gc-gold'}`} aria-hidden="true" />
+                        Room {mpRoomCode}
+                        <span className="text-gc-small font-semibold text-gc-quiet">· {phonesConnected} connected</span>
+                      </span>
+                      <ActionButton
+                        onClick={() => setShowMpLobbyModal(true)}
+                        playSound={playSound}
+                        variant="ghost"
+                        className="h-12 px-5 text-gc-body font-bold"
+                      >
+                        <span className="inline-flex items-center gap-1.5"><QrCode className="w-4 h-4 shrink-0" aria-hidden="true" />Show the QR code</span>
+                      </ActionButton>
+                    </>
+                  ) : (
+                    <ActionButton
+                      onClick={handleCreateMpRoom}
+                      variant="ghost"
+                      className="h-12 px-5 text-gc-body font-bold"
+                      title={canHostRoom ? 'Open a live room with a QR code' : 'You need the teacher PIN to open a live room'}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        {canHostRoom ? <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" /> : <Lock className="w-4 h-4 shrink-0" aria-hidden="true" />}
+                        Open a live room
+                      </span>
+                    </ActionButton>
+                  )}
+                  {!mpRoomCode && !canHostRoom && (
+                    <span className="text-gc-small text-gc-quiet">Needs the teacher PIN</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setIsStudentControllerMode(true);
+                    }}
+                    className="ml-auto text-gc-small font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 decoration-gc-line/30 cursor-pointer"
+                    title="Use this device as a student phone and join a room"
+                  >
+                    Join a room as a student
+                  </button>
+                </div>
+              </section>
+            </div>
+
+            {/* Who is at the table */}
+            <section className="gc-surface rounded-gc-lg p-5 sm:p-6 mb-6" aria-labelledby="lobby-table-title">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 id="lobby-table-title" className="text-gc-lead font-bold text-gc-ink">
+                    At the table <span className="text-gc-quiet font-semibold tabular-nums">({players.length})</span>
+                  </h2>
+                  {activeCloudRoster && (
+                    <span className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-full bg-gc-info/10 text-gc-info text-gc-cap font-bold">
+                      <CloudIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                      Class: {activeCloudRoster.className}
+                    </span>
+                  )}
+                </div>
 
                 {isEditingStartingCash ? (
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well border-[#d4af37]">
-                    <PokerChip denomination={100} size="xs" />
-                    <div className="text-left">
-                      <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60">Starting Stack</div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-xs font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">$</span>
-                        <input
-                          type="number"
-                          min={1}
-                          step={100}
-                          value={tempStartingCash}
-                          onChange={(e) => setTempStartingCash(e.target.value)}
-                          onBlur={handleSaveStartingCash}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveStartingCash();
-                            else if (e.key === 'Escape') {
-                              setIsEditingStartingCash(false);
-                              setTempStartingCash(String(startingCash));
-                            }
-                          }}
-                          autoFocus
-                          className="w-20 text-xs font-sans tabular-nums font-extrabold text-amber-900 dark:text-[#fef08a] bg-transparent border-b border-[#d4af37] focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            handleSaveStartingCash();
-                          }}
-                          className="w-5 h-5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] flex items-center justify-center cursor-pointer font-bold"
-                          title="Save starting cash"
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="gc-starting-cash" className="text-gc-small font-semibold text-gc-quiet">Starting money $</label>
+                    <input
+                      id="gc-starting-cash"
+                      type="number"
+                      min={1}
+                      step={100}
+                      value={tempStartingCash}
+                      onChange={(e) => setTempStartingCash(e.target.value)}
+                      onBlur={handleSaveStartingCash}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveStartingCash();
+                        else if (e.key === 'Escape') {
+                          setIsEditingStartingCash(false);
+                          setTempStartingCash(String(startingCash));
+                        }
+                      }}
+                      autoFocus
+                      className="w-24 h-10 px-3 rounded-gc-sm bg-gc-line/[0.05] border border-gc-gold text-gc-ink font-bold tabular-nums focus:outline-none focus:ring-2 focus:ring-gc-gold/30"
+                    />
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleSaveStartingCash();
+                      }}
+                      aria-label="Save the starting money"
+                      className="w-10 h-10 rounded-full bg-gc-win/15 text-gc-win grid place-items-center cursor-pointer hover:bg-gc-win/25"
+                    >
+                      <Check className="w-4 h-4" aria-hidden="true" />
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -4340,899 +4424,725 @@ export function App() {
                       setTempStartingCash(String(startingCash));
                       setIsEditingStartingCash(true);
                     }}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl felt-well hover:border-[#d4af37] transition-all cursor-pointer group/stack"
-                    title="Click to edit starting cash"
+                    className="h-10 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-line/[0.05] border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-small font-semibold text-gc-quiet cursor-pointer transition-colors"
+                    title="Change how much money each player starts with"
                   >
-                    <PokerChip denomination={100} size="xs" as="div" />
-                    <div className="text-left">
-                      <div className="text-[9px] font-sans uppercase tracking-widest text-slate-500 dark:text-amber-200/60 flex items-center gap-1">
-                        <span>Starting Stack</span>
-                        <span className="opacity-0 group-hover/stack:opacity-100 transition-opacity text-amber-600 dark:text-amber-400">✏️</span>
-                      </div>
-                      <div className="text-xs font-sans tabular-nums font-extrabold text-amber-800 dark:text-[#fef08a]">
-                        ${startingCash.toLocaleString()}
-                      </div>
-                    </div>
+                    Starting money
+                    <b className="text-gc-money tabular-nums">${startingCash.toLocaleString()}</b>
+                    <Pencil className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   </button>
                 )}
               </div>
 
-              {/* Live Classroom Multiplayer Bar */}
-              <div className="mb-5 p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/10 via-amber-500/10 to-emerald-950/10 dark:from-[#062415] dark:via-[#0b351f] dark:to-[#062415] border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-xl bg-[#d4af37]/20 border border-[#d4af37]/50 flex items-center justify-center text-lg shrink-0">
-                    📱
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
-                        Live Classroom Multiplayer
-                      </span>
-                      {mpRoomCode && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-extrabold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/40">
-                          ROOM {mpRoomCode} · {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length} ONLINE
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-600 dark:text-amber-100/70">
-                      {mpRoomCode
-                        ? 'Students can scan the QR code or enter the room code on their phones to claim a seat.'
-                        : 'Let students join from their phones via QR code or 4-letter Room Code — or play on this screen.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {mpRoomCode ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        playSound('click');
-                        setShowMpLobbyModal(true);
-                      }}
-                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
-                    >
-                      <span>📡</span>
-                      <span>Show QR &amp; Room ({mpRoomCode})</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleCreateMpRoom}
-                      className="px-3.5 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
-                      title={
-                        isTeacherAiUnlocked || desktopStatus.isDesktop
-                          ? 'Open a Live Classroom Room with QR Code'
-                          : 'Teacher PIN required to host a Live Classroom Room'
-                      }
-                    >
-                      <span>{isTeacherAiUnlocked || desktopStatus.isDesktop ? '📱' : '🔒'}</span>
-                      <span>{isTeacherAiUnlocked || desktopStatus.isDesktop ? 'Open Live Room (QR)' : 'Open Live Room (PIN)'}</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setIsStudentControllerMode(true);
-                    }}
-                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
-                    title="Join an existing room as a student controller"
-                  >
-                    <span>🎮</span>
-                    <span>Join Room</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleOpenCloudModal('rosters')}
-                    className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-xs cursor-pointer transition-all flex items-center gap-1.5"
-                    title="Open Cloud Classroom Rosters, Session Reports & Cloud Sentence Bank"
-                  >
-                    <span>☁️</span>
-                    <span>Cloud Rosters</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Add Player Input Row */}
-              <div className="flex flex-col sm:flex-row gap-3 mb-6"> 
-                <TextInput
-                  ref={playerNameInputRef}
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  onKeyDown={handlePlayerNameKeyDown}
-                  placeholder="Enter High-Roller's name..."
-                  className="text-lg h-14 flex-1"
-                /> 
-                <ActionButton
-                  onClick={handleAddPlayer}
-                  playSound={playSound}
-                  variant="outline-green"
-                  className="flex items-center justify-center gap-2 px-8 h-14 text-sm sm:text-base shrink-0"
-                >
-                  <span>+ Seat Player</span>
-                </ActionButton> 
-              </div> 
-              
-              {/* Seated Players Grid */}
-              <div className="min-h-[88px]"> 
-                {players.length === 0 ? (
-                  <div className="felt-well rounded-xl p-6 text-center flex flex-col items-center justify-center gap-2">
-                    <div className="text-2xl opacity-60 select-none">🃏</div>
-                    <div className="text-slate-600 dark:text-amber-100/70 font-editorial italic text-base">
-                      The velvet seats are open. Enter a player name above or open a Live Room so students can join from their phones.
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {players.map((player, index) => {
-                      const mpSeat = mpSeats[player.id];
-                      return ( 
-                      <div
+              {players.length === 0 ? (
+                <p className="py-6 text-center text-gc-body text-gc-quiet text-balance">
+                  No players yet. Add names above, or open a live room so students can join from their phones.
+                </p>
+              ) : (
+                <ul className="flex flex-wrap gap-2.5" aria-label="Players at the table">
+                  {players.map((player) => {
+                    const mpSeat = mpSeats[player.id];
+                    return (
+                      <li
                         key={player.id}
-                        className="felt-well rounded-xl p-3 flex items-center justify-between gap-3 group hover:border-[#d4af37]/70 transition-all"
-                      > 
-                        <div className="flex items-center gap-3 min-w-0">
-                          <button 
-                            type="button"
-                            onClick={() => handleOpenAvatarModal(player.id)} 
-                            className="w-11 h-11 rounded-full border-2 border-[#d4af37] bg-gradient-to-b from-amber-50 to-amber-100 dark:from-[#0d3520] dark:to-[#04150c] flex items-center justify-center text-2xl hover:scale-110 transition-transform cursor-pointer focus:outline-none shadow-md shrink-0 relative"
-                            title="Change Avatar"
-                          >
-                            {player.avatar}
-                            {mpSeat && (
-                              <span
-                                className={`w-3 h-3 rounded-full border-2 border-white dark:border-[#04150c] absolute -bottom-0.5 -right-0.5 ${
-                                  mpSeat.connected ? 'bg-emerald-500' : 'bg-amber-500'
-                                }`}
-                                title={mpSeat.connected ? 'Connected via Mobile' : 'Mobile Disconnected'}
-                              />
-                            )}
-                          </button> 
-                          <div className="min-w-0">
-                            <div className="text-[9px] font-sans tabular-nums uppercase tracking-widest text-amber-800/70 dark:text-[#d4af37]/80 flex items-center gap-1">
-                              <span>Seat #{index + 1} &middot; ${player.money.toLocaleString()}</span>
-                              {mpSeat && (
-                                <span className="text-[8px] px-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                                  📱
-                                </span>
-                              )}
-                            </div>
-                            {editingPlayerIdInSetup === player.id ? (
-                              <input
-                                type="text"
-                                value={editingPlayerNameInSetup}
-                                onChange={(e) => setEditingPlayerNameInSetup(e.target.value)}
-                                onBlur={() => {
-                                  if (editingPlayerNameInSetup.trim()) {
-                                    handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
-                                  }
-                                  setEditingPlayerIdInSetup(null);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    if (editingPlayerNameInSetup.trim()) {
-                                      handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
-                                    }
-                                    setEditingPlayerIdInSetup(null);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingPlayerIdInSetup(null);
-                                  }
-                                }}
-                                autoFocus
-                                maxLength={20}
-                                className="text-slate-900 dark:text-white font-sans uppercase tracking-wider text-sm font-bold bg-transparent border-b border-[#d4af37] focus:outline-none w-28"
-                              />
-                            ) : (
-                              <div 
-                                onClick={() => {
-                                  setEditingPlayerIdInSetup(player.id);
-                                  setEditingPlayerNameInSetup(player.name);
-                                }}
-                                className="text-slate-900 dark:text-amber-50 font-sans uppercase tracking-wider text-sm font-extrabold cursor-pointer hover:text-amber-700 dark:hover:text-[#fef08a] flex items-center gap-1.5 group/name truncate"
-                                title="Click to edit name"
-                              >
-                                <span className="truncate">{player.name}</span>
-                                <span className="text-[10px] opacity-0 group-hover/name:opacity-100 text-amber-600 dark:text-amber-400 shrink-0">✏️</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
+                        className="h-12 pl-1.5 pr-1.5 inline-flex items-center gap-2 rounded-full bg-gc-line/[0.05] border border-gc-line/[0.14] animate-gc-pop"
+                        title={`${player.name} · $${player.money.toLocaleString()}${mpSeat ? (mpSeat.connected ? ' · on a phone' : ' · phone disconnected') : ''}`}
+                      >
                         <button
-                          onClick={() => mpSeat ? handleKickMpPlayer(player.id) : handleDeletePlayer(player.id)}
-                          className="w-7 h-7 rounded-full border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center text-base transition-colors cursor-pointer shrink-0"
-                          title="Remove Seat"
+                          type="button"
+                          onClick={() => handleOpenAvatarModal(player.id)}
+                          aria-label={`Change ${player.name}'s avatar`}
+                          className="relative w-9 h-9 rounded-full bg-gc-card grid place-items-center text-[22px] leading-none ring-2 ring-gc-gold/50 hover:ring-gc-gold cursor-pointer transition-shadow"
                         >
-                          &times;
-                        </button> 
-                      </div> 
+                          {player.avatar}
+                          {mpSeat && (
+                            <span
+                              className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gc-card ${mpSeat.connected ? 'bg-gc-win' : 'bg-gc-gold'}`}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </button>
+                        {editingPlayerIdInSetup === player.id ? (
+                          <input
+                            type="text"
+                            value={editingPlayerNameInSetup}
+                            onChange={(e) => setEditingPlayerNameInSetup(e.target.value)}
+                            onBlur={() => {
+                              if (editingPlayerNameInSetup.trim()) {
+                                handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
+                              }
+                              setEditingPlayerIdInSetup(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                if (editingPlayerNameInSetup.trim()) {
+                                  handleUpdatePlayerName(player.id, editingPlayerNameInSetup);
+                                }
+                                setEditingPlayerIdInSetup(null);
+                              } else if (e.key === 'Escape') {
+                                setEditingPlayerIdInSetup(null);
+                              }
+                            }}
+                            autoFocus
+                            maxLength={20}
+                            aria-label="Player name"
+                            className="w-28 bg-transparent border-b border-gc-gold text-gc-body font-bold text-gc-ink focus:outline-none"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPlayerIdInSetup(player.id);
+                              setEditingPlayerNameInSetup(player.name);
+                            }}
+                            className="max-w-[10rem] truncate text-gc-body font-bold text-gc-ink cursor-text"
+                            title="Click to change the name"
+                          >
+                            {player.name}
+                          </button>
+                        )}
+                        {mpSeat && <Smartphone className="w-3.5 h-3.5 shrink-0 text-gc-quiet" aria-label="On a phone" />}
+                        <button
+                          type="button"
+                          onClick={() => (mpSeat ? handleKickMpPlayer(player.id) : handleDeletePlayer(player.id))}
+                          aria-label={`Remove ${player.name}`}
+                          className="w-8 h-8 rounded-full grid place-items-center text-gc-quiet hover:text-gc-loss hover:bg-gc-loss/10 cursor-pointer transition-colors"
+                        >
+                          <X className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                      </li>
                     );
-                    })}
-                  </div>
-                )} 
-              </div> 
-            </div> 
+                  })}
+                </ul>
+              )}
+            </section>
 
-            <div className="flex flex-wrap justify-center items-center gap-4">
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <ActionButton
                 onClick={handleStartGame}
                 playSound={playSound}
-                variant="gold"
-                className="text-base sm:text-lg py-4 px-12 tracking-[0.15em]"
+                variant="primary"
+                className="min-h-[60px] px-10 text-gc-lead"
                 disabled={players.length === 0}
               >
-                ENTER SALON &amp; TABLE SETUP &rarr;
-              </ActionButton> 
-              <ActionButton
-                onClick={handleLoadGameClick}
-                playSound={playSound}
-                variant="outline-gold"
-                className="text-sm py-4 px-5 flex items-center gap-2"
-                title="Load Saved Game File (.json)"
-              >
-                <span>📂</span>
-                <span className="hidden sm:inline">Load File</span>
+                <span className="inline-flex items-center gap-2.5">
+                  Set up the game
+                  <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
+                </span>
               </ActionButton>
-              <ActionButton
-                onClick={() => handleOpenCloudModal('rosters')}
-                playSound={playSound}
-                variant="outline-gold"
-                className="text-sm py-4 px-5 flex items-center gap-2"
-                title="Open Cloud Rosters, Saved Sessions & Sentence Bank"
-              >
-                <span>☁️</span>
-                <span className="hidden sm:inline">Cloud Vault</span>
-              </ActionButton>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playSound('click');
+                    setIsLobbyMenuOpen((v) => !v);
+                  }}
+                  aria-haspopup="menu"
+                  aria-expanded={isLobbyMenuOpen}
+                  className="h-[60px] px-5 inline-flex items-center gap-2 rounded-full bg-gc-line/[0.06] border border-gc-line/[0.16] hover:border-gc-line/30 text-gc-ink text-gc-body font-semibold cursor-pointer transition-colors"
+                >
+                  <MoreHorizontal className="w-5 h-5 shrink-0" aria-hidden="true" />
+                  More
+                </button>
+                {isLobbyMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setIsLobbyMenuOpen(false)} />
+                    <div
+                      role="menu"
+                      className="absolute z-50 bottom-full mb-2 left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 w-72 max-w-[calc(100vw-2rem)] p-1.5 rounded-gc bg-gc-raised border border-gc-line/[0.14] shadow-gc-2 text-left"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsLobbyMenuOpen(false);
+                          handleLoadGameClick();
+                        }}
+                        className="w-full px-3 py-2.5 rounded-gc-sm flex items-start gap-3 text-left hover:bg-gc-line/[0.07] cursor-pointer"
+                      >
+                        <FolderOpen className="w-5 h-5 mt-0.5 shrink-0 text-gc-quiet" aria-hidden="true" />
+                        <span>
+                          <span className="block text-gc-body font-semibold text-gc-ink">Load a saved game</span>
+                          <span className="block text-gc-small text-gc-quiet">Open a game file (.json) from this computer</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsLobbyMenuOpen(false);
+                          handleOpenCloudModal('rosters');
+                        }}
+                        className="w-full px-3 py-2.5 rounded-gc-sm flex items-start gap-3 text-left hover:bg-gc-line/[0.07] cursor-pointer"
+                      >
+                        <CloudIcon className="w-5 h-5 mt-0.5 shrink-0 text-gc-quiet" aria-hidden="true" />
+                        <span>
+                          <span className="block text-gc-body font-semibold text-gc-ink">Class lists and reports</span>
+                          <span className="block text-gc-small text-gc-quiet">Load a class from the cloud, or see saved games</span>
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-          </div> 
-        );
+          </div>
+          );
+        }
         case 'SETTINGS': {
-          const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Custom Topic") : settings.topic;
-          const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Custom Theme") : settings.theme;
+          const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Your own topic") : settings.topic;
+          const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
           const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
+          const levelProfile = CEFR_DIFFICULTY_PROFILES[settings.level];
+          const optionBase = 'border transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn';
+          const optionOn = 'bg-gc-gold/15 border-gc-gold text-gc-ink';
+          const optionOff = 'bg-gc-line/[0.05] border-gc-line/[0.14] text-gc-ink hover:border-gc-line/30';
+          const pill = (on: boolean) => `h-11 px-4 inline-flex items-center gap-1.5 rounded-full text-gc-body font-semibold ${optionBase} ${on ? optionOn : optionOff}`;
+          const sectionCls = 'gc-surface rounded-gc-lg p-5 sm:p-6 text-left';
+          const sectionTitle = 'text-gc-lead font-bold text-gc-ink';
+          const sectionHint = 'text-gc-small text-gc-quiet mt-0.5';
+          const winLabel =
+            gameMode === 'lastPlayer'
+              ? 'Last player standing'
+              : gameMode === 'rounds'
+                ? `${totalRounds || '?'} hands`
+                : `First to $${Number(targetAmount || 0).toLocaleString()}`;
+          const summaryChips = [
+            resolvedTopicPreview,
+            settings.level,
+            resolvedThemePreview,
+            currentFormatObj.shortLabel,
+            ...(settingsPart === 2
+              ? [winLabel, turnTimerSeconds === 0 ? 'No timer' : `${turnTimerSeconds} s timer`]
+              : []),
+          ];
 
-          return ( 
-          <div className="w-full max-w-4xl text-center animate-fade-in p-4"> 
-            <div className="flex flex-col items-center mb-6">
-              <div className="text-xs font-sans uppercase tracking-[0.3em] text-amber-800 dark:text-[#d4af37] mb-1 font-bold">
-                Croupier's Charter · Step {settingsPart} of 2
-              </div>
-              <h2 className="text-3xl sm:text-5xl font-black text-gold tracking-widest uppercase title-glow font-display">
-                Table Configuration
-              </h2> 
-              <div className="h-[1px] w-48 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mt-3 opacity-70" />
+          return (
+          <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-36 animate-gc-fade">
+            <header className="text-center mb-6">
+              <p className="text-gc-small font-semibold text-gc-quiet">Step {settingsPart} of 2</p>
+              <h1 className="font-logo text-gc-gold text-[34px] sm:text-[44px] leading-tight font-semibold tracking-[0.04em]">Table setup</h1>
 
-              {/* Two-Part Stepper Bar */}
-              <div className="mt-5 inline-flex items-center p-1.5 rounded-2xl felt-well border border-[#d4af37]/40 gap-2 max-w-full">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (settingsPart !== 1) {
-                      playSound('click');
-                      setSettingsPart(1);
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
-                    settingsPart === 1
-                      ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
-                      : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
-                  }`}
-                >
-                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-sans tabular-nums">1</span>
-                  <span>Linguistic Setup</span>
-                </button>
-                <span className="text-[#d4af37]/60 font-sans text-sm select-none">&rarr;</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (settingsPart !== 2) {
-                      handleAdvanceToSettingsPart2();
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
-                    settingsPart === 2
-                      ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] shadow-[0_4px_14px_rgba(202,138,4,0.35)]'
-                      : 'text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
-                  }`}
-                >
-                  <span className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center text-[11px] font-sans tabular-nums">2</span>
-                  <span>House Rules &amp; Power-Ups</span>
-                </button>
-              </div>
-            </div>
+              {/* The two steps */}
+              <nav aria-label="Setup steps" className="mt-4 inline-flex p-1 rounded-full bg-gc-line/[0.06] border border-gc-line/[0.12] gap-1 max-w-full">
+                {([
+                  { n: 1 as const, label: 'Questions' },
+                  { n: 2 as const, label: 'House rules' },
+                ]).map(({ n, label }) => {
+                  const isCurrent = settingsPart === n;
+                  const isDone = n === 1 && settingsPart === 2;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      aria-current={isCurrent ? 'step' : undefined}
+                      onClick={() => {
+                        if (settingsPart === n) return;
+                        if (n === 1) {
+                          playSound('click');
+                          setSettingsPart(1);
+                        } else {
+                          handleAdvanceToSettingsPart2();
+                        }
+                      }}
+                      className={`h-10 pl-1.5 pr-4 inline-flex items-center gap-2 rounded-full text-gc-small font-bold transition-colors cursor-pointer ${
+                        isCurrent ? 'bg-gc-card text-gc-ink shadow-gc-1' : 'text-gc-quiet hover:text-gc-ink'
+                      }`}
+                    >
+                      <span className={`w-7 h-7 rounded-full grid place-items-center text-gc-cap tabular-nums ${
+                        isCurrent ? 'bg-gc-gold text-gc-on-gold' : isDone ? 'bg-gc-win/20 text-gc-win' : 'bg-gc-line/[0.08]'
+                      }`}>
+                        {isDone ? <Check className="w-4 h-4" aria-hidden="true" /> : n}
+                      </span>
+                      {label}
+                    </button>
+                  );
+                })}
+              </nav>
+            </header>
 
             {settingsPart === 1 ? (
-              <>
-                <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative animate-fade-in">
-                  {[
-                    { title: "I. Language Domain", subtitle: "Choose a grammar rule, collocations, or a custom lexical topic for the shoe", items: GRAMMAR_TOPICS, settingKey: 'topic', customKey: 'customTopic', customValue: customTopic, setCustomValue: setCustomTopic, customPlaceholder: "Enter custom lexical or grammar topic (e.g., School Subjects, Places in Town, Inversion)..." },
-                    { title: "II. Stakes & Proficiency (CEFR)", subtitle: "Select syntactic complexity and mistake subtlety", items: CEFR_LEVELS, settingKey: 'level' },
-                    { title: "III. Salon Atmosphere & Theme", subtitle: "Flavor the AI-generated narratives", items: THEMES, settingKey: 'theme', customKey: 'customTheme', customValue: customTheme, setCustomValue: setCustomTheme, customPlaceholder: "Enter custom narrative theme..." }
-                  ].map(section => (
-                    <div key={section.title} className="text-left">
-                      <div className="mb-3.5 border-l-4 border-[#d4af37] pl-3.5">
-                        <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                          {section.title}
-                        </h3>
-                        <p className="text-xs text-slate-500 dark:text-amber-200/60">{section.subtitle}</p>
-                      </div>
-
-                      <div className={`grid grid-cols-2 ${section.items.length === 6 ? 'sm:grid-cols-3 md:grid-cols-6' : section.items.length === 9 ? 'sm:grid-cols-3' : section.items.length > 6 ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-2.5 sm:gap-3`}>
-                        {section.items.map(item => {
-                          const isActive = settings[section.settingKey as keyof Settings] === item;
+              <div className="space-y-4 animate-gc-fade">
+                {/* Topic */}
+                <section className={sectionCls} aria-labelledby="setup-topic">
+                  <h2 id="setup-topic" className={sectionTitle}>Topic</h2>
+                  <p className={sectionHint}>A grammar point, collocations, or a topic of your own.</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {GRAMMAR_TOPICS.map(item => {
+                      const isActive = settings.topic === item;
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          aria-pressed={isActive}
+                          onClick={() => { playSound('click'); setSettings(s => ({ ...s, topic: item })); }}
+                          className={pill(isActive)}
+                        >
+                          {isActive && <Check className="w-4 h-4 shrink-0" aria-hidden="true" />}
+                          {item === 'My own choice' ? 'My own topic' : item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {settings.topic === 'My own choice' && (
+                    <div className="mt-4 space-y-3 animate-gc-fade">
+                      <TextInput
+                        value={customTopic}
+                        onChange={e => setCustomTopic(e.target.value)}
+                        placeholder="For example: School subjects, Places in town, Inversion"
+                        aria-label="Your own topic"
+                        className="h-12"
+                      />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-gc-small font-semibold text-gc-quiet mr-1">Quick picks:</span>
+                        {QUICK_LEXICAL_TOPICS.map(lex => {
+                          const isPicked = customTopic.trim().toLowerCase() === lex.toLowerCase();
                           return (
                             <button
-                              key={item}
-                              onClick={() => { playSound('click'); setSettings(s => ({...s, [section.settingKey]: item})); }} 
-                              className={`p-3 rounded-xl transition-all duration-200 text-xs sm:text-sm font-sans border cursor-pointer relative overflow-hidden ${
-                                isActive
-                                  ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
-                                  : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
-                              }`}
+                              key={lex}
+                              type="button"
+                              aria-pressed={isPicked}
+                              onClick={() => { playSound('click'); setCustomTopic(lex); }}
+                              className={`h-8 px-3 rounded-full text-gc-small font-semibold ${optionBase} ${isPicked ? optionOn : optionOff}`}
                             >
-                              {item}
+                              {lex}
                             </button>
                           );
                         })}
                       </div>
-
-                      {section.settingKey === 'level' && CEFR_DIFFICULTY_PROFILES[settings.level] && (
-                        <div className="mt-3.5 p-4 rounded-xl felt-well text-xs space-y-1.5 animate-fade-in">
-                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="font-sans tabular-nums font-bold px-2.5 py-0.5 rounded-full text-[11px] bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
-                              {settings.level} — {CEFR_DIFFICULTY_PROFILES[settings.level]?.title}
-                            </span>
-                            <span className="text-[11px] text-amber-800/80 dark:text-[#d4af37] font-sans uppercase tracking-widest">
-                              Croupier's Briefing
-                            </span>
-                          </div>
-                          <div className="text-slate-700 dark:text-slate-300">
-                            <strong className="text-slate-900 dark:text-amber-100">Syntax &amp; Structure:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.syntax}
-                          </div>
-                          <div className="text-slate-700 dark:text-slate-300">
-                            <strong className="text-slate-900 dark:text-amber-100">Lexis &amp; Register:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.lexis}
-                          </div>
-                          <div className="text-amber-900 dark:text-amber-300 font-medium">
-                            <strong className="text-amber-950 dark:text-[#fef08a]">Mistake Spotting:</strong> {CEFR_DIFFICULTY_PROFILES[settings.level]?.mistakeIdentification}
-                          </div>
-                        </div>
-                      )}
-                      {section.customKey && settings[section.settingKey as keyof Settings] === (section.settingKey === 'topic' ? "My own choice" : "Custom ✍️") && (
-                        <div className="mt-3.5 space-y-2.5 animate-fade-in">
-                          <TextInput value={section.customValue || ""} onChange={e => section.setCustomValue!(e.target.value)} placeholder={section.customPlaceholder} />
-                          {section.settingKey === 'topic' && (
-                            <div className="p-3 rounded-xl felt-well flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] font-sans uppercase tracking-wider text-amber-800 dark:text-[#fef08a] font-bold mr-1">
-                                Quick Lexical Topics:
-                              </span>
-                              {QUICK_LEXICAL_TOPICS.map(lex => {
-                                const isPicked = (section.customValue || '').trim().toLowerCase() === lex.toLowerCase();
-                                return (
-                                  <button
-                                    key={lex}
-                                    type="button"
-                                    onClick={() => {
-                                      playSound('click');
-                                      section.setCustomValue!(lex);
-                                    }}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-sans transition-all cursor-pointer border ${
-                                      isPicked
-                                        ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] font-extrabold shadow-sm'
-                                        : 'bg-white/70 dark:bg-black/30 text-slate-800 dark:text-amber-100/85 border-[#d4af37]/40 hover:border-[#d4af37]'
-                                    }`}
-                                  >
-                                    {lex}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
-                  ))}
+                  )}
+                </section>
 
-                  {/* IV. Challenge Format Selector */}
-                  <div className="text-left border-t border-[#d4af37]/25 pt-6">
-                    <div className="mb-3.5 border-l-4 border-emerald-400 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                        IV. Challenge Format
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                        Choose how players evaluate each sentence (can also be switched mid-game between hands!)
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {CHALLENGE_FORMATS.map(fmt => {
-                        const currentFormat: ChallengeFormat = settings.challengeFormat || 'binary';
-                        const isSelected = currentFormat === fmt.id;
-                        return (
-                          <button
-                            key={fmt.id}
-                            type="button"
-                            onClick={() => {
-                              playSound('click');
-                              setMixedFormatSetupWarning(null);
-                              setSettings(s => ({
-                                ...s,
-                                challengeFormat: fmt.id,
-                                mixedFormats: getEffectiveMixedFormats(s.mixedFormats),
-                              }));
-                            }}
-                            className={`p-4 rounded-xl border-2 text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
-                              isSelected
-                                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] scale-[1.01]'
-                                : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
-                            }`}
-                          >
-                            <span className="text-2xl sm:text-3xl select-none shrink-0 mt-0.5">{fmt.icon}</span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-sans font-extrabold text-sm sm:text-base uppercase tracking-wider">
-                                  {fmt.label}
-                                </span>
-                                {isSelected && (
-                                  <span className="text-[10px] font-sans tabular-nums font-black uppercase px-2 py-0.5 rounded-full bg-black/20 text-[#1c0a04]">
-                                    Active
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`text-xs mt-1 leading-relaxed ${isSelected ? 'text-[#1c0a04]/85 font-medium' : 'text-slate-500 dark:text-amber-200/70'}`}>
-                                {fmt.subtitle}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Customizable Mixed Shoe Format Selector */}
-                    {settings.challengeFormat === 'mixed' && (() => {
-                      const activeMixed = getEffectiveMixedFormats(settings.mixedFormats);
-                      const toggleMixedItem = (qType: QuestionType) => {
-                        const isIncluded = activeMixed.includes(qType);
-                        if (isIncluded) {
-                          if (activeMixed.length <= 1) {
-                            playSound('error');
-                            setMixedFormatSetupWarning('At least 1 challenge format must remain active in the Mixed Shoe.');
-                            return;
-                          }
-                          playSound('click');
-                          setMixedFormatSetupWarning(null);
-                          setSettings(s => ({
-                            ...s,
-                            mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) && q !== qType),
-                          }));
-                        } else {
-                          playSound('click');
-                          setMixedFormatSetupWarning(null);
-                          setSettings(s => ({
-                            ...s,
-                            mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) || q === qType),
-                          }));
-                        }
-                      };
-
+                {/* Level */}
+                <section className={sectionCls} aria-labelledby="setup-level">
+                  <h2 id="setup-level" className={sectionTitle}>Level</h2>
+                  <p className={sectionHint}>How long the sentences are, and how hard the mistakes are to spot.</p>
+                  <div className="mt-4 grid grid-cols-3 sm:grid-cols-6 gap-2" role="group" aria-label="Level">
+                    {CEFR_LEVELS.map(item => {
+                      const isActive = settings.level === item;
                       return (
-                        <div className="mt-4 p-4 sm:p-5 rounded-xl felt-well border-2 border-[#d4af37]/60 space-y-3 animate-fade-in">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-xs sm:text-sm font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] flex items-center gap-2">
-                                <span>🎛️</span>
-                                <span>Customize Mixed Shoe Challenges</span>
-                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-sans tabular-nums font-bold bg-[#d4af37]/20 border border-[#d4af37]/50 text-amber-950 dark:text-[#fef08a]">
-                                  {activeMixed.length} of 5 Selected
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-600 dark:text-amber-200/75 mt-0.5">
-                                Toggle which of the 5 challenge formats are dealt in the Mixed Shoe rotation:
-                              </p>
-                            </div>
-                            {activeMixed.length < 5 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  playSound('click');
-                                  setMixedFormatSetupWarning(null);
-                                  setSettings(s => ({ ...s, mixedFormats: ALL_QUESTION_TYPES }));
-                                }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider bg-amber-500/20 hover:bg-amber-500/30 border border-[#d4af37]/60 text-amber-950 dark:text-[#fef08a] transition-all cursor-pointer"
-                              >
-                                Select All 5
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
-                            {CHALLENGE_FORMATS.filter((c): c is typeof CHALLENGE_FORMATS[number] & { id: QuestionType } => c.id !== 'mixed').map(subFmt => {
-                              const isChecked = activeMixed.includes(subFmt.id);
-                              return (
-                                <button
-                                  key={subFmt.id}
-                                  type="button"
-                                  onClick={() => toggleMixedItem(subFmt.id)}
-                                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                                    isChecked
-                                      ? 'bg-emerald-500/20 dark:bg-emerald-950/60 border-emerald-400 text-slate-900 dark:text-emerald-100 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
-                                      : 'bg-white/50 dark:bg-black/30 border-slate-300/60 dark:border-slate-800 text-slate-500 dark:text-slate-400 opacity-70 hover:opacity-100'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-xl select-none shrink-0">{subFmt.icon}</span>
-                                    <span className="font-sans font-bold text-xs uppercase tracking-wider truncate">
-                                      {subFmt.shortLabel}
-                                    </span>
-                                  </div>
-                                  <span
-                                    className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-black shrink-0 border ${
-                                      isChecked
-                                        ? 'bg-emerald-500 text-[#051a0f] border-emerald-300 shadow-sm'
-                                        : 'bg-transparent border-slate-400/50 dark:border-slate-600'
-                                    }`}
-                                  >
-                                    {isChecked ? '✓' : ''}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {mixedFormatSetupWarning && (
-                            <div className="text-xs font-sans text-amber-900 dark:text-amber-200 bg-amber-500/15 border border-[#d4af37]/50 rounded-lg px-3 py-1.5 flex items-center gap-2">
-                              <span>⚠️</span>
-                              <span>{mixedFormatSetupWarning}</span>
-                            </div>
-                          )}
-
-                          <div className="text-xs font-sans text-slate-700 dark:text-amber-100/85 flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#d4af37]/20">
-                            <span className="font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a]">Rotation Order:</span>
-                            <span>
-                              {activeMixed
-                                .map(q => {
-                                  const found = CHALLENGE_FORMATS.find(f => f.id === q);
-                                  return found ? `${found.icon} ${found.shortLabel}` : q;
-                                })
-                                .join('  →  ')}
-                            </span>
-                          </div>
-                        </div>
+                        <button
+                          key={item}
+                          type="button"
+                          aria-pressed={isActive}
+                          onClick={() => { playSound('click'); setSettings(s => ({ ...s, level: item })); }}
+                          className={`h-16 rounded-gc-sm flex flex-col items-center justify-center ${optionBase} ${isActive ? optionOn : optionOff}`}
+                        >
+                          <span className="text-gc-lead font-extrabold tabular-nums leading-none">{item}</span>
+                          <span className="mt-1 text-gc-cap text-gc-quiet">{CEFR_DIFFICULTY_PROFILES[item]?.title}</span>
+                        </button>
                       );
-                    })()}
-
-                    {(settings.challengeFormat === 'multipleChoice' || settings.challengeFormat === 'openCloze' || settings.challengeFormat === 'wordFormation' || settings.challengeFormat === 'keyWordTransformation' || settings.challengeFormat === 'mixed') && (
-                      <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-[#d4af37]/35 text-[11px] font-sans text-amber-900 dark:text-amber-200/85 flex items-center gap-2">
-                        <span>ℹ️</span>
-                        <span>
-                          <strong>Cloze &amp; Transformation House Rules:</strong> Clean 1:1 base payouts on Cloze &amp; Word Formation; <strong>Key Word Transformation</strong> awards <strong>1× Wager</strong> for 1/2 mark (partial) and <strong>2× Wager</strong> for 2/2 marks (full transformation)! <em>Split Bet</em> lets you hedge 2 options/phrases (50% each) or stack 1 for full payout. <em>Correction Bounty</em> &amp; <em>Grammar Goggles</em> are automatically disabled on Cloze hands.
-                        </span>
-                      </div>
-                    )}
+                    })}
                   </div>
-                </div>
-
-                <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-                  <ActionButton
-                    onClick={() => { playSound('click'); setStep('PLAYER_SETUP'); }}
-                    variant="outline-gold"
-                    className="py-3.5 px-6 text-sm"
-                  >
-                    &larr; Guest Registry
-                  </ActionButton>
-                  <ActionButton
-                    onClick={handleAdvanceToSettingsPart2}
-                    variant="gold"
-                    className="w-full sm:w-auto text-base sm:text-lg py-4 px-12 tracking-[0.12em]"
-                  >
-                    NEXT: HOUSE RULES &amp; POWER-UPS &rarr;
-                  </ActionButton>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-8 glass-panel p-6 sm:p-9 rounded-2xl relative animate-fade-in">
-                  {/* Locked-in Linguistic Setup Summary Bar */}
-                  <div className="p-3.5 sm:p-4 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3 text-left">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-sans uppercase tracking-wider text-amber-800 dark:text-[#d4af37] font-bold mr-1">
-                        Charter Locked:
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans font-bold text-slate-900 dark:text-[#fef08a]">
-                        📚 {resolvedTopicPreview}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans tabular-nums font-bold text-slate-900 dark:text-[#fef08a]">
-                        🎯 {settings.level}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-[#d4af37]/40 font-sans font-bold text-slate-900 dark:text-[#fef08a]">
-                        🎭 {resolvedThemePreview}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 font-sans font-bold text-emerald-900 dark:text-emerald-200">
-                        {currentFormatObj.icon} {currentFormatObj.label}
-                        {settings.challengeFormat === 'mixed' && (
-                          <span className="ml-1 opacity-90">
-                            ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join(' ')})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        playSound('click');
-                        setSettingsPart(1);
-                      }}
-                      className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer shrink-0"
-                    >
-                      &larr; Edit Setup
-                    </button>
-                  </div>
-
-                  {/* V. Configure Power-Up Shoe */}
-                  <div className="text-left">
-                    <div className="mb-3.5 border-l-4 border-purple-500 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                        V. House Power-Up Shoe
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-amber-200/60">Curate the special cards available at the table</p>
-                    </div>
-
-                    <div className="p-4 sm:p-5 rounded-xl felt-well border-purple-400/40 dark:border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="space-y-1.5 flex-1 min-w-0 w-full">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className="text-2xl filter drop-shadow select-none">🎴</span>
-                          <span className="font-sans font-extrabold text-base sm:text-lg text-slate-900 dark:text-purple-100 uppercase tracking-wide">
-                            Active Shoe Deck
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-full text-xs font-sans tabular-nums font-bold bg-purple-500/20 text-purple-900 dark:text-purple-200 border border-purple-400/50">
-                            {selectedPowerUps.length} / {(Object.keys(POWER_UPS) as PowerUpKey[]).length} Cards
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-300/80">
-                          Players can draw random cards from this shoe during betting rounds to gain advantages or sabotage rivals.
-                        </p>
-                        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pt-1 pb-0.5">
-                          {selectedPowerUps.slice(0, 12).map(k => (
-                            <span key={k} className="text-base select-none bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded border border-purple-400/20" title={POWER_UPS[k]?.name}>
-                              {POWER_UPS[k]?.icon}
-                            </span>
-                          ))}
-                          {selectedPowerUps.length > 12 && (
-                            <span className="text-[11px] font-sans tabular-nums text-purple-700 dark:text-purple-300 font-bold ml-1">
-                              +{selectedPowerUps.length - 12} more
-                            </span>
-                          )}
-                        </div>
+                  {levelProfile && (
+                    <dl className="mt-4 p-4 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] grid sm:grid-cols-3 gap-3 text-gc-small">
+                      <div>
+                        <dt className="font-bold text-gc-ink">Sentences</dt>
+                        <dd className="text-gc-quiet">{levelProfile.syntax}</dd>
                       </div>
+                      <div>
+                        <dt className="font-bold text-gc-ink">Vocabulary</dt>
+                        <dd className="text-gc-quiet">{levelProfile.lexis}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-bold text-gc-ink">Mistakes</dt>
+                        <dd className="text-gc-quiet">{levelProfile.mistakeIdentification}</dd>
+                      </div>
+                    </dl>
+                  )}
+                </section>
 
-                      <div className="flex items-center gap-3 w-full sm:w-auto shrink-0">
-                        <ActionButton
+                {/* Theme */}
+                <section className={sectionCls} aria-labelledby="setup-theme">
+                  <h2 id="setup-theme" className={sectionTitle}>Theme</h2>
+                  <p className={sectionHint}>The setting for the sentences, such as fantasy or business.</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {THEMES.map(item => {
+                      const isActive = settings.theme === item;
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          aria-pressed={isActive}
+                          onClick={() => { playSound('click'); setSettings(s => ({ ...s, theme: item })); }}
+                          className={pill(isActive)}
+                        >
+                          {item === 'Custom ✍️' ? 'My own theme ✍️' : item}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {settings.theme === 'Custom ✍️' && (
+                    <div className="mt-4 animate-gc-fade">
+                      <TextInput
+                        value={customTheme}
+                        onChange={e => setCustomTheme(e.target.value)}
+                        placeholder="For example: Football, Space travel, Cooking"
+                        aria-label="Your own theme"
+                        className="h-12"
+                      />
+                    </div>
+                  )}
+                </section>
+
+                {/* Question type */}
+                <section className={sectionCls} aria-labelledby="setup-format">
+                  <h2 id="setup-format" className={sectionTitle}>Question type</h2>
+                  <p className={sectionHint}>How students answer each sentence. You can change it between hands.</p>
+                  <div className="mt-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {CHALLENGE_FORMATS.map(fmt => {
+                      const isSelected = (settings.challengeFormat || 'binary') === fmt.id;
+                      return (
+                        <button
+                          key={fmt.id}
+                          type="button"
+                          aria-pressed={isSelected}
                           onClick={() => {
                             playSound('click');
-                            setShowDeckConfigModal(true);
+                            setMixedFormatSetupWarning(null);
+                            setSettings(s => ({
+                              ...s,
+                              challengeFormat: fmt.id,
+                              mixedFormats: getEffectiveMixedFormats(s.mixedFormats),
+                            }));
                           }}
-                          variant="purple"
-                          className="w-full sm:w-auto px-6 py-3 text-xs sm:text-sm flex items-center justify-center gap-2"
+                          className={`p-4 rounded-gc text-left flex items-start gap-3 ${optionBase} ${isSelected ? optionOn : optionOff}`}
                         >
-                          <span>🎴</span>
-                          <span>Customize Shoe</span>
-                        </ActionButton>
-                      </div>
-                    </div>
+                          <span className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] grid place-items-center text-[22px] leading-none" aria-hidden="true">{fmt.icon}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="text-gc-body font-bold">{fmt.label}</span>
+                              {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-money" aria-hidden="true" />}
+                            </span>
+                            <span className="block mt-0.5 text-gc-small text-gc-quiet">{fmt.subtitle}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  {/* VI. Win Condition */}
-                  <div className="text-left border-t border-[#d4af37]/25 pt-6"> 
-                    <div className="mb-3.5 border-l-4 border-rose-500 pl-3.5">
-                      <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                        VI. Table Rules &amp; Victory Condition
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-amber-200/60">Define how the Grand Champion is crowned</p>
-                    </div>
+                  {settings.challengeFormat === 'mixed' && (() => {
+                    const activeMixed = getEffectiveMixedFormats(settings.mixedFormats);
+                    const toggleMixedItem = (qType: QuestionType) => {
+                      const isIncluded = activeMixed.includes(qType);
+                      if (isIncluded) {
+                        if (activeMixed.length <= 1) {
+                          playSound('error');
+                          setMixedFormatSetupWarning('Keep at least one question type in the mix.');
+                          return;
+                        }
+                        playSound('click');
+                        setMixedFormatSetupWarning(null);
+                        setSettings(s => ({
+                          ...s,
+                          mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) && q !== qType),
+                        }));
+                      } else {
+                        playSound('click');
+                        setMixedFormatSetupWarning(null);
+                        setSettings(s => ({
+                          ...s,
+                          mixedFormats: ALL_QUESTION_TYPES.filter(q => activeMixed.includes(q) || q === qType),
+                        }));
+                      }
+                    };
+                    return (
+                      <div className="mt-4 p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-3 animate-gc-fade">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-gc-body font-bold text-gc-ink">
+                            In the mix <span className="text-gc-quiet font-semibold tabular-nums">({activeMixed.length} of 5)</span>
+                          </h3>
+                          {activeMixed.length < 5 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                playSound('click');
+                                setMixedFormatSetupWarning(null);
+                                setSettings(s => ({ ...s, mixedFormats: ALL_QUESTION_TYPES }));
+                              }}
+                              className="h-9 px-3.5 rounded-full text-gc-small font-semibold bg-gc-line/[0.06] border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink cursor-pointer"
+                            >
+                              Turn all on
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {CHALLENGE_FORMATS.filter((c): c is typeof CHALLENGE_FORMATS[number] & { id: QuestionType } => c.id !== 'mixed').map(subFmt => {
+                            const isChecked = activeMixed.includes(subFmt.id);
+                            return (
+                              <button
+                                key={subFmt.id}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={isChecked}
+                                onClick={() => toggleMixedItem(subFmt.id)}
+                                className={`h-11 pl-2 pr-4 inline-flex items-center gap-2 rounded-full text-gc-small font-semibold ${optionBase} ${isChecked ? optionOn : `${optionOff} text-gc-quiet`}`}
+                              >
+                                <span className={`w-6 h-6 rounded-full grid place-items-center ${isChecked ? 'bg-gc-gold text-gc-on-gold' : 'bg-gc-line/[0.08]'}`}>
+                                  {isChecked ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : null}
+                                </span>
+                                <span aria-hidden="true">{subFmt.icon}</span>
+                                {subFmt.shortLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {mixedFormatSetupWarning && (
+                          <p role="alert" className="text-gc-small font-semibold text-gc-loss flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                            {mixedFormatSetupWarning}
+                          </p>
+                        )}
+                        <p className="text-gc-small text-gc-quiet">
+                          <span className="font-semibold text-gc-ink">Order: </span>
+                          {activeMixed
+                            .map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.shortLabel || q)
+                            .join(', then ')}
+                        </p>
+                      </div>
+                    );
+                  })()}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4"> 
-                      {/* Mode 1: Last Survivor */}
-                      <button 
-                        type="button"
-                        onClick={() => { playSound('click'); setGameMode('lastPlayer'); }} 
-                        className={`p-5 rounded-xl border-2 transition-all flex flex-col items-center justify-center text-center cursor-pointer ${
-                          gameMode === 'lastPlayer'
-                            ? 'bg-gradient-to-b from-amber-500/20 to-amber-900/20 border-[#d4af37] shadow-[0_0_25px_rgba(212,175,55,0.25)] scale-[1.01]'
-                            : 'felt-well opacity-75 hover:opacity-100 hover:border-[#d4af37]/60'
-                        }`}
-                      >
-                        <div className="text-3xl mb-2">👑</div>
-                        <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">High-Roller Survival</div>
-                        <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Play until only one solvent player remains.</div>
-                      </button> 
-
-                      {/* Mode 2: Fixed Rounds */}
-                      <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
-                        gameMode === 'rounds'
-                          ? 'bg-gradient-to-b from-sky-500/20 to-blue-950/30 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.25)] scale-[1.01]'
-                          : 'felt-well opacity-75 hover:opacity-100 hover:border-sky-400/50'
-                      }`}> 
-                        <button 
-                          type="button"
-                          onClick={() => { playSound('click'); setGameMode('rounds'); }} 
-                          className="w-full text-center cursor-pointer"
+                  {settings.challengeFormat && settings.challengeFormat !== 'binary' && (
+                    <p className="mt-4 text-gc-small text-gc-quiet flex items-start gap-2">
+                      <Info className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>
+                        Gap questions pay 1:1. Key word transformation pays 1× the bet for 1 mark and 2× for 2 marks.
+                        A split bet covers two answers at half the bet each. The correction bonus and Grammar Goggles are off for gap questions.
+                      </span>
+                    </p>
+                  )}
+                </section>
+              </div>
+            ) : (
+              <div className="space-y-4 animate-gc-fade">
+                {/* How to win */}
+                <section className={sectionCls} aria-labelledby="setup-win">
+                  <h2 id="setup-win" className={sectionTitle}>How to win</h2>
+                  <p className={sectionHint}>When the game ends and who is the winner.</p>
+                  <div className="mt-4 grid md:grid-cols-3 gap-2.5">
+                    {([
+                      { mode: 'lastPlayer' as const, icon: '👑', title: 'Last player standing', text: 'Play until only one player has money left.' },
+                      { mode: 'rounds' as const, icon: '⏳', title: 'Set number of hands', text: 'The most money after the last hand wins.' },
+                      { mode: 'targetAmount' as const, icon: '🎯', title: 'Target amount', text: 'The first player to reach the target wins.' },
+                    ]).map(opt => {
+                      const isSelected = gameMode === opt.mode;
+                      return (
+                        <div
+                          key={opt.mode}
+                          className={`rounded-gc ${optionBase} ${isSelected ? optionOn : optionOff} !cursor-default`}
                         >
-                            <div className="text-3xl mb-2">⏳</div>
-                            <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Fixed Shoe Hands</div>
-                            <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">Richest vault after a set number of hands.</div>
-                        </button> 
-                        {gameMode === 'rounds' && (
-                          <div className="flex flex-col items-center gap-2 pt-2 border-t border-sky-400/30 w-full">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-sans uppercase tracking-wider text-slate-700 dark:text-sky-200 font-bold">Hands:</span> 
-                              <TextInput 
-                                type="number" 
+                          <button
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => { playSound('click'); setGameMode(opt.mode); }}
+                            className="w-full p-4 text-left flex items-start gap-3 cursor-pointer rounded-gc focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                          >
+                            <span className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] grid place-items-center text-[22px] leading-none" aria-hidden="true">{opt.icon}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="text-gc-body font-bold">{opt.title}</span>
+                                {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-money" aria-hidden="true" />}
+                              </span>
+                              <span className="block mt-0.5 text-gc-small text-gc-quiet">{opt.text}</span>
+                            </span>
+                          </button>
+                          {isSelected && opt.mode === 'rounds' && (
+                            <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
+                              <label htmlFor="gc-total-rounds" className="text-gc-small font-semibold text-gc-quiet">Hands</label>
+                              <TextInput
+                                id="gc-total-rounds"
+                                type="number"
                                 min={1}
                                 max={100}
-                                value={String(totalRounds)} 
-                                onChange={(e) => { 
-                                  const val = e.target.value; 
+                                value={String(totalRounds)}
+                                onChange={(e) => {
+                                  const val = e.target.value;
                                   setTotalRounds(val === '' ? '' : parseInt(val, 10));
-                                }} 
-                                className="w-20 text-center !py-1 font-sans tabular-nums font-bold"
+                                }}
+                                className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
                               />
-                            </div>
-                            <div className="flex items-center gap-1.5 text-[11px]">
                               {[5, 10, 15, 20].map((r) => (
                                 <button
                                   key={r}
                                   type="button"
+                                  aria-pressed={totalRounds === r}
                                   onClick={() => { playSound('click'); setTotalRounds(r); }}
-                                  className={`px-2 py-0.5 rounded border text-xs font-sans tabular-nums transition-colors cursor-pointer ${totalRounds === r ? 'bg-sky-500 text-white border-sky-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-sky-400'}`}
+                                  className={`h-9 min-w-[2.5rem] px-2.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
                                 >
                                   {r}
                                 </button>
                               ))}
                             </div>
-                          </div>
-                        )} 
-                      </div> 
-
-                      {/* Mode 3: Target Amount */}
-                      <div className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
-                        gameMode === 'targetAmount'
-                          ? 'bg-gradient-to-b from-emerald-500/20 to-emerald-950/30 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.25)] scale-[1.01]'
-                          : 'felt-well opacity-75 hover:opacity-100 hover:border-emerald-400/50'
-                      }`}> 
-                        <button 
-                          type="button"
-                          onClick={() => { playSound('click'); setGameMode('targetAmount'); }} 
-                          className="w-full text-center cursor-pointer"
-                        >
-                            <div className="text-3xl mb-2">🎯</div>
-                            <div className="font-sans text-base sm:text-lg text-slate-900 dark:text-amber-50 font-extrabold uppercase tracking-wider">Target Bankroll</div>
-                            <div className="text-xs text-slate-500 dark:text-amber-200/70 mt-1">First high-roller to hit the vault target wins.</div>
-                        </button> 
-                        {gameMode === 'targetAmount' && (
-                          <div className="flex flex-col items-center gap-2 pt-2 border-t border-emerald-400/30 w-full">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-sans uppercase tracking-wider text-slate-700 dark:text-emerald-200 font-bold">Goal: $</span> 
-                              <TextInput 
-                                type="number" 
+                          )}
+                          {isSelected && opt.mode === 'targetAmount' && (
+                            <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
+                              <label htmlFor="gc-target-amount" className="text-gc-small font-semibold text-gc-quiet">Target $</label>
+                              <TextInput
+                                id="gc-target-amount"
+                                type="number"
                                 min={MIN_TARGET_AMOUNT}
                                 step={250}
-                                value={String(targetAmount)} 
-                                onChange={(e) => { 
-                                  const val = e.target.value; 
+                                value={String(targetAmount)}
+                                onChange={(e) => {
+                                  const val = e.target.value;
                                   setTargetAmount(val === '' ? '' : parseInt(val, 10));
-                                }} 
-                                className="w-24 text-center !py-1 font-sans tabular-nums font-bold"
+                                }}
+                                className="w-24 h-10 !py-1 text-center font-bold tabular-nums"
                               />
-                            </div>
-                            <div className="flex flex-wrap justify-center items-center gap-1 text-[11px]">
                               {[2000, 2500, 3000, 5000].map((amt) => (
                                 <button
                                   key={amt}
                                   type="button"
+                                  aria-pressed={Number(targetAmount) === amt}
                                   onClick={() => { playSound('click'); setTargetAmount(amt); }}
-                                  className={`px-2 py-0.5 rounded border text-[11px] font-sans tabular-nums transition-colors cursor-pointer ${Number(targetAmount) === amt ? 'bg-emerald-600 text-white border-emerald-300 font-bold' : 'bg-black/10 dark:bg-black/40 text-slate-700 dark:text-slate-300 border-slate-400/40 hover:border-emerald-400'}`}
+                                  className={`h-9 px-2.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${Number(targetAmount) === amt ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
                                 >
-                                  ${amt >= 1000 ? `${amt / 1000}k` : amt}
+                                  ${amt.toLocaleString()}
                                 </button>
                               ))}
                             </div>
-                          </div>
-                        )} 
-                      </div> 
-                    </div> 
-                  </div> 
-
-                  {/* VII. Betting Turn / Round Clock */}
-                  <div className="text-left border-t border-[#d4af37]/25 pt-6">
-                    <div className="mb-3.5 border-l-4 border-amber-400 pl-3.5 flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-lg sm:text-xl font-sans text-slate-900 dark:text-[#fef08a] font-extrabold uppercase tracking-wider">
-                          {mpRoomCode ? 'VII. Shared Round Clock' : 'VII. Betting Turn Clock'}
-                        </h3>
-                        <p className="text-xs text-slate-500 dark:text-amber-200/60">
-                          {mpRoomCode
-                            ? 'Set a shared countdown timer displayed to everyone while all players place their bets simultaneously'
-                            : 'Set a per-player time limit for placing bets, writing corrections, and buying hints or power-ups'}
-                        </p>
-                      </div>
-                      {turnTimerSeconds > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
-                          className={`px-3 py-1.5 rounded-full text-xs font-sans font-bold uppercase tracking-wider border transition-all cursor-pointer ${
-                            autoStartNextTimer
-                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
-                              : 'felt-well text-slate-600 dark:text-amber-200/70 border-[#d4af37]/40'
-                          }`}
-                          title={
-                            mpRoomCode
-                              ? 'When enabled, the shared round timer starts automatically as soon as each hand is dealt'
-                              : "When enabled, locking or finishing one player's timer automatically starts the next player's timer"
-                          }
-                        >
-                          {mpRoomCode
-                            ? (autoStartNextTimer ? '✓ Auto-Start Round Timer: ON' : 'Auto-Start Round Timer: OFF')
-                            : (autoStartNextTimer ? '✓ Auto-Advance Next Player: ON' : 'Auto-Advance Next Player: OFF')}
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 sm:gap-3">
-                      {TURN_TIMER_OPTIONS.map(secs => {
-                        const isSelected = turnTimerSeconds === secs;
-                        return (
-                          <button
-                            key={secs}
-                            type="button"
-                            onClick={() => {
-                              playSound('click');
-                              setTurnTimerSeconds(secs);
-                              setTurnTimers({});
-                              setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
-                              mpAutoStartedRoundRef.current = 0;
-                            }}
-                            className={`p-3.5 rounded-xl transition-all duration-200 font-sans border cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                              isSelected
-                                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow-[0_6px_18px_rgba(202,138,4,0.4),inset_0_1px_0_rgba(255,255,255,0.8)] font-extrabold scale-[1.02]'
-                                : 'felt-well text-slate-800 dark:text-amber-50/90 hover:border-[#d4af37] hover:bg-amber-500/10'
-                            }`}
-                          >
-                            <span className="text-xl select-none">{secs === 0 ? '∞' : '⏱️'}</span>
-                            <span className="text-xs sm:text-sm uppercase tracking-wider font-extrabold">
-                              {secs === 0 ? 'Off' : `${secs}s`}
-                            </span>
-                            <span className={`text-[10px] font-sans ${isSelected ? 'text-[#1c0a04]/80 font-semibold' : 'opacity-65'}`}>
-                              {secs === 0 ? 'No time limit' : 'Per player turn'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                </div> 
+                </section>
 
-                <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+                {/* Timer */}
+                <section className={sectionCls} aria-labelledby="setup-timer">
+                  <h2 id="setup-timer" className={sectionTitle}>{mpRoomCode ? 'Round timer' : 'Turn timer'}</h2>
+                  <p className={sectionHint}>
+                    {mpRoomCode
+                      ? 'One countdown for everyone while they place their bets on their phones.'
+                      : 'Time for each player to choose, bet, and buy hints or power-ups.'}
+                  </p>
+                  <div className="mt-4 grid grid-cols-3 sm:grid-cols-6 gap-2" role="group" aria-label={mpRoomCode ? 'Round timer' : 'Turn timer'}>
+                    {TURN_TIMER_OPTIONS.map(secs => {
+                      const isSelected = turnTimerSeconds === secs;
+                      return (
+                        <button
+                          key={secs}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => {
+                            playSound('click');
+                            setTurnTimerSeconds(secs);
+                            setTurnTimers({});
+                            setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                            mpAutoStartedRoundRef.current = 0;
+                          }}
+                          className={`h-14 rounded-gc-sm flex flex-col items-center justify-center ${optionBase} ${isSelected ? optionOn : optionOff}`}
+                        >
+                          <span className="text-gc-body font-extrabold tabular-nums leading-none">{secs === 0 ? 'Off' : `${secs} s`}</span>
+                          <span className="mt-1 text-gc-cap text-gc-quiet">{secs === 0 ? 'No limit' : mpRoomCode ? 'per round' : 'per turn'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {turnTimerSeconds > 0 && (
+                    <label className="mt-4 flex items-center justify-between gap-4 p-3.5 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] cursor-pointer">
+                      <span>
+                        <span className="block text-gc-body font-semibold text-gc-ink">Start the timer by itself</span>
+                        <span className="block text-gc-small text-gc-quiet">
+                          {mpRoomCode
+                            ? 'The countdown starts as soon as each hand is dealt.'
+                            : "When one player locks in, the next player's timer starts."}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={autoStartNextTimer}
+                        onClick={() => { playSound('click'); setAutoStartNextTimer(v => !v); }}
+                        className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${autoStartNextTimer ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                      >
+                        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoStartNextTimer ? 'translate-x-5' : ''}`} />
+                        <span className="sr-only">Start the timer by itself</span>
+                      </button>
+                    </label>
+                  )}
+                </section>
+
+                {/* Power-ups */}
+                <section className={sectionCls} aria-labelledby="setup-powerups">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 id="setup-powerups" className={sectionTitle}>
+                        Power-ups <span className="text-gc-quiet font-semibold tabular-nums">({selectedPowerUps.length} of {(Object.keys(POWER_UPS) as PowerUpKey[]).length})</span>
+                      </h2>
+                      <p className={sectionHint}>Cards players can draw during a hand to help themselves or slow down others.</p>
+                    </div>
+                    <ActionButton
+                      onClick={() => { playSound('click'); setShowDeckConfigModal(true); }}
+                      variant="ghost"
+                      className="h-11 px-5 text-gc-body font-bold shrink-0"
+                    >
+                      Choose power-ups
+                    </ActionButton>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-1.5" aria-label="Power-ups in the deck">
+                    {selectedPowerUps.slice(0, 16).map(k => (
+                      <span key={k} className="w-9 h-9 rounded-full bg-gc-line/[0.06] grid place-items-center text-[18px] leading-none" title={POWER_UPS[k]?.name}>
+                        {POWER_UPS[k]?.icon}
+                      </span>
+                    ))}
+                    {selectedPowerUps.length > 16 && (
+                      <span className="ml-1 text-gc-small font-semibold text-gc-quiet tabular-nums">+{selectedPowerUps.length - 16} more</span>
+                    )}
+                    {selectedPowerUps.length === 0 && (
+                      <span className="text-gc-small text-gc-quiet">No power-ups. Players can still buy hints.</span>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {/* Summary and the next step, always in reach */}
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gc-line/[0.12] bg-gc-bg/90 backdrop-blur-md">
+              <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
+                <ul className="hidden md:flex flex-1 min-w-0 flex-wrap gap-1.5" aria-label="Your choices">
+                  {summaryChips.map((c, i) => (
+                    <li key={i} className="h-8 px-3 inline-flex items-center rounded-full bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-small font-semibold text-gc-ink max-w-[14rem] truncate">
+                      {c}
+                    </li>
+                  ))}
+                </ul>
+                <p className="md:hidden flex-1 min-w-0 text-gc-small text-gc-quiet truncate">{summaryChips.join(' · ')}</p>
+                <ActionButton
+                  onClick={() => {
+                    playSound('click');
+                    if (settingsPart === 2) setSettingsPart(1);
+                    else setStep('PLAYER_SETUP');
+                  }}
+                  variant="ghost"
+                  className="h-12 px-4 text-gc-body font-semibold shrink-0"
+                  title={settingsPart === 2 ? 'Back to the questions' : 'Back to the lobby'}
+                >
+                  <span className="inline-flex items-center gap-1.5"><ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">Back</span></span>
+                </ActionButton>
+                {settingsPart === 1 ? (
                   <ActionButton
-                    onClick={() => { playSound('click'); setSettingsPart(1); }}
-                    variant="outline-gold"
-                    className="py-3.5 px-6 text-sm"
+                    onClick={handleAdvanceToSettingsPart2}
+                    variant="primary"
+                    className="h-12 px-6 text-gc-body shrink-0"
                   >
-                    &larr; Linguistic Setup
+                    <span className="inline-flex items-center gap-2">Next: house rules<ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" /></span>
                   </ActionButton>
+                ) : (
                   <ActionButton
                     onClick={handleFinalizeSettings}
                     playSound={playSound}
-                    variant="gold"
-                    className="w-full sm:w-auto text-lg sm:text-xl py-4 px-14 tracking-[0.15em]"
+                    variant="primary"
+                    className="h-12 px-6 text-gc-body shrink-0"
                   >
-                    DEAL THE FIRST HAND ♠️
+                    <span className="inline-flex items-center gap-2">Deal the first hand<ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" /></span>
                   </ActionButton>
-                </div>
-              </>
-            )}
-          </div> 
+                )}
+              </div>
+            </div>
+          </div>
           );
         }
         case 'IN_GAME': { 
@@ -5416,19 +5326,19 @@ export function App() {
                       return (
                         <div key={player.id} className="space-y-2">
                           {mpRoomCode && mpSeat?.lockedIn && !isFrozen && player.money > 0 && (
-                            <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-400/50 text-emerald-900 dark:text-emerald-200">
-                              <span className="text-xs font-sans font-extrabold uppercase tracking-wider flex items-center gap-2">
-                                <span>🔒</span>
-                                <span>{player.name} Locked In Wager on Device</span>
+                            <div className="flex items-center justify-between gap-3 px-4 py-2 rounded-gc bg-gc-win/10 border border-gc-win/40">
+                              <span className="text-gc-small font-semibold text-gc-ink flex items-center gap-2 min-w-0">
+                                <Lock className="w-4 h-4 shrink-0 text-gc-win" aria-hidden="true" />
+                                <span className="truncate">{player.name} locked in on their phone</span>
                               </span>
                               <button
                                 type="button"
                                 onClick={() => handleMpUnlockPlayer(player.id)}
-                                title="Teacher Only: Unlock this player's wager so they can change their bet"
-                                className="px-3 py-1 rounded-lg font-sans font-extrabold uppercase tracking-wider text-xs border border-[#d4af37]/70 hover:border-[#d4af37] bg-black/15 dark:bg-black/50 text-amber-900 dark:text-[#fef08a] transition-all cursor-pointer flex items-center gap-1.5"
+                                title="Let this player change their bet"
+                                className="h-9 px-3 shrink-0 rounded-full border border-gc-line/[0.2] bg-gc-line/[0.05] hover:border-gc-line/40 text-gc-small font-bold text-gc-ink transition-colors cursor-pointer inline-flex items-center gap-1.5"
                               >
-                                <span>🔓</span>
-                                <span>Unlock Player</span>
+                                <LockOpen className="w-4 h-4" aria-hidden="true" />
+                                Unlock
                               </button>
                             </div>
                           )}
@@ -5528,6 +5438,45 @@ export function App() {
             // Style A chips under the sentence: quiet, no emoji; a gold "Next" tag when a change is queued.
             const metaChip = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-small font-medium text-gc-quiet whitespace-nowrap';
             const nextTag = 'inline-flex items-center h-5 px-1.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold';
+            // The settings drawer under the chips (style A).
+            const drawerCell = 'px-3 py-2 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12]';
+            const drawerLink = 'h-8 px-2.5 rounded-full text-gc-small font-semibold text-gc-ink hover:bg-gc-line/[0.08] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn';
+            const mixIcons = (formats: Settings['mixedFormats']) =>
+              getEffectiveMixedFormats(formats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('');
+            const formatIsChanging = Boolean(nextFormatConfig && (
+              nextFormatConfig.id !== activeFormatConfig.id ||
+              (nextFormatConfig.id === 'mixed' &&
+                getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !== getEffectiveMixedFormats(settings.mixedFormats).join(','))
+            ));
+            const aiReady = desktopStatus.hasKey && desktopStatus.isOnline;
+            const drawerRows: { tab: SettingsModalTab; icon: string; label: string; value: string; next?: string | null; note?: string; warn?: boolean }[] = [
+              {
+                tab: 'topic', icon: '📚', label: 'Topic', value: settings.topic,
+                next: nextRoundSettings && nextRoundSettings.topic !== settings.topic ? nextRoundSettings.topic : null,
+                note: currentSentence?.bankTopic ? `This hand: ${currentSentence.bankTopic}` : undefined,
+              },
+              {
+                tab: 'level', icon: '📊', label: 'Level', value: settings.level,
+                next: nextRoundSettings && nextRoundSettings.level !== settings.level ? nextRoundSettings.level : null,
+              },
+              {
+                tab: 'theme', icon: '🎭', label: 'Theme', value: settings.theme,
+                next: nextRoundSettings && nextRoundSettings.theme !== settings.theme ? nextRoundSettings.theme : null,
+              },
+              {
+                tab: 'format', icon: activeFormatConfig.icon, label: 'Question type',
+                value: activeFormatConfig.id === 'mixed' ? `${activeFormatConfig.shortLabel} ${mixIcons(settings.mixedFormats)}` : activeFormatConfig.shortLabel,
+                next: formatIsChanging && nextFormatConfig
+                  ? (nextFormatConfig.id === 'mixed' ? `${nextFormatConfig.shortLabel} ${mixIcons(nextRoundSettings?.mixedFormats)}` : nextFormatConfig.shortLabel)
+                  : null,
+              },
+              {
+                tab: 'ai', icon: desktopStatus.decryptionFailed ? '🔑' : aiReady ? '⚡' : '💾', label: 'Sentences',
+                value: desktopStatus.decryptionFailed ? 'Re-enter the AI key' : aiReady ? 'AI sentences' : 'Offline bank',
+                note: [desktopStatus.isPortable ? 'Portable' : '', desktopStatus.isReadOnly ? 'Read-only' : ''].filter(Boolean).join(' · ') || undefined,
+                warn: desktopStatus.decryptionFailed,
+              },
+            ];
 
             return ( 
               <div className="w-full max-w-6xl animate-fade-in p-2 md:p-4"> 
@@ -5694,175 +5643,85 @@ export function App() {
                                   </span>
                                 </button>
 
-                                {/* Expanded Area: Full interactive Topic/Level/Theme/Format pills + Full Deck bar */}
+                                {/* The game's settings. Each row opens the settings window on its tab. */}
                                 {isSettingsDeckExpanded && (
-                                  <div className="w-full mt-3 pt-3 border-t border-[#d4af37]/25 flex flex-col items-center gap-2.5 animate-fade-in">
-                                    {/* Interactive Topic, Level, Theme, Format, & Turn Timer Pills */}
-                                    <div className="flex flex-wrap gap-2 justify-center items-center">
-                                      {/* Topic Pill */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSettingsModal('topic')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to change Topic for next round"
-                                      >
-                                        <span className="flex items-center gap-1">
-                                          <span>📚</span>
-                                          <span className="font-bold">{settings.topic}</span>
-                                          {currentSentence?.bankTopic && (
-                                            <span
-                                              className="text-[9px] bg-sky-200 text-sky-950 px-1.5 rounded-full font-sans tabular-nums font-bold"
-                                              title={`The offline bank has no unused ${settings.level} items for ${settings.topic}, so this hand uses ${currentSentence.bankTopic} at the same level.`}
-                                            >
-                                              This hand: {currentSentence.bankTopic}
+                                  <div className="w-full max-w-4xl mt-3 gc-surface rounded-gc-lg p-3 sm:p-4 text-left animate-gc-fade">
+                                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-1">
+                                      <h3 className="text-gc-body font-bold text-gc-ink">Game settings</h3>
+                                      <p className="text-gc-cap text-gc-quiet">Change them for this hand or from the next one.</p>
+                                    </div>
+
+                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                      {drawerRows.map(row => (
+                                        <button
+                                          key={row.tab}
+                                          type="button"
+                                          onClick={() => handleOpenSettingsModal(row.tab)}
+                                          className={`group flex items-center gap-3 w-full min-h-[60px] ${drawerCell} hover:border-gc-gold/60 text-left transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn`}
+                                          title={`Change the ${row.label.toLowerCase()}`}
+                                        >
+                                          <span className="w-9 h-9 shrink-0 rounded-full bg-gc-line/[0.07] grid place-items-center text-[18px] leading-none" aria-hidden="true">{row.icon}</span>
+                                          <span className="flex-1 min-w-0">
+                                            <span className="block text-gc-cap font-semibold text-gc-quiet">{row.label}</span>
+                                            <span className={`block text-gc-small font-bold truncate ${row.warn ? 'text-gc-loss' : 'text-gc-ink'}`}>{row.value}</span>
+                                            {row.note && <span className="block text-gc-cap text-gc-info truncate">{row.note}</span>}
+                                          </span>
+                                          {row.next && (
+                                            <span className="inline-block shrink-0 max-w-[9rem] truncate h-5 leading-5 px-1.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold">
+                                              Next: {row.next}
                                             </span>
                                           )}
-                                        </span>
-                                        {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
-                                            <span>Next:</span>
-                                            <span className="truncate max-w-[100px]">{nextRoundSettings.topic}</span>
-                                          </span>
-                                        )}
-                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
-                                      </button>
+                                          <Pencil className="w-4 h-4 shrink-0 text-gc-quiet group-hover:text-gc-gold transition-colors" aria-hidden="true" />
+                                        </button>
+                                      ))}
 
-                                      {/* Level Pill */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSettingsModal('level')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to change CEFR Level for next round"
-                                      >
-                                        <span className="flex items-center gap-1">
-                                          <span>📊</span>
-                                          <span className="font-bold">{settings.level}</span>
+                                      {/* Timer: one tap, no window */}
+                                      <div className={`min-h-[60px] ${drawerCell}`}>
+                                        <span id="drawer-timer-label" className="block text-gc-cap font-semibold text-gc-quiet">
+                                          {mpRoomCode ? 'Round timer' : 'Turn timer'}, in seconds
                                         </span>
-                                        {nextRoundSettings && nextRoundSettings.level !== settings.level && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
-                                            <span>Next:</span>
-                                            <span>{nextRoundSettings.level}</span>
-                                          </span>
-                                        )}
-                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
-                                      </button>
-
-                                      {/* Theme Pill */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSettingsModal('theme')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to change Theme for next round"
-                                      >
-                                        <span className="flex items-center gap-1">
-                                          <span>🎭</span>
-                                          <span className="font-bold">{settings.theme}</span>
-                                        </span>
-                                        {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
-                                            <span>Next:</span>
-                                            <span className="truncate max-w-[100px]">{nextRoundSettings.theme}</span>
-                                          </span>
-                                        )}
-                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
-                                      </button>
-
-                                      {/* Challenge Format Pill */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSettingsModal('format')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to change Challenge Format (Valid/Flawed, Multiple-Choice Cloze, Open Cloze, Word Formation, Mixed Shoe)"
-                                      >
-                                        <span className="flex items-center gap-1">
-                                          <span>{activeFormatConfig.icon}</span>
-                                          <span className="font-bold">
-                                            {activeFormatConfig.shortLabel}
-                                            {activeFormatConfig.id === 'mixed' && (
-                                              <span className="ml-1 text-[10px] opacity-90">
-                                                ({getEffectiveMixedFormats(settings.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
-                                              </span>
-                                            )}
-                                          </span>
-                                        </span>
-                                        {nextFormatConfig && (
-                                          nextFormatConfig.id !== activeFormatConfig.id ||
-                                          (nextFormatConfig.id === 'mixed' &&
-                                            getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !==
-                                              getEffectiveMixedFormats(settings.mixedFormats).join(','))
-                                        ) && (
-                                          <span className="bg-amber-500 text-black text-[9px] font-sans tabular-nums font-black px-1.5 py-0.2 rounded-full shadow-sm animate-pulse flex items-center gap-0.5">
-                                            <span>Next:</span>
-                                            <span>
-                                              {nextFormatConfig.shortLabel}
-                                              {nextFormatConfig.id === 'mixed' && ` (${getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})`}
-                                            </span>
-                                          </span>
-                                        )}
-                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">✏️</span>
-                                      </button>
-
-                                                                            {/* AI & Offline Pill */}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenSettingsModal('ai')}
-                                        className="group relative px-3.5 py-1 felt-well hover:border-[#d4af37] rounded-full text-xs font-sans text-slate-800 dark:text-white flex items-center gap-1.5 font-medium transition-all duration-200 hover:scale-105 cursor-pointer"
-                                        title="Click to view AI & Offline Settings"
-                                      >
-                                        <span className="flex items-center gap-1">
-                                          <span>{desktopStatus.decryptionFailed ? '🔑' : desktopStatus.hasKey && desktopStatus.isOnline ? '⚡' : '💾'}</span>
-                                          <span className="font-bold">{desktopStatus.decryptionFailed ? 'Key Re-entry Needed' : desktopStatus.hasKey && desktopStatus.isOnline ? 'Gemini AI' : 'Offline Bank'}</span>
-                                          {desktopStatus.isPortable && <span className="text-purple-600 dark:text-purple-300 font-sans tabular-nums font-bold text-[10px]">🎒 Portable</span>}
-                                          {desktopStatus.isReadOnly && <span className="text-red-500 font-sans tabular-nums font-bold text-[10px]">🔒 Read-Only</span>}
-                                        </span>
-                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 opacity-60 group-hover:opacity-100 transition-opacity">⚙️</span>
-                                      </button>
-
-{/* Turn / Round Clock Quick Selector Pill */}
-                                      <div className="px-3 py-1 felt-well rounded-full text-xs font-sans text-slate-800 dark:text-amber-100 flex items-center gap-1.5">
-                                        <span>⏱️ {mpRoomCode ? 'Round Clock:' : 'Turn Clock:'}</span>
-                                        {TURN_TIMER_OPTIONS.map(secs => (
-                                          <button
-                                            key={secs}
-                                            type="button"
-                                            onClick={() => {
-                                              playSound('click');
-                                              setTurnTimerSeconds(secs);
-                                              setTurnTimers({});
-                                              setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
-                                              mpAutoStartedRoundRef.current = 0;
-                                            }}
-                                            className={`px-2 py-0.5 rounded-full font-sans tabular-nums text-[10px] font-bold transition-all cursor-pointer ${
-                                              turnTimerSeconds === secs
-                                                ? 'bg-[#d4af37] text-black shadow-sm'
-                                                : 'hover:bg-amber-500/20 text-slate-700 dark:text-amber-200/80'
-                                            }`}
-                                          >
-                                            {secs === 0 ? 'Off' : `${secs}s`}
-                                          </button>
-                                        ))}
+                                        <div className="mt-1.5 grid grid-cols-6 gap-1" role="group" aria-labelledby="drawer-timer-label">
+                                          {TURN_TIMER_OPTIONS.map(secs => {
+                                            const isSelected = turnTimerSeconds === secs;
+                                            return (
+                                              <button
+                                                key={secs}
+                                                type="button"
+                                                aria-pressed={isSelected}
+                                                onClick={() => {
+                                                  playSound('click');
+                                                  setTurnTimerSeconds(secs);
+                                                  setTurnTimers({});
+                                                  setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                                                  mpAutoStartedRoundRef.current = 0;
+                                                }}
+                                                className={`h-8 rounded-gc-sm border text-gc-small font-bold tabular-nums transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
+                                                  isSelected
+                                                    ? 'bg-gc-gold/15 border-gc-gold text-gc-ink'
+                                                    : 'border-gc-line/[0.14] text-gc-ink hover:border-gc-line/30'
+                                                }`}
+                                              >
+                                                {secs === 0 ? 'Off' : secs}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
                                     </div>
 
-                                    {/* Interactive Deck Power-ups Bar */}
-                                    <div className="px-4 py-1.5 felt-well border-purple-400/40 rounded-full text-xs font-sans text-purple-900 dark:text-purple-200 flex flex-wrap items-center gap-2 max-w-full justify-center">
-                                      <button 
-                                        type="button"
-                                        onClick={() => {
-                                          playSound('click');
-                                          setShowDeckConfigModal(true);
-                                        }}
-                                        className="flex items-center gap-1.5 font-bold select-none hover:text-purple-600 dark:hover:text-purple-300 transition-colors cursor-pointer group"
-                                        title="Configure Power-Up Deck"
-                                      >
-                                        <span>🃏 Shoe:</span>
-                                        <span className="text-[10px] font-sans tabular-nums px-1.5 py-0.5 rounded bg-purple-500/20 font-semibold" title={`${selectedPowerUps.length} of ${(Object.keys(POWER_UPS) as PowerUpKey[]).length} power-ups active`}>
-                                          {selectedPowerUps.length}/{(Object.keys(POWER_UPS) as PowerUpKey[]).length}
+                                    {/* Power-ups: tap one to turn it on or off */}
+                                    <div className={`mt-2 ${drawerCell}`}>
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <span className="text-gc-small font-semibold text-gc-ink">
+                                          Power-ups <span className="text-gc-quiet tabular-nums">({selectedPowerUps.length} of {(Object.keys(POWER_UPS) as PowerUpKey[]).length})</span>
                                         </span>
-                                        <span className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity">✏️</span>
-                                      </button>
-
-                                      <div className="flex flex-wrap items-center gap-1 justify-center">
+                                        <span className="flex flex-wrap items-center gap-1">
+                                          <button type="button" onClick={() => handleToggleAllPowerUps(true)} className={drawerLink}>All on</button>
+                                          <button type="button" onClick={() => handleToggleAllPowerUps(false)} className={drawerLink}>All off</button>
+                                          <button type="button" onClick={() => { playSound('click'); setShowDeckConfigModal(true); }} className={drawerLink}>Choose power-ups</button>
+                                        </span>
+                                      </div>
+                                      <div className="mt-2 flex flex-wrap gap-1">
                                         {(Object.keys(POWER_UPS) as PowerUpKey[]).map(key => {
                                           const isActive = selectedPowerUps.includes(key);
                                           const isDisabledInCloze = isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(key);
@@ -5870,90 +5729,44 @@ export function App() {
                                           const isDisabledInSolo = !mpRoomCode && MP_ONLY_POWER_UPS.includes(key);
                                           const isFormatDisabled = isDisabledInCloze || isDisabledInBinary || isDisabledInSolo;
                                           const powerUp = POWER_UPS[key];
-                                          
+                                          const whyNotNow = isDisabledInCloze
+                                            ? 'Not used on gap questions'
+                                            : isDisabledInBinary
+                                              ? 'Only on gap questions'
+                                              : isDisabledInSolo
+                                                ? 'Only in a live room'
+                                                : '';
                                           return (
-                                            <PowerUpTooltip 
-                                              key={key} 
-                                              powerUpKey={key} 
+                                            <PowerUpTooltip
+                                              key={key}
+                                              powerUpKey={key}
                                               placement="bottom"
                                               statusBadge={
-                                                isDisabledInCloze ? (
-                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
-                                                    <span>🚫 Disabled on Cloze Hands</span>
-                                                  </div>
-                                                ) : isDisabledInBinary ? (
-                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
-                                                    <span>🚫 Cloze Hands Only (MC / Open Cloze)</span>
-                                                  </div>
-                                                ) : isDisabledInSolo ? (
-                                                  <div className="flex items-center gap-1 font-semibold text-amber-300">
-                                                    <span>🚫 Live Multiplayer Only</span>
-                                                  </div>
-                                                ) : (
-                                                  <div className={`flex items-center gap-1 font-semibold ${isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                    <span>{isActive ? '🟢 Active in Deck' : '🔴 Deactivated'}</span>
-                                                    <span className="text-slate-400 text-[9px]">• Click to {isActive ? 'deactivate' : 'activate'}</span>
-                                                  </div>
-                                                )
+                                                <div className={`font-semibold ${isFormatDisabled ? 'text-amber-300' : isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                  {whyNotNow || (isActive ? 'On. Tap to turn it off.' : 'Off. Tap to turn it on.')}
+                                                </div>
                                               }
                                             >
                                               <button
                                                 type="button"
+                                                aria-pressed={isActive}
                                                 onClick={(e) => {
                                                   e.stopPropagation();
                                                   handleTogglePowerUpInDeck(key);
                                                 }}
-                                                className={`relative p-0.5 rounded transition-all duration-150 select-none group focus:outline-none ${
-                                                  isFormatDisabled
-                                                    ? 'opacity-25 grayscale cursor-not-allowed'
-                                                    : isActive 
-                                                      ? 'opacity-100 hover:scale-130 filter drop-shadow-sm cursor-pointer' 
-                                                      : 'opacity-30 grayscale hover:opacity-75 hover:scale-110 cursor-pointer'
+                                                className={`relative w-9 h-9 rounded-full grid place-items-center text-[18px] leading-none border transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
+                                                  isActive && !isFormatDisabled
+                                                    ? 'bg-gc-gold/15 border-gc-gold/60 hover:scale-110'
+                                                    : 'border-gc-line/[0.14] opacity-35 grayscale hover:opacity-75'
                                                 }`}
-                                                title={
-                                                  isDisabledInCloze
-                                                    ? `${powerUp.name} - Disabled on Cloze hands`
-                                                    : isDisabledInBinary
-                                                      ? `${powerUp.name} - Multiple-Choice & Open Cloze hands only`
-                                                      : isDisabledInSolo
-                                                        ? `${powerUp.name} - Live QR Multiplayer only`
-                                                        : `${powerUp.name} - ${isActive ? 'Active (Click to Deactivate)' : 'Deactivated (Click to Activate)'}`
-                                                }
-                                                aria-label={`${powerUp.name} (${isFormatDisabled ? 'disabled for current mode' : isActive ? 'active' : 'deactivated'})`}
+                                                title={`${powerUp.name}: ${whyNotNow || (isActive ? 'on' : 'off')}`}
+                                                aria-label={`${powerUp.name}${whyNotNow ? ` (${whyNotNow.toLowerCase()})` : ''}`}
                                               >
-                                                <span className="text-sm md:text-base inline-block">
-                                                  {powerUp.icon}
-                                                </span>
-                                                {(!isActive || isFormatDisabled) && (
-                                                  <span className="absolute inset-0 flex items-center justify-center text-rose-500 font-bold text-xs pointer-events-none drop-shadow">
-                                                    ✕
-                                                  </span>
-                                                )}
+                                                {powerUp.icon}
                                               </button>
                                             </PowerUpTooltip>
                                           );
                                         })}
-                                      </div>
-
-                                       {/* Deck Quick Mass Actions */}
-                                      <div className="flex items-center gap-1 border-l border-purple-400/30 pl-2 text-[10px] select-none">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleToggleAllPowerUps(true)}
-                                          className="px-1.5 py-0.5 rounded hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 font-bold hover:underline transition-colors cursor-pointer"
-                                          title={`Activate all ${Object.keys(POWER_UPS).length} power-ups in the deck`}
-                                        >
-                                          All
-                                        </button>
-                                        <span className="opacity-40">|</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleToggleAllPowerUps(false)}
-                                          className="px-1.5 py-0.5 rounded hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 font-bold hover:underline transition-colors cursor-pointer"
-                                          title="Deactivate all power-ups in the deck"
-                                        >
-                                          None
-                                        </button>
                                       </div>
                                     </div>
                                   </div>
@@ -6134,7 +5947,7 @@ export function App() {
                                 {mpSeat && (
                                   <span
                                     className={`w-3.5 h-3.5 rounded-full border-2 border-gc-card absolute -bottom-0.5 -right-0.5 ${
-                                      mpSeat.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                                      mpSeat.connected ? 'bg-gc-win' : 'bg-gc-gold'
                                     }`}
                                     title={mpSeat.connected ? 'Connected on a phone' : 'Disconnected'}
                                   />
@@ -6745,66 +6558,111 @@ export function App() {
             </div>
             ); 
         }
-        case 'GAME_OVER': return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in p-4 w-full max-w-4xl mx-auto">
-            <div className="text-xs font-sans uppercase tracking-[0.35em] text-amber-800 dark:text-[#d4af37] mb-2 font-bold">
-              Salon Privé · Final Settlement
-            </div>
-            <h1 className="text-5xl sm:text-7xl font-black text-gold mb-3 tracking-wider font-display title-glow">
-              TABLE CLOSED
-            </h1>
-            <div className="h-[1px] w-48 bg-gradient-to-r from-transparent via-[#d4af37] to-transparent mb-12"></div>
-            
-            {winner ? (
-              <div className="relative group w-full max-w-lg mb-8">
-                <div className="absolute inset-0 bg-gradient-to-b from-amber-400 to-amber-700 blur-2xl opacity-25 group-hover:opacity-40 transition-opacity duration-1000 rounded-full"></div>
-                <div className="luxury-card rounded-2xl p-8 sm:p-10 text-center relative border-2 border-[#d4af37] shadow-[0_0_50px_rgba(212,175,55,0.3)]">
-                    <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 text-6xl filter drop-shadow-lg animate-bounce">👑</div>
-                    
-                    <div className="mt-6 mb-4">
-                        <div className="w-28 h-28 mx-auto mb-4 rounded-full border-4 border-[#d4af37] bg-gradient-to-b from-amber-50 to-amber-100 dark:from-[#0d3520] dark:to-[#04150c] flex items-center justify-center text-7xl shadow-2xl">
-                          {winner.avatar}
-                        </div>
-                        <h2 className="text-4xl sm:text-5xl font-sans font-extrabold text-slate-900 dark:text-amber-50 mb-2 uppercase tracking-wider">
-                          {winner.name}
-                        </h2>
-                        <div className="text-amber-800 dark:text-[#fef08a] text-xs uppercase tracking-[0.3em] font-bold">
-                          {gameMode === 'targetAmount' ? 'Target Bankroll Champion' : gameMode === 'rounds' ? 'Highest Bankroll Champion' : 'Grand Salon Champion'}
-                        </div>
-                        {gameMode === 'targetAmount' && (
-                          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1.5 font-sans tabular-nums">
-                            🎯 Surpassed the ${Number(targetAmount).toLocaleString()} Vault Goal!
-                          </div>
-                        )}
-                    </div>
-                    
-                    <div className="felt-well rounded-xl p-6 mt-6">
-                        <div className="text-slate-600 dark:text-amber-200/70 text-xs font-sans uppercase tracking-[0.25em] mb-1 font-bold">
-                          Final Vault Balance
-                        </div>
-                        <div className="text-5xl sm:text-6xl font-sans tabular-nums font-black text-gold-flat mb-4">
-                          ${winner.money.toLocaleString()}
-                        </div>
-                        <div className="flex justify-center pt-3 border-t border-[#d4af37]/20">
-                          <ChipRack amount={winner.money} size="sm" />
-                        </div>
-                    </div>
-                </div>
+        case 'GAME_OVER': {
+          const ranked = [...players].sort((a, b) => b.money - a.money);
+          if (winner) {
+            const wi = ranked.findIndex(p => p.id === winner.id);
+            if (wi > 0) ranked.unshift(...ranked.splice(wi, 1));
+          }
+          const podium = ranked.slice(0, 3);
+          const everyoneBust = !winner && players.every(p => p.money <= 0);
+          // Podium order on screen: 2nd, 1st, 3rd
+          const podiumOrder = [podium[1], podium[0], podium[2]];
+          const podiumStyle = [
+            { place: 2, block: 'h-24 sm:h-28', avatar: 'w-16 h-16 sm:w-20 sm:h-20 text-[34px] sm:text-[42px]', delay: '0.25s' },
+            { place: 1, block: 'h-36 sm:h-44', avatar: 'w-20 h-20 sm:w-28 sm:h-28 text-[44px] sm:text-[60px]', delay: '0s' },
+            { place: 3, block: 'h-16 sm:h-20', avatar: 'w-14 h-14 sm:w-16 sm:h-16 text-[30px] sm:text-[34px]', delay: '0.45s' },
+          ];
+          const confettiColours = ['#f1cf72', '#e2b04a', '#86efac', '#fda4af', '#a5e3ff', '#fffdf7'];
+          return (
+          <div className="relative w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-12 text-center animate-gc-fade">
+            {/* Confetti, once. Calm mode and reduced motion skip it. */}
+            {winner && !isCalmMode && (
+              <div className="gc-confetti pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
+                {Array.from({ length: 70 }, (_, i) => (
+                  <span
+                    key={i}
+                    className="absolute -top-4 block rounded-[2px] animate-gc-confetti"
+                    style={{
+                      left: `${(i * 37 + 11) % 100}%`,
+                      width: i % 3 === 0 ? 8 : 6,
+                      height: i % 3 === 0 ? 12 : 10,
+                      background: confettiColours[i % confettiColours.length],
+                      animationDelay: `${(i % 9) * 0.06}s`,
+                      animationDuration: `${1.6 + ((i * 13) % 9) / 10}s`,
+                      ['--gc-drift' as string]: `${((i * 53) % 120) - 60}px`,
+                    } as React.CSSProperties}
+                  />
+                ))}
               </div>
-            ) : (
-               <div className="luxury-card rounded-2xl p-12 text-center border-2 border-[#d4af37]/40 max-w-lg shadow-2xl mb-8">
-                 <div className="text-7xl mb-5 opacity-70">🏛️</div>
-                 <h2 className="text-3xl sm:text-4xl font-sans font-extrabold text-slate-800 dark:text-amber-100 mb-2 uppercase tracking-wider">
-                   The House Prevails
-                 </h2>
-                 <p className="text-slate-600 dark:text-amber-200/60 font-editorial italic text-lg">
-                   Every challenger at the table has gone bust.
-                 </p>
-               </div>
             )}
 
-            {/* End-of-Game Grammar Report Card */}
-            <div className="w-full mt-4">
+            <p className="text-gc-small font-semibold text-gc-quiet">Final results</p>
+            <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">Table closed</h1>
+            <p className="mt-2 text-gc-lead text-gc-quiet text-balance">
+              {winner ? (
+                <>
+                  <b className="text-gc-ink">{winner.name}</b> wins with <b className="text-gc-money tabular-nums">${winner.money.toLocaleString()}</b>
+                  {gameMode === 'targetAmount' && <> and passed the ${Number(targetAmount).toLocaleString()} target</>}
+                  .
+                </>
+              ) : everyoneBust ? (
+                'Every player ran out of money. The house wins.'
+              ) : (
+                "It's a tie at the top, so there is no single winner."
+              )}
+            </p>
+
+            {podium.length > 0 && !everyoneBust && (
+              <ol className="mt-10 flex items-end justify-center gap-2.5 sm:gap-5" aria-label="Top three players">
+                {podiumOrder.map((p, idx) => {
+                  if (!p) return <li key={`empty-${idx}`} className="w-24 sm:w-40" aria-hidden="true" />;
+                  const st = podiumStyle[idx];
+                  const isFirst = st.place === 1;
+                  return (
+                    <li key={p.id} className="w-24 sm:w-40 flex flex-col items-center animate-gc-rise" style={{ animationDelay: st.delay }}>
+                      <span className="sr-only">Place {st.place}: </span>
+                      {isFirst && winner && <span className="text-[30px] sm:text-[38px] leading-none mb-1" aria-hidden="true">👑</span>}
+                      <span className={`${st.avatar} rounded-full bg-gc-card grid place-items-center leading-none ring-4 ${isFirst ? 'ring-gc-gold' : 'ring-gc-line/20'} shadow-gc-1`} aria-hidden="true">
+                        {p.avatar}
+                      </span>
+                      <span className={`mt-2 max-w-full truncate font-bold text-gc-ink ${isFirst ? 'text-gc-title' : 'text-gc-body sm:text-gc-lead'}`}>{p.name}</span>
+                      <span className="text-gc-small sm:text-gc-body font-bold text-gc-money tabular-nums">${p.money.toLocaleString()}</span>
+                      <span
+                        className={`mt-2 w-full ${st.block} rounded-t-gc grid place-items-start justify-center pt-3 border border-b-0 ${
+                          isFirst ? 'bg-gc-gold/25 border-gc-gold/50' : 'bg-gc-line/[0.07] border-gc-line/[0.14]'
+                        }`}
+                      >
+                        <span className={`font-extrabold tabular-nums ${isFirst ? 'text-gc-money text-[36px] sm:text-[44px]' : 'text-gc-quiet text-[28px] sm:text-[32px]'} leading-none`}>
+                          {st.place}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+            {podium.length > 0 && !everyoneBust && <div className="h-px bg-gc-line/[0.14] max-w-xl mx-auto" aria-hidden="true" />}
+
+            {everyoneBust && (
+              <div className="mt-8 mx-auto max-w-md gc-surface rounded-gc-lg p-8">
+                <div className="text-[56px] leading-none mb-3" aria-hidden="true">🏛️</div>
+                <h2 className="text-gc-title font-bold text-gc-ink">The house wins</h2>
+                <p className="mt-1 text-gc-body text-gc-quiet">Nobody has any money left.</p>
+              </div>
+            )}
+
+            <div className="mt-8 flex flex-wrap justify-center items-center gap-3">
+              <ActionButton onClick={handleRestartGame} playSound={playSound} variant="primary" className="min-h-[60px] px-10 text-gc-lead">
+                <span className="inline-flex items-center gap-2.5"><RotateCcw className="w-5 h-5 shrink-0" aria-hidden="true" />Play again</span>
+              </ActionButton>
+              <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
+                <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to the cloud</span>
+              </ActionButton>
+            </div>
+
+            {/* The session report */}
+            <div className="w-full mt-10 text-left">
               <GrammarReportCard
                 history={roundHistory}
                 players={players}
@@ -6817,18 +6675,9 @@ export function App() {
                 targetAmount={targetAmount}
               />
             </div>
-
-            <div className="mt-10 flex flex-wrap justify-center items-center gap-4">
-                <ActionButton onClick={handleRestartGame} playSound={playSound} variant="gold" className="text-lg py-4 px-12 tracking-[0.15em]">
-                    🔄 Open New Table
-                </ActionButton>
-                <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="outline-gold" className="text-sm py-4 px-6 flex items-center gap-2">
-                    <span>☁️</span>
-                    <span>Save Session / Roster to Cloud</span>
-                </ActionButton>
-            </div>
           </div>
-        );
+          );
+        }
         default: return <div className="p-20 text-center text-gold font-sans text-2xl animate-pulse">Initializing Table...</div>;
     }
   };
@@ -6838,6 +6687,7 @@ export function App() {
       ? (new URLSearchParams(window.location.search).get('room') || '')
       : '';
     return (
+      <MotionConfig reducedMotion="user">
       <StudentControllerView
         initialRoomCode={initialUrlRoom}
         playSound={playSound}
@@ -6854,11 +6704,12 @@ export function App() {
           setIsStudentControllerMode(false);
         }}
       />
+      </MotionConfig>
     );
   }
 
   return (
-    <>
+    <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300">
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
@@ -6869,7 +6720,7 @@ export function App() {
                 title="Leave the table and go back to the lobby"
              >
                 <ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span>Lobby</span>
+                <span className="sr-only sm:not-sr-only">Lobby</span>
              </button>
           </div>
         )}
@@ -6881,7 +6732,7 @@ export function App() {
         )}
 
         {/* Top Controls: Multiplayer Room Badge, Teacher AI / Offline Mode Gate, Theme Toggle & Audio */}
-        <div className="fixed top-4 right-4 z-50 flex items-center gap-2.5">
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 sm:gap-2.5">
           {mpRoomCode && (
             <button
               type="button"
@@ -6892,9 +6743,9 @@ export function App() {
               className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold tabular-nums"
               title="Open the room: QR code and who is connected"
             >
-              <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${mpHostConnected ? 'bg-gc-win animate-pulse' : 'bg-gc-gold'}`} />
               <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span>Room {mpRoomCode}</span>
+              <span><span className="sr-only sm:not-sr-only">Room </span>{mpRoomCode}</span>
               <span className="px-1.5 py-0.5 rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">
                 {Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length}
               </span>
@@ -6922,14 +6773,30 @@ export function App() {
                   : 'Offline Curated Bank Mode (0 API usage) — Click to enter Teacher PIN or Sign In with Google for Live AI'
               }
             >
-              <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-gc-win animate-pulse' : 'bg-gc-gold'}`} />
               {isTeacherAiUnlocked ? <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" /> : <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />}
-              <span>{isTeacherAiUnlocked ? 'Live AI' : 'Offline bank'}</span>
+              <span className="sr-only sm:not-sr-only">{isTeacherAiUnlocked ? 'Live AI' : 'Offline bank'}</span>
               {isTeacherAiUnlocked
                 ? <LockOpen className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
                 : <Lock className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />}
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              playSound('click');
+              setIsCalmMode(prev => !prev);
+            }}
+            className={`w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer ${
+              isCalmMode ? '!bg-gc-gold !text-gc-on-gold !border-transparent' : ''
+            }`}
+            aria-pressed={isCalmMode}
+            aria-label="Calm mode: turn the motion off"
+            title={isCalmMode ? 'Calm mode is on: motion is off for the whole class. Click to turn motion back on.' : 'Calm mode: turn the motion off for the whole class'}
+          >
+            <Wind className="w-5 h-5" aria-hidden="true" />
+          </button>
 
           <button 
             onClick={toggleTheme}
@@ -6986,27 +6853,27 @@ export function App() {
         accept=".json,application/json" 
         onChange={handleFileChange} 
       />
-      {error && (<Modal title={error.title} onClose={() => setError(null)} playSound={playSound}><p className="text-lg text-slate-700 dark:text-slate-300 leading-relaxed">{error.message}</p></Modal>)}
+      {error && (<Modal title={error.title} onClose={() => setError(null)} playSound={playSound}><p className="text-gc-body text-gc-ink leading-relaxed">{error.message}</p></Modal>)}
       {historyPlayer && ( 
-        <Modal title={`${historyPlayer.name}'s History`} onClose={() => setHistoryPlayer(null)} playSound={playSound}> 
+        <Modal title={`${historyPlayer.name}'s hands`} onClose={() => setHistoryPlayer(null)} playSound={playSound}> 
           <div className="space-y-4 text-left max-h-[60vh] overflow-y-auto pr-2 modal-content-scroll"> 
             {historyPlayer.history.length > 0 ? ( 
               historyPlayer.history.map((item, index) => ( 
-                <div key={index} className="bg-amber-50/70 dark:bg-slate-900/50 border border-amber-200 dark:border-slate-700 p-4 rounded-lg shadow-sm"> 
-                  <div className="flex justify-between mb-2">
-                    <span className="font-bold text-amber-700 dark:text-amber-500 text-sm uppercase tracking-wide">Round {item.round}</span> 
-                    <span className={`font-sans tabular-nums font-bold ${item.amount >= 0 ? 'text-emerald-600 dark:text-green-400' : 'text-rose-600 dark:text-red-400'}`}> 
-                        {item.amount >= 0 ? '+' : ''}{item.amount}
+                <div key={index} className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]"> 
+                  <div className="flex justify-between gap-3 mb-2">
+                    <span className="text-gc-small font-bold text-gc-quiet">Hand {item.round}</span> 
+                    <span className={`tabular-nums font-bold ${item.amount >= 0 ? 'text-gc-win' : 'text-gc-loss'}`}> 
+                        {item.amount >= 0 ? '+' : '\u2212'}${Math.abs(item.amount).toLocaleString()}
                     </span> 
                   </div>
-                  <p className="text-sm text-slate-700 dark:text-slate-400 italic mb-3 font-editorial">"{item.sentence}"</p> 
-                  <div className="flex justify-between text-xs text-slate-500 border-t border-amber-200/60 dark:border-slate-800 pt-2">
-                    <span>Spent: ${item.spent}</span>
-                    <span className="text-slate-700 dark:text-slate-300 font-bold">Total: ${item.endTotal}</span>
+                  <p className="text-gc-body text-gc-ink font-sentence italic mb-3">&ldquo;{item.sentence}&rdquo;</p> 
+                  <div className="flex justify-between text-gc-small text-gc-quiet border-t border-gc-line/[0.1] pt-2 tabular-nums">
+                    <span>Spent ${item.spent}</span>
+                    <span className="text-gc-ink font-bold">Total ${item.endTotal}</span>
                   </div>
                 </div> 
               )) 
-            ) : ( <p className="text-center py-10 text-slate-500 italic">No history recorded yet.</p> )} 
+            ) : ( <p className="text-center py-10 text-gc-quiet">No hands played yet.</p> )} 
           </div> 
         </Modal> 
       )}
@@ -7030,7 +6897,7 @@ export function App() {
                     </span>
                   </PowerUpTooltip>
                 </div> 
-                <p className="text-xl text-slate-800 dark:text-slate-200 font-medium leading-relaxed whitespace-pre-line">{showPowerUpModal.message}</p> 
+                <p className="text-gc-lead text-gc-ink font-medium leading-relaxed whitespace-pre-line">{showPowerUpModal.message}</p> 
             </div> 
         </Modal>
       }
@@ -7189,46 +7056,46 @@ export function App() {
         />
       )}
       {pendingLoadGame && (
-        <Modal title="Load Game" onClose={() => setPendingLoadGame(null)} playSound={playSound} hideOkButton>
-          <div className="space-y-6">
-            <div className="bg-amber-50/70 dark:bg-slate-900/50 p-4 rounded-lg border border-amber-200 dark:border-slate-700">
-              <h3 className="text-amber-800 dark:text-amber-400 font-bold uppercase tracking-widest text-sm mb-4">Game Info</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-slate-500">Mode:</span> <span className="text-slate-800 dark:text-white capitalize font-semibold">{pendingLoadGame.gameMode === 'lastPlayer' ? 'Last Survivor' : pendingLoadGame.gameMode === 'rounds' ? 'Fixed Rounds' : 'Target Bankroll'}</span></div>
+        <Modal title="Load this game?" onClose={() => setPendingLoadGame(null)} playSound={playSound} hideOkButton>
+          <div className="space-y-4">
+            <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]">
+              <h3 className="text-gc-small font-bold text-gc-quiet mb-3">The game</h3>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-gc-small">
+                <div><dt className="text-gc-quiet">How to win</dt><dd className="text-gc-ink font-semibold">{pendingLoadGame.gameMode === 'lastPlayer' ? 'Last player standing' : pendingLoadGame.gameMode === 'rounds' ? 'Set number of hands' : 'Target amount'}</dd></div>
                 <div>
-                  <span className="text-slate-500">{pendingLoadGame.gameMode === 'targetAmount' ? 'Goal:' : 'Round:'}</span>{" "}
-                  <span className="text-slate-800 dark:text-white font-semibold">
-                    {pendingLoadGame.gameMode === 'targetAmount' ? `$${(pendingLoadGame.targetAmount || 2000).toLocaleString()}` : `${pendingLoadGame.currentRound} / ${pendingLoadGame.totalRounds}`}
-                  </span>
+                  <dt className="text-gc-quiet">{pendingLoadGame.gameMode === 'targetAmount' ? 'Target' : 'Hand'}</dt>
+                  <dd className="text-gc-ink font-semibold tabular-nums">
+                    {pendingLoadGame.gameMode === 'targetAmount' ? `$${(pendingLoadGame.targetAmount || 2000).toLocaleString()}` : `${pendingLoadGame.currentRound} of ${pendingLoadGame.totalRounds}`}
+                  </dd>
                 </div>
-                <div><span className="text-slate-500">Topic:</span> <span className="text-slate-800 dark:text-white font-semibold">{pendingLoadGame.settings?.topic}</span></div>
-                <div><span className="text-slate-500">Level:</span> <span className="text-slate-800 dark:text-white font-semibold">{pendingLoadGame.settings?.level}</span></div>
-              </div>
+                <div><dt className="text-gc-quiet">Topic</dt><dd className="text-gc-ink font-semibold">{pendingLoadGame.settings?.topic}</dd></div>
+                <div><dt className="text-gc-quiet">Level</dt><dd className="text-gc-ink font-semibold">{pendingLoadGame.settings?.level}</dd></div>
+              </dl>
             </div>
-            <div className="bg-amber-50/70 dark:bg-slate-900/50 p-4 rounded-lg border border-amber-200 dark:border-slate-700">
-              <h3 className="text-amber-800 dark:text-amber-400 font-bold uppercase tracking-widest text-sm mb-4">Players ({pendingLoadGame.players?.length || 0})</h3>
-              <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 modal-content-scroll">
+            <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]">
+              <h3 className="text-gc-small font-bold text-gc-quiet mb-3">Players ({pendingLoadGame.players?.length || 0})</h3>
+              <ul className="space-y-1.5 max-h-[200px] overflow-y-auto pr-2 modal-content-scroll">
                 {pendingLoadGame.players?.map((p: any) => (
-                  <div key={p.id} className="flex justify-between items-center bg-white/80 dark:bg-black/30 p-2 rounded border border-amber-200/50 dark:border-transparent">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{p.avatar || '👤'}</span>
-                      <span className="text-slate-800 dark:text-white font-bold">{p.name}</span>
-                    </div>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-sans tabular-nums font-bold">${p.money}</span>
-                  </div>
+                  <li key={p.id} className="flex justify-between items-center gap-3 px-3 py-2 rounded-gc-sm bg-gc-line/[0.05]">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="text-[20px] leading-none">{p.avatar || '👤'}</span>
+                      <span className="text-gc-body font-bold text-gc-ink truncate">{p.name}</span>
+                    </span>
+                    <span className="text-gc-body font-bold text-gc-money tabular-nums">${Number(p.money).toLocaleString()}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
-            <div className="flex gap-4 pt-4">
-              <ActionButton onClick={() => setPendingLoadGame(null)} playSound={playSound} variant="outline-gold" className="flex-1 py-3">Cancel</ActionButton>
-              <ActionButton onClick={handleConfirmLoadGame} playSound={playSound} variant="gold" className="flex-1 py-3">Load Game</ActionButton>
+            <div className="flex gap-3 pt-2">
+              <ActionButton onClick={() => setPendingLoadGame(null)} playSound={playSound} variant="ghost" className="flex-1 h-12 text-gc-body font-bold">Cancel</ActionButton>
+              <ActionButton onClick={handleConfirmLoadGame} playSound={playSound} variant="primary" className="flex-1 h-12 text-gc-body">Load the game</ActionButton>
             </div>
           </div>
         </Modal>
       )}
       {showReportCardModal && (
         <Modal 
-          title="Grammar Casino - Report Card" 
+          title="Report card" 
           onClose={() => setShowReportCardModal(false)} 
           playSound={playSound}
         >
@@ -7297,19 +7164,19 @@ export function App() {
             role="alertdialog"
             aria-live="assertive"
             aria-label={`New phone wants to play as ${request.name}`}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] rounded-2xl border-2 border-[#d4af37] bg-amber-50 dark:bg-[#051c10] text-amber-950 dark:text-amber-50 shadow-[0_10px_40px_rgba(0,0,0,0.55)] p-4"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] gc-panel rounded-gc-lg border-gc-gold/60 p-4"
           >
             <div className="flex items-start gap-3">
               <span className="text-3xl leading-none" aria-hidden="true">{request.avatar || '📱'}</span>
               <div className="flex-1 min-w-0">
-                <p className="font-sans font-extrabold text-base">
+                <p className="text-gc-body font-bold text-gc-ink">
                   A new phone wants to play as {request.name}.
                 </p>
-                <p className="text-sm mt-1 text-amber-900 dark:text-amber-100">
+                <p className="text-gc-small mt-1 text-gc-quiet">
                   {request.name}'s seat is already on another phone. Only say yes if {request.name} really changed phones: the new phone sees and controls their bet, and the old one is signed out.
                 </p>
                 {mpTakeoverRequests.length > 1 && (
-                  <p className="text-sm mt-1 font-semibold">+{mpTakeoverRequests.length - 1} more waiting</p>
+                  <p className="text-gc-small mt-1 font-semibold text-gc-ink">+{mpTakeoverRequests.length - 1} more waiting</p>
                 )}
                 <div className="flex flex-wrap gap-2 mt-3">
                   <button
@@ -7319,7 +7186,7 @@ export function App() {
                       mpControllerRef.current?.answerSeatTakeover(request.clientId, true);
                       setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== request.clientId));
                     }}
-                    className="px-4 py-2 rounded-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm"
+                    className="gc-btn-primary h-11 px-5 rounded-full text-gc-small font-bold cursor-pointer"
                   >
                     Yes, it's {request.name}
                   </button>
@@ -7330,7 +7197,7 @@ export function App() {
                       mpControllerRef.current?.answerSeatTakeover(request.clientId, false);
                       setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== request.clientId));
                     }}
-                    className="px-4 py-2 rounded-full bg-rose-700 hover:bg-rose-600 text-white font-bold text-sm"
+                    className="h-11 px-5 rounded-full border border-gc-line/[0.2] bg-gc-line/[0.05] hover:border-gc-line/40 text-gc-small font-bold text-gc-ink cursor-pointer"
                   >
                     No, keep the seat
                   </button>
@@ -7359,198 +7226,184 @@ export function App() {
       )}
       {showTeacherPinModal && (
         <Modal
-          title={isTeacherAiUnlocked ? 'Teacher Live AI Unlocked' : 'Offline Curated Mode · Teacher Unlock'}
+          title={isTeacherAiUnlocked ? 'Teacher tools are on' : 'Unlock teacher tools'}
           onClose={() => setShowTeacherPinModal(false)}
           playSound={playSound}
           hideOkButton
         >
           <div className="space-y-4 text-left">
-            <div
-              className={`p-3.5 rounded-xl border flex items-start gap-3 ${
-                isTeacherAiUnlocked
-                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-950 dark:text-emerald-100'
-                  : 'bg-amber-500/10 border-[#d4af37]/40 text-amber-950 dark:text-amber-100'
-              }`}
-            >
-              <span className="text-2xl select-none mt-0.5">{isTeacherAiUnlocked ? '✨' : '📚'}</span>
-              <div className="text-xs sm:text-sm leading-relaxed">
+            <div className={`p-3.5 rounded-gc border flex items-start gap-3 ${isTeacherAiUnlocked ? 'bg-gc-win/10 border-gc-win/40' : 'bg-gc-line/[0.04] border-gc-line/[0.12]'}`}>
+              <span className="text-[24px] leading-none mt-0.5" aria-hidden="true">{isTeacherAiUnlocked ? '✨' : '📚'}</span>
+              <div className="text-gc-small text-gc-quiet leading-relaxed">
                 {isTeacherAiUnlocked ? (
                   <>
-                    <strong className="font-sans uppercase tracking-wider block text-emerald-800 dark:text-emerald-300 mb-0.5">
-                      Live Gemini AI &amp; Live Room Hosting Active (Current Game Only)
-                    </strong>
-                    This session is authorized to host a Live Classroom Room (QR) and generate dynamic AI sentences, AI Judge verifications, AI hints, and neural speech. For security, Live Mode is never saved in browser storage and automatically locks when the game finishes, when you return to the lobby, or if the URL is edited/reloaded.
+                    <strong className="block text-gc-body font-bold text-gc-ink mb-0.5">The live room and AI sentences are on for this game</strong>
+                    You can open a live room for phones and use Gemini for new sentences, answer checks, hints and the natural voice. For safety this is never saved in the browser: it locks again when the game ends, when you go back to the lobby, or when the page is reloaded or its address changes.
                   </>
                 ) : (
                   <>
-                    <strong className="font-sans uppercase tracking-wider block text-amber-900 dark:text-[#fef08a] mb-0.5">
-                      Playing in Free Offline Curated Mode (0 API Usage)
-                    </strong>
-                    Students and visitors without the Teacher PIN play in 100% free Offline Curated Mode (0 Gemini API calls) and cannot host a Live Classroom Room. Enter your Teacher PIN below to unlock Live Gemini AI and Live Room Hosting for the current game session.
+                    <strong className="block text-gc-body font-bold text-gc-ink mb-0.5">You're playing with the free offline bank</strong>
+                    Without the teacher PIN, the game uses ready-made sentences (no Gemini use) and can't open a live room. Sign in or enter the PIN to turn on the live room and AI sentences for this game.
                   </>
                 )}
               </div>
             </div>
 
             {teacherPinNotice && (
-              <div
-                className={`p-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
-                  teacherPinNotice.type === 'success'
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 dark:text-emerald-200'
-                    : 'bg-rose-500/15 border-rose-500/40 text-rose-800 dark:text-rose-200'
+              <p
+                role="status"
+                className={`flex items-start gap-2 text-gc-small font-semibold ${
+                  teacherPinNotice.type === 'success' ? 'text-gc-win' : teacherPinNotice.type === 'error' ? 'text-gc-loss' : 'text-gc-info'
                 }`}
               >
-                <span>{teacherPinNotice.type === 'success' ? '✓' : '⚠️'}</span>
-                <span>{teacherPinNotice.text}</span>
-              </div>
+                {teacherPinNotice.type === 'success'
+                  ? <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  : teacherPinNotice.type === 'error'
+                    ? <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                    : <Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />}
+                {teacherPinNotice.text}
+              </p>
             )}
 
             {!isTeacherAiUnlocked ? (
-              <div className="space-y-4 pt-1">
-                {/* Option 1: Google Sign-In */}
-                <div className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-sans font-bold uppercase tracking-wider text-slate-800 dark:text-[#fef08a]">
-                      Option 1 · Verified Teacher Google Account
-                    </div>
-                    <div className="text-[11px] text-slate-600 dark:text-amber-200/70">
-                      Sign in with your Google Teacher account to unlock Live AI &amp; Cloud Vault
-                    </div>
+              <div className="space-y-3">
+                <div className="p-3.5 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-gc-body font-bold text-gc-ink">Sign in with Google</p>
+                    <p className="text-gc-small text-gc-quiet">For the teacher's Google account. It also opens the cloud saves.</p>
                   </div>
                   <ActionButton
                     type="button"
                     onClick={handleSignInWithGoogle}
-                    playSound={playSound}
-                    variant="gold"
+                    variant="ghost"
                     disabled={isSigningInGoogle || isVerifyingTeacherPin}
-                    className="py-2 px-4 text-xs"
+                    className="h-11 px-4 text-gc-small font-bold"
                   >
-                    {isSigningInGoogle ? 'Signing In...' : '🔐 Sign In with Google'}
+                    {isSigningInGoogle ? 'Signing in…' : 'Sign in with Google'}
                   </ActionButton>
                 </div>
 
-                {/* Option 2: Teacher PIN */}
-                <form onSubmit={handleUnlockTeacherPin} className="space-y-3 pt-1">
+                <div className="flex items-center gap-3 text-gc-cap font-semibold text-gc-quiet" aria-hidden="true">
+                  <span className="flex-1 h-px bg-gc-line/[0.14]" />or<span className="flex-1 h-px bg-gc-line/[0.14]" />
+                </div>
+
+                <form onSubmit={handleUnlockTeacherPin} className="space-y-3">
                   <div>
-                    <label className="block text-xs font-sans font-bold uppercase tracking-wider text-slate-700 dark:text-amber-200 mb-1.5">
-                      Option 2 · Enter Teacher PIN to Unlock Live AI
-                    </label>
+                    <label htmlFor="teacher-pin" className="block text-gc-small font-bold text-gc-ink mb-1.5">Teacher PIN</label>
                     <input
+                      id="teacher-pin"
                       type="password"
                       value={teacherPinInput}
                       onChange={(e) => setTeacherPinInput(e.target.value)}
-                      placeholder="Enter Teacher PIN..."
+                      placeholder="Enter the PIN"
                       autoFocus
-                      className="w-full px-3.5 py-2.5 rounded-xl felt-well border border-[#d4af37]/60 focus:border-[#fef08a] focus:outline-none text-slate-900 dark:text-white font-sans tabular-nums text-base tracking-widest"
+                      autoComplete="off"
+                      className="w-full h-12 px-4 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-lead text-gc-ink tracking-[0.2em] tabular-nums placeholder:tracking-normal placeholder:text-gc-body placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30"
                     />
                   </div>
-                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
                     <ActionButton
                       type="button"
                       onClick={() => setShowTeacherPinModal(false)}
                       playSound={playSound}
-                      variant="outline-gold"
-                      className="py-2.5 px-4 text-xs"
+                      variant="ghost"
+                      className="h-12 px-5 text-gc-body font-bold"
                     >
-                      Stay in Offline Mode
+                      Keep playing offline
                     </ActionButton>
                     <ActionButton
                       type="submit"
                       playSound={playSound}
-                      variant="gold"
+                      variant="primary"
                       disabled={!teacherPinInput.trim() || isVerifyingTeacherPin}
-                      className="py-2.5 px-6 text-xs"
+                      className="h-12 px-7 text-gc-body"
                     >
-                      {isVerifyingTeacherPin ? 'Verifying...' : '🔑 Unlock with PIN'}
+                      {isVerifyingTeacherPin ? 'Checking…' : 'Unlock'}
                     </ActionButton>
                   </div>
                 </form>
               </div>
             ) : (
-              <div className="space-y-4 pt-1">
+              <div className="space-y-3">
                 {teacherGoogleEmail && (
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
-                    <span>Signed in as <strong>{teacherGoogleEmail}</strong></span>
-                    <span className="text-[10px] uppercase tracking-wider font-sans tabular-nums px-2 py-0.5 rounded bg-emerald-500/20">Google Verified</span>
-                  </div>
+                  <p className="px-3 py-2 rounded-gc-sm bg-gc-win/10 border border-gc-win/30 text-gc-small text-gc-ink flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0 break-all">Signed in as <strong>{teacherGoogleEmail}</strong></span>
+                    <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">Google verified</span>
+                  </p>
                 )}
-                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton
+                    type="button"
+                    onClick={() => {
+                      setShowTeacherPinModal(false);
+                      setShowCloudModal(true);
+                    }}
+                    playSound={playSound}
+                    variant="ghost"
+                    className="h-11 px-4 text-gc-small font-bold"
+                  >
+                    Open cloud saves
+                  </ActionButton>
+                  <ActionButton
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setShowChangePinForm((prev) => !prev);
+                      setTeacherPinNotice(null);
+                    }}
+                    variant="ghost"
+                    aria-expanded={showChangePinForm}
+                    className="h-11 px-4 text-gc-small font-bold"
+                  >
+                    {showChangePinForm ? 'Keep the current PIN' : 'Change the PIN'}
+                  </ActionButton>
                   <ActionButton
                     type="button"
                     onClick={handleLockTeacherPin}
-                    playSound={playSound}
-                    variant="outline-red"
-                    className="py-2.5 px-4 text-xs"
+                    variant="ghost"
+                    className="h-11 px-4 text-gc-small font-bold text-gc-loss border-gc-loss/40"
                   >
-                    🔒 Lock &amp; Switch to Offline Mode
+                    Lock and play offline
                   </ActionButton>
-
-                  <div className="flex items-center gap-2">
-                    <ActionButton
-                      type="button"
-                      onClick={() => {
-                        setShowTeacherPinModal(false);
-                        setShowCloudModal(true);
-                      }}
-                      playSound={playSound}
-                      variant="outline-gold"
-                      className="py-2 px-3.5 text-xs"
-                    >
-                      ☁️ Open Cloud Vault
-                    </ActionButton>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        playSound('click');
-                        setShowChangePinForm((prev) => !prev);
-                        setTeacherPinNotice(null);
-                      }}
-                      className="text-xs font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-[#fef08a] hover:underline cursor-pointer px-2 py-1"
-                    >
-                      {showChangePinForm ? 'Cancel PIN Change' : '⚙️ Change PIN'}
-                    </button>
-                  </div>
                 </div>
 
                 {showChangePinForm && (
                   <form
                     onSubmit={handleChangeTeacherPin}
-                    className="p-3.5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3"
+                    className="p-3.5 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-3"
                   >
-                    <div className="text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
-                      Update Server Teacher PIN
-                    </div>
                     <div>
-                      <label className="block text-[11px] text-slate-600 dark:text-amber-200/75 mb-1">
-                        New Teacher PIN (4–32 characters)
-                      </label>
+                      <label htmlFor="teacher-new-pin" className="block text-gc-small font-bold text-gc-ink">New teacher PIN</label>
+                      <p className="text-gc-cap text-gc-quiet">4 to 32 characters.</p>
                       <input
+                        id="teacher-new-pin"
                         type="password"
                         value={newTeacherPinInput}
                         onChange={(e) => setNewTeacherPinInput(e.target.value)}
-                        placeholder="Enter new PIN..."
-                        className="w-full px-3 py-2 rounded-lg bg-white/80 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white font-sans tabular-nums text-sm focus:outline-none"
+                        placeholder="New PIN"
+                        autoComplete="new-password"
+                        className="mt-2 w-full h-11 px-3 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-body text-gc-ink tabular-nums placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30"
                       />
                     </div>
                     <div className="flex justify-end">
                       <ActionButton
                         type="submit"
-                        variant="gold"
+                        variant="primary"
                         disabled={newTeacherPinInput.trim().length < 4 || isVerifyingTeacherPin}
-                        className="py-2 px-4 text-xs"
+                        className="h-11 px-5 text-gc-small"
                       >
-                        {isVerifyingTeacherPin ? 'Saving...' : 'Save New PIN'}
+                        {isVerifyingTeacherPin ? 'Saving…' : 'Save the new PIN'}
                       </ActionButton>
                     </div>
                   </form>
                 )}
 
-                <div className="flex justify-end pt-1 border-t border-[#d4af37]/20">
+                <div className="flex justify-end pt-3 border-t border-gc-line/[0.12]">
                   <ActionButton
                     onClick={() => setShowTeacherPinModal(false)}
                     playSound={playSound}
-                    variant="outline-gold"
-                    className="py-2 px-5 text-xs"
+                    variant="primary"
+                    className="h-12 px-8 text-gc-body"
                   >
                     Done
                   </ActionButton>
@@ -7584,6 +7437,6 @@ export function App() {
           isDesktopApp={desktopStatus.isDesktop}
         />
       )}
-    </>
+    </MotionConfig>
   );
 }

@@ -291,6 +291,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     view?.turnDurationMs || 0
   );
 
+  // The teacher's Calm mode turns this phone's motion off too.
+  const calmFromTeacher = Boolean(view?.calmMode);
+  useEffect(() => {
+    document.documentElement.classList.toggle('gc-calm-room', calmFromTeacher);
+    return () => document.documentElement.classList.remove('gc-calm-room');
+  }, [calmFromTeacher]);
+
   const isRoundTimeUp = Boolean(
     view?.turnDurationMs &&
       view.turnDurationMs > 0 &&

@@ -93,6 +93,17 @@ export default {
           '0%, 100%': { opacity: '0.25' },
           '50%': { opacity: '1' },
         },
+        // The final podium rises once.
+        'gc-rise': {
+          from: { opacity: '0', transform: 'translateY(48px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        // Confetti falls once over the final screen (each piece sets --gc-drift).
+        'gc-confetti': {
+          '0%': { opacity: '1', transform: 'translate3d(0, -5vh, 0) rotate(0deg)' },
+          '80%': { opacity: '1' },
+          '100%': { opacity: '0', transform: 'translate3d(var(--gc-drift, 0px), 105vh, 0) rotate(640deg)' },
+        },
         // The "locked in" badge on phones: a soft green ring that spreads out.
         'gc-ring': {
           '0%': { boxShadow: '0 0 0 0 rgb(74 222 128 / 0.45)' },
@@ -109,6 +120,8 @@ export default {
         'gc-stamp': 'gc-stamp 0.55s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both',
         'gc-blink': 'gc-blink 1.2s ease-in-out infinite both',
         'gc-ring': 'gc-ring 1.8s ease-out infinite',
+        'gc-rise': 'gc-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both',
+        'gc-confetti': 'gc-confetti 2s cubic-bezier(0.25, 0.6, 0.45, 1) both',
       },
       // Seven text steps. Nothing smaller than 12 px on the projector or 14 px on phones.
       fontSize: {

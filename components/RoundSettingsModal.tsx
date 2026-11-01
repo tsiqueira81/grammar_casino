@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { AlertTriangle, Check, Eye, EyeOff, Info, KeyRound, Lock, Pencil, X } from 'lucide-react';
 import { Settings, CEFRLevel, SoundEffect, ChallengeFormat, QuestionType } from '../types';
 import { GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import ActionButton from './ActionButton';
@@ -121,6 +122,15 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
     }
   }, [isOpen, initialTab, currentSettings, nextSettings]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { playSound('click'); onClose(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose, playSound]);
+
   if (!isOpen) return null;
 
   const resolvedTopic = isCustomTopicMode ? (customTopicInput.trim() || 'Custom Grammar') : selectedTopic;
@@ -132,7 +142,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
     if (isIncluded) {
       if (effectiveMixedFormats.length <= 1) {
         playSound('error');
-        setMixedFormatWarning('At least 1 challenge format must remain active in the Mixed Shoe.');
+        setMixedFormatWarning('Keep at least one question type in the mix.');
         return;
       }
       playSound('click');
@@ -172,7 +182,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
   const handleSaveKey = async () => {
     const trimmed = apiKeyInput.trim();
     if (!trimmed) {
-      setKeyNotice({ type: 'error', text: 'Please enter a valid Gemini API key.' });
+      setKeyNotice({ type: 'error', text: 'Type or paste a Gemini API key first.' });
       return;
     }
     playSound('click');
@@ -181,13 +191,13 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       playSound('success');
       setKeyNotice({
         type: 'success',
-        text: 'API key encrypted and safely stored using OS-backed Windows DPAPI encryption!',
+        text: 'Key saved. It is encrypted on this computer.',
       });
       setApiKeyInput('');
       const updated = await getDesktopStatus();
       setDesktopStatus(updated);
     } else {
-      setKeyNotice({ type: 'error', text: res.error || 'Failed to save key.' });
+      setKeyNotice({ type: 'error', text: res.error || "The key wasn't saved. Try again." });
     }
   };
 
@@ -198,266 +208,203 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       playSound('click');
       setKeyNotice({
         type: 'info',
-        text: 'Stored API key removed. Casino is running 100% in Curated Offline Bank mode.',
+        text: 'Key removed. The game now uses the offline bank.',
       });
       setApiKeyInput('');
       const updated = await getDesktopStatus();
       setDesktopStatus(updated);
     } else {
-      setKeyNotice({ type: 'error', text: res.error || 'Failed to remove key.' });
+      setKeyNotice({ type: 'error', text: res.error || "The key wasn't removed. Try again." });
     }
   };
 
   const handleTestConnection = async () => {
     playSound('click');
     setIsTesting(true);
-    setKeyNotice({ type: 'info', text: 'Contacting Gemini API...' });
+    setKeyNotice({ type: 'info', text: 'Checking the key with Gemini…' });
     const res = await testDesktopApiKey(apiKeyInput.trim() || undefined);
     setIsTesting(false);
     if (res.valid) {
       playSound('success');
-      setKeyNotice({ type: 'success', text: 'Connection successful! Gemini API is active and responding.' });
+      setKeyNotice({ type: 'success', text: 'The key works. Gemini answered.' });
     } else {
-      setKeyNotice({ type: 'error', text: res.error || 'API connection failed. Check your key and internet connection.' });
+      setKeyNotice({ type: 'error', text: res.error || "The key didn't work. Check the key and the internet connection." });
     }
   };
 
+  const aiOn = desktopStatus.hasKey && desktopStatus.isOnline;
+  const selectedFormatConfig = CHALLENGE_FORMATS.find(f => f.id === selectedFormat);
+  const mixIcons = effectiveMixedFormats.map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('');
+
+  // Style A building blocks (the same look as the table setup screen).
+  const optionBase = 'rounded-gc border text-left transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn';
+  const optionOn = 'bg-gc-gold/15 border-gc-gold text-gc-ink';
+  const optionOff = 'bg-gc-line/[0.05] border-gc-line/[0.14] text-gc-ink hover:border-gc-line/30';
+  const hint = 'text-gc-small text-gc-quiet';
+  const card = 'p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]';
+  const cardTitle = 'text-gc-body font-bold text-gc-ink';
+  const inputCls = 'w-full h-11 px-3 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-body text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30';
+  const smallBtn = 'h-10 px-4 rounded-full text-gc-small font-bold border transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn disabled:opacity-40 disabled:cursor-not-allowed';
+  const changedDot = <span className="w-2 h-2 rounded-full bg-gc-gold shrink-0" aria-label="changed" />;
+
+  const tabs: { id: SettingsModalTab; label: string; icon: string; changed: boolean }[] = [
+    { id: 'topic', label: 'Topic', icon: '📚', changed: resolvedTopic !== currentSettings.topic },
+    { id: 'level', label: 'Level', icon: '📊', changed: selectedLevel !== currentSettings.level },
+    { id: 'theme', label: 'Theme', icon: '🎭', changed: resolvedTheme !== currentSettings.theme },
+    { id: 'format', label: 'Question type', icon: '🎯', changed: selectedFormat !== (currentSettings.challengeFormat || 'binary') },
+    { id: 'ai', label: 'Sentences', icon: aiOn ? '⚡' : '💾', changed: false },
+  ];
+
   return (
     <AnimatePresence>
-      <div 
-        className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center z-50 p-4"
+      <div
+        className="fixed inset-0 bg-black/60 dark:bg-black/75 backdrop-blur-sm flex justify-center items-center z-50 p-3 sm:p-4"
         onClick={() => { playSound('click'); onClose(); }}
       >
         <motion.div
-          initial={{ scale: 0.95, opacity: 0, y: 15 }}
+          initial={{ scale: 0.96, opacity: 0, y: 12 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 15 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 320 }}
-          className="bg-white dark:bg-[#062414] border-2 border-[#ca8a04] rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+          exit={{ scale: 0.96, opacity: 0, y: 12 }}
+          transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Game settings"
+          className="gc-panel rounded-gc-lg w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="bg-amber-50/80 dark:bg-[#0a1f14] p-5 border-b border-[#ca8a04]/30 relative flex justify-between items-center select-none">
-            <div className="absolute inset-x-0 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#fef08a] to-transparent"></div>
-            <div>
-              <div className="text-[11px] font-sans tabular-nums tracking-widest text-[#ca8a04] uppercase font-bold">
-                Table Dealer Settings
-              </div>
-              <h2 className="text-2xl font-sans font-bold text-slate-900 dark:text-amber-100 flex items-center gap-2">
-                <span>Configure Round Options</span>
-                <span className="text-xs font-sans tabular-nums font-normal px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-900 dark:text-amber-300 border border-amber-500/30">
-                  Target: Round {currentRound + 1}
-                </span>
-              </h2>
+          <div className="px-5 sm:px-6 pt-5 pb-3 flex justify-between items-start gap-4">
+            <div className="min-w-0">
+              <p className="text-gc-cap font-semibold text-gc-quiet tabular-nums">For hand {currentRound + 1} onwards</p>
+              <h2 className="font-logo text-gc-title font-bold text-gc-ink">Game settings</h2>
             </div>
             <button
+              type="button"
               onClick={() => { playSound('click'); onClose(); }}
-              className="text-[#ca8a04]/70 hover:text-amber-800 dark:text-[#ca8a04]/60 dark:hover:text-[#fef08a] text-3xl leading-none transition-colors p-1"
-              aria-label="Close modal"
+              aria-label="Close"
+              className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] hover:bg-gc-line/[0.12] text-gc-quiet hover:text-gc-ink grid place-items-center transition-colors cursor-pointer"
             >
-              &times;
+              <X className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex border-b border-amber-200/60 dark:border-amber-900/40 bg-amber-100/30 dark:bg-black/20 p-2 gap-2 select-none overflow-x-auto">
-            <button
-              onClick={() => { playSound('click'); setActiveTab('topic'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'topic'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
-              }`}
-            >
-              <span>📚</span>
-              <span>Domain</span>
-              {resolvedTopic !== currentSettings.topic && (
-                <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => { playSound('click'); setActiveTab('level'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'level'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
-              }`}
-            >
-              <span>📊</span>
-              <span>Level</span>
-              {selectedLevel !== currentSettings.level && (
-                <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => { playSound('click'); setActiveTab('theme'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'theme'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
-              }`}
-            >
-              <span>🎭</span>
-              <span>Theme</span>
-              {resolvedTheme !== currentSettings.theme && (
-                <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
-              )}
-            </button>
-
-            <button
-              onClick={() => { playSound('click'); setActiveTab('format'); }}
-              className={`flex-1 min-w-[75px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'format'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
-              }`}
-            >
-              <span>🎯</span>
-              <span>Format</span>
-              {selectedFormat !== (currentSettings.challengeFormat || 'binary') && (
-                <span className="w-2 h-2 rounded-full bg-amber-900 dark:bg-amber-200"></span>
-              )}
-            </button>
-
-            {/* AI & Offline Tab */}
-            <button
-              onClick={() => { playSound('click'); setActiveTab('ai'); }}
-              className={`flex-1 min-w-[100px] py-2.5 px-3 rounded-lg text-xs md:text-sm font-sans font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === 'ai'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-amber-200/50 dark:hover:bg-amber-950/40'
-              }`}
-            >
-              <span>🤖</span>
-              <span>AI & Offline</span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  desktopStatus.hasKey && desktopStatus.isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                }`}
-                title={desktopStatus.hasKey && desktopStatus.isOnline ? 'Live AI Active' : 'Curated Bank Active'}
-              />
-            </button>
+          {/* Tabs */}
+          <div className="px-3 sm:px-5 pb-3 border-b border-gc-line/[0.12]">
+            <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Settings">
+              {tabs.map(tab => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => { playSound('click'); setActiveTab(tab.id); }}
+                    className={`shrink-0 h-10 px-3.5 rounded-full border text-gc-small font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
+                      isActive ? 'bg-gc-gold/15 border-gc-gold text-gc-ink' : 'border-transparent text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.06]'
+                    }`}
+                  >
+                    <span aria-hidden="true">{tab.icon}</span>
+                    <span className="whitespace-nowrap">{tab.label}</span>
+                    {tab.changed && changedDot}
+                    {tab.id === 'ai' && (
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${aiOn ? 'bg-gc-win' : 'bg-gc-quiet/50'}`} title={aiOn ? 'AI sentences are on' : 'Using the offline bank'} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Modal Body / Tab Content */}
-          <div className="flex-1 overflow-y-auto p-5 text-slate-800 dark:text-slate-100 modal-content-scroll">
-            {/* TOPIC / LANGUAGE DOMAIN TAB */}
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5 text-gc-ink modal-content-scroll">
+            {/* TOPIC */}
             {activeTab === 'topic' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
-                  Select a Language Domain (grammar or collocations) for subsequent rounds, or enter a custom lexical/grammar topic:
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto pr-1">
+                <p className={hint}>Pick the grammar or vocabulary for the sentences.</p>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {EXTENDED_GRAMMAR_TOPICS.map((top) => {
                     const isSelected = !isCustomTopicMode && selectedTopic === top.name;
                     return (
                       <button
                         key={top.name}
                         type="button"
+                        aria-pressed={isSelected}
                         onClick={() => {
                           playSound('click');
                           setIsCustomTopicMode(false);
                           setSelectedTopic(top.name);
                         }}
-                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
-                          isSelected
-                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
-                            : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
-                        }`}
+                        className={`p-3 flex items-start gap-3 ${optionBase} ${isSelected ? optionOn : optionOff}`}
                       >
-                        <span className="text-xl mt-0.5 select-none">{top.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-sans font-bold text-xs text-slate-900 dark:text-white flex items-center justify-between">
-                            <span className="truncate">{top.name}</span>
-                            {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5 line-clamp-1">
-                            {top.desc}
-                          </p>
-                        </div>
+                        <span className="text-[20px] leading-none mt-0.5" aria-hidden="true">{top.icon}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-gc-small font-bold truncate">{top.name}</span>
+                            {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-gold" aria-hidden="true" />}
+                          </span>
+                          <span className="block text-gc-cap text-gc-quiet mt-0.5 line-clamp-2">{top.desc}</span>
+                        </span>
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Custom Lexical or Grammar Topic Input */}
-                <div className="mt-4 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
-                  <div
-                    onClick={() => {
-                      playSound('click');
-                      setIsCustomTopicMode(true);
+                {/* My own topic */}
+                <div
+                  className={`mt-3 p-3.5 ${optionBase} ${isCustomTopicMode ? optionOn : 'bg-gc-line/[0.03] border-dashed border-gc-line/[0.24] hover:border-gc-line/40'}`}
+                  onClick={() => { if (!isCustomTopicMode) { playSound('click'); setIsCustomTopicMode(true); } }}
+                >
+                  <label htmlFor="rsm-custom-topic" className="flex items-center gap-2 text-gc-small font-bold text-gc-ink">
+                    <Pencil className="w-4 h-4 text-gc-quiet" aria-hidden="true" />
+                    My own topic
+                    <span className="font-normal text-gc-quiet">(grammar or vocabulary)</span>
+                  </label>
+                  <input
+                    id="rsm-custom-topic"
+                    type="text"
+                    value={customTopicInput}
+                    onChange={(e) => {
+                      setCustomTopicInput(e.target.value);
+                      if (!isCustomTopicMode) setIsCustomTopicMode(true);
                     }}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                      isCustomTopicMode
-                        ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-400/50'
-                        : 'bg-white dark:bg-black/20 border-dashed border-amber-300 dark:border-amber-800/60 hover:border-amber-400'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">✍️</span>
-                        <span className="text-xs font-sans font-bold text-slate-900 dark:text-amber-200">
-                          Custom Lexical or Grammar Preference:
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 dark:text-amber-200/60 font-sans">
-                        Vocabulary or Grammar
-                      </span>
-                    </div>
-                    <input
-                      type="text"
-                      value={customTopicInput}
-                      onChange={(e) => {
-                        setCustomTopicInput(e.target.value);
-                        if (!isCustomTopicMode) setIsCustomTopicMode(true);
-                      }}
-                      onFocus={() => setIsCustomTopicMode(true)}
-                      placeholder="e.g. School Subjects, Places in Town, Food & Cooking, Inversion..."
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-sans uppercase tracking-wider text-slate-500 dark:text-amber-200/60 mr-1">
-                        Quick Lexis:
-                      </span>
-                      {QUICK_LEXICAL_TOPICS.map((lex) => {
-                        const isQuickActive = isCustomTopicMode && customTopicInput.trim().toLowerCase() === lex.toLowerCase();
-                        return (
-                          <button
-                            key={lex}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              playSound('click');
-                              setIsCustomTopicMode(true);
-                              setCustomTopicInput(lex);
-                            }}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-sans transition-all cursor-pointer border ${
-                              isQuickActive
-                                ? 'bg-amber-500 text-black border-amber-400 font-bold'
-                                : 'bg-amber-50/60 dark:bg-black/30 text-slate-700 dark:text-amber-100/80 border-amber-300/60 dark:border-amber-800/50 hover:border-amber-400'
-                            }`}
-                          >
-                            {lex}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    onFocus={() => setIsCustomTopicMode(true)}
+                    placeholder="For example: places in town, food and cooking, inversion"
+                    className={`mt-2 ${inputCls}`}
+                  />
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-gc-cap font-semibold text-gc-quiet mr-1">Quick picks:</span>
+                    {QUICK_LEXICAL_TOPICS.map((lex) => {
+                      const isQuickActive = isCustomTopicMode && customTopicInput.trim().toLowerCase() === lex.toLowerCase();
+                      return (
+                        <button
+                          key={lex}
+                          type="button"
+                          aria-pressed={isQuickActive}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playSound('click');
+                            setIsCustomTopicMode(true);
+                            setCustomTopicInput(lex);
+                          }}
+                          className={`h-8 px-3 rounded-full border text-gc-small font-semibold transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
+                            isQuickActive ? 'bg-gc-gold text-gc-on-gold border-transparent' : 'bg-gc-line/[0.05] border-gc-line/[0.14] text-gc-ink hover:border-gc-line/30'
+                          }`}
+                        >
+                          {lex}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* LEVEL TAB */}
+            {/* LEVEL */}
             {activeTab === 'level' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
-                  Select CEFR linguistic complexity profile:
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <p className={hint}>How hard the sentences are, from beginner (A1) to proficient (C2).</p>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {CEFR_LEVELS.map((lvl) => {
                     const isSelected = selectedLevel === lvl;
                     const profile = CEFR_DIFFICULTY_PROFILES[lvl];
@@ -465,30 +412,21 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                       <button
                         key={lvl}
                         type="button"
+                        aria-pressed={isSelected}
                         onClick={() => {
                           playSound('click');
                           setSelectedLevel(lvl);
                         }}
-                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
-                          isSelected
-                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
-                            : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
-                        }`}
+                        className={`p-3 flex items-start gap-3 ${optionBase} ${isSelected ? optionOn : optionOff}`}
                       >
-                        <span className="text-xl font-sans tabular-nums font-black text-amber-600 dark:text-amber-400 select-none">
-                          {lvl}
+                        <span className="w-11 h-11 shrink-0 rounded-full bg-gc-line/[0.07] grid place-items-center text-gc-body font-extrabold tabular-nums">{lvl}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="text-gc-small font-bold">{profile?.title || lvl}</span>
+                            {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-gold" aria-hidden="true" />}
+                          </span>
+                          <span className="block text-gc-cap text-gc-quiet mt-0.5 leading-snug">{profile?.syntax || ''}</span>
                         </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <span className="font-sans font-bold text-xs text-slate-900 dark:text-white">
-                              {profile?.title || lvl}
-                            </span>
-                            {isSelected && <span className="text-amber-500 font-bold text-sm">✓</span>}
-                          </div>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
-                            {profile?.syntax || ''}
-                          </p>
-                        </div>
                       </button>
                     );
                   })}
@@ -496,130 +434,91 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               </div>
             )}
 
-            {/* THEME TAB */}
+            {/* THEME */}
             {activeTab === 'theme' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
-                  Choose a contextual scenario or real-world theme:
-                </p>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                <p className={hint}>The setting for the sentences, such as fantasy or business.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {THEMES.map((th) => {
                     const isSelected = !isCustomThemeMode && selectedTheme === th;
                     return (
                       <button
                         key={th}
                         type="button"
+                        aria-pressed={isSelected}
                         onClick={() => {
                           playSound('click');
                           setIsCustomThemeMode(false);
                           setSelectedTheme(th);
                         }}
-                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                          isSelected
-                            ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
-                            : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
-                        }`}
+                        className={`h-10 px-4 rounded-full border text-gc-small font-semibold transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${isSelected ? optionOn : optionOff}`}
                       >
-                        <span className="font-sans font-bold text-xs text-slate-900 dark:text-white">
-                          {th}
-                        </span>
+                        {th}
                       </button>
                     );
                   })}
                 </div>
 
-                {/* Custom Theme Input */}
-                <div className="mt-4 pt-3 border-t border-amber-200/40 dark:border-amber-900/30">
-                  <div
-                    onClick={() => {
-                      playSound('click');
-                      setIsCustomThemeMode(true);
+                {/* My own theme */}
+                <div
+                  className={`mt-3 p-3.5 ${optionBase} ${isCustomThemeMode ? optionOn : 'bg-gc-line/[0.03] border-dashed border-gc-line/[0.24] hover:border-gc-line/40'}`}
+                  onClick={() => { if (!isCustomThemeMode) { playSound('click'); setIsCustomThemeMode(true); } }}
+                >
+                  <label htmlFor="rsm-custom-theme" className="flex items-center gap-2 text-gc-small font-bold text-gc-ink">
+                    <Pencil className="w-4 h-4 text-gc-quiet" aria-hidden="true" />
+                    My own theme
+                  </label>
+                  <input
+                    id="rsm-custom-theme"
+                    type="text"
+                    value={customThemeInput}
+                    onChange={(e) => {
+                      setCustomThemeInput(e.target.value);
+                      if (!isCustomThemeMode) setIsCustomThemeMode(true);
                     }}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                      isCustomThemeMode
-                        ? 'bg-amber-500/10 border-amber-500 ring-2 ring-amber-400/50'
-                        : 'bg-white dark:bg-black/20 border-dashed border-amber-300 dark:border-amber-800/60 hover:border-amber-400'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-base">✍️</span>
-                      <span className="text-xs font-sans font-bold text-slate-900 dark:text-amber-200">
-                        Custom Scenario Theme:
-                      </span>
-                    </div>
-                    <input
-                      type="text"
-                      value={customThemeInput}
-                      onChange={(e) => {
-                        setCustomThemeInput(e.target.value);
-                        if (!isCustomThemeMode) setIsCustomThemeMode(true);
-                      }}
-                      onFocus={() => setIsCustomThemeMode(true)}
-                      placeholder="e.g. Victorian London Mystery, Space Station Operations, Film Noir..."
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50/30 dark:bg-black/40 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                  </div>
+                    onFocus={() => setIsCustomThemeMode(true)}
+                    placeholder="For example: Victorian London, a space station, film noir"
+                    className={`mt-2 ${inputCls}`}
+                  />
                 </div>
               </div>
             )}
 
-            {/* FORMAT TAB */}
+            {/* QUESTION TYPE */}
             {activeTab === 'format' && (
               <div>
-                <p className="text-xs text-slate-500 dark:text-amber-200/70 mb-3 font-sans">
-                  Choose challenge structure:
-                </p>
-
-                <div className="grid grid-cols-1 gap-2.5">
+                <p className={hint}>What players do with each sentence.</p>
+                <div className="mt-3 grid grid-cols-1 gap-2">
                   {CHALLENGE_FORMATS.map((fmt) => {
                     const isSelected = selectedFormat === fmt.id;
                     return (
-                      <div key={fmt.id} className="space-y-2">
+                      <div key={fmt.id}>
                         <button
                           type="button"
+                          aria-pressed={isSelected}
                           onClick={() => {
                             playSound('click');
                             setSelectedFormat(fmt.id);
                           }}
-                          className={`w-full p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
-                            isSelected
-                              ? 'bg-amber-500/15 dark:bg-amber-500/20 border-amber-500 ring-2 ring-amber-400/50 shadow-md'
-                              : 'bg-white dark:bg-black/20 border-slate-200 dark:border-slate-800 hover:border-amber-400/60 hover:bg-amber-50/40 dark:hover:bg-amber-950/20'
-                          }`}
+                          className={`w-full p-3.5 flex items-start gap-3 ${optionBase} ${isSelected ? optionOn : optionOff}`}
                         >
-                          <span className="text-2xl mt-0.5 select-none">{fmt.icon}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className={`font-sans font-bold text-sm ${isSelected ? 'text-amber-900 dark:text-amber-300' : 'text-slate-900 dark:text-white'}`}>
-                                {fmt.label}
-                              </span>
-                              {isSelected && (
-                                <span className="text-amber-500 font-bold text-base select-none">✓</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
-                              {fmt.subtitle}
-                            </p>
-                          </div>
+                          <span className="text-[24px] leading-none mt-0.5" aria-hidden="true">{fmt.icon}</span>
+                          <span className="flex-1 min-w-0">
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="text-gc-body font-bold">{fmt.label}</span>
+                              {isSelected && <Check className="w-5 h-5 shrink-0 text-gc-gold" aria-hidden="true" />}
+                            </span>
+                            <span className="block text-gc-small text-gc-quiet mt-0.5 leading-snug">{fmt.subtitle}</span>
+                          </span>
                         </button>
 
-                        {/* Customizable Mixed Shoe Format Picker */}
+                        {/* Which question types go in the mix */}
                         {fmt.id === 'mixed' && isSelected && (
-                          <div className="p-3.5 rounded-xl border border-amber-400/50 dark:border-amber-700/60 bg-amber-50/60 dark:bg-black/35 space-y-2.5 animate-fade-in">
+                          <div className="mt-2 p-3.5 rounded-gc border border-gc-gold/40 bg-gc-gold/[0.06] animate-gc-fade">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <div className="text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                                  <span>🎛️</span>
-                                  <span>Customize Mixed Shoe Rotation</span>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums bg-amber-500/20 border border-amber-500/40 text-amber-900 dark:text-amber-300">
-                                    {effectiveMixedFormats.length} of 5 Active
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                                  Select which challenge formats are dealt in the Mixed Shoe rotation:
-                                </p>
-                              </div>
+                              <p className="text-gc-small font-bold text-gc-ink">
+                                In the mix <span className="text-gc-quiet font-semibold tabular-nums">({effectiveMixedFormats.length} of 5)</span>
+                              </p>
                               {effectiveMixedFormats.length < 5 && (
                                 <button
                                   type="button"
@@ -628,65 +527,47 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                                     setMixedFormatWarning(null);
                                     setSelectedMixedFormats(ALL_QUESTION_TYPES);
                                   }}
-                                  className="px-2.5 py-1 rounded-lg text-[11px] font-sans font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-900 dark:text-amber-200 transition-colors cursor-pointer"
+                                  className="h-8 px-3 rounded-full text-gc-small font-semibold text-gc-ink hover:bg-gc-line/[0.08] transition-colors cursor-pointer"
                                 >
-                                  Select All 5
+                                  Turn all on
                                 </button>
                               )}
                             </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                               {CHALLENGE_FORMATS.filter((c): c is typeof CHALLENGE_FORMATS[number] & { id: QuestionType } => c.id !== 'mixed').map((subFmt) => {
                                 const isChecked = effectiveMixedFormats.includes(subFmt.id);
                                 return (
                                   <button
                                     key={subFmt.id}
                                     type="button"
+                                    role="checkbox"
+                                    aria-checked={isChecked}
                                     onClick={() => handleToggleMixedFormatItem(subFmt.id)}
-                                    className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                                      isChecked
-                                        ? 'bg-emerald-500/15 dark:bg-emerald-950/50 border-emerald-500/70 text-slate-900 dark:text-emerald-100 shadow-sm'
-                                        : 'bg-white/60 dark:bg-black/25 border-slate-300/70 dark:border-slate-800 text-slate-500 dark:text-slate-400 opacity-75 hover:opacity-100'
-                                    }`}
+                                    className={`h-11 px-3 flex items-center justify-between gap-2 ${optionBase} ${isChecked ? 'bg-gc-card border-gc-gold/60 text-gc-ink' : 'bg-transparent border-gc-line/[0.14] text-gc-quiet hover:border-gc-line/30'}`}
                                   >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="text-lg select-none">{subFmt.icon}</span>
-                                      <span className="font-sans font-bold text-xs truncate">
-                                        {subFmt.shortLabel}
-                                      </span>
-                                    </div>
-                                    <span
-                                      className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold shrink-0 border ${
-                                        isChecked
-                                          ? 'bg-emerald-500 text-black border-emerald-300'
-                                          : 'bg-transparent border-slate-400/50 dark:border-slate-600'
-                                      }`}
-                                    >
-                                      {isChecked ? '✓' : ''}
+                                    <span className="flex items-center gap-2 min-w-0">
+                                      <span className="text-[18px] leading-none" aria-hidden="true">{subFmt.icon}</span>
+                                      <span className="text-gc-small font-semibold truncate">{subFmt.shortLabel}</span>
+                                    </span>
+                                    <span className={`w-5 h-5 rounded-[6px] grid place-items-center shrink-0 border ${isChecked ? 'bg-gc-gold border-gc-gold text-gc-on-gold' : 'border-gc-line/40'}`}>
+                                      {isChecked && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
                                     </span>
                                   </button>
                                 );
                               })}
                             </div>
-
                             {mixedFormatWarning && (
-                              <div className="text-[11px] font-sans text-amber-800 dark:text-amber-300 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                                <span>⚠️</span>
-                                <span>{mixedFormatWarning}</span>
-                              </div>
+                              <p className="mt-2 flex items-center gap-1.5 text-gc-small font-semibold text-gc-loss" role="alert">
+                                <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                {mixedFormatWarning}
+                              </p>
                             )}
-
-                            <div className="text-[11px] font-sans text-slate-600 dark:text-amber-200/80 flex items-center gap-1.5 pt-0.5">
-                              <span className="font-bold text-amber-900 dark:text-amber-300">Active Cycle:</span>
-                              <span>
-                                {effectiveMixedFormats
-                                  .map(q => {
-                                    const found = CHALLENGE_FORMATS.find(f => f.id === q);
-                                    return found ? `${found.icon} ${found.shortLabel}` : q;
-                                  })
-                                  .join(' → ')}
-                              </span>
-                            </div>
+                            <p className="mt-2 text-gc-cap text-gc-quiet">
+                              <span className="font-semibold">Order:</span>{' '}
+                              {effectiveMixedFormats
+                                .map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.shortLabel || q)
+                                .join(', then ')}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -696,315 +577,202 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               </div>
             )}
 
-            {/* AI & OFFLINE TAB */}
+            {/* SENTENCES: AI or the offline bank */}
             {activeTab === 'ai' && (
-              <div className="space-y-4">
-                {/* Status Hero Card */}
-                <div className="p-4 rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-amber-50/50 dark:bg-black/30">
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">⚡</span>
-                      <div>
-                        <h3 className="font-sans font-bold text-sm text-slate-900 dark:text-amber-100">
-                          Casino Intelligence Engine
-                        </h3>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sans tabular-nums">
-                          {desktopStatus.isDesktop
-                            ? 'Windows Desktop Edition (Self-Contained)'
-                            : 'Web Edition (Serverless Backend)'}
-                        </p>
-                      </div>
+              <div className="space-y-3">
+                {/* Where the sentences come from */}
+                <div className={card}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className={cardTitle}>Where the sentences come from</h3>
+                      <p className={hint}>{desktopStatus.isDesktop ? 'Desktop app for Windows' : 'Web app'}</p>
                     </div>
-
-                    <div className="flex flex-col items-end gap-1">
-                      <span
-                        className={`text-[10px] font-sans tabular-nums font-bold px-2.5 py-0.5 rounded-full border ${
-                          desktopStatus.isOnline
-                            ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40'
-                            : 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40'
-                        }`}
-                      >
-                        {desktopStatus.isOnline ? '● Online' : '○ Offline Mode'}
-                      </span>
-                      {desktopStatus.isDesktop && (
-                        <span className="text-[9px] font-sans tabular-nums text-slate-500 dark:text-slate-400">
-                          {desktopStatus.isEncrypted ? '🛡️ Windows DPAPI Ready' : 'Key Protection'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Active Generator Badge */}
-                  <div className="p-2.5 rounded-lg bg-amber-100/60 dark:bg-amber-950/40 border border-amber-300/40 dark:border-amber-800/40 flex items-center justify-between text-xs">
-                    <span className="font-sans font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                      <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '🚀' : '💾'}</span>
-                      <span>Active Engine:</span>
-                    </span>
-                    <span className="font-sans tabular-nums font-bold text-slate-900 dark:text-white">
-                      {desktopStatus.hasKey && desktopStatus.isOnline
-                        ? 'Gemini Live Generative AI'
-                        : 'Curated Sentence Bank (Offline)'}
+                    <span className={`h-7 px-3 inline-flex items-center gap-1.5 rounded-full text-gc-cap font-bold ${desktopStatus.isOnline ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-line/[0.08] text-gc-quiet'}`}>
+                      <span className={`w-2 h-2 rounded-full ${desktopStatus.isOnline ? 'bg-gc-win' : 'bg-gc-quiet/60'}`} aria-hidden="true" />
+                      {desktopStatus.isOnline ? 'Online' : 'Offline'}
                     </span>
                   </div>
-
-                  {/* Portable Edition Badge */}
+                  <div className="mt-3 flex items-center gap-3 p-3 rounded-gc-sm bg-gc-line/[0.05]">
+                    <span className="text-[22px] leading-none" aria-hidden="true">{aiOn ? '⚡' : '💾'}</span>
+                    <div className="min-w-0">
+                      <p className="text-gc-cap text-gc-quiet">Using now</p>
+                      <p className="text-gc-body font-bold text-gc-ink">{aiOn ? 'AI sentences from Gemini' : 'The offline sentence bank'}</p>
+                    </div>
+                  </div>
                   {desktopStatus.isPortable && (
-                    <div className="mt-2.5 p-2 rounded-lg bg-purple-500/10 border border-purple-400/40 dark:border-purple-800/40 flex items-center justify-between text-xs">
-                      <span className="font-sans font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
-                        <span>🎒</span>
-                        <span>Portable Edition:</span>
-                      </span>
-                      <span className="font-sans tabular-nums text-[11px] text-slate-700 dark:text-slate-300 truncate max-w-[280px]" title={desktopStatus.dataPath}>
-                        📁 {desktopStatus.dataPath ? desktopStatus.dataPath.split(/[\\/]/).slice(-2).join('/') : 'Grammar Casino Data'}
-                      </span>
-                    </div>
+                    <p className="mt-2 text-gc-small text-gc-quiet truncate" title={desktopStatus.dataPath}>
+                      Portable app. Data folder: {desktopStatus.dataPath ? desktopStatus.dataPath.split(/[\\/]/).slice(-2).join('/') : 'Grammar Casino Data'}
+                    </p>
                   )}
                 </div>
 
-                {/* Read-Only Media Warning Banner */}
                 {desktopStatus.isReadOnly && (
-                  <div className="p-3.5 rounded-xl border-2 border-red-500/80 bg-red-500/15 text-red-950 dark:text-red-100 flex items-start gap-3 animate-fade-in shadow-md">
-                    <span className="text-2xl mt-0.5 select-none">🔒</span>
-                    <div className="flex-1 min-w-0">
-                      <h5 className="font-sans font-bold text-xs uppercase tracking-wide text-red-700 dark:text-red-300">
-                        Read-Only Location Detected
-                      </h5>
-                      <p className="text-xs mt-1 leading-relaxed">
-                        Grammar Casino Portable is running from a write-protected drive or read-only directory. Settings, progress, and game saves will run in temporary session memory and cannot be saved to the drive.
-                      </p>
+                  <div className="p-3.5 rounded-gc border border-gc-loss/50 bg-gc-loss/10 flex items-start gap-3" role="alert">
+                    <Lock className="w-5 h-5 shrink-0 mt-0.5 text-gc-loss" aria-hidden="true" />
+                    <div>
+                      <p className="text-gc-small font-bold text-gc-ink">This drive is read-only</p>
+                      <p className="text-gc-small text-gc-quiet mt-0.5">Settings, progress and saved games last only until you close the app.</p>
                     </div>
                   </div>
                 )}
 
-                {/* DPAPI Machine Transfer Key Re-entry Alert Banner */}
                 {desktopStatus.decryptionFailed && (
-                  <div className="p-3.5 rounded-xl border-2 border-amber-500 bg-amber-500/15 text-amber-950 dark:text-amber-100 flex items-start gap-3 animate-fade-in shadow-md">
-                    <span className="text-2xl mt-0.5 select-none">🔑</span>
-                    <div className="flex-1 min-w-0">
-                      <h5 className="font-sans font-bold text-xs uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                        Key Re-entry Needed (New PC or User Account)
-                      </h5>
-                      <p className="text-xs mt-1 leading-relaxed">
-                        Your previously saved Gemini API key was encrypted with Windows DPAPI on a different computer or Windows account. Because Windows security credentials do not transfer between different user profiles or machines, please re-enter your Gemini API key below to re-encrypt and activate live AI on this computer.
+                  <div className="p-3.5 rounded-gc border border-gc-gold/60 bg-gc-gold/10 flex items-start gap-3" role="alert">
+                    <KeyRound className="w-5 h-5 shrink-0 mt-0.5 text-gc-gold" aria-hidden="true" />
+                    <div>
+                      <p className="text-gc-small font-bold text-gc-ink">Enter your AI key again</p>
+                      <p className="text-gc-small text-gc-quiet mt-0.5">
+                        The saved Gemini key was locked to another computer or Windows account, so it can't be read here. Enter it again below to use AI sentences on this computer.
                       </p>
                     </div>
                   </div>
                 )}
 
-                {/* Feature Availability Matrix */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-black/20">
-                  <h4 className="font-sans font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200/90 mb-2.5">
-                    Feature Availability (Offline vs Live AI)
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <div className="p-2 rounded bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
-                      <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                        <span>✅</span>
-                        <span>Curated Challenge Bank (A1-C2)</span>
-                      </div>
-                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        Hand-crafted grammar challenges across all CEFR levels & formats. Fully offline.
-                      </p>
-                    </div>
-
-                    <div className="p-2 rounded bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40">
-                      <div className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                        <span>✅</span>
-                        <span>Pedagogical Heuristics & Hints</span>
-                      </div>
-                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        Deterministic grammar clues, sentence verification, & offline audio synthesis.
-                      </p>
-                    </div>
-
-                    <div className={`p-2 rounded border ${
-                      desktopStatus.hasKey && desktopStatus.isOnline
-                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
-                        : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300/50 dark:border-amber-800/40'
-                    }`}>
-                      <div className={`font-bold flex items-center gap-1 ${
-                        desktopStatus.hasKey && desktopStatus.isOnline
-                          ? 'text-emerald-800 dark:text-emerald-300'
-                          : 'text-amber-800 dark:text-amber-300'
-                      }`}>
-                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '✅' : '⚠️'}</span>
-                        <span>Dynamic Sentence Synthesis</span>
-                      </div>
-                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        {desktopStatus.hasKey && desktopStatus.isOnline
-                          ? 'Generates fresh, never-before-seen sentences matching custom rules.'
-                          : 'Unavailable offline or without key (curated bank used instead).'}
-                      </p>
-                    </div>
-
-                    <div className={`p-2 rounded border ${
-                      desktopStatus.hasKey && desktopStatus.isOnline
-                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
-                        : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300/50 dark:border-amber-800/40'
-                    }`}>
-                      <div className={`font-bold flex items-center gap-1 ${
-                        desktopStatus.hasKey && desktopStatus.isOnline
-                          ? 'text-emerald-800 dark:text-emerald-300'
-                          : 'text-amber-800 dark:text-amber-300'
-                      }`}>
-                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? '✅' : '⚠️'}</span>
-                        <span>Neural Voice (Gemini TTS)</span>
-                      </div>
-                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        {desktopStatus.hasKey && desktopStatus.isOnline
-                          ? 'Studio-grade natural neural speech model.'
-                          : 'Falls back to Windows system text-to-speech engine.'}
-                      </p>
-                    </div>
-                  </div>
+                {/* What works without the AI key */}
+                <div className={card}>
+                  <h3 className={cardTitle}>What works without an AI key</h3>
+                  <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {[
+                      { ok: true, title: 'Sentence bank, A1 to C2', text: 'Ready-made sentences for every level and question type. Works offline.' },
+                      { ok: true, title: 'Hints and answer checks', text: 'Grammar clues and checks that work offline.' },
+                      { ok: aiOn, title: 'New sentences', text: aiOn ? 'Fresh sentences for any topic you type.' : 'Needs the AI key and the internet. The bank is used instead.' },
+                      { ok: aiOn, title: 'Natural voice', text: aiOn ? 'Gemini reads the sentences aloud.' : "Without the key, the computer's own voice reads aloud." },
+                    ].map(item => (
+                      <li key={item.title} className="p-2.5 rounded-gc-sm bg-gc-line/[0.04] flex items-start gap-2">
+                        {item.ok
+                          ? <Check className="w-4 h-4 shrink-0 mt-0.5 text-gc-win" aria-hidden="true" />
+                          : <Info className="w-4 h-4 shrink-0 mt-0.5 text-gc-quiet" aria-hidden="true" />}
+                        <span>
+                          <span className="block text-gc-small font-bold text-gc-ink">{item.title}</span>
+                          <span className="block text-gc-cap text-gc-quiet">{item.text}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
-                {/* Optional API Key Configuration */}
-                <div className="p-4 rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-white dark:bg-black/20">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <h4 className="font-sans font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-amber-200">
-                      Custom Gemini API Key (Optional)
-                    </h4>
+                {/* Optional Gemini key */}
+                <div className={card}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className={cardTitle}>Gemini API key <span className="font-normal text-gc-quiet">(optional)</span></h3>
                     {desktopStatus.hasKey && (
-                      <span className="text-[10px] font-sans tabular-nums bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded font-bold border border-emerald-500/40">
-                        Configured: {desktopStatus.maskedKey || 'Saved'}
+                      <span className="h-7 px-2.5 inline-flex items-center rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold tabular-nums">
+                        Saved: {desktopStatus.maskedKey || 'yes'}
                       </span>
                     )}
                   </div>
-
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
-                    Grammar Casino is 100% playable offline out of the box. An API key is entirely optional. If you want to enable live generative AI features, enter your own Google Gemini API key below.
+                  <p className={`mt-1 ${hint}`}>
+                    The game works fully offline. Add your own Google Gemini key only if you want AI sentences and the natural voice.
                   </p>
 
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <input
-                        type={showKeyText ? 'text' : 'password'}
-                        value={apiKeyInput}
-                        onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder={desktopStatus.hasKey ? 'Enter new key to replace existing...' : 'AIzaSy...'}
-                        className="w-full px-3 py-2 pr-16 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-black/50 text-slate-900 dark:text-white font-sans tabular-nums focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowKeyText(!showKeyText)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-sans tabular-nums text-amber-700 dark:text-amber-300 hover:underline px-1 cursor-pointer"
-                      >
-                        {showKeyText ? 'Hide' : 'Show'}
-                      </button>
-                    </div>
-
-                    {keyNotice && (
-                      <div
-                        className={`text-xs p-2 rounded-lg border flex items-center gap-1.5 ${
-                          keyNotice.type === 'success'
-                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 text-emerald-800 dark:text-emerald-200'
-                            : keyNotice.type === 'error'
-                            ? 'bg-red-50 dark:bg-red-950/40 border-red-300 text-red-800 dark:text-red-200'
-                            : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 text-amber-800 dark:text-amber-200'
-                        }`}
-                      >
-                        <span>{keyNotice.type === 'success' ? '✓' : keyNotice.type === 'error' ? '⚠️' : 'ℹ️'}</span>
-                        <span>{keyNotice.text}</span>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleSaveKey}
-                        className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold bg-amber-500 hover:bg-amber-600 text-black shadow transition-all cursor-pointer flex items-center gap-1"
-                      >
-                        <span>💾</span>
-                        <span>Save Encrypted Key (DPAPI)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleTestConnection}
-                        disabled={isTesting || (!apiKeyInput.trim() && !desktopStatus.hasKey)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold border border-amber-400 dark:border-amber-700 hover:bg-amber-100/50 dark:hover:bg-amber-950/30 text-amber-900 dark:text-amber-200 transition-all cursor-pointer disabled:opacity-40"
-                      >
-                        <span>{isTesting ? '⏳ Testing...' : '🔍 Test Connection'}</span>
-                      </button>
-
-                      {desktopStatus.hasKey && (
-                        <button
-                          type="button"
-                          onClick={handleRemoveKey}
-                          className="px-3 py-1.5 rounded-lg text-xs font-sans font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-red-300/60 dark:border-red-900/40 transition-all cursor-pointer"
-                        >
-                          <span>🗑️ Remove Key</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 italic pt-1">
-                      🛡️ Security Guarantee: Your key is stored in your personal Windows app data folder using OS-backed Windows DPAPI encryption. It is never included in installers or shared with anyone.
-                    </p>
+                  <div className="mt-3 relative">
+                    <label htmlFor="rsm-api-key" className="sr-only">Gemini API key</label>
+                    <input
+                      id="rsm-api-key"
+                      type={showKeyText ? 'text' : 'password'}
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder={desktopStatus.hasKey ? 'Paste a new key to replace the saved one' : 'AIzaSy…'}
+                      className={`${inputCls} pr-12 tabular-nums`}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyText(!showKeyText)}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full grid place-items-center text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.08] cursor-pointer"
+                      aria-label={showKeyText ? 'Hide the key' : 'Show the key'}
+                    >
+                      {showKeyText ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
+                    </button>
                   </div>
+
+                  {keyNotice && (
+                    <p
+                      className={`mt-2 flex items-start gap-1.5 text-gc-small font-semibold ${
+                        keyNotice.type === 'success' ? 'text-gc-win' : keyNotice.type === 'error' ? 'text-gc-loss' : 'text-gc-info'
+                      }`}
+                      role="status"
+                    >
+                      {keyNotice.type === 'success'
+                        ? <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                        : keyNotice.type === 'error'
+                          ? <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                          : <Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />}
+                      {keyNotice.text}
+                    </p>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={handleSaveKey} className={`${smallBtn} gc-btn-primary border-transparent`}>
+                      Save key
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={isTesting || (!apiKeyInput.trim() && !desktopStatus.hasKey)}
+                      className={`${smallBtn} bg-gc-line/[0.06] border-gc-line/[0.16] text-gc-ink hover:border-gc-line/30`}
+                    >
+                      {isTesting ? 'Checking…' : 'Test the key'}
+                    </button>
+                    {desktopStatus.hasKey && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveKey}
+                        className={`${smallBtn} border-gc-loss/40 text-gc-loss hover:bg-gc-loss/10`}
+                      >
+                        Remove key
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-3 text-gc-cap text-gc-quiet">
+                    The key is encrypted with Windows' own protection (DPAPI) and kept in your app data folder. It is never put in the installer or shared.
+                  </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Pending Configuration Summary Banner */}
-          <div className="px-5 py-3 bg-amber-50/90 dark:bg-black/40 border-t border-amber-300/40 dark:border-amber-900/50 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 flex-wrap text-slate-600 dark:text-slate-400 font-sans">
-              <span className="font-bold text-amber-800 dark:text-amber-400">Next Deal Summary:</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 truncate max-w-[140px]" title={resolvedTopic}>
-                📚 {resolvedTopic}
+          {/* What the next hand will use */}
+          <div className="hidden sm:flex px-5 sm:px-6 py-3 border-t border-gc-line/[0.12] flex-wrap items-center gap-1.5">
+            <span className="text-gc-cap font-semibold text-gc-quiet mr-1">Next hand:</span>
+            {[
+              { key: 'topic', text: resolvedTopic },
+              { key: 'level', text: selectedLevel },
+              { key: 'theme', text: resolvedTheme },
+              { key: 'format', text: `${selectedFormatConfig?.shortLabel || 'Valid or flawed'}${selectedFormat === 'mixed' ? ` ${mixIcons}` : ''}` },
+            ].map(chip => (
+              <span key={chip.key} className="h-7 px-2.5 inline-flex items-center rounded-full bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-cap font-semibold text-gc-ink max-w-[12rem] truncate" title={chip.text}>
+                {chip.text}
               </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50">
-                📊 {selectedLevel}
-              </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50 truncate max-w-[140px]" title={resolvedTheme}>
-                🎭 {resolvedTheme}
-              </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/50">
-                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.icon || '🎯'}{' '}
-                {CHALLENGE_FORMATS.find(f => f.id === selectedFormat)?.shortLabel || 'Valid / Flawed'}
-                {selectedFormat === 'mixed' && (
-                  <span className="ml-0.5 text-[10px] opacity-90">
-                    ({effectiveMixedFormats.map(q => CHALLENGE_FORMATS.find(f => f.id === q)?.icon).filter(Boolean).join('')})
-                  </span>
-                )}
-              </span>
-            </div>
-            <div className="text-[11px] text-amber-700 dark:text-amber-400/80 italic">
-              Takes effect starting Round {currentRound + 1}
-            </div>
+            ))}
           </div>
 
-          {/* Action Buttons */}
-          <div className="p-4 bg-amber-50/50 dark:bg-[#0a1f14]/50 border-t border-amber-200/50 dark:border-[#14532d] flex flex-wrap justify-between items-center gap-2 select-none">
+          {/* Actions */}
+          <div className="px-5 sm:px-6 py-4 border-t border-gc-line/[0.12] flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
             {onApplyCurrentRound ? (
               <button
                 type="button"
                 onClick={handleApplyNow}
-                className="px-3.5 py-2 rounded-lg text-xs font-sans font-bold text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 border border-amber-400/50 hover:border-amber-500 hover:bg-amber-100/50 dark:hover:bg-amber-950/40 transition-colors flex items-center gap-1.5 cursor-pointer"
-                title="Immediately apply and deal a new card right now for the current round"
+                className="h-11 px-4 rounded-gc-sm text-gc-small font-bold text-gc-ink border border-gc-line/[0.16] bg-gc-line/[0.04] hover:border-gc-line/30 transition-colors cursor-pointer"
+                title="Use these settings now and deal a new sentence for this hand"
               >
-                <span>🔄</span>
-                <span>Apply & Deal New Card Now</span>
+                Use now and deal a new sentence
               </button>
-            ) : <div />}
-
-            <div className="flex items-center gap-2">
+            ) : <span className="hidden sm:block" />}
+            <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => { playSound('click'); onClose(); }}
-                className="px-4 py-2 rounded-lg text-xs font-sans font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+                className="h-11 px-4 rounded-gc-sm text-gc-small font-bold text-gc-quiet hover:text-gc-ink transition-colors cursor-pointer"
               >
-                Close
+                Cancel
               </button>
               <ActionButton
                 onClick={handleSaveForNext}
-                playSound={playSound}
-                variant="gold"
-                className="py-2.5 px-6 text-sm shadow-md"
+                variant="primary"
+                className="h-12 px-6 text-gc-body"
               >
-                <span>Save for Next Round ➡️</span>
+                Save for the next hand
               </ActionButton>
             </div>
           </div>

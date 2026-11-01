@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { RoundHistoryRecord, SoundEffect, Player, Settings, GameMode } from '../types';
-import ActionButton from './ActionButton';
+import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Printer } from 'lucide-react';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 
 interface GrammarReportCardProps {
@@ -303,253 +303,173 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     }
   };
 
+  const tabCls = (on: boolean) =>
+    `h-9 px-3.5 rounded-full text-gc-small font-semibold transition-colors cursor-pointer border ${
+      on ? 'bg-gc-gold/15 border-gc-gold text-gc-ink' : 'bg-gc-line/[0.05] border-gc-line/[0.14] text-gc-quiet hover:text-gc-ink hover:border-gc-line/30'
+    }`;
+  const toolBtn =
+    'h-10 px-3.5 inline-flex items-center gap-1.5 rounded-full bg-gc-line/[0.06] border border-gc-line/[0.16] hover:border-gc-line/30 text-gc-small font-semibold text-gc-ink transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
+  const label = 'text-gc-cap font-bold text-gc-quiet mb-1';
+  const formatName = (q: string) =>
+    q === 'multipleChoice'
+      ? 'Multiple choice'
+      : q === 'wordFormation'
+        ? 'Word formation'
+        : q === 'keyWordTransformation'
+          ? 'Key word'
+          : 'Open cloze';
+
   return (
-    <div className="w-full max-w-5xl mx-auto my-8 animate-fade-in print:my-0 print:max-w-none relative">
-      {/* Toast Notification for PDF Generation */}
+    <div className="w-full max-w-5xl mx-auto my-8 print:my-0 print:max-w-none relative text-left">
+      {/* Message after making the PDF */}
       {pdfToast && (
-        <div className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl bg-slate-900/95 dark:bg-[#071e12]/95 text-amber-200 border-2 border-amber-400 shadow-2xl font-sans text-sm font-bold flex items-center gap-2.5 animate-bounce">
+        <div role="status" className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-gc gc-panel text-gc-small font-semibold flex items-center gap-2.5 animate-gc-slide-up">
           <span>{pdfToast}</span>
         </div>
       )}
 
-      {/* Header Banner */}
-      <div className="luxury-card rounded-2xl p-6 md:p-8 border-2 border-amber-400 dark:border-amber-500/40 shadow-2xl relative overflow-visible bg-white/95 dark:bg-[#071e12]/95 backdrop-blur-md">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-6 border-b border-amber-200 dark:border-amber-900/60">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="text-4xl filter drop-shadow">📜</span>
-              <div>
-                <h2 className="text-2xl md:text-3xl font-sans font-black text-slate-900 dark:text-amber-100 uppercase tracking-wide">
-                  Grammar Report Card
-                </h2>
-                <p className="text-sm text-slate-600 dark:text-emerald-300/80 font-medium">
-                  End-of-Game Pedagogical Review & Error Analysis
-                </p>
-              </div>
+      <section className="gc-surface rounded-gc-lg p-5 md:p-7" aria-labelledby="gc-report-title">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-gc-line/[0.12]">
+          <div className="flex items-start gap-3">
+            <span className="w-11 h-11 shrink-0 rounded-full bg-gc-gold/15 text-gc-money grid place-items-center">
+              <FileText className="w-5 h-5" aria-hidden="true" />
+            </span>
+            <div>
+              <h2 id="gc-report-title" className="text-gc-title font-bold text-gc-ink">Report card</h2>
+              <p className="text-gc-small text-gc-quiet">Every sentence from this game, with the answer, the rule and each player's bet.</p>
             </div>
           </div>
 
-          {/* Quick Action Tools */}
-          <div className="flex items-center gap-2 flex-wrap justify-end print:hidden relative">
-            <button
-              onClick={copyReportToClipboard}
-              className="px-3.5 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-600/60 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
-              title="Copy formatted summary to clipboard"
-            >
-              <span>{copiedToast ? '✅' : '📋'}</span>
-              <span>{copiedToast ? 'Copied to Clipboard!' : 'Copy Summary'}</span>
+          <div className="flex items-center gap-2 flex-wrap print:hidden relative">
+            <button type="button" onClick={copyReportToClipboard} className={toolBtn} title="Copy a short summary to paste somewhere else">
+              {copiedToast ? <Check className="w-4 h-4 text-gc-win" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
+              {copiedToast ? 'Copied' : 'Copy summary'}
             </button>
 
-            {/* Split / Unified PDF Action Button */}
-            <div className="relative inline-flex items-center shadow-md rounded-lg">
+            <div className="relative inline-flex items-center">
               <button
+                type="button"
                 onClick={() => handleGeneratePDF(false)}
                 disabled={isGeneratingPDF}
-                className="px-4 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-l-lg bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 border border-amber-400 dark:border-amber-300 transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:opacity-60"
-                title="Generate and download complete pedagogical PDF report"
+                className={`${toolBtn} rounded-r-none pr-3`}
+                title="Download the whole report as a PDF"
               >
-                {isGeneratingPDF ? (
-                  <>
-                    <span className="animate-spin text-sm">⏳</span>
-                    <span>Generating PDF...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-base leading-none">📄</span>
-                    <span>Download PDF</span>
-                  </>
-                )}
+                {isGeneratingPDF ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : <Download className="w-4 h-4" aria-hidden="true" />}
+                {isGeneratingPDF ? 'Making the PDF…' : 'Download PDF'}
               </button>
-              
               <button
+                type="button"
                 onClick={() => setShowPdfOptions(prev => !prev)}
                 disabled={isGeneratingPDF}
-                className="px-2.5 py-2 text-xs font-bold rounded-r-lg bg-amber-600 hover:bg-amber-500 text-slate-950 border-t border-b border-r border-amber-400 border-l border-l-amber-700/50 transition-colors cursor-pointer disabled:opacity-60"
-                title="More PDF export options"
-                aria-label="PDF export options"
+                className={`${toolBtn} rounded-l-none border-l-0 px-2.5`}
+                aria-label="More PDF options"
+                aria-expanded={showPdfOptions}
               >
-                ▾
+                <ChevronDown className="w-4 h-4" aria-hidden="true" />
               </button>
 
-              {/* PDF Dropdown Menu */}
               {showPdfOptions && (
-                <div className="absolute right-0 top-full mt-1.5 w-64 rounded-xl bg-white dark:bg-[#0a2316] border border-amber-300 dark:border-amber-600/60 shadow-2xl z-50 p-2 text-xs font-sans animate-fade-in">
-                  <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-slate-400 dark:text-slate-500 px-2.5 py-1 font-bold">
-                    Export PDF Options
-                  </div>
+                <div role="menu" className="absolute right-0 top-full mt-2 w-72 p-1.5 rounded-gc bg-gc-raised border border-gc-line/[0.14] shadow-gc-2 z-50">
                   <button
+                    type="button"
+                    role="menuitem"
                     onClick={() => handleGeneratePDF(false)}
-                    className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/50 text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 rounded-gc-sm hover:bg-gc-line/[0.07] flex items-center justify-between gap-2 cursor-pointer"
                   >
-                    <span className="font-bold flex items-center gap-1.5">
-                      <span>📄</span> Full Report ({history.length} Rounds)
-                    </span>
-                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-sans tabular-nums">Recommended</span>
+                    <span className="text-gc-small font-semibold text-gc-ink">Whole report ({history.length} hands)</span>
+                    <span className="text-gc-cap text-gc-quiet">Best</span>
                   </button>
-                  
                   {activeTab !== 'all' && (
                     <button
+                      type="button"
+                      role="menuitem"
                       onClick={() => handleGeneratePDF(true)}
-                      className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/50 text-slate-800 dark:text-slate-200 flex items-center justify-between cursor-pointer"
+                      className="w-full text-left px-3 py-2.5 rounded-gc-sm hover:bg-gc-line/[0.07] flex items-center justify-between gap-2 cursor-pointer"
                     >
-                      <span className="font-bold flex items-center gap-1.5">
-                        <span>📑</span> Filtered ({filteredHistory.length} Rounds)
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-sans tabular-nums capitalize">{activeTab}</span>
+                      <span className="text-gc-small font-semibold text-gc-ink">Only this list ({filteredHistory.length} hands)</span>
                     </button>
                   )}
-
-                  <div className="my-1 border-t border-slate-200 dark:border-slate-800" />
-                  
+                  <div className="my-1 border-t border-gc-line/[0.12]" />
                   <button
+                    type="button"
+                    role="menuitem"
                     onClick={() => { setShowPdfOptions(false); handlePrint(); }}
-                    className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 rounded-gc-sm hover:bg-gc-line/[0.07] flex items-center gap-2 text-gc-small font-semibold text-gc-ink cursor-pointer"
                   >
-                    <span>🖨️</span> Open Browser Print Dialog
+                    <Printer className="w-4 h-4 text-gc-quiet" aria-hidden="true" />
+                    Open the print window
                   </button>
                 </div>
               )}
             </div>
 
-            <button
-              onClick={handlePrint}
-              className="px-3.5 py-2 text-xs font-sans font-bold uppercase tracking-wider rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
-              title="Print report card directly"
-            >
-              <span>🖨️</span>
-              <span>Print</span>
+            <button type="button" onClick={handlePrint} className={toolBtn} title="Print the report card">
+              <Printer className="w-4 h-4" aria-hidden="true" />
+              Print
             </button>
           </div>
         </div>
 
-        {/* Analytics Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 my-6">
-          <div className="p-4 rounded-xl bg-amber-50/80 dark:bg-black/40 border border-amber-200 dark:border-amber-800/40 text-center">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-              Table Accuracy
-            </div>
-            <div className="text-3xl font-black font-sans text-emerald-600 dark:text-emerald-400">
-              {stats.accuracyPct}%
-            </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
-              {stats.correctVotes} of {stats.totalVotes} bets correct
-            </div>
+        {/* Numbers for the whole class */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 my-5">
+          <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.1]">
+            <div className={label}>Class accuracy</div>
+            <div className="text-gc-display font-extrabold text-gc-win tabular-nums">{stats.accuracyPct}%</div>
+            <div className="text-gc-cap text-gc-quiet tabular-nums">{stats.correctVotes} of {stats.totalVotes} bets right</div>
           </div>
-
-          <div className="p-4 rounded-xl bg-amber-50/80 dark:bg-black/40 border border-amber-200 dark:border-amber-800/40 text-center">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-              Sentences Played
-            </div>
-            <div className="text-3xl font-black font-sans text-amber-600 dark:text-amber-400">
-              {stats.totalRounds}
-            </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
-              {stats.errorSentencesCount} errors / {stats.cleanSentencesCount} clean
-            </div>
+          <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.1]">
+            <div className={label}>Sentences</div>
+            <div className="text-gc-display font-extrabold text-gc-ink tabular-nums">{stats.totalRounds}</div>
+            <div className="text-gc-cap text-gc-quiet tabular-nums">{stats.errorSentencesCount} with a mistake, {stats.cleanSentencesCount} correct</div>
           </div>
-
-          <div className="p-4 rounded-xl bg-amber-50/80 dark:bg-black/40 border border-amber-200 dark:border-amber-800/40 text-center">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-              Tricky Rounds
-            </div>
-            <div className="text-3xl font-black font-sans text-rose-600 dark:text-rose-400">
-              {stats.missedSentencesCount}
-            </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tabular-nums mt-0.5">
-              had at least 1 miss
-            </div>
+          <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.1]">
+            <div className={label}>Missed by someone</div>
+            <div className="text-gc-display font-extrabold text-gc-loss tabular-nums">{stats.missedSentencesCount}</div>
+            <div className="text-gc-cap text-gc-quiet">hands where at least one player lost</div>
           </div>
-
-          <div className="p-4 rounded-xl bg-amber-50/80 dark:bg-black/40 border border-amber-200 dark:border-amber-800/40 text-center">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1">
-              Top Grammarian
-            </div>
+          <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.1]">
+            <div className={label}>Best player</div>
             {stats.topGrammarian ? (
               <>
-                <div className="text-xl font-bold font-sans text-slate-900 dark:text-white truncate flex items-center justify-center gap-1.5">
-                  <span>{stats.topGrammarian.avatar}</span>
+                <div className="text-gc-lead font-bold text-gc-ink truncate flex items-center gap-1.5 min-h-[40px]">
+                  <span aria-hidden="true">{stats.topGrammarian.avatar}</span>
                   <span className="truncate">{stats.topGrammarian.name}</span>
                 </div>
-                <div className="text-[10px] text-amber-600 dark:text-amber-400 font-sans tabular-nums font-bold mt-0.5">
-                  {stats.topGrammarian.accuracy}% win rate
-                </div>
+                <div className="text-gc-cap text-gc-quiet tabular-nums">{stats.topGrammarian.accuracy}% of bets right</div>
               </>
             ) : (
-              <div className="text-sm text-slate-400 italic mt-2">N/A</div>
+              <div className="text-gc-body text-gc-quiet min-h-[40px] flex items-center">Not enough bets yet</div>
             )}
           </div>
         </div>
 
-        {/* Filter Navigation Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200 dark:border-slate-800 print:hidden">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              onClick={() => { playSound?.('click'); setActiveTab('all'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'all'
-                  ? 'bg-amber-500 text-black shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              All Sentences ({history.length})
+        {/* Which hands to show */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-gc-line/[0.12] print:hidden">
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Show">
+            <button type="button" aria-pressed={activeTab === 'all'} onClick={() => { playSound?.('click'); setActiveTab('all'); }} className={tabCls(activeTab === 'all')}>
+              All <span className="tabular-nums">({history.length})</span>
             </button>
-
-            <button
-              onClick={() => { playSound?.('click'); setActiveTab('errors'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'errors'
-                  ? 'bg-rose-500 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              ⚠️ Error Sentences ({stats.errorSentencesCount})
+            <button type="button" aria-pressed={activeTab === 'errors'} onClick={() => { playSound?.('click'); setActiveTab('errors'); }} className={tabCls(activeTab === 'errors')}>
+              With a mistake <span className="tabular-nums">({stats.errorSentencesCount})</span>
             </button>
-
-            <button
-              onClick={() => { playSound?.('click'); setActiveTab('missed'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'missed'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              ⚡ Missed by Players ({stats.missedSentencesCount})
+            <button type="button" aria-pressed={activeTab === 'missed'} onClick={() => { playSound?.('click'); setActiveTab('missed'); }} className={tabCls(activeTab === 'missed')}>
+              Missed by someone <span className="tabular-nums">({stats.missedSentencesCount})</span>
             </button>
-
-            <button
-              onClick={() => { playSound?.('click'); setActiveTab('perfect'); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'perfect'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              ✅ Perfect Calls ({history.length - stats.missedSentencesCount})
+            <button type="button" aria-pressed={activeTab === 'perfect'} onClick={() => { playSound?.('click'); setActiveTab('perfect'); }} className={tabCls(activeTab === 'perfect')}>
+              Everyone right <span className="tabular-nums">({history.length - stats.missedSentencesCount})</span>
             </button>
           </div>
-
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-            <button
-              onClick={expandAll}
-              className="hover:text-amber-600 dark:hover:text-amber-400 hover:underline cursor-pointer"
-            >
-              Expand All
-            </button>
-            <span>•</span>
-            <button
-              onClick={collapseAll}
-              className="hover:text-amber-600 dark:hover:text-amber-400 hover:underline cursor-pointer"
-            >
-              Collapse All
-            </button>
+          <div className="flex items-center gap-3 text-gc-small font-semibold text-gc-quiet">
+            <button type="button" onClick={expandAll} className="hover:text-gc-ink underline-offset-4 hover:underline cursor-pointer">Open all</button>
+            <button type="button" onClick={collapseAll} className="hover:text-gc-ink underline-offset-4 hover:underline cursor-pointer">Close all</button>
           </div>
         </div>
 
-        {/* Sentences List */}
-        <div className="space-y-4 mt-6">
+        {/* The hands */}
+        <div className="space-y-3 mt-5">
           {filteredHistory.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400 font-editorial italic bg-slate-50 dark:bg-black/20 rounded-xl border border-dashed border-slate-300 dark:border-slate-800">
-              No sentences matched the selected filter tab.
+            <div className="text-center py-10 text-gc-body text-gc-quiet rounded-gc border border-dashed border-gc-line/[0.2]">
+              No hands in this list.
             </div>
           ) : (
             filteredHistory.map((record) => {
@@ -558,273 +478,155 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
               const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
               const hasError = !isCloze && !record.sentence.isCorrect;
               const anyPlayerLost = record.playerResults.some(pr => !pr.isWin);
+              const chip = 'h-7 px-2.5 inline-flex items-center gap-1 rounded-full text-gc-cap font-bold shrink-0';
 
               return (
-                <div
-                  key={record.round}
-                  className={`rounded-xl border transition-all duration-200 overflow-hidden ${
-                    isCloze
-                      ? 'border-indigo-300/80 dark:border-indigo-900/60 bg-indigo-50/15 dark:bg-indigo-950/10'
-                      : hasError
-                        ? 'border-rose-300/80 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
-                        : 'border-emerald-300/80 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/10'
-                  }`}
-                >
-                  {/* Round Item Bar / Header */}
-                  <div
+                <div key={record.round} className="rounded-gc border border-gc-line/[0.14] bg-gc-line/[0.03] overflow-hidden">
+                  <button
+                    type="button"
                     onClick={() => toggleExpand(record.round)}
-                    className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors select-none"
+                    aria-expanded={isExpanded}
+                    className="w-full p-4 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-gc-line/[0.04] transition-colors"
                   >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <span className="px-2.5 py-1 rounded-md text-xs font-sans font-black uppercase tracking-wider bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                        R{record.round}
-                      </span>
-
+                    <span className="flex items-center gap-2 flex-1 min-w-0 flex-wrap sm:flex-nowrap">
+                      <span className={`${chip} bg-gc-line/[0.08] text-gc-ink tabular-nums`}>Hand {record.round}</span>
                       {isCloze ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800">
-                          <span>
-                            {qType === 'multipleChoice'
-                              ? '🔤 Multiple-Choice'
-                              : qType === 'wordFormation'
-                                ? `🧬 Word Form (${record.sentence.baseWord || 'ROOT'})`
-                                : qType === 'keyWordTransformation'
-                                  ? `🔑 Key Word (${record.sentence.baseWord || 'KEY'})`
-                                  : '✍️ Open Cloze'}
-                          </span>
+                        <span className={`${chip} bg-gc-info/15 text-gc-info`}>
+                          {formatName(qType)}
+                          {(qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.baseWord ? ` · ${record.sentence.baseWord.toUpperCase()}` : ''}
                         </span>
                       ) : (
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${
-                            hasError
-                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
-                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
-                          }`}
-                        >
-                          <span>{hasError ? '❌ Error' : '✔️ Flawless'}</span>
+                        <span className={`${chip} ${hasError ? 'bg-gc-loss/15 text-gc-loss' : 'bg-gc-win/15 text-gc-win'}`}>
+                          {hasError ? 'Flawed' : 'Valid'}
                         </span>
                       )}
-
                       {isCloze && record.sentence.correctAnswer && (
-                        <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                          Ans: "{record.sentence.correctAnswer}"
-                        </span>
+                        <span className={`${chip} hidden sm:inline-flex bg-gc-win/15 text-gc-win max-w-[12rem] truncate`}>Answer: {record.sentence.correctAnswer}</span>
                       )}
+                      {anyPlayerLost && <span className={`${chip} hidden sm:inline-flex bg-gc-line/[0.08] text-gc-quiet`}>Missed by someone</span>}
+                      <span className="text-gc-body font-sentence italic text-gc-ink truncate flex-1 min-w-0 basis-full sm:basis-auto">&ldquo;{record.sentence.text}&rdquo;</span>
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="text-gc-cap text-gc-quiet hidden md:inline-block">{record.topic} · {record.level}</span>
+                      <ChevronDown className={`w-5 h-5 text-gc-quiet transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    </span>
+                  </button>
 
-                      {anyPlayerLost && (
-                        <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
-                          Class Miss
-                        </span>
-                      )}
-
-                      <p className="text-sm md:text-base font-sans font-medium text-slate-900 dark:text-slate-100 truncate flex-1">
-                        "{record.sentence.text}"
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-sans tabular-nums text-slate-500 dark:text-slate-400 hidden md:inline-block">
-                        {record.topic} ({record.level})
-                      </span>
-                      <span className="text-lg text-slate-400 group-hover:text-amber-500 transition-transform">
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Expanded Content Area */}
                   {isExpanded && (
-                    <div className="p-4 md:p-6 border-t border-slate-200 dark:border-slate-800/80 bg-white/60 dark:bg-black/30 space-y-5 animate-fade-in">
-                      {/* Sentence Comparison Box */}
-                      <div className="space-y-3">
-                        <div className="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-                          <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
-                            <span>
-                              {qType === 'keyWordTransformation'
-                                ? 'Key Word Transformation Prompt (Part 4)'
-                                : qType === 'wordFormation'
-                                  ? 'Word Formation Challenge Prompt'
-                                  : isCloze
-                                    ? 'Cloze Challenge Prompt'
-                                    : 'Original Sentence'}
-                            </span>
-                            {qType === 'wordFormation' && record.sentence.baseWord && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-sans tabular-nums">
-                                Base Word: ({record.sentence.baseWord})
-                              </span>
-                            )}
-                            {qType === 'keyWordTransformation' && record.sentence.baseWord && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-sans tabular-nums">
-                                🔑 KEY WORD: {record.sentence.baseWord}
-                              </span>
-                            )}
+                    <div className="px-4 pb-5 md:px-5 pt-4 border-t border-gc-line/[0.1] space-y-4 animate-gc-fade">
+                      <div className="p-4 rounded-gc-sm bg-gc-card/60 border border-gc-line/[0.1]">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className={label}>
+                            {qType === 'keyWordTransformation' ? 'Second sentence' : isCloze ? 'The gap sentence' : 'The sentence'}
                           </div>
-                          {qType === 'keyWordTransformation' && record.sentence.leadInSentence && (
-                            <div className="mb-2 p-2.5 rounded-md bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-sm md:text-base font-editorial italic text-slate-800 dark:text-amber-100">
-                              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 block not-italic mb-0.5">
-                                Lead-in Sentence:
-                              </span>
-                              "{record.sentence.leadInSentence}"
-                            </div>
+                          {qType === 'wordFormation' && record.sentence.baseWord && (
+                            <span className={`${chip} bg-gc-gold/15 text-gc-money`}>Word to change: {record.sentence.baseWord.toUpperCase()}</span>
                           )}
-                          <div className="text-base md:text-lg font-sans text-slate-900 dark:text-slate-100 leading-relaxed">
-                            "{record.sentence.text}"
-                          </div>
-                          {qType === 'multipleChoice' && record.sentence.options && (
-                            <div className="mt-2.5 flex flex-wrap gap-2">
-                              {record.sentence.options.map((opt, idx) => {
-                                const isOfficial = opt.trim().toLowerCase() === (record.sentence.correctAnswer || '').trim().toLowerCase();
-                                return (
-                                  <span
-                                    key={idx}
-                                    className={`px-2.5 py-1 rounded-md text-xs font-sans font-semibold border ${
-                                      isOfficial
-                                        ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
-                                        : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                                    }`}
-                                  >
-                                    <strong className="mr-1">{['A', 'B', 'C', 'D'][idx]}.</strong> {opt}
-                                  </span>
-                                );
-                              })}
-                            </div>
+                          {qType === 'keyWordTransformation' && record.sentence.baseWord && (
+                            <span className={`${chip} bg-gc-gold/15 text-gc-money`}>Key word: {record.sentence.baseWord.toUpperCase()}</span>
                           )}
                         </div>
-
-                        {isCloze && (
-                          <div className="p-3.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/50">
-                            <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400 mb-1 flex flex-wrap items-center justify-between gap-2">
-                              <span className="flex items-center gap-1.5">
-                                <span>✅</span>
-                                <span>Official Answer: "{record.sentence.correctAnswer}"</span>
-                              </span>
-                              {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
-                                <span className="font-sans tabular-nums text-emerald-800 dark:text-emerald-300 font-medium normal-case bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800 text-[11px]">
-                                  Accepted Forms: {record.sentence.acceptedAnswers.join(' | ')}
-                                </span>
-                              )}
-                            </div>
-                            {record.sentence.correction && (
-                              <div className="text-base md:text-lg font-sans font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
-                                "{record.sentence.correction}"
-                              </div>
-                            )}
-                          </div>
+                        {qType === 'keyWordTransformation' && record.sentence.leadInSentence && (
+                          <p className="mb-2 text-gc-body font-sentence italic text-gc-quiet">
+                            <span className="not-italic font-sans text-gc-cap font-bold block">First sentence</span>
+                            &ldquo;{record.sentence.leadInSentence}&rdquo;
+                          </p>
                         )}
-
-                        {hasError && record.sentence.correction && (
-                          <div className="p-3.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/50">
-                            <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400 mb-1 flex items-center justify-between">
-                              <span className="flex items-center gap-1.5">
-                                <span>✅</span>
-                                <span>Corrected Version</span>
-                              </span>
-                              {record.sentence.errorPhrase && (
-                                <span className="font-sans tabular-nums text-rose-700 dark:text-rose-300 font-medium normal-case bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800 text-[11px]">
-                                  Mistake: "{record.sentence.errorPhrase}" {record.sentence.mistakeType ? `(${record.sentence.mistakeType})` : ''}
+                        <p className="text-gc-lead font-sentence italic text-gc-ink">&ldquo;{record.sentence.text}&rdquo;</p>
+                        {qType === 'multipleChoice' && record.sentence.options && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {record.sentence.options.map((opt, idx) => {
+                              const isOfficial = opt.trim().toLowerCase() === (record.sentence.correctAnswer || '').trim().toLowerCase();
+                              return (
+                                <span
+                                  key={idx}
+                                  className={`h-8 px-3 inline-flex items-center gap-1.5 rounded-full text-gc-small font-semibold border ${
+                                    isOfficial ? 'bg-gc-win/15 border-gc-win/40 text-gc-ink' : 'bg-gc-line/[0.04] border-gc-line/[0.14] text-gc-quiet'
+                                  }`}
+                                >
+                                  <b>{['A', 'B', 'C', 'D'][idx]}</b> {opt}
                                 </span>
-                              )}
-                            </div>
-                            <div className="text-base md:text-lg font-sans font-medium text-emerald-900 dark:text-emerald-200 leading-relaxed">
-                              "{record.sentence.correction}"
-                            </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
 
-                      {/* Explanation & Linguistic Rule */}
-                      <div className="p-4 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/30">
-                        <div className="text-xs font-bold uppercase tracking-widest text-amber-800 dark:text-amber-300 mb-1.5 flex items-center gap-1.5">
-                          <span>💡</span>
-                          <span>Grammar Explanation & Rule</span>
+                      {isCloze && (
+                        <div className="p-4 rounded-gc-sm bg-gc-win/[0.08] border border-gc-win/30">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className={`${label} !text-gc-win`}>Answer: {record.sentence.correctAnswer}</div>
+                            {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
+                              <span className="text-gc-cap text-gc-quiet">Also accepted: {record.sentence.acceptedAnswers.join(', ')}</span>
+                            )}
+                          </div>
+                          {record.sentence.correction && (
+                            <p className="text-gc-body font-medium text-gc-ink">&ldquo;{record.sentence.correction}&rdquo;</p>
+                          )}
                         </div>
-                        <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed">
-                          {record.sentence.explanation}
-                        </p>
+                      )}
+
+                      {hasError && record.sentence.correction && (
+                        <div className="p-4 rounded-gc-sm bg-gc-win/[0.08] border border-gc-win/30">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className={`${label} !text-gc-win`}>The correction</div>
+                            {record.sentence.errorPhrase && (
+                              <span className={`${chip} bg-gc-loss/15 text-gc-loss`}>
+                                Mistake: {record.sentence.errorPhrase}{record.sentence.mistakeType ? ` (${record.sentence.mistakeType})` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-gc-body font-medium text-gc-ink">&ldquo;{record.sentence.correction}&rdquo;</p>
+                        </div>
+                      )}
+
+                      <div className="p-4 rounded-gc-sm bg-gc-gold/[0.08] border border-gc-gold/25">
+                        <div className={`${label} flex items-center gap-1.5`}>
+                          <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
+                          Why
+                        </div>
+                        <p className="text-gc-body text-gc-ink">{record.sentence.explanation}</p>
                         {record.sentence.grammarPhrase && (
-                          <div className="mt-2 text-xs font-medium text-amber-900 dark:text-amber-200/90">
-                            <span className="font-bold">Key Target Phrase:</span>{' '}
-                            <code className="px-1.5 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/40 font-sans tabular-nums text-[11px]">
-                              {record.sentence.grammarPhrase}
-                            </code>
-                          </div>
+                          <p className="mt-2 text-gc-small text-gc-quiet">
+                            <span className="font-semibold">Look at: </span>
+                            <span className="px-1.5 py-0.5 rounded bg-gc-gold/15 text-gc-ink">{record.sentence.grammarPhrase}</span>
+                          </p>
                         )}
                       </div>
 
-                      {/* Player Votes & Outcomes Grid */}
                       <div>
-                        <div className="text-xs font-bold uppercase tracking-widest text-slate-600 dark:text-slate-400 mb-2.5 flex items-center gap-1.5">
-                          <span>🎲</span>
-                          <span>Player Bets & Performance</span>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                        <div className={label}>Bets</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                           {record.playerResults.map((pr, pidx) => (
-                            <div
-                              key={pidx}
-                              className={`p-3 rounded-lg border flex flex-col justify-between text-xs ${
-                                pr.isWin
-                                  ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-950 dark:text-emerald-200'
-                                  : 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40 text-rose-950 dark:text-rose-200'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <div className="flex items-center gap-1.5 truncate font-sans font-bold">
-                                  <span>{pr.playerAvatar}</span>
+                            <div key={pidx} className="p-3 rounded-gc-sm border border-gc-line/[0.12] bg-gc-card/50 text-gc-small">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="flex items-center gap-1.5 truncate font-bold text-gc-ink">
+                                  <span aria-hidden="true">{pr.playerAvatar}</span>
                                   <span className="truncate">{pr.playerName}</span>
-                                </div>
-                                <div className="flex items-center gap-1">
+                                </span>
+                                <span className="flex items-center gap-1 shrink-0">
                                   {qType === 'keyWordTransformation' && pr.marksAwarded !== undefined && (
-                                    <span
-                                      className={`px-1.5 py-0.5 rounded text-[10px] font-sans tabular-nums font-bold ${
-                                        pr.marksAwarded === 2
-                                          ? 'bg-amber-200 dark:bg-amber-800 text-amber-950 dark:text-amber-100'
-                                          : pr.marksAwarded === 1
-                                            ? 'bg-cyan-200 dark:bg-cyan-800 text-cyan-950 dark:text-cyan-100'
-                                            : 'bg-rose-200/70 dark:bg-rose-900/60 text-rose-900 dark:text-rose-200'
-                                      }`}
-                                    >
-                                      {pr.marksAwarded}/2 Marks
-                                    </span>
+                                    <span className={`${chip} !h-6 bg-gc-gold/15 text-gc-money tabular-nums`}>{pr.marksAwarded} of 2 marks</span>
                                   )}
-                                  <span
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                      pr.isWin
-                                        ? 'bg-emerald-200 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100'
-                                        : 'bg-rose-200 dark:bg-rose-800 text-rose-900 dark:text-rose-100'
-                                    }`}
-                                  >
-                                    {pr.isWin ? 'Won' : 'Lost'}
+                                  <span className={`font-bold tabular-nums ${pr.amountChanged > 0 ? 'text-gc-win' : pr.amountChanged < 0 ? 'text-gc-loss' : 'text-gc-quiet'}`}>
+                                    {pr.amountChanged >= 0 ? `+$${pr.amountChanged}` : `−$${Math.abs(pr.amountChanged)}`}
                                   </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
-                                <span className="truncate">
-                                  {isCloze ? 'Answer:' : 'Voted:'}{' '}
-                                  <strong className={isCloze ? 'font-sans text-slate-900 dark:text-slate-100' : 'uppercase'}>
-                                    {pr.playerAnswerDisplay || pr.opinion}
-                                  </strong>
-                                </span>
-                                <span className="font-sans tabular-nums font-bold shrink-0">
-                                  {pr.amountChanged >= 0 ? `+$${pr.amountChanged}` : `-$${Math.abs(pr.amountChanged)}`}
                                 </span>
                               </div>
-
+                              <div className="text-gc-quiet truncate">
+                                {isCloze ? 'Answer: ' : 'Pick: '}
+                                <b className="text-gc-ink">{pr.playerAnswerDisplay || pr.opinion}</b>
+                                <span className={`ml-1.5 ${pr.isWin ? 'text-gc-win' : 'text-gc-loss'}`}>· {pr.isWin ? 'won' : 'lost'}</span>
+                              </div>
                               {!isCloze && pr.userCorrection && (
-                                <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800 text-[11px]">
-                                  <div className="font-semibold text-slate-500 dark:text-slate-400">Correction submitted:</div>
-                                  <div className="italic font-editorial">"{pr.userCorrection}"</div>
-                                  {pr.correctionFeedback && (
-                                    <div className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5 font-medium">
-                                      {pr.correctionFeedback}
-                                    </div>
-                                  )}
+                                <div className="mt-2 pt-2 border-t border-gc-line/[0.1]">
+                                  <div className="text-gc-cap font-semibold text-gc-quiet">Their correction</div>
+                                  <div className="font-sentence italic text-gc-ink">&ldquo;{pr.userCorrection}&rdquo;</div>
+                                  {pr.correctionFeedback && <div className="text-gc-cap text-gc-money mt-0.5">{pr.correctionFeedback}</div>}
                                 </div>
                               )}
                               {isCloze && pr.correctionFeedback && (
-                                <div className="mt-1.5 pt-1.5 border-t border-slate-200 dark:border-slate-800 text-[10px] text-amber-700 dark:text-amber-400 font-medium">
-                                  {pr.correctionFeedback}
-                                </div>
+                                <div className="mt-1.5 pt-1.5 border-t border-gc-line/[0.1] text-gc-cap text-gc-money">{pr.correctionFeedback}</div>
                               )}
                             </div>
                           ))}
@@ -837,7 +639,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             })
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 };

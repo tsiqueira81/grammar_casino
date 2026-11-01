@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Player, SoundEffect } from '../types';
 import { MultiplayerSeat } from '../utils/multiplayerProtocol';
 import ActionButton from './ActionButton';
+import { Check, Copy, Lock, LockOpen, X } from 'lucide-react';
 
 interface MultiplayerLobbyModalProps {
   isOpen: boolean;
@@ -97,25 +98,26 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
 
   const seatList = Object.values(seats) as MultiplayerSeat[];
   const bankruptCount = players.filter(p => p.money <= 0).length;
+  const connectedCount = seatList.filter(s => s.connected).length;
+  const ghostBtn = 'h-11 px-4 rounded-full border border-gc-line/[0.2] bg-gc-line/[0.05] hover:border-gc-line/40 text-gc-small font-bold text-gc-ink transition-colors cursor-pointer inline-flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn';
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 dark:bg-black/75 backdrop-blur-sm animate-gc-fade"
       onClick={onClose}
     >
       <div
-        className="glass-panel rounded-2xl max-w-3xl w-full p-6 sm:p-8 border-2 border-[#d4af37] shadow-[0_25px_70px_rgba(0,0,0,0.85)] relative max-h-[90vh] overflow-y-auto modal-content-scroll text-left"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Live room"
+        className="gc-panel rounded-gc-lg max-w-3xl w-full p-5 sm:p-7 relative max-h-[92vh] overflow-y-auto modal-content-scroll text-left"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 pb-4 mb-6 border-b border-[#d4af37]/30">
-          <div>
-            <div className="text-xs font-sans uppercase tracking-[0.25em] text-amber-800 dark:text-[#d4af37] font-bold">
-              Live Classroom Controller · Host Relay
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-display font-black text-gold uppercase tracking-wider mt-0.5">
-              Multiplayer Salon Lobby
-            </h2>
+        <div className="flex items-start justify-between gap-4 pb-4 mb-5 border-b border-gc-line/[0.12]">
+          <div className="min-w-0">
+            <p className="text-gc-small text-gc-quiet">Phones join here</p>
+            <h2 className="font-logo text-gc-title sm:text-gc-display font-bold text-gc-ink">Live room</h2>
           </div>
           <button
             type="button"
@@ -123,151 +125,146 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
               playSound('click');
               onClose();
             }}
-            className="w-9 h-9 rounded-full felt-well border border-[#d4af37]/50 hover:border-[#d4af37] flex items-center justify-center text-lg text-slate-700 dark:text-amber-100 cursor-pointer"
-            title="Close Lobby Window"
+            className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] hover:bg-gc-line/[0.12] text-gc-quiet hover:text-gc-ink grid place-items-center transition-colors cursor-pointer"
+            aria-label="Close"
           >
-            &times;
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
         {!roomCode ? (
-          <div className="felt-well rounded-2xl p-8 text-center space-y-5">
-            <div className="text-5xl select-none">📱</div>
+          <div className="gc-surface rounded-gc-lg p-6 sm:p-8 text-center space-y-4">
+            <div className="text-[48px] leading-none" aria-hidden="true">📱</div>
             <div className="max-w-md mx-auto space-y-2">
-              <h3 className="text-xl font-sans font-extrabold text-slate-900 dark:text-amber-50 uppercase tracking-wider">
-                Host a Live Classroom Table
-              </h3>
-              <p className="text-sm text-slate-600 dark:text-amber-100/75 leading-relaxed">
-                Open a live room so students can join from their phones, tablets, or laptops using a 4-letter Room Code or QR scan. Everyone places hidden wagers simultaneously while watching this projector screen.
+              <h3 className="text-gc-lead font-bold text-gc-ink">Open a live room</h3>
+              <p className="text-gc-body text-gc-quiet leading-relaxed">
+                Students join on their phones, tablets or laptops with a 4-letter code or the QR code. Everyone bets in secret at the same time while watching this screen.
               </p>
             </div>
             <div className="pt-2">
               <ActionButton
                 onClick={onCreateRoom}
                 playSound={playSound}
-                variant="gold"
-                className="py-4 px-10 text-base sm:text-lg tracking-[0.15em]"
+                variant="primary"
+                className="h-14 px-10 text-gc-lead"
               >
-                OPEN LIVE MULTIPLAYER ROOM
+                Open a live room
               </ActionButton>
             </div>
           </div>
         ) : (
-          <div className="space-y-6">
-            {/* Top Split: QR Code + Room Code & Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-              {/* Left QR Card */}
-              <div className="md:col-span-5 felt-well rounded-2xl p-5 flex flex-col items-center justify-center text-center border border-[#d4af37]/40">
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+              {/* QR code */}
+              <div className="md:col-span-5 gc-surface rounded-gc-lg p-5 flex flex-col items-center justify-center text-center">
                 {qrDataUrl ? (
                   <img
                     src={qrDataUrl}
                     alt={`QR code for room ${roomCode}`}
                     referrerPolicy="no-referrer"
-                    className="w-48 h-48 sm:w-52 sm:h-52 rounded-xl border-2 border-[#d4af37] shadow-lg bg-white p-1.5"
+                    className="w-52 h-52 sm:w-56 sm:h-56 rounded-gc bg-white p-1.5 shadow-gc-1"
                   />
                 ) : (
-                  <div className="w-48 h-48 rounded-xl border-2 border-[#d4af37]/40 flex items-center justify-center text-xs font-sans tabular-nums text-amber-300">
-                    Generating QR...
+                  <div className="w-52 h-52 rounded-gc border border-gc-line/[0.2] grid place-items-center text-gc-small text-gc-quiet">
+                    Making the QR code…
                   </div>
                 )}
-                <div className="mt-3 text-xs font-sans uppercase tracking-widest text-slate-600 dark:text-amber-200/80 font-bold">
-                  Scan with Phone Camera to Join
-                </div>
+                <p className="mt-3 text-gc-small font-semibold text-gc-quiet">Scan with the phone camera to join</p>
               </div>
 
-              {/* Right Room Code & Actions */}
-              <div className="md:col-span-7 felt-well rounded-2xl p-5 flex flex-col justify-between border border-[#d4af37]/40 space-y-4">
+              {/* Room code and controls */}
+              <div className="md:col-span-7 gc-surface rounded-gc-lg p-5 flex flex-col justify-between gap-4">
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-xs font-sans uppercase tracking-[0.2em] text-slate-500 dark:text-amber-200/70 font-bold">
-                      Room Code
-                    </span>
-                    <span
-                      className={`text-xs font-sans tabular-nums font-semibold ${
-                        hostConnected ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'
-                      }`}
-                    >
-                      {hostConnected ? 'Room online' : "Not connected: phones can't join yet"} &middot; {seatList.filter(s => s.connected).length} Connected
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                    <span className="text-gc-small font-semibold text-gc-quiet">Room code</span>
+                    <span className={`inline-flex items-center gap-1.5 text-gc-small font-semibold ${hostConnected ? 'text-gc-win' : 'text-gc-loss'}`}>
+                      <span className={`w-2 h-2 rounded-full ${hostConnected ? 'bg-gc-win' : 'bg-gc-loss'}`} aria-hidden="true" />
+                      {hostConnected ? 'Room online' : "Not connected: phones can't join yet"}
+                      <span className="text-gc-quiet tabular-nums">· {connectedCount} connected</span>
                     </span>
                   </div>
 
-                  <div className="py-3 px-4 rounded-xl bg-amber-500/10 dark:bg-black/50 border border-[#d4af37]/60 text-center">
-                    <div className="text-4xl sm:text-5xl font-display font-black tracking-[0.28em] text-gold select-all">
+                  <div className="py-3 px-4 rounded-gc bg-gc-line/[0.05] border border-gc-gold/50 text-center">
+                    <div className="font-logo text-[44px] sm:text-[56px] leading-tight font-bold tracking-[0.24em] text-gc-gold select-all">
                       {roomCode}
                     </div>
                   </div>
 
                   <div className="mt-3 flex items-center gap-2">
+                    <label htmlFor="mp-join-link" className="sr-only">Join link</label>
                     <input
+                      id="mp-join-link"
                       type="text"
                       readOnly
                       value={joinUrl}
-                      className="flex-1 text-xs font-sans tabular-nums px-3 py-2.5 rounded-lg bg-white/80 dark:bg-black/40 border border-[#d4af37]/40 text-slate-800 dark:text-amber-100 focus:outline-none"
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="flex-1 min-w-0 h-11 px-3 rounded-gc-sm bg-gc-bg/60 border border-gc-line/[0.2] text-gc-small text-gc-ink tabular-nums focus:outline-none focus:border-gc-gold"
                     />
                     <button
                       type="button"
                       onClick={handleCopyJoinLink}
-                      className="px-4 py-2.5 rounded-lg bg-[#d4af37] hover:bg-amber-400 text-black font-sans font-extrabold text-xs uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                      className="gc-btn-primary h-11 px-4 rounded-full text-gc-small font-bold cursor-pointer shrink-0 inline-flex items-center gap-1.5"
                     >
-                      {copiedLink ? 'Copied ✓' : 'Copy Link'}
+                      {copiedLink ? <Check className="w-4 h-4" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
+                      {copiedLink ? 'Copied' : 'Copy link'}
                     </button>
                   </div>
 
                   {!isNetlifyHost && !isFileProtocol && (
-                    <div className="mt-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-amber-200/75">
-                        <span>Student Link Mode:</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            playSound('click');
-                            setUseNetlifyUrl((prev) => !prev);
-                          }}
-                          className="px-2.5 py-1 rounded-md border border-[#d4af37]/40 hover:border-[#d4af37] bg-amber-500/10 text-amber-900 dark:text-[#fef08a] font-sans tabular-nums text-[10px] cursor-pointer transition-colors"
-                        >
-                          {useNetlifyUrl
-                            ? '🌐 Public Web (siqueiragrammarcasino.netlify.app) · Switch to Shared Host'
-                            : '🔗 Shared Host (ais-pre) · Switch to Public Netlify URL'}
-                        </button>
+                    <div className="mt-3 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-gc-cap font-semibold text-gc-quiet">Link for students</span>
+                        <div className="inline-flex p-0.5 rounded-full bg-gc-line/[0.06] border border-gc-line/[0.12]" role="group" aria-label="Link for students">
+                          {[
+                            { on: true, label: 'Public website' },
+                            { on: false, label: 'This host' },
+                          ].map(opt => (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              aria-pressed={useNetlifyUrl === opt.on}
+                              onClick={() => {
+                                if (useNetlifyUrl === opt.on) return;
+                                playSound('click');
+                                setUseNetlifyUrl(opt.on);
+                              }}
+                              className={`h-8 px-3 rounded-full text-gc-cap font-bold transition-colors cursor-pointer ${
+                                useNetlifyUrl === opt.on ? 'bg-gc-card text-gc-ink shadow-gc-1' : 'text-gc-quiet hover:text-gc-ink'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       {isAiStudioHost && (
-                        <div className="text-[10px] leading-snug px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80">
+                        <p className="text-gc-cap leading-snug px-3 py-2 rounded-gc-sm bg-gc-info/10 text-gc-ink">
                           {useNetlifyUrl ? (
-                            <span>
-                              <strong>Public Mode (Recommended):</strong> Students join via{' '}
-                              <span className="font-sans tabular-nums">siqueiragrammarcasino.netlify.app</span> with{' '}
-                              <strong>no Google login required</strong>.
-                            </span>
+                            <>Recommended. Students join at <span className="tabular-nums">siqueiragrammarcasino.netlify.app</span> with no Google sign-in.</>
                           ) : (
-                            <span>
-                              <strong>AI Studio Shared Mode:</strong> Uses{' '}
-                              <span className="font-sans tabular-nums">ais-pre-...</span> instead of your private{' '}
-                              <span className="font-sans tabular-nums">ais-dev-...</span> link. To avoid{' '}
-                              <strong>403 Access Denied</strong> on other people&apos;s phones, click{' '}
-                              <strong>Share</strong> in the top-right of AI Studio and enable public sharing first.
-                            </span>
+                            <>This uses the shareable <span className="tabular-nums">ais-pre-…</span> link instead of your private <span className="tabular-nums">ais-dev-…</span> one. So phones don't see &ldquo;403 Access denied&rdquo;, first click <strong>Share</strong> at the top right of AI Studio and turn on public sharing.</>
                           )}
-                        </div>
+                        </p>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Host Controls */}
-                <div className="pt-3 border-t border-[#d4af37]/20 flex flex-wrap items-center gap-2.5">
+                {/* Room controls */}
+                <div className="pt-3 border-t border-gc-line/[0.12] flex flex-wrap items-center gap-2">
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={roomLocked}
                     onClick={() => {
                       playSound('click');
                       onToggleLockRoom();
                     }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider border transition-all cursor-pointer flex items-center gap-1.5 ${
-                      roomLocked
-                        ? 'bg-rose-500/20 border-rose-400 text-rose-800 dark:text-rose-200'
-                        : 'bg-emerald-500/20 border-emerald-400 text-emerald-900 dark:text-emerald-200'
-                    }`}
+                    className={ghostBtn}
+                    title={roomLocked ? 'New phones cannot join. Tap to let them in.' : 'New phones can join. Tap to stop them.'}
                   >
-                    <span>{roomLocked ? '🔒 Room Locked' : '🔓 Room Open'}</span>
+                    {roomLocked ? <Lock className="w-4 h-4 text-gc-loss" aria-hidden="true" /> : <LockOpen className="w-4 h-4 text-gc-win" aria-hidden="true" />}
+                    {roomLocked ? 'Room locked' : 'Room open'}
                   </button>
 
                   {bankruptCount > 0 && (
@@ -277,9 +274,9 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                         playSound('powerUp');
                         onBailoutBankruptPlayers();
                       }}
-                      className="px-4 py-2.5 rounded-xl text-xs font-sans font-extrabold uppercase tracking-wider border border-amber-400 bg-amber-500/20 text-amber-900 dark:text-[#fef08a] hover:bg-amber-500/30 transition-all cursor-pointer"
+                      className={ghostBtn}
                     >
-                      +$150 Bailout ({bankruptCount} Broke)
+                      Give $150 to {bankruptCount === 1 ? 'the player' : `the ${bankruptCount} players`} with no money
                     </button>
                   )}
 
@@ -289,57 +286,51 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       playSound('lose', 0);
                       onCloseRoom();
                     }}
-                    className="ml-auto px-3.5 py-2.5 rounded-xl text-xs font-sans font-bold uppercase tracking-wider border border-rose-500/40 hover:border-rose-500 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    className="ml-auto h-11 px-4 rounded-full border border-gc-loss/40 hover:bg-gc-loss/10 text-gc-small font-bold text-gc-loss transition-colors cursor-pointer"
                   >
-                    Close Room
+                    Close the room
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Connected Student Seats List */}
+            {/* Players */}
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-amber-50">
-                  Seated Players ({players.length})
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2.5">
+                <h3 className="text-gc-body font-bold text-gc-ink">
+                  At the table <span className="text-gc-quiet font-semibold tabular-nums">({players.length})</span>
                 </h3>
-                <span className="text-xs text-slate-500 dark:text-amber-200/70">
-                  Automatic $150 House Bailout &amp; 1-Attack-Per-Round Shield Active
+                <span className="text-gc-cap text-gc-quiet">
+                  Players who run out of money get $150 from the house, except in Last player standing. Each player can be attacked once per hand.
                 </span>
               </div>
 
               {players.length === 0 ? (
-                <div className="felt-well rounded-xl p-6 text-center text-sm text-slate-600 dark:text-amber-100/70 italic font-editorial">
-                  Waiting for students to scan the QR code or enter code <strong className="font-sans tabular-nums not-italic text-amber-700 dark:text-[#fef08a]">{roomCode}</strong>...
+                <div className="rounded-gc border border-dashed border-gc-line/[0.24] p-6 text-center text-gc-body text-gc-quiet">
+                  Waiting for students to scan the QR code or type the code <strong className="text-gc-gold tabular-nums">{roomCode}</strong>…
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1 modal-content-scroll">
+                <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-1 modal-content-scroll">
                   {players.map((p) => {
                     const seat = seats[p.id];
                     const isRemote = Boolean(seat);
                     const isOnline = seat ? seat.connected : true;
+                    const status = !isRemote ? 'On this screen' : isOnline ? (seat.lockedIn ? 'Locked in' : 'Online') : 'Offline';
                     return (
-                      <div
+                      <li
                         key={p.id}
-                        className="felt-well rounded-xl p-3 flex items-center justify-between gap-2 border border-[#d4af37]/30"
+                        className="rounded-gc p-2.5 pl-3 flex items-center justify-between gap-2 bg-gc-line/[0.05] border border-gc-line/[0.12]"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-2xl shrink-0">{p.avatar}</span>
+                          <span className="text-[24px] leading-none shrink-0" aria-hidden="true">{p.avatar}</span>
                           <div className="min-w-0">
-                            <div className="font-sans font-extrabold text-sm text-slate-900 dark:text-amber-50 truncate">
-                              {p.name}
-                            </div>
-                            <div className="text-[11px] font-sans tabular-nums text-slate-500 dark:text-amber-200/75 flex items-center gap-1.5">
-                              <span className="tabular-nums">${p.money.toLocaleString()}</span>
-                              <span>&middot;</span>
-                              <span>
-                                {!isRemote
-                                  ? 'Local Seat'
-                                  : isOnline
-                                    ? seat.lockedIn
-                                      ? 'Locked ✓'
-                                      : 'Online'
-                                    : 'Offline'}
+                            <div className="text-gc-small font-bold text-gc-ink truncate">{p.name}</div>
+                            <div className="text-gc-cap text-gc-quiet flex items-center gap-1.5 tabular-nums">
+                              <span className="text-gc-money font-semibold">${p.money.toLocaleString()}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="inline-flex items-center gap-1">
+                                {isRemote && <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-gc-win' : 'bg-gc-quiet/60'}`} aria-hidden="true" />}
+                                {status}
                               </span>
                             </div>
                           </div>
@@ -348,26 +339,27 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                         <button
                           type="button"
                           onClick={() => onKickPlayer(p.id)}
-                          className="w-7 h-7 rounded-full border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center text-sm cursor-pointer shrink-0"
+                          className="w-9 h-9 rounded-full text-gc-quiet hover:text-gc-loss hover:bg-gc-loss/10 grid place-items-center cursor-pointer shrink-0 transition-colors"
                           title={`Remove ${p.name}`}
+                          aria-label={`Remove ${p.name}`}
                         >
-                          &times;
+                          <X className="w-4 h-4" aria-hidden="true" />
                         </button>
-                      </div>
+                      </li>
                     );
                   })}
-                </div>
+                </ul>
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-[#d4af37]/20">
+            <div className="flex justify-end pt-3 border-t border-gc-line/[0.12]">
               <ActionButton
                 onClick={onClose}
                 playSound={playSound}
-                variant="gold"
-                className="py-3 px-8 text-sm tracking-widest"
+                variant="primary"
+                className="h-12 px-8 text-gc-body"
               >
-                DONE &amp; RETURN TO TABLE
+                Back to the table
               </ActionButton>
             </div>
           </div>
