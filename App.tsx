@@ -8,7 +8,7 @@ import {
 import { 
   POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
   INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
-  JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
+  JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw } from 'lucide-react';
@@ -40,7 +40,7 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
-import { settleRound, buildAcceptedAnswerSet } from './utils/roundSettlement';
+import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import {
   signInTeacherWithGoogle,
@@ -1001,17 +1001,21 @@ export function App() {
     if (activeTurnPlayerId !== null) setOpenSeatPlayerId(activeTurnPlayerId);
   }, [activeTurnPlayerId]);
 
-  // Bring the opened card into view below the sticky sentence.
+  // Bring the opened card into view below the compact sticky sentence.
   useEffect(() => {
     if (openSeatPlayerId === null) return;
+    setIsSentenceHeaderStuck(true);
     const id = window.setTimeout(() => {
       const el = openSeatRef.current;
       if (!el) return;
-      // Leave room for the sticky sentence banner so it never covers the card's header.
       const bannerHeight = sentenceHeaderRef.current?.offsetHeight ?? 0;
-      const top = el.getBoundingClientRect().top + window.scrollY - STICKY_TOP_PX - bannerHeight - 16;
-      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-    }, 50);
+      const rectTop = el.getBoundingClientRect().top;
+      const desiredTop = STICKY_TOP_PX + bannerHeight + 16;
+      if (rectTop < desiredTop - 8 || rectTop > window.innerHeight * 0.45) {
+        const top = rectTop + window.scrollY - desiredTop;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      }
+    }, 60);
     return () => window.clearTimeout(id);
   }, [openSeatPlayerId]);
 
@@ -1464,28 +1468,44 @@ export function App() {
     } 
   }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer]);
 
-  // Sticky header logic
+  // Sticky header logic: smoothly compact into an opaque bar when scrolling down
   useEffect(() => {
-    const header = sentenceHeaderRef.current;
-    if (!header) return;
+    if (step !== 'IN_GAME') {
+      setIsSentenceHeaderStuck(false);
+      return;
+    }
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        setIsSentenceHeaderStuck(!entry.isIntersecting);
-      },
-      { rootMargin: `-${STICKY_TOP_PX + 1}px 0px 0px 0px`, threshold: [1] } 
-    );
+    const handleScroll = () => {
+      const y = window.scrollY;
+      setIsSentenceHeaderStuck(prev => {
+        if (openSeatPlayerId !== null) return true;
+        if (y <= 12) return false;
+        if (y > 44) {
+          const scrollableSpace = document.documentElement.scrollHeight - window.innerHeight;
+          if (effectiveTableLayout === 'cards' || scrollableSpace > 180) {
+            return true;
+          }
+        }
+        return prev;
+      });
+    };
 
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, [step]); 
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [step, openSeatPlayerId, effectiveTableLayout]); 
 
   // Scroll to top when betting screen loads
   useEffect(() => {
     if (step === 'IN_GAME' || step === 'RESULTS') {
+      setIsSentenceHeaderStuck(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [step]);
+  }, [step, currentRound]);
 
   // ... (handlers remain largely the same, logic is preserved)
   const handleSaveStartingCash = useCallback(() => {
@@ -1660,7 +1680,7 @@ export function App() {
       const remainingBatch = currentBatch.slice(1);
 
       const topicKey = targetSettings.topic;
-      const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
+      const allSubtypes = getSubtypesForTopic(topicKey, targetSettings.level);
       const activeUsedSubtypes = isSettingsPart2 ? [] : usedSubtypes;
       const available = allSubtypes.filter(s => !activeUsedSubtypes.includes(s));
       const pool = available.length > 0 ? available : allSubtypes;
@@ -1670,7 +1690,7 @@ export function App() {
         targetSettings,
         pastSentences,
         forceCorrect,
-        (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
+        subtype,
         pastMistakes,
         resolvedQuestionType
       ).then(generated => ({
@@ -1755,7 +1775,7 @@ export function App() {
           }
 
           const topicKey = currentSettings.topic;
-          const allSubtypes = TOPIC_SUBTYPES[topicKey] || [];
+          const allSubtypes = getSubtypesForTopic(topicKey, currentSettings.level);
           allSubtypesLen = allSubtypes.length;
           const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
           const pool = available.length > 0 ? available : allSubtypes;
@@ -1766,33 +1786,59 @@ export function App() {
             currentSettings, 
             history, 
             forceCorrect, 
-            (resolvedQuestionType === 'binary' && forceCorrect) ? null : subtype,
+            subtype,
             effectiveMistakes,
             resolvedQuestionType
           );
         }
         
-        if ((resolvedQuestionType !== 'binary' || !forceCorrect) && subtype) {
+        if (subtype) {
           setUsedSubtypes(prev => {
             const next = [...prev, subtype!];
-            return next.length >= allSubtypesLen ? [] : next;
+            return allSubtypesLen > 0 && next.length >= allSubtypesLen ? [] : next;
           });
         }
 
-        // Never repeat mistakes: track mistake phrase and type
-        if (!generated.isCorrect) {
-          const mistakePhrase = (generated.errorPhrase || generated.grammarPhrase || '').trim();
-          if (mistakePhrase) {
-            const descriptor = generated.mistakeType ? `${mistakePhrase} (${generated.mistakeType.trim()})` : mistakePhrase;
-            setPastMistakes(prev => {
-              const lower = descriptor.toLowerCase();
-              return prev.some(p => p.toLowerCase() === lower) ? prev : [...prev, descriptor];
-            });
-          }
+        // Never repeat mistakes, key words, target verbs/phrases, or structures across ANY question type
+        const targetParts: string[] = [];
+        if (generated.baseWord) {
+          targetParts.push(`keyWord: ${generated.baseWord.trim()}`);
+        }
+        const coreTarget = (
+          generated.correctAnswer ||
+          generated.errorPhrase ||
+          generated.grammarPhrase ||
+          ''
+        ).trim();
+        if (coreTarget) {
+          targetParts.push(coreTarget);
+        }
+        if (
+          generated.grammarPhrase &&
+          generated.grammarPhrase.trim() &&
+          generated.grammarPhrase.trim().toLowerCase() !== coreTarget.toLowerCase()
+        ) {
+          targetParts.push(`phrase: "${generated.grammarPhrase.trim()}"`);
+        }
+        const structureTag = (generated.mistakeType || subtype || '').trim();
+        if (structureTag) {
+          targetParts.push(`focus: ${structureTag}`);
+        }
+        if (targetParts.length > 0) {
+          const descriptor = targetParts.join(' | ');
+          setPastMistakes(prev => {
+            const lower = descriptor.toLowerCase();
+            return prev.some(p => p.toLowerCase() === lower) ? prev : [...prev, descriptor];
+          });
         }
 
         setCurrentSentence(generated);
-        setPastSentences(prev => [...prev, generated!.text]);
+        const sentenceRecord = generated.leadInSentence
+          ? `${generated.leadInSentence} -> ${generated.correction || generated.text}`
+          : generated.correction && generated.text.includes('_____')
+          ? `${generated.text} (${generated.correction})`
+          : generated.text;
+        setPastSentences(prev => [...prev, sentenceRecord]);
         // Small delay to allow initial card render before flip
         setTimeout(() => {
             setIsSentenceRevealed(true);
@@ -3679,9 +3725,13 @@ export function App() {
             currentSentence.mark2Parts
           );
           clozeWordVerifications[norm] = detResult;
-          // If deterministic check gave < 2 marks (and didn't fail the mandatory key-word/word-count check), consult AI Judge for valid alternative phrasing
+          // Only consult the AI Judge if the submission passed the mandatory key-word/word-count gate
+          // AND at least one half is neither deterministically matched nor deterministically disqualified
           const hasValidKeyAndCount = isValidKeyWordTransformationPhrase(rawPhrase, currentSentence.baseWord);
-          if (detResult.marks < 2 && hasValidKeyAndCount) {
+          const hasUndecidedHalf =
+            (!detResult.half1Matched && !detResult.half1Disqualified) ||
+            (!detResult.half2Matched && !detResult.half2Disqualified);
+          if (detResult.marks < 2 && hasValidKeyAndCount && hasUndecidedHalf) {
             kwtToVerifyWithAi.add(norm);
           }
         });
@@ -5416,11 +5466,25 @@ export function App() {
             })();
 
             const sentenceLength = currentSentence?.text?.length || 0;
-            const sentenceTextClass = sentenceLength > 150
-              ? "text-xl sm:text-2xl lg:text-3xl leading-[1.3]"
-              : sentenceLength > 90
-                ? "text-2xl sm:text-3xl lg:text-4xl leading-[1.25]"
-                : "text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3]";
+            const sentenceTextClass = isSentenceHeaderStuck
+              ? isProjectorMode
+                ? (sentenceLength > 140
+                    ? "text-lg sm:text-xl lg:text-2xl leading-snug font-semibold"
+                    : "text-xl sm:text-2xl lg:text-[1.75rem] leading-snug font-semibold")
+                : (sentenceLength > 140
+                    ? "text-base sm:text-lg lg:text-xl leading-snug"
+                    : "text-lg sm:text-xl lg:text-2xl leading-snug")
+              : isProjectorMode
+                ? sentenceLength > 150
+                  ? "text-2xl sm:text-3xl lg:text-4xl leading-[1.28] font-semibold"
+                  : sentenceLength > 90
+                    ? "text-3xl sm:text-4xl lg:text-[2.85rem] leading-[1.24] font-semibold"
+                    : "text-4xl sm:text-5xl lg:text-[3.5rem] leading-[1.22] font-semibold"
+                : sentenceLength > 150
+                  ? "text-xl sm:text-2xl lg:text-3xl leading-[1.3]"
+                  : sentenceLength > 90
+                    ? "text-2xl sm:text-3xl lg:text-4xl leading-[1.25]"
+                    : "text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3]";
 
             const activeFormatConfig = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
             const nextFormatConfig = nextRoundSettings?.challengeFormat
@@ -5479,9 +5543,13 @@ export function App() {
             ];
 
             return ( 
-              <div className="w-full max-w-6xl animate-fade-in p-2 md:p-4"> 
+              <div className={`w-full ${isProjectorMode ? 'max-w-7xl' : 'max-w-6xl'} animate-fade-in p-2 md:p-4`}> 
                 {/* 3D Bespoke Casino Playing Card Container */}
-                <div ref={sentenceHeaderRef} className="card-reveal-container sticky z-30 mb-5 sm:mb-6" style={{ top: STICKY_TOP_PX }}>
+                <div
+                  ref={sentenceHeaderRef}
+                  className={`card-reveal-container sticky z-30 mb-5 sm:mb-6 ${isSentenceHeaderStuck ? 'is-stuck' : ''}`}
+                  style={{ top: STICKY_TOP_PX }}
+                >
                   <div className={`card-reveal-flipper ${isSentenceRevealed && !isLoading ? 'revealed' : ''}`}>
                     
                     {/* Front of the card, shown while the next sentence is dealt */}
@@ -5498,86 +5566,157 @@ export function App() {
 
                     {/* Back of the card: the sentence */}
                     <div className="card-reveal-back">
-                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-10 transition-[padding] ${
+                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-8 transition-[padding,background-color,box-shadow] duration-200 ${
                         isSentenceHeaderStuck
-                          ? 'stuck py-3'
-                          : 'gc-surface shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
+                          ? 'stuck py-2.5 sm:py-3'
+                          : 'gc-panel shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
                       }`}> 
                         {currentSentence && (
                           <>
-                            <div className="flex justify-center">
-                              <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
-                              </span>
-                            </div>
-                            
-                            <div className="relative flex flex-col items-center justify-center py-3 sm:py-4"> 
-                                {/* Top-right utility actions */}
-                                <div className={`flex gap-2 mb-2 sm:mb-0 sm:absolute sm:right-0 z-20 ${isSentenceHeaderStuck ? 'sm:-top-9' : 'sm:-top-10'}`}>
-                                    <button 
-                                      onClick={handleCopySentence}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer"
-                                      title="Copy sentence to clipboard"
-                                    >
-                                      {isCopied ? <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
-                                      <span>{isCopied ? 'Copied' : 'Copy'}</span>
-                                    </button>
-                                    <button 
-                                      onClick={() =>
-                                        speakText(
-                                          currentQuestionType === 'keyWordTransformation'
-                                            ? `${currentSentence.leadInSentence ? `Lead-in sentence: ${currentSentence.leadInSentence}. ` : ''}Key word: ${currentSentence.baseWord || ''}. Target sentence: ${currentSentence.text}`
-                                            : currentQuestionType === 'wordFormation' && currentSentence.baseWord
-                                              ? `${currentSentence.text}. Base word: ${currentSentence.baseWord}.`
-                                              : currentSentence.text
-                                        )
-                                      } 
-                                      disabled={isSpeaking}
-                                      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                                      title="Read sentence aloud"
-                                    >
-                                      <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                                      <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
-                                    </button>
+                            {isSentenceHeaderStuck ? (
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
+                                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                  <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                  </span>
+                                  {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
+                                    <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
+                                      <span aria-hidden="true">🔑</span>
+                                      <span>Key word: {currentSentence.baseWord.toUpperCase()}</span>
+                                      <span className="hidden md:inline font-semibold text-gc-quiet tracking-normal">· 2 to 6 words</span>
+                                    </span>
+                                  )}
+                                  <span className="hidden lg:inline-flex items-center gap-1.5 text-gc-cap font-medium text-gc-quiet truncate">
+                                    <span>{settings.topic}</span>
+                                    <span aria-hidden="true">·</span>
+                                    <span>{settings.level}</span>
+                                  </span>
                                 </div>
-
-                                {currentQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence && (
-                                  <div className="w-full max-w-3xl mx-auto mb-3 px-4 py-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] text-center space-y-1.5">
-                                    <div className="text-gc-small font-bold text-gc-quiet">
-                                      First sentence (keep the meaning)
-                                    </div>
-                                    <p className="text-gc-lead sm:text-[22px] font-sentence italic text-gc-ink">
-                                      &ldquo;{currentSentence.leadInSentence}&rdquo;
-                                    </p>
-                                    {currentSentence.baseWord && (
-                                      <div className="pt-1 flex items-center justify-center gap-2.5 flex-wrap">
-                                        <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-body tracking-wider">
-                                          <span aria-hidden="true">🔑</span>
-                                          <span>Key word: {currentSentence.baseWord.toUpperCase()}</span>
-                                        </span>
-                                        <span className="text-gc-small text-gc-quiet">
-                                          Use 2 to 6 words, including this word unchanged
-                                        </span>
-                                      </div>
-                                    )}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button 
+                                    onClick={handleCopySentence}
+                                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer"
+                                    title="Copy sentence to clipboard"
+                                  >
+                                    {isCopied ? <Check className="w-3 h-3 shrink-0" aria-hidden="true" /> : <Copy className="w-3 h-3 shrink-0" aria-hidden="true" />}
+                                    <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                                  </button>
+                                  <button 
+                                    onClick={() =>
+                                      speakText(
+                                        currentQuestionType === 'keyWordTransformation'
+                                          ? `${currentSentence.leadInSentence ? `Lead-in sentence: ${currentSentence.leadInSentence}. ` : ''}Key word: ${currentSentence.baseWord || ''}. Target sentence: ${currentSentence.text}`
+                                          : currentQuestionType === 'wordFormation' && currentSentence.baseWord
+                                            ? `${currentSentence.text}. Base word: ${currentSentence.baseWord}.`
+                                            : currentSentence.text
+                                      )
+                                    } 
+                                    disabled={isSpeaking}
+                                    className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    title="Read sentence aloud"
+                                  >
+                                    <Volume2 className="w-3 h-3 shrink-0" aria-hidden="true" />
+                                    <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleToggleSettingsDeckExpanded}
+                                    aria-expanded={isSettingsDeckExpanded}
+                                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-gc-cap font-semibold text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] hover:border-gc-line/30 transition-colors cursor-pointer"
+                                    title={isSettingsDeckExpanded ? "Hide this round's settings" : "Show and change this round's settings"}
+                                  >
+                                    <span>{isSettingsDeckExpanded ? 'Hide settings' : 'Settings'}</span>
+                                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isSettingsDeckExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex justify-center">
+                                <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                </span>
+                              </div>
+                            )}
+                            
+                            <div className={`relative flex flex-col items-center justify-center ${isSentenceHeaderStuck ? 'pt-1.5 pb-0.5' : 'py-3 sm:py-4'}`}> 
+                                {/* Top-right utility actions (full unstuck mode only) */}
+                                {!isSentenceHeaderStuck && (
+                                  <div className="flex gap-2 mb-2 sm:mb-0 sm:absolute sm:right-0 sm:-top-10 z-20">
+                                      <button 
+                                        onClick={handleCopySentence}
+                                        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer"
+                                        title="Copy sentence to clipboard"
+                                      >
+                                        {isCopied ? <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
+                                        <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                                      </button>
+                                      <button 
+                                        onClick={() =>
+                                          speakText(
+                                            currentQuestionType === 'keyWordTransformation'
+                                              ? `${currentSentence.leadInSentence ? `Lead-in sentence: ${currentSentence.leadInSentence}. ` : ''}Key word: ${currentSentence.baseWord || ''}. Target sentence: ${currentSentence.text}`
+                                              : currentQuestionType === 'wordFormation' && currentSentence.baseWord
+                                                ? `${currentSentence.text}. Base word: ${currentSentence.baseWord}.`
+                                                : currentSentence.text
+                                          )
+                                        } 
+                                        disabled={isSpeaking}
+                                        className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors ${isSpeaking ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                        title="Read sentence aloud"
+                                      >
+                                        <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                                        <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
+                                      </button>
                                   </div>
                                 )}
 
+                                {currentQuestionType === 'keyWordTransformation' && currentSentence.leadInSentence && (
+                                  isSentenceHeaderStuck ? (
+                                    <div className="w-full max-w-5xl mx-auto mb-1 px-3 py-1 rounded-gc-sm bg-gc-line/[0.06] border border-gc-line/[0.12] text-center">
+                                      <span className="text-gc-cap font-bold text-gc-quiet mr-2">First sentence:</span>
+                                      <span className={`${isProjectorMode ? 'text-base sm:text-lg font-medium' : 'text-sm sm:text-base'} font-sentence italic text-gc-ink`}>
+                                        &ldquo;{currentSentence.leadInSentence}&rdquo;
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className={`w-full ${isProjectorMode ? 'max-w-4xl px-5 py-3.5' : 'max-w-3xl px-4 py-3'} mx-auto mb-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12] text-center space-y-1.5`}>
+                                      <div className="text-gc-small font-bold text-gc-quiet">
+                                        First sentence (keep the meaning)
+                                      </div>
+                                      <p className={`${isProjectorMode ? 'text-xl sm:text-[26px] leading-snug font-medium' : 'text-gc-lead sm:text-[22px]'} font-sentence italic text-gc-ink`}>
+                                        &ldquo;{currentSentence.leadInSentence}&rdquo;
+                                      </p>
+                                      {currentSentence.baseWord && (
+                                        <div className="pt-1 flex items-center justify-center gap-2.5 flex-wrap">
+                                          <span className={`inline-flex items-center gap-1.5 ${isProjectorMode ? 'px-4 py-1.5 text-lg' : 'px-3.5 py-1 text-gc-body'} rounded-full bg-gc-gold text-gc-on-gold font-extrabold tracking-wider`}>
+                                            <span aria-hidden="true">🔑</span>
+                                            <span>Key word: {currentSentence.baseWord.toUpperCase()}</span>
+                                          </span>
+                                          <span className="text-gc-small text-gc-quiet">
+                                            Use 2 to 6 words, including this word unchanged
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )}
+
                                 <p 
-                                  className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-1' : 'pt-3 sm:pt-4'}`}
+                                  className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
                                   dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
                                 />
                             </div> 
                             
-                            {/* Settings chips under the sentence; the whole row opens the full settings */}
-                            <div className={`flex flex-col items-center w-full ${isSentenceHeaderStuck ? 'mt-2' : 'mt-4'}`}> 
-                                <button
-                                  type="button"
-                                  onClick={handleToggleSettingsDeckExpanded}
-                                  className="group flex items-center justify-center gap-2 flex-wrap rounded-gc-sm p-1 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                                  title={isSettingsDeckExpanded ? "Hide this round's settings" : "Show and change this round's settings"}
-                                  aria-expanded={isSettingsDeckExpanded}
-                                >
+                            {/* Settings chips under the sentence; hidden when compact sticky unless the settings drawer is open */}
+                            <div className={`flex flex-col items-center w-full ${isSentenceHeaderStuck ? (isSettingsDeckExpanded ? 'mt-2' : 'hidden') : 'mt-4'}`}> 
+                                {!isSentenceHeaderStuck && (
+                                  <button
+                                    type="button"
+                                    onClick={handleToggleSettingsDeckExpanded}
+                                    className="group flex items-center justify-center gap-2 flex-wrap rounded-gc-sm p-1 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                    title={isSettingsDeckExpanded ? "Hide this round's settings" : "Show and change this round's settings"}
+                                    aria-expanded={isSettingsDeckExpanded}
+                                  >
                                   <span className={metaChip}>
                                     {settings.topic}
                                     {nextRoundSettings && nextRoundSettings.topic !== settings.topic && (
@@ -5642,6 +5781,7 @@ export function App() {
                                     <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${isSettingsDeckExpanded ? 'rotate-180' : ''}`} aria-hidden="true" />
                                   </span>
                                 </button>
+                                )}
 
                                 {/* The game's settings. Each row opens the settings window on its tab. */}
                                 {isSettingsDeckExpanded && (
@@ -6094,44 +6234,83 @@ export function App() {
                       </div>
                     )}
                     {!mpRoomCode && effectiveTableLayout === 'grid' ? (
-                      <>
-                        <PlayerTileGrid
-                          tiles={playerTiles}
-                          openPlayerId={openSeatPlayer ? openSeatPlayer.id : null}
-                          onOpen={(id) => { playSound('click'); setOpenSeatPlayerId(prev => (prev === id ? null : id)); }}
-                          outLabel="Eliminated"
-                        />
-                        {openSeatPlayer && (
-                          <div ref={openSeatRef} key={openSeatPlayer.id} className="space-y-3 pt-2 animate-gc-slide-up">
-                            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                              <h2 className="text-gc-lead font-bold text-gc-ink">
+                      openSeatPlayer ? (
+                        <div ref={openSeatRef} key={openSeatPlayer.id} className="space-y-3 pt-1 animate-gc-slide-up">
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                              <h2 className="text-gc-lead font-bold text-gc-ink mr-1">
                                 {openSeatPlayer.name}'s betting card
                               </h2>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => { playSound('click'); setOpenSeatPlayerId(null); }}
-                                  className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
-                                >
-                                  <ChevronLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
-                                  All players
-                                </button>
-                                {nextSeatPlayer && (
-                                  <button
-                                    type="button"
-                                    onClick={() => { playSound('click'); setOpenSeatPlayerId(nextSeatPlayer.id); }}
-                                    className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
-                                  >
-                                    Next: {nextSeatPlayer.name}
-                                    <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
-                                  </button>
-                                )}
+                              <div className="hidden sm:flex items-center gap-1.5 flex-wrap" role="group" aria-label="Switch player">
+                                {playerTiles.map(({ player: p, status }) => {
+                                  const isCurrent = p.id === openSeatPlayer.id;
+                                  const isOut = status === 'out';
+                                  return (
+                                    <button
+                                      key={p.id}
+                                      type="button"
+                                      disabled={isOut}
+                                      onClick={() => {
+                                        playSound('click');
+                                        setOpenSeatPlayerId(p.id);
+                                      }}
+                                      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-gc-cap font-semibold border transition-colors ${
+                                        isCurrent
+                                          ? 'bg-gc-gold/20 border-gc-turn text-gc-ink font-bold'
+                                          : isOut
+                                            ? 'opacity-40 border-gc-line/[0.1] text-gc-quiet cursor-not-allowed'
+                                            : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-quiet hover:text-gc-ink hover:border-gc-line/30 cursor-pointer'
+                                      }`}
+                                    >
+                                      <span aria-hidden="true">{p.avatar}</span>
+                                      <span className="max-w-[6rem] truncate">{p.name}</span>
+                                      {status === 'placed' && <Check className="w-3.5 h-3.5 text-gc-win shrink-0" strokeWidth={3} aria-hidden="true" />}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
-                            {renderPlayerSeat(openSeatPlayer)}
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  playSound('click');
+                                  setOpenSeatPlayerId(null);
+                                  setIsSentenceHeaderStuck(false);
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                                className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
+                              >
+                                <ChevronLeft className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                All players
+                              </button>
+                              {nextSeatPlayer && (
+                                <button
+                                  type="button"
+                                  onClick={() => { playSound('click'); setOpenSeatPlayerId(nextSeatPlayer.id); }}
+                                  className="inline-flex items-center gap-1.5 h-10 px-4 rounded-full text-gc-small font-semibold border border-gc-line/[0.16] text-gc-ink hover:bg-gc-line/[0.06] transition-colors cursor-pointer"
+                                >
+                                  Next: {nextSeatPlayer.name}
+                                  <ChevronRight className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </>
+                          {renderPlayerSeat(openSeatPlayer)}
+                        </div>
+                      ) : (
+                        <PlayerTileGrid
+                          tiles={playerTiles}
+                          openPlayerId={null}
+                          onOpen={(id) => {
+                            playSound('click');
+                            setIsSentenceHeaderStuck(true);
+                            setOpenSeatPlayerId(id);
+                          }}
+                          outLabel="Eliminated"
+                          projectorMode={isProjectorMode}
+                        />
+                      )
                     ) : (
                       <div className="grid grid-cols-1 gap-5 sm:gap-6">
                         {players.map(renderPlayerSeat)}
@@ -6222,7 +6401,7 @@ export function App() {
             const rulingWord = isResultCloze ? null : currentSentence?.isCorrect ? 'Valid' : 'Flawed';
 
             return ( 
-            <div className="w-full max-w-6xl animate-fade-in p-2 md:p-4">
+            <div className={`w-full ${isProjectorMode ? 'max-w-7xl' : 'max-w-6xl'} animate-fade-in p-2 md:p-4`}>
                 {hasTargetWinner && (
                   <div className="mb-5 px-5 py-4 rounded-gc bg-gc-win/15 text-gc-win text-center text-gc-lead font-extrabold animate-gc-pop" role="status">
                     Target of ${numTargetAmount.toLocaleString()} reached. We have a winner!
@@ -6248,17 +6427,17 @@ export function App() {
                     )}
 
                     {resultQuestionType === 'keyWordTransformation' && currentSentence?.leadInSentence && (
-                      <div className="mt-5 mx-auto max-w-3xl px-4 py-3 rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12]">
+                      <div className={`mt-5 mx-auto ${isProjectorMode ? 'max-w-4xl px-5 py-3.5' : 'max-w-3xl px-4 py-3'} rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.12]`}>
                         <div className="text-gc-small font-bold text-gc-quiet mb-0.5">
                           First sentence{currentSentence.baseWord ? ` · Key word: ${currentSentence.baseWord.toUpperCase()}` : ''}
                         </div>
-                        <div className="text-gc-lead font-sentence italic text-gc-ink">
+                        <div className={`${isProjectorMode ? 'text-xl sm:text-[26px] leading-snug font-medium' : 'text-gc-lead'} font-sentence italic text-gc-ink`}>
                           &ldquo;{currentSentence.leadInSentence}&rdquo;
                         </div>
                       </div>
                     )}
 
-                    <p className={`font-sentence italic font-medium text-gc-ink text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3] text-balance mt-5 max-w-5xl mx-auto ${rulingWord ? 'lg:px-28' : ''}`}>
+                    <p className={`font-sentence italic ${isProjectorMode ? 'font-semibold text-4xl sm:text-5xl lg:text-[3.35rem] leading-[1.24]' : 'font-medium text-3xl sm:text-4xl lg:text-[2.875rem] leading-[1.3]'} text-gc-ink text-balance mt-5 max-w-5xl mx-auto ${rulingWord ? 'lg:px-28' : ''}`}>
                       &ldquo;{revealHighlight
                         ? renderTextSegments(revealHighlight.sentence, 'bg-transparent text-gc-danger underline decoration-wavy decoration-2 underline-offset-[9px] animate-gc-fade [animation-delay:0.55s]')
                         : currentSentence?.text}&rdquo;
@@ -6276,13 +6455,16 @@ export function App() {
                             <h3 className="text-gc-small font-bold text-gc-quiet">
                               The answer: <span className="text-gc-win">&ldquo;{currentSentence?.correctAnswer}&rdquo;</span>
                             </h3>
-                            {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && currentSentence.acceptedAnswers && currentSentence.acceptedAnswers.length > 0 && (
+                            {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && (() => {
+                              const altAccepted = getAlternativeAcceptedAnswers(currentSentence.correctAnswer, currentSentence.acceptedAnswers);
+                              return altAccepted.length > 0 ? (
                                 <span className="text-gc-small font-semibold text-gc-win bg-gc-win/15 px-2.5 py-0.5 rounded-full">
-                                    Also accepted: {currentSentence.acceptedAnswers.map(a => `"${a}"`).join(', ')}
+                                  Also accepted: {altAccepted.map(a => `"${a}"`).join(', ')}
                                 </span>
-                            )}
+                              ) : null;
+                            })()}
                         </div>
-                        <p className="font-sentence italic text-gc-ink text-2xl sm:text-[30px] leading-snug">
+                        <p className={`font-sentence italic text-gc-ink ${isProjectorMode ? 'text-3xl sm:text-4xl font-semibold' : 'text-2xl sm:text-[30px]'} leading-snug`}>
                           &ldquo;{currentSentence.correction}&rdquo;
                         </p>
                     </div>
@@ -6298,7 +6480,7 @@ export function App() {
                                 </span>
                             )}
                         </div>
-                        <p className="font-sentence italic text-gc-ink text-2xl sm:text-[30px] leading-snug">
+                        <p className={`font-sentence italic text-gc-ink ${isProjectorMode ? 'text-3xl sm:text-4xl font-semibold' : 'text-2xl sm:text-[30px]'} leading-snug`}>
                           &ldquo;{revealHighlight
                             ? renderTextSegments(revealHighlight.correction, 'bg-gc-win/20 text-gc-win rounded-md px-1.5')
                             : currentSentence?.correction}&rdquo;

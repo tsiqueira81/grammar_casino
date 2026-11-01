@@ -279,24 +279,23 @@ html.dark .modal-content-scroll::-webkit-scrollbar-track {
 .sticky-sentence.stuck {
   background: #fffdf7; /* opaque: cards scrolling underneath must not show through */
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(22, 35, 63, 0.14);
+  border: 1px solid rgba(22, 35, 63, 0.16);
   border-top: 0;
   /* square top corners: the card meets the band behind the top buttons, so nothing
      scrolling underneath peeks through the rounded corners */
   border-top-left-radius: 0 !important;
   border-top-right-radius: 0 !important;
-  box-shadow: 0 16px 36px rgba(22, 35, 63, 0.16);
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
+  box-shadow: 0 16px 36px rgba(22, 35, 63, 0.2);
+  padding-top: 0.625rem;
+  padding-bottom: 0.625rem;
   transform: translateY(0);
-  animation: slide-down 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html.dark .sticky-sentence.stuck {
-  background: rgb(12, 52, 37);
+  background: rgb(11, 49, 35);
   backdrop-filter: blur(16px);
-  border-color: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6);
+  border-color: rgba(241, 207, 114, 0.24);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.72);
 }
 
 /* Band behind the fixed top buttons while the sentence banner is stuck */
@@ -364,6 +363,14 @@ html.dark .top-band {
   width: 100%;
   min-height: 190px;
   position: relative;
+}
+
+.card-reveal-container.is-stuck {
+  min-height: 0;
+}
+
+.card-reveal-container.is-stuck .card-reveal-front {
+  display: none;
 }
 
 .card-reveal-flipper {
@@ -503,16 +510,98 @@ input[type=range]::-webkit-slider-runnable-track {
 }
 
 /* ===== Projector mode (📽️ button, top right) =====
-   Readability boost for the back of a classroom: faded text becomes solid,
-   tiny labels get a minimum size. Generated from the list of translucent
-   text classes in the components; add a line here if you add a new one. */
+   Classroom projection boost:
+   1. High-contrast --gc-* colour tokens (crisp pure white/deep navy ink, bright secondary labels, vivid gold/win/loss/info)
+   2. Scaled-up --gc-* typography tokens (text-gc-cap through text-gc-sentence)
+   3. Stronger card, chip, and input borders so surfaces never wash out on a projector
+   4. Enlarged player tiles and main sentence banner */
+html.projector:not(.dark) {
+  --gc-bg: 245 240 228;
+  --gc-card: 255 255 255;
+  --gc-raised: 255 255 255;
+  --gc-ink: 8 15 30;             /* ultra-deep navy-black ink */
+  --gc-quiet: 30 41 59;          /* solid dark slate (#1e293b) for secondary text */
+  --gc-line: 15 23 42;
+  --gc-gold: 146 98 24;
+  --gc-on-gold: 255 255 255;
+  --gc-money: 102 65 8;          /* high-contrast dark bronze for bankrolls */
+  --gc-win: 4 108 78;            /* vivid deep emerald */
+  --gc-loss: 159 18 57;          /* vivid deep crimson */
+  --gc-info: 29 78 216;          /* vivid royal blue */
+  --gc-turn: 180 118 18;
+  --gc-danger: 185 28 28;
+}
+
+html.projector.dark {
+  --gc-bg: 3 20 14;              /* deeper obsidian-felt backdrop for stronger card contrast */
+  --gc-card: 10 46 32;
+  --gc-raised: 18 66 47;
+  --gc-ink: 255 255 255;         /* pure crisp white (#ffffff) */
+  --gc-quiet: 232 242 236;       /* bright near-white sage for secondary labels */
+  --gc-line: 255 255 255;
+  --gc-gold: 253 224 71;         /* high-luminance projector gold (#fde047) */
+  --gc-on-gold: 20 14 2;
+  --gc-money: 253 224 71;        /* bright gold bankroll numbers */
+  --gc-win: 110 231 183;         /* bright mint-emerald */
+  --gc-loss: 254 168 180;        /* bright coral-rose */
+  --gc-info: 125 211 252;        /* bright sky-blue */
+  --gc-turn: 253 224 71;
+  --gc-danger: 251 113 133;
+}
+
+/* Scale up all --gc-* typography classes in Projector Mode */
+html.projector .text-gc-cap {
+  font-size: 14px !important;
+  line-height: 19px !important;
+  font-weight: 600 !important;
+}
+html.projector .text-gc-small {
+  font-size: 16px !important;
+  line-height: 22px !important;
+}
+html.projector .text-gc-body {
+  font-size: 18px !important;
+  line-height: 26px !important;
+}
+html.projector .text-gc-lead {
+  font-size: 23px !important;
+  line-height: 30px !important;
+}
+html.projector .text-gc-title {
+  font-size: 28px !important;
+  line-height: 36px !important;
+}
+html.projector .text-gc-display {
+  font-size: 38px !important;
+  line-height: 44px !important;
+}
+html.projector .text-gc-sentence {
+  font-size: clamp(3.25rem, 2.5rem + 2vw, 4.75rem) !important;
+  line-height: 1.18 !important;
+}
+
+/* Boost subtle border hairlines & surface outlines so cards and chips pop on washed-out projectors */
+html.projector .gc-panel,
+html.projector .gc-surface {
+  border-color: rgb(var(--gc-line) / 0.3) !important;
+}
+html.projector .border-gc-line\/\[0\.06\],
+html.projector .border-gc-line\/\[0\.08\],
+html.projector .border-gc-line\/\[0\.1\],
+html.projector .border-gc-line\/\[0\.12\],
+html.projector .border-gc-line\/\[0\.14\],
+html.projector .border-gc-line\/\[0\.16\] {
+  border-color: rgb(var(--gc-line) / 0.28) !important;
+}
+
 html.projector .text-\[8px\],
 html.projector .text-\[9px\],
-html.projector .text-\[10px\] { font-size: 12.5px !important; }
-html.projector .text-\[11px\] { font-size: 13px !important; }
-html.projector .text-xs { font-size: 0.875rem !important; line-height: 1.25rem !important; }
+html.projector .text-\[10px\] { font-size: 13.5px !important; }
+html.projector .text-\[11px\] { font-size: 14px !important; }
+html.projector .text-xs { font-size: 0.9375rem !important; line-height: 1.35rem !important; }
+html.projector .text-sm { font-size: 1rem !important; line-height: 1.45rem !important; }
 
-html.projector :is(.text-\[8px\], .text-\[9px\], .text-\[10px\], .text-\[11px\], .text-xs, .text-sm):is(.opacity-50, .opacity-60, .opacity-65, .opacity-70, .opacity-75, .opacity-80, .opacity-85, .opacity-90) {
+html.projector :is(.text-\[8px\], .text-\[9px\], .text-\[10px\], .text-\[11px\], .text-xs, .text-sm, .text-gc-cap, .text-gc-small, .text-gc-body):is(.opacity-50, .opacity-60, .opacity-65, .opacity-70, .opacity-75, .opacity-80, .opacity-85, .opacity-90) {
   opacity: 1 !important;
 }
 

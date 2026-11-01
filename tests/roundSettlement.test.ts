@@ -1,7 +1,8 @@
 // Characterisation tests for round settlement: they pin how payouts work today,
 // so later changes to power-ups or game rules can't silently change them.
 import { describe, it, expect } from 'vitest';
-import { settleRound, buildAcceptedAnswerSet, SettleRoundInput } from '../utils/roundSettlement';
+import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, SettleRoundInput } from '../utils/roundSettlement';
+import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
 import { Player, Bet, ActivePowerUp, GeneratedSentence, PlayerEffect, QuestionType } from '../types';
 
 const flawed: GeneratedSentence = {
@@ -232,4 +233,108 @@ describe('Key Word Transformation marks', () => {
     expect(money(r, 3)).toBe(900);
     expect(r.playerResults[2].marksAwarded).toBe(0);
   });
+
+  it('awards 0 marks when both halves have errors (wrong tense in half 1 + spelling error in half 2)', () => {
+    const prophecyKwt: GeneratedSentence = {
+      text: 'The ancient prophecy _____ by the chosen hero.',
+      leadInSentence: 'The council of wizards expects that the ancient prophecy will be fulfilled by the chosen hero.',
+      isCorrect: true,
+      correction: 'The ancient prophecy is expected to be fulfilled by the chosen hero.',
+      explanation: 'Passive reporting structure in present tense.',
+      grammarPhrase: 'is expected to be fulfilled',
+      questionType: 'keyWordTransformation',
+      baseWord: 'EXPECTED',
+      correctAnswer: 'is expected to be fulfilled',
+      acceptedAnswers: ['is expected to be fulfilled'],
+      mark1Parts: ['is expected'],
+      mark2Parts: ['to be fulfilled'],
+    };
+
+    // Thiago: wrong tense ("was expected" instead of "is expected") AND spelling error ("fullfilled") -> 0 marks
+    const thiagoEval = evaluateKeyWordTransformationDeterministic(
+      'was expected to be fullfilled',
+      prophecyKwt.correctAnswer!,
+      prophecyKwt.acceptedAnswers!,
+      prophecyKwt.baseWord,
+      prophecyKwt.mark1Parts,
+      prophecyKwt.mark2Parts
+    );
+    expect(thiagoEval.marks).toBe(0);
+    expect(thiagoEval.isCorrect).toBe(false);
+    expect(thiagoEval.half1Disqualified).toBe(true);
+    expect(thiagoEval.half2Disqualified).toBe(true);
+
+    // Correct half 1 ("is expected") + misspelled half 2 ("to be fullfilled") -> 1 mark
+    const half1RightEval = evaluateKeyWordTransformationDeterministic(
+      'is expected to be fullfilled',
+      prophecyKwt.correctAnswer!,
+      prophecyKwt.acceptedAnswers!,
+      prophecyKwt.baseWord,
+      prophecyKwt.mark1Parts,
+      prophecyKwt.mark2Parts
+    );
+    expect(half1RightEval.marks).toBe(1);
+    expect(half1RightEval.isCorrect).toBe(true);
+    expect(half1RightEval.half1Matched).toBe(true);
+    expect(half1RightEval.half2Disqualified).toBe(true);
+
+    // Wrong tense half 1 ("was expected") + correct half 2 ("to be fulfilled") -> 1 mark
+    const half2RightEval = evaluateKeyWordTransformationDeterministic(
+      'was expected to be fulfilled',
+      prophecyKwt.correctAnswer!,
+      prophecyKwt.acceptedAnswers!,
+      prophecyKwt.baseWord,
+      prophecyKwt.mark1Parts,
+      prophecyKwt.mark2Parts
+    );
+    expect(half2RightEval.marks).toBe(1);
+    expect(half2RightEval.isCorrect).toBe(true);
+    expect(half2RightEval.half1Disqualified).toBe(true);
+    expect(half2RightEval.half2Matched).toBe(true);
+
+    // Settlement check: Molly ("is expected to be fulfilled") wins 2x; Thiago ("was expected to be fullfilled") loses 1x
+    const r = settle({
+      sentence: prophecyKwt,
+      players: [player(1, 200000), player(2, 60910)],
+      bets: {
+        1: { bet: 138784, clozeAnswer: 'is expected to be fulfilled' },
+        2: { bet: 24364, clozeAnswer: 'was expected to be fullfilled' },
+      },
+    });
+    expect(r.playerResults.find(p => p.playerId === 1)?.marksAwarded).toBe(2);
+    expect(r.playerResults.find(p => p.playerId === 2)?.marksAwarded).toBe(0);
+    expect(r.playerResults.find(p => p.playerId === 2)?.isWin).toBe(false);
+    expect(money(r, 2)).toBe(60910 - 24364);
+  });
+
+  it('never awards 1 mark merely for repeating the bare given baseWord', () => {
+    const ev = evaluateKeyWordTransformationDeterministic(
+      'denied to copy',
+      'denied copying',
+      ['denied copying', 'denied having copied'],
+      'DENIED',
+      ['denied'],
+      ['copying', 'having copied']
+    );
+    expect(ev.marks).toBe(0);
+    expect(ev.isCorrect).toBe(false);
+  });
 });
+
+describe('getAlternativeAcceptedAnswers', () => {
+  it('returns empty array when acceptedAnswers only repeats correctAnswer', () => {
+    expect(
+      getAlternativeAcceptedAnswers('is expected to be fulfilled', ['is expected to be fulfilled'])
+    ).toEqual([]);
+    expect(
+      getAlternativeAcceptedAnswers('is expected to be fulfilled', ['Is Expected To Be Fulfilled'])
+    ).toEqual([]);
+  });
+
+  it('returns only genuinely distinct alternative answers', () => {
+    expect(
+      getAlternativeAcceptedAnswers('was called off', ['was called off', 'got called off'])
+    ).toEqual(['got called off']);
+  });
+});
+

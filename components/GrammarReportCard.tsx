@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { RoundHistoryRecord, SoundEffect, Player, Settings, GameMode } from '../types';
 import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Printer } from 'lucide-react';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
+import { getAlternativeAcceptedAnswers } from '../utils/roundSettlement';
 
 interface GrammarReportCardProps {
   history: RoundHistoryRecord[];
@@ -216,8 +217,9 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
         if (qType === 'multipleChoice' && round.sentence.options) {
           report += `Options: ${round.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${opt}`).join(' | ')}\n`;
         }
-        if ((qType === 'openCloze' || qType === 'wordFormation') && round.sentence.acceptedAnswers && round.sentence.acceptedAnswers.length > 0) {
-          report += `Accepted Answers: ${round.sentence.acceptedAnswers.join(', ')}\n`;
+        const altAnswers = getAlternativeAcceptedAnswers(round.sentence.correctAnswer, round.sentence.acceptedAnswers);
+        if ((qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && altAnswers.length > 0) {
+          report += `Also Accepted: ${altAnswers.join(', ')}\n`;
         }
         if (round.sentence.correction) {
           report += `Completed Sentence: "${round.sentence.correction}"\n`;
@@ -556,9 +558,12 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                         <div className="p-4 rounded-gc-sm bg-gc-win/[0.08] border border-gc-win/30">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className={`${label} !text-gc-win`}>Answer: {record.sentence.correctAnswer}</div>
-                            {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 1 && (
-                              <span className="text-gc-cap text-gc-quiet">Also accepted: {record.sentence.acceptedAnswers.join(', ')}</span>
-                            )}
+                            {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                              const altAnswers = getAlternativeAcceptedAnswers(record.sentence.correctAnswer, record.sentence.acceptedAnswers);
+                              return altAnswers.length > 0 ? (
+                                <span className="text-gc-cap text-gc-quiet">Also accepted: {altAnswers.join(', ')}</span>
+                              ) : null;
+                            })()}
                           </div>
                           {record.sentence.correction && (
                             <p className="text-gc-body font-medium text-gc-ink">&ldquo;{record.sentence.correction}&rdquo;</p>

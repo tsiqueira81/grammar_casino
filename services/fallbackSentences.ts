@@ -1238,8 +1238,8 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     grammarPhrase: 'unless you leave',
     correctAnswer: 'unless you leave',
     acceptedAnswers: ['unless you leave', 'unless you go'],
-    mark1Parts: ['unless'],
-    mark2Parts: ['you leave', 'you go'],
+    mark1Parts: ['unless you'],
+    mark2Parts: ['leave', 'go'],
   },
   {
     topic: 'Conditionals',
@@ -1315,8 +1315,8 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     grammarPhrase: 'must still be',
     correctAnswer: 'must still be',
     acceptedAnswers: ['must still be', 'must be'],
-    mark1Parts: ['must'],
-    mark2Parts: ['still be', 'be'],
+    mark1Parts: ['must still'],
+    mark2Parts: ['be'],
   },
   {
     topic: 'Modals',
@@ -1475,8 +1475,8 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     grammarPhrase: 'took no notice of',
     correctAnswer: 'took no notice of',
     acceptedAnswers: ['took no notice of', 'did not take any notice of', "didn't take any notice of"],
-    mark1Parts: ['took no notice', 'did not take any notice', "didn't take any notice"],
-    mark2Parts: ['of'],
+    mark1Parts: ['took no', 'did not take any', "didn't take any"],
+    mark2Parts: ['notice of'],
   },
   {
     topic: 'Collocations',
@@ -1506,6 +1506,193 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     mark1Parts: ['the'],
     mark2Parts: ['easier'],
   },
+  // --- PASSIVE VOICE (Varied Tenses & Constructions) ---
+  {
+    topic: 'Passive Voice',
+    level: 'A2',
+    leadInSentence: 'A famous Italian architect designed the city museum in 1925.',
+    baseWord: 'BY',
+    text: 'The city museum _____ a famous Italian architect in 1925.',
+    correction: 'The city museum was designed by a famous Italian architect in 1925.',
+    explanation: 'Use the past simple passive ("was designed") + the agent preposition "by".',
+    grammarPhrase: 'was designed by',
+    correctAnswer: 'was designed by',
+    acceptedAnswers: ['was designed by'],
+    mark1Parts: ['was designed'],
+    mark2Parts: ['by'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B1',
+    leadInSentence: 'Sound engineers are currently remixing the band\'s debut album in London.',
+    baseWord: 'BEING',
+    text: 'The band\'s debut album _____ in London right now.',
+    correction: 'The band\'s debut album is currently being remixed in London right now.',
+    explanation: 'Transform the present continuous active into the present continuous passive ("is currently being remixed" or "is being remixed").',
+    grammarPhrase: 'is currently being remixed',
+    correctAnswer: 'is currently being remixed',
+    acceptedAnswers: ['is currently being remixed', 'is being remixed'],
+    mark1Parts: ['is currently being', 'is being'],
+    mark2Parts: ['remixed'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B1',
+    leadInSentence: 'More than two million gamers have downloaded the indie expansion pack this week.',
+    baseWord: 'BEEN',
+    text: 'The indie expansion pack _____ more than two million gamers this week.',
+    correction: 'The indie expansion pack has been downloaded by more than two million gamers this week.',
+    explanation: 'Use the present perfect passive ("has been downloaded") followed by "by" to introduce the agent.',
+    grammarPhrase: 'has been downloaded by',
+    correctAnswer: 'has been downloaded by',
+    acceptedAnswers: ['has been downloaded by'],
+    mark1Parts: ['has been downloaded'],
+    mark2Parts: ['by'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'Film critics say that the director shot the entire thriller on vintage 35mm film.',
+    baseWord: 'SAID',
+    text: 'The director _____ the entire thriller on vintage 35mm film.',
+    correction: 'The director is said to have shot the entire thriller on vintage 35mm film.',
+    explanation: 'Use the impersonal reporting passive ("is said") + the perfect infinitive ("to have shot") for a past action.',
+    grammarPhrase: 'is said to have shot',
+    correctAnswer: 'is said to have shot',
+    acceptedAnswers: ['is said to have shot', 'is said to have filmed'],
+    mark1Parts: ['is said'],
+    mark2Parts: ['to have shot', 'to have filmed'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'A professional costume designer is altering the lead singer\'s jacket before the broadcast.',
+    baseWord: 'HAVING',
+    text: 'The lead singer _____ before the broadcast.',
+    correction: 'The lead singer is having his jacket altered before the broadcast.',
+    explanation: 'Use the present continuous causative structure "is having + object + past participle" ("is having his/her jacket altered").',
+    grammarPhrase: 'is having his jacket altered',
+    correctAnswer: 'is having his jacket altered',
+    acceptedAnswers: [
+      'is having his jacket altered',
+      'is having her jacket altered',
+      'is having their jacket altered',
+    ],
+    mark1Parts: ['is having'],
+    mark2Parts: ['his jacket altered', 'her jacket altered', 'their jacket altered'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'Someone had leaked the final episode\'s script online before the season premiere.',
+    baseWord: 'BEEN',
+    text: 'The final episode\'s script _____ online before the season premiere.',
+    correction: 'The final episode\'s script had been leaked online before the season premiere.',
+    explanation: 'Use the past perfect passive ("had been leaked") to show an action completed before another past point.',
+    grammarPhrase: 'had been leaked',
+    correctAnswer: 'had been leaked',
+    acceptedAnswers: ['had been leaked', 'had already been leaked'],
+    mark1Parts: ['had been', 'had already been'],
+    mark2Parts: ['leaked'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'The studio ought to have credited the voice actors in the opening titles.',
+    baseWord: 'SHOULD',
+    text: 'The voice actors _____ in the opening titles.',
+    correction: 'The voice actors should have been credited in the opening titles.',
+    explanation: 'Transform "ought to have + past participle" into the modal perfect passive ("should have been credited").',
+    grammarPhrase: 'should have been credited',
+    correctAnswer: 'should have been credited',
+    acceptedAnswers: ['should have been credited'],
+    mark1Parts: ['should have been'],
+    mark2Parts: ['credited'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'Famous celebrities often hate it when paparazzi photograph them at the airport.',
+    baseWord: 'BEING',
+    text: 'Famous celebrities often hate _____ paparazzi at the airport.',
+    correction: 'Famous celebrities often hate being photographed by paparazzi at the airport.',
+    explanation: 'After verbs like "hate", use the passive gerund ("being photographed") + "by" to express a passive action.',
+    grammarPhrase: 'being photographed by',
+    correctAnswer: 'being photographed by',
+    acceptedAnswers: ['being photographed by'],
+    mark1Parts: ['being photographed'],
+    mark2Parts: ['by'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'Technicians were still calibrating the stage microphones when the audience arrived.',
+    baseWord: 'BEING',
+    text: 'The stage microphones _____ when the audience arrived.',
+    correction: 'The stage microphones were still being calibrated when the audience arrived.',
+    explanation: 'Use the past continuous passive ("were still being calibrated") for an action in progress when interrupted in the past.',
+    grammarPhrase: 'were still being calibrated',
+    correctAnswer: 'were still being calibrated',
+    acceptedAnswers: ['were still being calibrated', 'were being calibrated'],
+    mark1Parts: ['were still being', 'were being'],
+    mark2Parts: ['calibrated'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'Everyone expects the animated sequel to break box-office records next month.',
+    baseWord: 'EXPECTED',
+    text: 'The animated sequel _____ box-office records next month.',
+    correction: 'The animated sequel is expected to break box-office records next month.',
+    explanation: 'Use the passive reporting verb "is expected" followed by the to-infinitive ("to break").',
+    grammarPhrase: 'is expected to break',
+    correctAnswer: 'is expected to break',
+    acceptedAnswers: ['is expected to break'],
+    mark1Parts: ['is expected'],
+    mark2Parts: ['to break'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'B2',
+    leadInSentence: 'By Friday, the editors will have finalized all twelve podcast episodes.',
+    baseWord: 'BEEN',
+    text: 'By Friday, all twelve podcast episodes _____ by the editors.',
+    correction: 'By Friday, all twelve podcast episodes will have been finalized by the editors.',
+    explanation: 'Use the future perfect passive ("will have been finalized" / "will have been finalised") for completion before a future deadline.',
+    grammarPhrase: 'will have been finalized',
+    correctAnswer: 'will have been finalized',
+    acceptedAnswers: ['will have been finalized', 'will have been finalised'],
+    mark1Parts: ['will have been'],
+    mark2Parts: ['finalized', 'finalised'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'C1',
+    leadInSentence: 'Journalists rumour that the graphic novelist is negotiating a three-series streaming deal.',
+    baseWord: 'RUMOURED',
+    text: 'The graphic novelist _____ a three-series streaming deal.',
+    correction: 'The graphic novelist is rumoured to be negotiating a three-series streaming deal.',
+    explanation: 'Use the impersonal passive "is rumoured" + the continuous infinitive ("to be negotiating") for an ongoing action.',
+    grammarPhrase: 'is rumoured to be negotiating',
+    correctAnswer: 'is rumoured to be negotiating',
+    acceptedAnswers: ['is rumoured to be negotiating'],
+    mark1Parts: ['is rumoured'],
+    mark2Parts: ['to be negotiating'],
+  },
+  {
+    topic: 'Passive Voice',
+    level: 'C1',
+    leadInSentence: 'Nobody had informed the screenwriter that the studio was rewriting her dialogue.',
+    baseWord: 'BEING',
+    text: 'The screenwriter had not been informed about _____ by the studio.',
+    correction: 'The screenwriter had not been informed about her dialogue being rewritten by the studio.',
+    explanation: 'After the preposition "about", use the possessive + passive gerund ("her dialogue being rewritten").',
+    grammarPhrase: 'her dialogue being rewritten',
+    correctAnswer: 'her dialogue being rewritten',
+    acceptedAnswers: ['her dialogue being rewritten'],
+    mark1Parts: ['her dialogue'],
+    mark2Parts: ['being rewritten'],
+  },
 ];
 
 export function getStaticBankCounts(): {
@@ -1532,6 +1719,8 @@ interface BankEntryBase {
   topic: string;
   level: CEFRLevel;
   text: string;
+  correction?: string;
+  leadInSentence?: string;
 }
 
 /**
@@ -1555,9 +1744,28 @@ function pickKeepingLevel<T extends BankEntryBase>(
 ): { entry: T | undefined; topicSwitched: boolean } {
   const { topic, level } = settings;
   const hasTopic = Boolean(topic) && topic !== 'My own choice';
-  const sameTopic = (e: T) => !hasTopic || e.topic.toLowerCase() === topic.toLowerCase();
+  const topicLower = (topic || '').trim().toLowerCase();
+  const sameTopic = (e: T) => {
+    if (!hasTopic) return true;
+    const entryTopicLower = e.topic.toLowerCase();
+    if (entryTopicLower === topicLower) return true;
+    if (topicLower.includes('passive') && entryTopicLower === 'passive voice') return true;
+    return false;
+  };
   const sameLevel = (e: T) => !level || e.level === level;
-  const unplayed = (e: T) => !pastTextSet.has(e.text.trim().toLowerCase());
+  const pastTextList = Array.from(pastTextSet);
+  const unplayed = (e: T) => {
+    const tNorm = e.text.trim().toLowerCase();
+    if (pastTextSet.has(tNorm)) return false;
+    const cNorm = e.correction?.trim().toLowerCase();
+    const lNorm = e.leadInSentence?.trim().toLowerCase();
+    return !pastTextList.some(
+      past =>
+        past.includes(tNorm) ||
+        (cNorm ? past.includes(cNorm) : false) ||
+        (lNorm ? past.includes(lNorm) : false)
+    );
+  };
   const extras = (e: T) => extraFilters.every(f => f(e));
 
   const tiers: { filter: (e: T) => boolean; keepsTopic: boolean }[] = [

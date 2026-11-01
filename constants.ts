@@ -529,13 +529,298 @@ export const CHALLENGE_FORMATS: ChallengeFormatOption[] = [
 ];
 
 export const TOPIC_SUBTYPES: Record<string, string[]> = {
-  'Tenses':          ['Present Simple','Present Continuous','Present Perfect','Past Simple','Past Continuous','Past Perfect','Future Simple','Future Continuous','Future Perfect'],
-  'Conditionals':    ['Zero Conditional','First Conditional','Second Conditional','Third Conditional','Mixed Conditional'],
-  'Modals':          ['Ability (can/could)','Permission (may/might)','Obligation (must/have to)','Advice (should/ought to)','Possibility (could/might/may)','Deduction (must/can\'t)'],
-  'Prepositions':    ['Time (at/on/in)','Place (at/on/in)','Direction (to/into/onto)','Prepositions after adjectives','Prepositions after verbs','Prepositional phrases'],
-  'Articles':        ['Definite article (the)','Indefinite article (a/an)','Zero article','Generic reference','Specific reference'],
-  'Phrasal Verbs':   ['Separable transitive','Inseparable transitive','Intransitive','Three-part phrasal verbs'],
-  'Reported Speech': ['Reported statements','Reported questions','Reported commands','Tense backshift','Reporting verbs'],
-  'Collocations':    ['Verb + Noun (make/do/take/have)','Adjective + Noun collocations','Verb + Preposition collocations','Adverb + Adjective collocations','Fixed idiomatic expressions'],
-  'Mixed Grammar':   ['Subject-verb agreement','Pronoun reference','Parallelism','Dangling modifiers','Run-on sentences','Sentence fragments'],
+  'Tenses': [
+    'Present Simple',
+    'Present Continuous',
+    'Present Perfect Simple',
+    'Present Perfect Continuous',
+    'Past Simple',
+    'Past Continuous',
+    'Past Perfect Simple',
+    'Past Perfect Continuous',
+    'Future Continuous (will be doing)',
+    'Future Perfect (will have done)',
+    'Future in the Past (was/were going to / would)',
+  ],
+  'Conditionals': [
+    'Zero Conditional',
+    'First Conditional (with unless / as long as / provided that)',
+    'Second Conditional (unreal present/future)',
+    'Third Conditional (unreal past)',
+    'Mixed Conditional (past condition, present result)',
+    'Mixed Conditional (present state, past result)',
+    'Inverted / Formal Conditionals (Had I known / Were it not for / Should you)',
+    'Wish / If only / Would rather (unreal tenses)',
+  ],
+  'Modals': [
+    'Ability & Achievement (can / could / be able to / manage to)',
+    'Permission & Prohibition (may / be allowed to / mustn\'t / can\'t)',
+    'Obligation & Necessity (must / have to / need to / needn\'t have)',
+    'Advice & Criticism (should / ought to / had better / should have + past participle)',
+    'Possibility & Probability (could / might / may well + infinitive or perfect infinitive)',
+    'Logical Deduction Present & Past (must be / can\'t be / must have been / can\'t have been)',
+    'Past Modal Regret & Speculation (could have / might have / needn\'t have + past participle)',
+  ],
+  'Prepositions': [
+    'Time & Duration (at/on/in/by/until/during/throughout)',
+    'Place, Position & Movement (at/on/in/into/onto/across/beyond)',
+    'Dependent prepositions after adjectives (accustomed to, capable of, renowned for)',
+    'Dependent prepositions after verbs (insist on, succeed in, blame for, accuse of)',
+    'Dependent prepositions after nouns (increase in, solution to, impact on, demand for)',
+    'Complex prepositional phrases (in spite of, on behalf of, with regard to, by means of)',
+  ],
+  'Articles': [
+    'Definite article (the) for unique or previously mentioned reference',
+    'Indefinite article (a/an) for singular countable roles & classifications',
+    'Zero article with plural/uncountable generic concepts',
+    'Generic reference (The + singular noun /The + adjective for groups)',
+    'Specific vs. institutional reference (go to school/hospital/prison vs. the school)',
+    'Articles with geographical names, institutions, and media',
+  ],
+  'Phrasal Verbs': [
+    'Separable transitive phrasal verbs (call off, turn down, bring up, work out)',
+    'Inseparable transitive phrasal verbs (look into, come across, run into, take after)',
+    'Intransitive phrasal verbs (break down, show up, take off, wear off)',
+    'Three-part phrasal verbs (put up with, look forward to, come up with, get away with)',
+    'Phrasal verbs with multiple idiomatic meanings (make up, take on, set off, turn out)',
+  ],
+  'Reported Speech': [
+    'Reported statements with tense backshift',
+    'Reported yes/no and wh- questions (word order & if/whether)',
+    'Reported commands, requests, and warnings (told/warned/urged + object + to-infinitive)',
+    'Reporting verbs with gerund or preposition (admit, deny, apologize for, insist on, accuse of)',
+    'Reporting verbs with to-infinitive (refuse, offer, promise, threaten, claim)',
+    'Reporting verbs with that-clause / subjunctive (suggest, recommend, demand)',
+    'Time and place reference shifts in indirect speech',
+  ],
+  'Collocations': [
+    'Delexicalized Verb + Noun (make/do/take/have/pay/give/draw)',
+    'Adjective + Noun collocations (heavy traffic, fierce competition, slim chance)',
+    'Verb + Preposition collocations (contribute to, rely on, specialize in, stem from)',
+    'Adverb + Adjective collocations (bitterly disappointed, highly unlikely, utterly ridiculous)',
+    'Fixed idiomatic & comparative expressions (by far, at stake, out of the question)',
+  ],
+  'Passive Voice': [
+    'Present Continuous Passive (is/are being + past participle)',
+    'Past Continuous Passive (was/were being + past participle)',
+    'Present Perfect Passive (has/have been + past participle)',
+    'Past Perfect Passive (had been + past participle)',
+    'Modal Passive & Modal Perfect Passive (must/should/could/might be or have been + past participle)',
+    'Impersonal Reporting Passive (is/was said, believed, thought, rumoured, or expected + to-infinitive / to have + past participle)',
+    'Causative Passive (have/get something done across varied tenses)',
+    'Passive Infinitive or Gerund (to be + past participle / being + past participle / having been + past participle)',
+    'Future & Future Perfect Passive (will be / is going to be / will have been + past participle)',
+    'Ditransitive & Prepositional Passive (was awarded to / was spoken about / was relied upon / was taken care of)',
+    'Present Simple Passive with high-register verbs (is regarded as / is attributed to / is composed of)',
+    'Past Simple Passive with narrative/historical focus (was commissioned / was broadcast / was unveiled)',
+  ],
+  'Relative Clauses': [
+    'Defining relative clauses (who/which/that)',
+    'Non-defining relative clauses with commas',
+    'Relative clauses with formal prepositions (in which / to whom / on which)',
+    'Possessive relative clauses (whose)',
+    'Relative adverbs of place, time, and reason (where / when / why)',
+    'Reduced relative clauses (present -ing and past -ed participle phrases)',
+    'Quantifiers with relative pronouns (most of whom / neither of which / many of which)',
+    'Nominal relative clauses (what / whatever / whoever)',
+  ],
+  'Gerunds and Infinitives': [
+    'Verbs followed by gerund (-ing: avoid, deny, risk, consider, postpone, suggest)',
+    'Verbs followed by to-infinitive (afford, manage, pretend, refuse, tend, threaten)',
+    'Verbs + object + to-infinitive (encourage, persuade, enable, forbid, remind)',
+    'Verbs with meaning change (remember, forget, stop, regret, try, go on + -ing vs. to-infinitive)',
+    'Prepositions and phrasal expressions followed by gerund (look forward to, be used to, in spite of, instead of)',
+    'Passive gerunds and infinitives (being + past participle / to be + past participle)',
+    'Perfect gerunds and infinitives (having + past participle / to have + past participle)',
+    'Bare infinitive after make, let, perception verbs, had better, and would rather',
+  ],
+  'Comparatives and Superlatives': [
+    'Comparative adjectives and adverbs with modifiers (much, far, slightly, a great deal, considerably)',
+    'Superlative structures (by far the most..., one of the least..., the second most...)',
+    'Equality & inequality comparisons (as...as / not nearly as...as / nowhere near as...as / twice as...as)',
+    'Correlative double comparatives (The more..., the more... / The sooner..., the better)',
+    'Preference comparisons (prefer X to Y / would rather do X than Y / would prefer to)',
+    'Resultative comparisons (so + adj/adv + that vs. such + noun phrase + that / too...to vs. enough to)',
+  ],
+  'Subject-Verb Agreement': [
+    'Indefinite pronouns (everyone, neither, each, nobody, either + singular verb)',
+    'Correlative conjunctions (neither...nor / either...or / not only...but also proximity agreement)',
+    'Subjects with intervening phrases (along with, as well as, accompanied by, in addition to)',
+    'Quantifiers & fractions (a number of + plural vs. the number of + singular / majority of)',
+    'Collective nouns and plural-form singular nouns (news, economics, series, species, criteria)',
+    'Inverted subjects and cleft clauses (There is/are, Here comes, What matters most is/are)',
+  ],
+  'Inversion': [
+    'Negative frequency adverbials at clause start (Never, Rarely, Seldom, Scarcely)',
+    'Time correlative inversion (Hardly...when / Scarcely...when / No sooner...than)',
+    'Additive & restrictive inversion (Not only...but also / Little did they know)',
+    'Only-phrases requiring inversion (Only after / Only when / Only by / Only then)',
+    'Prepositional & prohibitive inversion (Under no circumstances / On no account / At no time)',
+    'Degree inversion (So + adjective + be + subject + that / Such + be + noun + that)',
+  ],
+  'Causatives': [
+    'Have something done (present, past, present perfect, and modal forms)',
+    'Get something done (informal/effort causative across tenses)',
+    'Active causative: have someone do something (bare infinitive)',
+    'Active persuasive causative: get someone to do something (to-infinitive)',
+    'Make someone do something vs. passive be made to do something',
+    'Let someone do something vs. be allowed to do something',
+  ],
+  'Wish and Unreal Past': [
+    'Wish / If only + past simple or continuous (present regret or desire)',
+    'Wish / If only + past perfect (past regret)',
+    'Wish / If only + would + infinitive (annoyance or desire for change)',
+    'It is time / It is high time + subject + past simple',
+    'Would rather / Would sooner + subject + past simple or past perfect',
+    'As if / As though + unreal past or past perfect',
+  ],
+  'Participle Clauses': [
+    'Present participle clauses (-ing) expressing simultaneous action or reason',
+    'Past participle clauses (-ed) expressing passive condition or cause',
+    'Perfect participle clauses (Having + past participle) expressing prior action',
+    'Passive perfect participle clauses (Having been + past participle)',
+    'Participle clauses after conjunctions/prepositions (On arriving, While waiting, Once completed)',
+  ],
+  'Mixed Grammar': [
+    'Subject-verb agreement',
+    'Passive voice & causative structures',
+    'Unreal past & mixed conditionals',
+    'Relative clauses & participle clauses',
+    'Gerunds vs. infinitives & dependent prepositions',
+    'Modal perfects of deduction & regret',
+    'Negative inversion & cleft sentences',
+    'Reported speech with reporting verbs',
+  ],
 };
+
+const LEVEL_FALLBACK_SUBTYPES: Record<CEFRLevel, string[]> = {
+  A1: [
+    'Present Simple affirmative/negative/question form',
+    'Present Continuous action in progress',
+    'Past Simple regular and irregular forms',
+    'Basic modal verbs (can / can\'t / must)',
+    'Going to future plans',
+    'Singular/plural & countable/uncountable determiners',
+  ],
+  A2: [
+    'Past Simple vs. Past Continuous',
+    'Present Perfect with ever/never/already/yet/just',
+    'Comparative and superlative forms',
+    'First Conditional & future time clauses',
+    'Modal verbs of obligation and advice (have to / should)',
+    'Present and Past Simple Passive',
+    'Gerunds vs. to-infinitives after common verbs',
+  ],
+  B1: [
+    'Present Perfect Simple vs. Continuous (for/since)',
+    'Past Perfect in narrative sequences',
+    'Second & Third Conditionals',
+    'Passive Voice across continuous, perfect, and modal tenses',
+    'Reported speech & reporting verbs',
+    'Defining and non-defining relative clauses',
+    'Modals of deduction (must / might / can\'t)',
+    'Causative have/get something done',
+  ],
+  B2: [
+    'Present Perfect Continuous & Past Perfect Continuous',
+    'Modal Perfects (should have / must have / needn\'t have + past participle)',
+    'Impersonal Reporting Passive (is said/believed/expected to have...)',
+    'Present & Past Continuous Passive / Perfect Passive',
+    'Causative constructions (have/get something done)',
+    'Mixed Conditionals & Wish / If only / High time',
+    'Future Continuous & Future Perfect',
+    'Gerund/Infinitive meaning shifts & Passive Gerunds/Infinitives',
+    'Correlative comparisons (The more..., the more... / nowhere near as...as)',
+    'Participle clauses & reduced relative clauses',
+  ],
+  C1: [
+    'Negative & restrictive inversion (Never / No sooner / Only after / Not only)',
+    'Impersonal passive & passive infinitives/gerunds (is rumoured to have been...)',
+    'Subjunctive mood & formal conditional inversion (Were it not for / Had it not been for)',
+    'Cleft sentences for emphasis (It was... that / What... was)',
+    'Perfect & passive participle clauses (Having been...)',
+    'Advanced reporting verbs + preposition + gerund',
+    'Complex relative clauses with prepositions & quantifiers (in which / most of whom)',
+    'Nuanced modal idioms & hedging structures',
+  ],
+  C2: [
+    'Inverted conditionals & negative adverbial fronting (Scarcely / Little / Under no circumstances)',
+    'Complex impersonal passive &perfect passive infinitives',
+    'Emphatic cleft & pseudo-cleft constructions',
+    'Absolute participle clauses & nominative absolutes',
+    'Subtle subjunctive, putative should, and archaic/formal conditionals',
+    'Idiomatic phrasal-prepositional verbs & high-register collocations',
+    'Double comparatives & subtle degree modifiers',
+    'Ellipsis, substitution, and discourse-level cohesion',
+  ],
+};
+
+export function getSubtypesForTopic(topic: string, level: CEFRLevel = 'B2'): string[] {
+  const trimmed = (topic || '').trim();
+  if (!trimmed) return LEVEL_FALLBACK_SUBTYPES[level] || LEVEL_FALLBACK_SUBTYPES.B2;
+
+  // 1. Direct match
+  if (TOPIC_SUBTYPES[trimmed]) {
+    return TOPIC_SUBTYPES[trimmed];
+  }
+
+  // 2. Case-insensitive match
+  const lower = trimmed.toLowerCase();
+  for (const [key, list] of Object.entries(TOPIC_SUBTYPES)) {
+    if (key.toLowerCase() === lower) {
+      if (key === 'Passive Voice' && (level === 'A1' || level === 'A2')) {
+        return [
+          'Present Simple Passive (am/is/are + past participle)',
+          'Past Simple Passive (was/were + past participle)',
+          'Present Perfect Passive (has/have been + past participle)',
+          'Modal Passive (can/must/should be + past participle)',
+          'Future Simple Passive (will be + past participle)',
+          'Going to Passive (is/are going to be + past participle)',
+          'Ditransitive Passive (was given / was sent / was offered)',
+        ];
+      }
+      return list;
+    }
+  }
+
+  // 3. Keyword / alias matching for custom topics entered under "My own choice"
+  if (lower.includes('passive')) {
+    if (level === 'A1' || level === 'A2') {
+      return [
+        'Present Simple Passive (am/is/are + past participle)',
+        'Past Simple Passive (was/were + past participle)',
+        'Present Perfect Passive (has/have been + past participle)',
+        'Modal Passive (can/must/should be + past participle)',
+        'Future Simple Passive (will be + past participle)',
+        'Going to Passive (is/are going to be + past participle)',
+        'Ditransitive Passive (was given / was sent / was offered)',
+      ];
+    }
+    return TOPIC_SUBTYPES['Passive Voice'];
+  }
+  if (lower.includes('relative')) return TOPIC_SUBTYPES['Relative Clauses'];
+  if (lower.includes('gerund') || lower.includes('infinitive')) return TOPIC_SUBTYPES['Gerunds and Infinitives'];
+  if (lower.includes('comparative') || lower.includes('superlative') || lower.includes('comparison')) {
+    return TOPIC_SUBTYPES['Comparatives and Superlatives'];
+  }
+  if (lower.includes('agreement') || lower.includes('concord')) return TOPIC_SUBTYPES['Subject-Verb Agreement'];
+  if (lower.includes('inversion') || lower.includes('inverted')) return TOPIC_SUBTYPES['Inversion'];
+  if (lower.includes('causative') || lower.includes('have something done')) return TOPIC_SUBTYPES['Causatives'];
+  if (lower.includes('wish') || lower.includes('unreal past') || lower.includes('if only') || lower.includes('regret')) {
+    return TOPIC_SUBTYPES['Wish and Unreal Past'];
+  }
+  if (lower.includes('participle')) return TOPIC_SUBTYPES['Participle Clauses'];
+  if (lower.includes('conditional')) return TOPIC_SUBTYPES['Conditionals'];
+  if (lower.includes('modal')) return TOPIC_SUBTYPES['Modals'];
+  if (lower.includes('preposition')) return TOPIC_SUBTYPES['Prepositions'];
+  if (lower.includes('article') || lower.includes('determiner')) return TOPIC_SUBTYPES['Articles'];
+  if (lower.includes('phrasal')) return TOPIC_SUBTYPES['Phrasal Verbs'];
+  if (lower.includes('reported') || lower.includes('indirect speech')) return TOPIC_SUBTYPES['Reported Speech'];
+  if (lower.includes('collocation') || lower.includes('idiom')) return TOPIC_SUBTYPES['Collocations'];
+  if (lower.includes('tense')) return TOPIC_SUBTYPES['Tenses'];
+
+  // 4. Universal fallback for any other custom topic: rotate through level-appropriate tense & structural contexts
+  return (LEVEL_FALLBACK_SUBTYPES[level] || LEVEL_FALLBACK_SUBTYPES.B2).map(
+    context => `${trimmed} — tested within a ${context}`
+  );
+}

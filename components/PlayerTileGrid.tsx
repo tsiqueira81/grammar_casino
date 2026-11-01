@@ -19,6 +19,7 @@ interface PlayerTileGridProps {
   openPlayerId: number | null;
   onOpen: (playerId: number) => void;
   outLabel: string;
+  projectorMode?: boolean;
 }
 
 const STATUS_TEXT: Record<SeatStatus, string> = {
@@ -33,24 +34,24 @@ const STATUS_TEXT: Record<SeatStatus, string> = {
 
 // One colour per meaning: gold = their turn, blue = bet placed, green = locked in, red = out.
 const STATUS_CLASS: Record<SeatStatus, string> = {
-  waiting: 'bg-gc-line/[0.07] text-gc-quiet',
-  turn: 'bg-gc-gold text-gc-on-gold',
-  placed: 'bg-gc-info/15 text-gc-info',
-  locked: 'bg-gc-win/15 text-gc-win animate-gc-pop',
-  frozen: 'bg-gc-info/15 text-gc-info',
-  satOut: 'bg-gc-line/[0.07] text-gc-quiet',
-  out: 'bg-gc-loss/15 text-gc-loss',
+  waiting: 'bg-gc-line/[0.1] text-gc-quiet border border-gc-line/[0.15]',
+  turn: 'bg-gc-gold text-gc-on-gold border border-transparent',
+  placed: 'bg-gc-info/20 text-gc-info border border-gc-info/35',
+  locked: 'bg-gc-win/20 text-gc-win border border-gc-win/35 animate-gc-pop',
+  frozen: 'bg-gc-info/20 text-gc-info border border-gc-info/35',
+  satOut: 'bg-gc-line/[0.1] text-gc-quiet border border-gc-line/[0.15]',
+  out: 'bg-gc-loss/20 text-gc-loss border border-gc-loss/35',
 };
 
-const StatusIcon: React.FC<{ status: SeatStatus }> = ({ status }) => {
-  const cls = 'w-3.5 h-3.5 shrink-0';
+const StatusIcon: React.FC<{ status: SeatStatus; projectorMode?: boolean }> = ({ status, projectorMode }) => {
+  const cls = projectorMode ? 'w-4 h-4 shrink-0' : 'w-3.5 h-3.5 shrink-0';
   switch (status) {
     case 'waiting':
       return (
         <span className="inline-flex gap-[3px]" aria-hidden="true">
-          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink" />
-          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.2s]" />
-          <i className="w-[5px] h-[5px] rounded-full bg-current animate-gc-blink [animation-delay:0.4s]" />
+          <i className={`${projectorMode ? 'w-[6px] h-[6px]' : 'w-[5px] h-[5px]'} rounded-full bg-current animate-gc-blink`} />
+          <i className={`${projectorMode ? 'w-[6px] h-[6px]' : 'w-[5px] h-[5px]'} rounded-full bg-current animate-gc-blink [animation-delay:0.2s]`} />
+          <i className={`${projectorMode ? 'w-[6px] h-[6px]' : 'w-[5px] h-[5px]'} rounded-full bg-current animate-gc-blink [animation-delay:0.4s]`} />
         </span>
       );
     case 'locked':
@@ -66,10 +67,12 @@ const StatusIcon: React.FC<{ status: SeatStatus }> = ({ status }) => {
   }
 };
 
-const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel }) => {
+const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel, projectorMode = false }) => {
   return (
     <div
-      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5"
+      className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${
+        projectorMode ? 'lg:grid-cols-5 xl:grid-cols-6 gap-4' : 'lg:grid-cols-6 gap-3.5'
+      }`}
       role="list"
       aria-label="Players at the table"
     >
@@ -85,26 +88,36 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             onClick={() => onOpen(player.id)}
             aria-pressed={isOpen}
             aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}
-            className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 px-3 pt-4 pb-3.5 flex flex-col items-center gap-2 text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 ${
+            className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 ${
+              projectorMode ? 'px-4 pt-5 pb-4 gap-2.5' : 'px-3 pt-4 pb-3.5 gap-2'
+            } flex flex-col items-center text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 ${
               isOpen
-                ? 'ring-2 ring-inset ring-gc-turn'
+                ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn' : 'ring-2 ring-inset ring-gc-turn'
                 : status === 'turn'
-                  ? 'ring-2 ring-inset ring-gc-turn/80'
+                  ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn/90' : 'ring-2 ring-inset ring-gc-turn/80'
                   : ''
-            } ${status === 'out' ? 'opacity-60' : ''}`}
+            } ${status === 'out' ? 'opacity-65' : ''}`}
           >
             <span
-              className="w-14 h-14 rounded-full grid place-items-center text-3xl leading-none bg-gc-line/[0.08] border-2 border-gc-turn/70 select-none shrink-0"
+              className={`${
+                projectorMode ? 'w-16 h-16 text-4xl border-[3px]' : 'w-14 h-14 text-3xl border-2'
+              } rounded-full grid place-items-center leading-none bg-gc-line/[0.1] border-gc-turn/85 select-none shrink-0`}
               aria-hidden="true"
             >
               {player.avatar}
             </span>
-            <span className="w-full text-gc-lead font-bold text-gc-ink truncate">{player.name}</span>
-            <span className="text-gc-lead font-bold tabular-nums text-gc-money -mt-1">${player.money.toLocaleString()}</span>
+            <span className={`w-full ${projectorMode ? 'text-[23px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} text-gc-ink truncate`}>
+              {player.name}
+            </span>
+            <span className={`${projectorMode ? 'text-[24px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} tabular-nums text-gc-money -mt-1`}>
+              ${player.money.toLocaleString()}
+            </span>
             <span
-              className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-gc-small font-bold whitespace-nowrap ${STATUS_CLASS[status]}`}
+              className={`inline-flex items-center gap-1.5 ${
+                projectorMode ? 'h-8 px-3.5 text-base' : 'h-7 px-3 text-gc-small'
+              } rounded-full font-bold whitespace-nowrap ${STATUS_CLASS[status]}`}
             >
-              <StatusIcon status={status} />
+              <StatusIcon status={status} projectorMode={projectorMode} />
               {statusText}
             </span>
 
@@ -114,7 +127,7 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
                   <span
                     key={j}
                     title={b.label}
-                    className="text-base leading-none px-1.5 py-1 rounded-md bg-gc-line/[0.07] border border-gc-line/[0.12]"
+                    className={`${projectorMode ? 'text-lg px-2 py-1' : 'text-base px-1.5 py-1'} leading-none rounded-md bg-gc-line/[0.1] border border-gc-line/[0.18]`}
                   >
                     {b.icon}
                   </span>
@@ -130,3 +143,4 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
 };
 
 export default PlayerTileGrid;
+

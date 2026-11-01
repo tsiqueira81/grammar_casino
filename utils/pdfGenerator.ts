@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { RoundHistoryRecord, Player, Settings, GameMode } from '../types';
+import { getAlternativeAcceptedAnswers } from './roundSettlement';
 
 export interface GeneratePDFOptions {
   history: RoundHistoryRecord[];
@@ -468,14 +469,15 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     const cleanOfficialAnswer = cleanText(record.sentence.correctAnswer || '');
     const cleanBaseWord = cleanText(record.sentence.baseWord || '');
 
+    const altAccepted = getAlternativeAcceptedAnswers(record.sentence.correctAnswer, record.sentence.acceptedAnswers);
     const optionsLine = (qType === 'multipleChoice' && record.sentence.options)
       ? `Options: ${record.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${cleanText(opt)}`).join('   ')}`
       : (qType === 'keyWordTransformation')
-        ? `KEY WORD: [${cleanBaseWord || 'KEY'}]${record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0 ? `   |   Accepted: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(' / ')}` : ''}`
+        ? `KEY WORD: [${cleanBaseWord || 'KEY'}]${altAccepted.length > 0 ? `   |   Also Accepted: ${altAccepted.map(a => cleanText(a)).join(' / ')}` : ''}`
         : (qType === 'wordFormation')
-          ? `Base Word: (${cleanBaseWord || 'ROOT'})${record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0 ? `   |   Accepted Forms: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}` : ''}`
-          : (qType === 'openCloze' && record.sentence.acceptedAnswers && record.sentence.acceptedAnswers.length > 0)
-            ? `Accepted Answers: ${record.sentence.acceptedAnswers.map(a => cleanText(a)).join(', ')}`
+          ? `Base Word: (${cleanBaseWord || 'ROOT'})${altAccepted.length > 0 ? `   |   Also Accepted: ${altAccepted.map(a => cleanText(a)).join(', ')}` : ''}`
+          : (qType === 'openCloze' && altAccepted.length > 0)
+            ? `Also Accepted: ${altAccepted.map(a => cleanText(a)).join(', ')}`
             : '';
 
     const mistakeLine = (isError && cleanErrorPhrase)

@@ -10,6 +10,7 @@ import {
   CURATED_KEY_WORD_TRANSFORMATION_BANK,
 } from '../services/fallbackSentences';
 import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
+import { getSubtypesForTopic } from '../constants';
 
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 const GAP = '_____';
@@ -143,4 +144,38 @@ describe('Offline picker when the bank runs dry', () => {
       }
     }
   );
+
+  it('provides rich tense and construction subtypes for Passive Voice and custom topics', () => {
+    const b2PassiveSubtypes = getSubtypesForTopic('Passive Voice', 'B2');
+    expect(b2PassiveSubtypes.length).toBeGreaterThanOrEqual(10);
+    expect(b2PassiveSubtypes.some(s => s.includes('Present Continuous Passive'))).toBe(true);
+    expect(b2PassiveSubtypes.some(s => s.includes('Past Perfect Passive'))).toBe(true);
+    expect(b2PassiveSubtypes.some(s => s.includes('Impersonal Reporting Passive'))).toBe(true);
+    expect(b2PassiveSubtypes.some(s => s.includes('Causative Passive'))).toBe(true);
+    expect(b2PassiveSubtypes.some(s => s.includes('Modal Passive'))).toBe(true);
+
+    // Case-insensitive and custom topic fallback
+    expect(getSubtypesForTopic('passive voice', 'B2')).toEqual(b2PassiveSubtypes);
+    expect(getSubtypesForTopic('Uncommon Custom Topic', 'B2').length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('deals 8 unique B2 Passive Voice Key Word Transformation sentences without repetition', () => {
+    const history: string[] = [];
+    const seenTexts = new Set<string>();
+    for (let round = 0; round < 8; round++) {
+      const s = getCuratedSentence(
+        { topic: 'Passive Voice', level: 'B2', theme: 'Pop Culture 🍿', challengeFormat: 'keyWordTransformation' },
+        history,
+        true,
+        null,
+        [],
+        'keyWordTransformation'
+      );
+      expect(seenTexts.has(s.text)).toBe(false);
+      seenTexts.add(s.text);
+      history.push(`${s.leadInSentence} -> ${s.correction}`);
+    }
+    expect(seenTexts.size).toBe(8);
+  });
 });
+

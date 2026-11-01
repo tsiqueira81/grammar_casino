@@ -140,6 +140,13 @@ export async function signInTeacherWithGoogle(): Promise<{
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
       return { ok: false, error: 'Google Sign-In popup was closed.' };
     }
+    if (code === 'auth/unauthorized-domain') {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+      return {
+        ok: false,
+        error: `This domain (${host}) is not yet authorized in Firebase Authentication. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains (project: ${firebaseConfig.projectId}).`,
+      };
+    }
     return {
       ok: false,
       error: err?.message || 'Google Sign-In failed.',

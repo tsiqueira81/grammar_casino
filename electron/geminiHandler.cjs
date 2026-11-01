@@ -128,7 +128,7 @@ function getStatus() {
 }
 
 // --- Gemini Client & Rotation Setup ---
-const TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+const TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
 const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
 const modelCooldownUntil = new Map();
 
@@ -705,10 +705,13 @@ const batchClozeVerificationSchema = {
         type: Type.OBJECT,
         properties: {
           word: { type: Type.STRING },
+          mark1Correct: { type: Type.BOOLEAN },
+          mark2Correct: { type: Type.BOOLEAN },
           isCorrect: { type: Type.BOOLEAN },
+          marks: { type: Type.INTEGER },
           feedback: { type: Type.STRING },
         },
-        required: ['word', 'isCorrect', 'feedback'],
+        required: ['word', 'isCorrect', 'marks', 'feedback'],
       },
     },
   },
@@ -742,19 +745,85 @@ async function generateSentence(payload) {
       : ['binary', 'multipleChoice', 'openCloze'][Math.floor(Math.random() * 3)];
 
   const recentSentences = Array.isArray(pastSentences)
-    ? pastSentences.slice(-25).map((s) => String(s).slice(0, 250))
+    ? pastSentences.slice(-25).map((s) => String(s).slice(0, 280))
     : [];
   const recentMistakes = Array.isArray(pastMistakes)
-    ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 120))
+    ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 160))
     : [];
+  const roundIdx = recentSentences.length;
 
-  const subtypeClause = subtype ? `\nThe grammatical focus MUST specifically be: ${String(subtype).slice(0, 100)}.` : '';
+  const THEME_SCENARIO_POOLS = {
+    'pop culture': [
+      'streaming television series, cliffhanger finales, or binge-watching culture',
+      'video games, esports tournaments, indie game design, or virtual worlds',
+      'viral social media trends, internet memes, or content creator collaborations',
+      'comic books, graphic novels, anime, or superhero cinematic adaptations',
+      'film directing, visual effects studios, screenwriting, or cinematography',
+      'music studio recording, songwriting royalties, sampling, or vinyl collecting',
+      'fashion runway collaborations, streetwear drops, or iconic red-carpet styling',
+      'podcast hosting, investigative audio series, or candid celebrity interviews',
+      'reality competition shows, talent judging, or unscripted television editing',
+      'nostalgic 90s/2000s reboots, cult classic sequels, or fan conventions',
+      'celebrity memoirs, unauthorized biographies, or entertainment journalism',
+      'animation studios, voice acting, or motion-capture choreography',
+    ],
+    fantasy: [
+      'ancient alchemy, potion brewing, and forbidden herbalism',
+      'enchanted artifacts, cursed heirlooms, and dwarven runesmithing',
+      'skyships, floating archipelagos, and astral cartography',
+      'magical academies, apprentice trials, and arcane libraries',
+      'mythical beasts, dragon sanctuaries, and shapeshifting guardians',
+      'royal succession, elven diplomacy, and ancient treaties',
+      'shadow guilds, enchanted disguises, and subterranean labyrinths',
+      'elemental storms, ley-line restoration, and prophetic tapestries',
+    ],
+    'sci-fi': [
+      'terraforming distant exoplanets and atmospheric engineering',
+      'cybernetic neural implants, synthetic memories, and bio-enhancements',
+      'deep-space salvage crews, derelict starships, and asteroid mining',
+      'first-contact linguistics and decoding alien transmissions',
+      'orbital space elevators, lunar colonies, and zero-gravity habitats',
+      'rogue artificial intelligence, android ethics, and sentient algorithms',
+      'faster-than-light propulsion, wormhole navigation, and time dilation',
+      'quantum teleportation, parallel dimensions, and timeline paradoxes',
+    ],
+  };
+
+  const GENERIC_THEME_ANGLES = [
+    'behind-the-scenes preparation, craftsmanship, or technical design',
+    'an unexpected discovery, breakthrough, or surprising turning point',
+    'historical evolution, origins, or how practices have changed over time',
+    'public reception, critical debate, or contrasting opinions',
+    'training, mentorship, or mastering a difficult skill',
+    'equipment innovation, specialized tools, or creative problem-solving',
+    'financial trade-offs, resource management, or high-stakes negotiation',
+    'collaboration between specialists, teamwork, or creative partnerships',
+  ];
+
+  const cleanThemeKey = theme.replace(/[^\w\s-]/g, '').trim().toLowerCase();
+  const matchedThemePool =
+    THEME_SCENARIO_POOLS[cleanThemeKey] ||
+    (Object.entries(THEME_SCENARIO_POOLS).find(([k]) => cleanThemeKey.includes(k)) || [])[1] ||
+    GENERIC_THEME_ANGLES.map((angle) => `${theme} (${angle})`);
+  const currentThemeFacet = matchedThemePool[roundIdx % matchedThemePool.length];
+
+  const subtypeClause = subtype
+    ? `\n- REQUIRED GRAMMATICAL STRUCTURE / TENSE FOCUS FOR THIS ROUND: "${String(subtype).slice(0, 140)}".`
+    : '';
   const avoidSentencesClause =
-    recentSentences.length > 0 ? `\nDO NOT repeat any of the following sentences: ${JSON.stringify(recentSentences)}` : '';
+    recentSentences.length > 0
+      ? `\n=== PREVIOUS SENTENCES IN THIS GAME (DO NOT REPEAT IDEAS, SCENARIOS, OR VERBS) ===\n${JSON.stringify(recentSentences)}`
+      : '';
   const avoidMistakesClause =
     recentMistakes.length > 0
-      ? `\n=== STRICT RULE: NEVER REPEAT THE SAME MISTAKE / GAP TARGET ===\nThe following specific mistakes or target phrases have ALREADY been tested in this game:\n${JSON.stringify(recentMistakes)}\nChoose a completely different grammatical sub-rule or mechanism within "${topic}".`
+      ? `\n=== STRICT RULE: NEVER REPEAT PREVIOUSLY USED KEY WORDS, VERBS, OR GAP TARGETS ===\nThe following targets, key words, phrases, and grammatical focuses have ALREADY been used in earlier rounds:\n${JSON.stringify(recentMistakes)}\nChoose a completely different main verb, vocabulary target, and grammatical sub-rule within "${topic}".`
       : '';
+
+  const varietyDirective = `
+=== MANDATORY VARIETY OF TENSES, VOCABULARY & IDEAS (ANTI-REPETITION) ===
+1. TENSE & STRUCTURE DIVERSITY: Do NOT default repeatedly to Simple Present or Simple Past! Use the full range of tenses, aspects, and structures appropriate to CEFR ${level}${subtype ? ` — specifically "${String(subtype).slice(0, 140)}"` : ''}.
+2. LEXICAL & VERB DIVERSITY: Never reuse any main verb, key word, or target phrase from previous rounds. Avoid overused cliché event verbs like "held", "postponed", "cancelled", or "called off".
+3. FRESH THEME SUB-SCENARIO: Within "${theme}", anchor this sentence specifically in: **${currentThemeFacet}**.`;
 
   let prompt = '';
 
@@ -763,8 +832,9 @@ async function generateSentence(payload) {
 Settings:
 - Grammar Topic: "${topic}"
 - CEFR Level: "${level}"
-- Theme: "${theme}"
+- Theme: "${theme}" (${currentThemeFacet})
 ${subtypeClause}
+${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
@@ -794,8 +864,9 @@ Respond ONLY with valid JSON matching the schema.`;
 Settings:
 - Grammar Topic: "${topic}"
 - CEFR Level: "${level}"
-- Theme: "${theme}"
+- Theme: "${theme}" (${currentThemeFacet})
 ${subtypeClause}
+${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
@@ -826,9 +897,10 @@ Respond ONLY with valid JSON matching the schema.`;
 Settings:
 - Grammar Topic: "${topic}"
 - CEFR Level: "${level}"
-- Theme: "${theme}"
+- Theme: "${theme}" (${currentThemeFacet})
 
 ${correctnessInstruction}${subtypeClause}
+${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 The sentence MUST strictly conform to the linguistic, syntactic, and pedagogical profile of CEFR Level ${level}:
@@ -854,7 +926,6 @@ Respond ONLY with valid JSON matching the schema.`;
       config: {
         responseMimeType: 'application/json',
         responseSchema: activeSchema,
-        temperature: 1,
         thinkingConfig: getFastThinkingConfig(model),
       },
     });
@@ -909,7 +980,6 @@ Respond ONLY with the hint text.`;
       model,
       contents: prompt,
       config: {
-        temperature: 0.8,
         thinkingConfig: getFastThinkingConfig(model),
       },
     });
@@ -952,7 +1022,17 @@ Respond ONLY with the JSON object matching the provided schema.`;
 }
 
 async function verifyOpenClozeBatch(payload) {
-  const { sentenceWithBlank, intendedAnswer, acceptedAnswers = [], candidateWords = [] } = payload || {};
+  const {
+    sentenceWithBlank,
+    intendedAnswer,
+    acceptedAnswers = [],
+    candidateWords = [],
+    questionType: batchQuestionType,
+    baseWord: batchBaseWord,
+    leadInSentence = '',
+    mark1Parts = [],
+    mark2Parts = [],
+  } = payload || {};
   if (!sentenceWithBlank || !Array.isArray(candidateWords)) {
     throw new Error('Missing parameters for verifyOpenClozeBatch.');
   }
@@ -960,7 +1040,7 @@ async function verifyOpenClozeBatch(payload) {
   const uniqueWords = Array.from(
     new Set(
       candidateWords
-        .map((w) => String(w || '').trim())
+        .map((w) => String(w || '').trim().replace(/\s+/g, ' '))
         .filter((w) => w.length > 0)
     )
   ).slice(0, 30);
@@ -969,7 +1049,64 @@ async function verifyOpenClozeBatch(payload) {
     return { results: {} };
   }
 
-  const prompt = `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
+  const safeBase = batchBaseWord ? String(batchBaseWord).trim().toUpperCase().slice(0, 50) : '';
+  const isKeyWordTransformation = batchQuestionType === 'keyWordTransformation';
+  const isWordFormation = !isKeyWordTransformation && (batchQuestionType === 'wordFormation' || Boolean(safeBase));
+
+  const prompt = isKeyWordTransformation
+    ? `You are a strict Cambridge English Use of English Part 4 (Key Word Transformation) examiner grading student submissions on a 0, 1, or 2 mark scale.
+Lead-in sentence: "${String(leadInSentence || '').slice(0, 400)}"
+Given KEY WORD (MUST NOT be changed): "${safeBase}"
+Second sentence with blank: "${String(sentenceWithBlank).slice(0, 500)}"
+Primary 2-mark target phrase: "${String(intendedAnswer || '').slice(0, 120)}"
+Known 2-mark accepted phrases: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
+1st Mark structural half (mark1Parts): ${JSON.stringify((Array.isArray(mark1Parts) ? mark1Parts : []).slice(0, 10))}
+2nd Mark structural half (mark2Parts): ${JSON.stringify((Array.isArray(mark2Parts) ? mark2Parts : []).slice(0, 10))}
+
+Evaluate each of the following student-submitted candidate phrases:
+${JSON.stringify(uniqueWords)}
+
+STRICT OFFICIAL CAMBRIDGE PART 4 (0 / 1 / 2 MARKS) MARKING SCHEME:
+The target answer is divided into TWO independent 1-mark halves:
+- HALF 1 (mark1Correct): the opening grammatical structure (${JSON.stringify((Array.isArray(mark1Parts) ? mark1Parts : []).slice(0, 5))})
+- HALF 2 (mark2Correct): the closing grammatical structure (${JSON.stringify((Array.isArray(mark2Parts) ? mark2Parts : []).slice(0, 5))})
+
+Grade each candidate by checking HALF 1 and HALF 2 independently:
+1. MANDATORY GATE: The submission MUST contain the exact unaltered KEY WORD "${safeBase}" (case-insensitive) and be between 2 and 6 words long. If it omits or alters "${safeBase}" or is outside 2–6 words, set mark1Correct: false, mark2Correct: false, marks: 0, isCorrect: false.
+2. NO FREE MARK FOR THE KEY WORD: Simply writing "${safeBase}" or pairing it with the wrong verb tense/auxiliary NEVER earns a mark!
+3. STRICT TENSE & AGREEMENT CHECK (CRITICAL):
+   - Compare the verb tense in the student's phrase against the Lead-in sentence ("${String(leadInSentence || '').slice(0, 200)}") and the target phrase ("${String(intendedAnswer || '').slice(0, 120)}").
+   - If the Lead-in sentence and target phrase are in the PRESENT tense (e.g., "expects" -> "is expected", "has", "do/does"), using a PAST tense form (e.g., "was expected", "were expected", "had", "did") is GRAMMATICALLY WRONG and scores 0 for that half!
+   - If the Lead-in sentence and target phrase are in the PAST tense, using a PRESENT tense form is GRAMMATICALLY WRONG and scores 0 for that half!
+   - Wrong subject-verb agreement (e.g., plural "are/were/have" with a singular subject, or singular "is/was/has" with a plural subject) scores 0 for that half!
+4. STRICT SPELLING CHECK (CRITICAL):
+   - Every word in a half MUST be spelled 100% correctly (standard British or American English) to earn that half's 1 mark.
+   - Any spelling error in a half (for example, "fullfilled" instead of "fulfilled", "recieved", "definately", "occured") automatically scores 0 for that half!
+5. TOTAL MARKS CALCULATION:
+   - marks = (mark1Correct ? 1 : 0) + (mark2Correct ? 1 : 0).
+   - Award marks: 2, isCorrect: true ONLY if BOTH Half 1 and Half 2 are 100% grammatically, semantically, and orthographically accurate.
+   - Award marks: 1, isCorrect: true ONLY if ONE half is 100% accurate (correct tense, agreement, and exact spelling) and the error is confined strictly to the OTHER half.
+   - Award marks: 0, isCorrect: false if BOTH halves contain an error (for example: wrong verb tense "was expected" in Half 1 AND misspelled "fullfilled" in Half 2 MUST score 0 marks!).
+
+Respond ONLY with valid JSON matching the schema.`
+    : isWordFormation
+    ? `You are a Cambridge English Use of English Part 3 (Word Formation) examiner grading student submissions.
+Sentence with blank: "${String(sentenceWithBlank).slice(0, 500)}"
+Base/root word in parentheses: "${safeBase}"
+Primary intended derived word: "${String(intendedAnswer || '').slice(0, 60)}"
+Known accepted derived words: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
+
+Evaluate each of the following student-submitted candidate words:
+${JSON.stringify(uniqueWords)}
+
+STRICT WORD FORMATION RULES:
+1. Gaps require a SINGLE WORD only. If a candidate contains spaces, mark isCorrect: false, marks: 0.
+2. The candidate word MUST be a valid morphological derivation (inflection, prefix, suffix, or compound) of the base word "${safeBase}".
+3. The candidate word MUST NOT be identical to the unchanged base word "${safeBase}".
+4. Accept both British and American English spelling variants.
+
+Respond ONLY with valid JSON matching the schema.`
+    : `You are a Cambridge English Use of English examiner grading an Open Cloze single-word gap-fill exercise.
 Sentence with blank: "${String(sentenceWithBlank).slice(0, 500)}"
 Primary intended single word: "${String(intendedAnswer || '').slice(0, 60)}"
 Known accepted single words: ${JSON.stringify(acceptedAnswers.slice(0, 20))}
@@ -978,8 +1115,8 @@ Evaluate each of the following student-submitted candidate words:
 ${JSON.stringify(uniqueWords)}
 
 STRICT RULES:
-1. Open Cloze gaps require a SINGLE WORD only. If a candidate contains multiple words (spaces), mark isCorrect: false.
-2. Mark isCorrect: true ONLY if inserting the single word into "_____" produces a 100% grammatically accurate, natural, and contextually coherent English sentence.
+1. Open Cloze gaps require a SINGLE WORD only. If a candidate contains multiple words (spaces), mark isCorrect: false, marks: 0.
+2. Mark isCorrect: true, marks: 1 ONLY if inserting the single word into "_____" produces a 100% grammatically accurate, natural, and contextually coherent English sentence.
 3. Provide a brief 1-sentence feedback for each word.
 
 Respond ONLY with valid JSON matching the schema.`;
@@ -1002,8 +1139,23 @@ Respond ONLY with valid JSON matching the schema.`;
   if (Array.isArray(parsed?.evaluations)) {
     parsed.evaluations.forEach((ev) => {
       if (ev && typeof ev.word === 'string') {
-        results[ev.word.trim().toLowerCase()] = {
-          isCorrect: Boolean(ev.isCorrect),
+        let rawMarks;
+        if (
+          isKeyWordTransformation &&
+          typeof ev.mark1Correct === 'boolean' &&
+          typeof ev.mark2Correct === 'boolean'
+        ) {
+          rawMarks = (ev.mark1Correct ? 1 : 0) + (ev.mark2Correct ? 1 : 0);
+          if (typeof ev.marks === 'number') {
+            rawMarks = Math.min(rawMarks, ev.marks);
+          }
+        } else {
+          rawMarks = typeof ev.marks === 'number' ? ev.marks : ev.isCorrect ? (isKeyWordTransformation ? 2 : 1) : 0;
+        }
+        const clampedMarks = rawMarks >= 2 ? 2 : rawMarks === 1 ? 1 : 0;
+        results[ev.word.trim().replace(/\s+/g, ' ').toLowerCase()] = {
+          isCorrect: isKeyWordTransformation ? clampedMarks >= 1 : Boolean(ev.isCorrect),
+          marks: clampedMarks,
           feedback: String(ev.feedback || ''),
         };
       }
@@ -1033,7 +1185,6 @@ async function simplifyExplanation(payload) {
       model,
       contents: prompt,
       config: {
-        temperature: 0.6,
         thinkingConfig: getFastThinkingConfig(model),
       },
     });
@@ -1049,11 +1200,24 @@ async function generateSpeech(payload) {
     throw new Error("Missing 'text' parameter for speech generation.");
   }
 
-  const safeText = text.slice(0, 600);
+  const safeText = text.slice(0, 600).trim();
   const base64Audio = await callWithModelRotation(TTS_MODELS, async (ai, model) => {
     const response = await ai.models.generateContent({
       model,
-      contents: [{ parts: [{ text: safeText }] }],
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: safeText,
+              speechMetadata: {
+                style:
+                  'Clear, warm, articulate English teacher. Read only the exact text naturally and stop cleanly in silence with no trailing breath or sound.',
+              },
+            },
+          ],
+        },
+      ],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {

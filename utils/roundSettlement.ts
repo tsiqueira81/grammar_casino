@@ -73,6 +73,37 @@ export function buildAcceptedAnswerSet(sentence: GeneratedSentence, qType: Quest
   return { acceptedSet, baseWordNorm };
 }
 
+/**
+ * Returns only the accepted answers that are genuinely distinct from `correctAnswer`
+ * (case-insensitive, whitespace-normalized), preserving their original display casing.
+ */
+export function getAlternativeAcceptedAnswers(
+  correctAnswer?: string,
+  acceptedAnswers?: string[]
+): string[] {
+  if (!Array.isArray(acceptedAnswers) || acceptedAnswers.length === 0) return [];
+  const norm = (s: string) =>
+    (s || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[’‘]/g, "'")
+      .replace(/\s+/g, ' ');
+  const primaryNorm = norm(correctAnswer || '');
+  const seen = new Set<string>();
+  if (primaryNorm) seen.add(primaryNorm);
+  const result: string[] = [];
+  for (const ans of acceptedAnswers) {
+    const trimmed = (ans || '').trim().replace(/\s+/g, ' ');
+    if (!trimmed) continue;
+    const n = norm(trimmed);
+    if (!seen.has(n)) {
+      seen.add(n);
+      result.push(trimmed);
+    }
+  }
+  return result;
+}
+
 export function settleRound(input: SettleRoundInput): SettleRoundOutput {
   const {
     currentSentence, qType, players, activePlayers, validPlayers, bets, activePowerUps, verifications,
