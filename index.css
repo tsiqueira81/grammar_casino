@@ -61,7 +61,7 @@ html.dark {
   --gc-felt: radial-gradient(1200px 700px at 50% -10%, #145a40 0%, #0b3a2a 45%, #06221a 100%);
 }
 
-/* Devices that ask for less motion get (almost) none. The Calm mode switch comes later. */
+/* Devices that ask for less motion get (almost) none. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -70,6 +70,16 @@ html.dark {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+/* Calm mode (the teacher's switch, also sent to phones in a live room): the same rule.
+   Animations still end in their final state, so nothing is left hidden or half-way. */
+html.gc-calm *, html.gc-calm *::before, html.gc-calm *::after,
+html.gc-calm-room *, html.gc-calm-room *::before, html.gc-calm-room *::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* ===== Older named colours, still used by the custom classes below ===== */

@@ -137,6 +137,8 @@ export interface PlayerViewPayload {
   roundHistory?: RoundHistoryRecord[];
   roundTimer?: PlayerTurnTimer;
   turnDurationMs?: number;
+  /** The teacher turned Calm mode on: this phone keeps its motion off too. */
+  calmMode?: boolean;
 }
 
 export interface AudiencePollBreakdownItem {
@@ -350,6 +352,8 @@ export interface BuildPlayerViewsParams {
   studentNotifications: Record<number, { id: string; title: string; message: string; icon?: string } | null>;
   roundTimer?: PlayerTurnTimer;
   turnDurationMs?: number;
+  /** The teacher's Calm mode: phones turn their motion off too. */
+  calmMode?: boolean;
 }
 
 /**
@@ -476,6 +480,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     studentNotifications,
     roundTimer,
     turnDurationMs,
+    calmMode,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -757,6 +762,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       roundHistory: step === 'GAME_OVER' ? (roundHistory || []) : undefined,
       roundTimer,
       turnDurationMs,
+      calmMode: Boolean(calmMode),
     };
   }
 
@@ -793,6 +799,7 @@ export const SHARED_VIEW_KEYS = [
   'roundHistory',
   'roundTimer',
   'turnDurationMs',
+  'calmMode',
 ] as const satisfies readonly (keyof PlayerViewPayload)[];
 
 export interface SplitPlayerViews {

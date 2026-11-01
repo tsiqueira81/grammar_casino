@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { motion } from 'motion/react';
+import { X } from 'lucide-react';
 import ActionButton from './ActionButton';
 import { SoundEffect } from '../types';
 
@@ -41,37 +42,40 @@ const Modal: React.FC<ModalProps> = ({ title, onClose, children, playSound, clos
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/75 dark:bg-black/85 backdrop-blur-md flex justify-center items-center z-50 p-4"
+      className="fixed inset-0 bg-black/60 dark:bg-black/75 backdrop-blur-sm flex justify-center items-center z-50 p-4"
       onClick={handleBackdropClick}
     >
       <motion.div 
-        initial={{ scale: 0.92, opacity: 0, y: 20 }}
+        initial={{ scale: 0.96, opacity: 0, y: 12 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.92, opacity: 0, y: 20 }}
-        transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-        className={`bg-gradient-to-b from-[#fffdf9] to-[#f5efe2] dark:from-[#082616] dark:to-[#03140b] border-2 border-[#d4af37]/80 rounded-2xl w-full ${maxWidth} m-4 overflow-hidden shadow-[0_25px_70px_rgba(0,0,0,0.85),0_0_30px_rgba(212,175,55,0.2)] max-h-[90vh] flex flex-col relative`}
+        exit={{ scale: 0.96, opacity: 0, y: 12 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`gc-panel rounded-gc-lg w-full ${maxWidth} m-4 overflow-hidden max-h-[90vh] flex flex-col relative`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Subtle inner gold hairline */}
-        <div className="pointer-events-none absolute inset-1.5 border border-[#d4af37]/20 rounded-xl z-20" />
-
-        <div className="bg-gradient-to-r from-amber-100/80 via-amber-50/90 to-amber-100/80 dark:from-[#04180d] dark:via-[#0b2e1b] dark:to-[#04180d] px-6 py-4 border-b border-[#d4af37]/40 flex justify-between items-center relative">
-          <div className="absolute inset-x-0 top-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#fef08a] to-transparent opacity-70"></div>
-          <div className="flex items-center gap-2.5">
-            <span className="text-[#d4af37] text-sm select-none">♦</span>
-            <h2 className="text-xl sm:text-2xl font-sans font-extrabold text-gold uppercase tracking-widest">{title}</h2>
-          </div>
+        <div className="px-6 pt-5 pb-4 border-b border-gc-line/[0.12] flex justify-between items-center gap-4">
+          <h2 className="text-gc-title font-bold text-gc-ink">{title}</h2>
           {closable && !hideCloseButton && (
-            <button onClick={handleClose} className="w-8 h-8 rounded-full border border-[#d4af37]/30 hover:border-[#d4af37] bg-black/5 dark:bg-black/40 text-amber-800 dark:text-[#fef08a] flex items-center justify-center text-xl transition-all hover:scale-105 cursor-pointer leading-none">&times;</button>
+            <button
+              type="button"
+              onClick={handleClose}
+              aria-label="Close"
+              className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] hover:bg-gc-line/[0.12] text-gc-quiet hover:text-gc-ink grid place-items-center transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" aria-hidden="true" />
+            </button>
           )}
         </div>
-        <div className="p-6 text-slate-800 dark:text-slate-100 overflow-y-auto modal-content-scroll">
+        <div className="p-6 text-gc-ink overflow-y-auto modal-content-scroll">
           {children}
         </div>
         {closable && !hideOkButton && (
-          <div className="px-6 py-4 bg-amber-100/40 dark:bg-[#03120a]/80 border-t border-[#d4af37]/30 flex justify-end">
-              <ActionButton onClick={onClose} playSound={playSound} variant="gold" className="px-8">
-                  Continue
+          <div className="px-6 py-4 border-t border-gc-line/[0.12] flex justify-end">
+              <ActionButton onClick={onClose} playSound={playSound} variant="primary" className="h-12 px-8 text-gc-body">
+                  OK
               </ActionButton>
           </div>
         )}
