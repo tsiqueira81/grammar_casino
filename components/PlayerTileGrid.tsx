@@ -101,18 +101,31 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
                 : status === 'turn'
                   ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn/90' : 'ring-2 ring-inset ring-gc-turn/80'
                   : isFrozen
-                    ? 'ring-2 ring-inset ring-cyan-300/75'
+                    ? 'ring-2 ring-inset ring-cyan-300/90 shadow-[inset_0_0_28px_rgba(34,211,238,0.38)]'
                     : hasShield
                       ? 'ring-2 ring-inset ring-amber-300/80'
                       : ''
             } ${status === 'out' ? 'opacity-65' : ''}`}
           >
-            {/* Subtle reactive tile aura for frozen / shielded / win-streak states */}
+            {/* Glacial frost aura & hanging icicles for frozen seats */}
             {isFrozen && (
-              <span
-                className="pointer-events-none absolute inset-0 bg-gradient-to-b from-cyan-400/15 via-transparent to-cyan-300/10"
-                aria-hidden="true"
-              />
+              <>
+                <span
+                  className="pointer-events-none absolute inset-0 bg-gradient-to-b from-cyan-300/30 via-sky-500/15 to-cyan-400/25"
+                  aria-hidden="true"
+                />
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 240 28"
+                  preserveAspectRatio="none"
+                  className="pointer-events-none absolute top-0 inset-x-0 w-full h-4 text-cyan-200/90 drop-shadow-[0_2px_4px_rgba(8,145,178,0.5)]"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M0,0 L240,0 L240,5 L228,18 L218,6 L204,24 L192,7 L180,15 L168,5 L154,26 L140,6 L128,17 L116,5 L102,22 L88,6 L76,16 L64,5 L48,25 L34,7 L22,18 L10,5 L0,16 Z"
+                  />
+                </svg>
+              </>
             )}
             {hasShield && !isFrozen && (
               <span
@@ -133,8 +146,15 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             )}
 
             <span className="relative inline-flex items-center justify-center shrink-0">
+              {/* Frozen crystalline outer ring */}
+              {isFrozen && (
+                <span
+                  className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-cyan-200/90 bg-cyan-300/20 shadow-[0_0_16px_rgba(34,211,238,0.65)] animate-pulse"
+                  aria-hidden="true"
+                />
+              )}
               {/* Shield dome ring */}
-              {hasShield && (
+              {hasShield && !isFrozen && (
                 <span
                   className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-dashed border-amber-300/90 bg-amber-300/10 animate-pulse"
                   aria-hidden="true"
@@ -152,7 +172,7 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
                   projectorMode ? 'w-16 h-16 text-4xl border-[3px]' : 'w-14 h-14 text-3xl border-2'
                 } rounded-full grid place-items-center leading-none ${
                   isFrozen
-                    ? 'bg-cyan-500/20 border-cyan-300'
+                    ? 'bg-cyan-500/30 border-cyan-200 shadow-[inset_0_0_14px_rgba(165,243,252,0.75)]'
                     : hasShield
                       ? 'bg-amber-400/15 border-amber-300'
                       : 'bg-gc-line/[0.1] border-gc-turn/85'

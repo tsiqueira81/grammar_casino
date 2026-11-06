@@ -46,7 +46,7 @@ export interface PlayerHistory {
 }
 
 export interface PlayerEffect {
-  type: 'BLESSING' | 'CRUCIO' | 'SILENCED' | 'SECOND_CHANCE' | 'TEACHERS_PET';
+  type: 'BLESSING' | 'CRUCIO' | 'SILENCED' | 'SECOND_CHANCE' | 'TEACHERS_PET' | 'SUB_ZERO' | 'BET_CAP';
   roundsLeft: number; // -1 for indefinite (until consumed)
 }
 

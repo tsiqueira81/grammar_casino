@@ -32,19 +32,14 @@ export interface BoomerangArcEvent {
   totalSeats: number;
 }
 
-export interface CardDrawEvent {
-  id: string;
-}
-
 export interface Tabletop3DOverlayProps {
   active: boolean;
   calmMode: boolean;
   projectorMode?: boolean;
-  seatStates: Seat3DState[];
+  seatStates?: Seat3DState[];
   tossEvent: ChipTossEvent | null;
   sweepEvent: PotSweepEvent | null;
   boomerangEvent: BoomerangArcEvent | null;
-  cardDrawEvent?: CardDrawEvent | null;
   onChipImpactSound?: (denomination: number) => void;
 }
 
@@ -80,7 +75,8 @@ interface ActiveBoomerangFlight {
 }
 
 /**
- * Computes a seat's 3D world position on a semi-circular arc around the table.
+ * Computes a seat's 3D world position on a semi-circular arc around the table
+ * for transient chip tosses, pot sweeps, and Boomerang flights.
  */
 function getSeatWorldPosition(seatIndex: number, totalSeats: number): THREE.Vector3 {
   const count = Math.max(1, totalSeats);
@@ -152,7 +148,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
     chipTemplates: Record<number, THREE.Object3D>;
-    boomerangTemplate?: THREE.Object3D;
+    boomerangTemplate: THREE.Object3D;
     chips: RigidChipBody[];
     boomerangs: ActiveBoomerangFlight[];
     lastProcessedTossId: string | null;
@@ -190,7 +186,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    // Warm casino lighting for the transient 3D chips
+    // Warm casino lighting for transient 3D chips and Boomerang arcs
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
     scene.add(ambientLight);
 
@@ -228,12 +224,23 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       chipTemplates[denom] = group;
     }
 
+    const boomerangFallback = new THREE.Mesh(
+      new THREE.TorusGeometry(0.22, 0.045, 12, 24, Math.PI * 1.3),
+      new THREE.MeshStandardMaterial({
+        color: 0xf59e0b,
+        emissive: 0xd97706,
+        emissiveIntensity: 0.6,
+        metalness: 0.6,
+        roughness: 0.2,
+      })
+    );
+
     const stateObj = {
       scene,
       camera,
       renderer,
       chipTemplates,
-      boomerangTemplate: undefined as THREE.Object3D | undefined,
+      boomerangTemplate: boomerangFallback as THREE.Object3D,
       chips: [] as RigidChipBody[],
       boomerangs: [] as ActiveBoomerangFlight[],
       lastProcessedTossId: null as string | null,
@@ -575,18 +582,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const midOut = startPos.clone().add(reflectPos).multiplyScalar(0.5).add(new THREE.Vector3(-0.7, 1.45, -0.6));
     const midBack = reflectPos.clone().add(startPos).multiplyScalar(0.5).add(new THREE.Vector3(0.7, 1.65, 0.5));
 
-    const mesh = ctx.boomerangTemplate
-      ? ctx.boomerangTemplate.clone(true)
-      : new THREE.Mesh(
-          new THREE.TorusGeometry(0.22, 0.045, 12, 24, Math.PI * 1.3),
-          new THREE.MeshStandardMaterial({
-            color: 0xf59e0b,
-            emissive: 0xd97706,
-            emissiveIntensity: 0.6,
-            metalness: 0.6,
-            roughness: 0.2,
-          })
-        );
+    const mesh = ctx.boomerangTemplate.clone(true);
     mesh.position.copy(startPos);
     ctx.scene.add(mesh);
 

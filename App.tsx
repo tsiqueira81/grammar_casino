@@ -35,7 +35,6 @@ import Tabletop3DOverlay, {
   ChipTossEvent,
   PotSweepEvent,
   BoomerangArcEvent,
-  CardDrawEvent,
   Seat3DState,
 } from './components/Tabletop3DOverlay';
 import {
@@ -531,7 +530,7 @@ export function App() {
   // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
   const [showCloudModal, setShowCloudModal] = useState<boolean>(false);
   const [cloudModalTab, setCloudModalTab] = useState<CloudManagerTab>('rosters');
-  const [activeCloudRoster, setActiveCloudRoster] = useState<{ id: string; name: string } | null>(null);
+  const [activeCloudRoster, setActiveCloudRoster] = useState<{ id: string; className: string } | null>(null);
 
   const refreshDesktopStatus = useCallback(() => {
     GeminiService.getDesktopStatus().then(setDesktopStatus);
@@ -789,7 +788,6 @@ export function App() {
   const [chipTossEvent, setChipTossEvent] = useState<ChipTossEvent | null>(null);
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
-  const [cardDrawEvent, setCardDrawEvent] = useState<CardDrawEvent | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
@@ -2099,7 +2097,7 @@ export function App() {
       const maxAllowed = isCapped ? Math.min(validAmount, capLimit) : validAmount;
 
       if (validAmount <= 0) {
-        if (playerBet.bet !== 0 && playerBet.bet !== '') {
+        if (currentBetNum !== 0) {
           return {
             ...prevBets,
             [playerId]: { ...playerBet, bet: 0 }
@@ -2244,7 +2242,6 @@ export function App() {
     }
 
     playSound('powerUp');
-    setCardDrawEvent({ id: `${playerId}-${powerUpKey}-${Date.now()}` });
     const newMoney = player.money - POWERUP_COST;
 
     setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: newMoney} : p));
@@ -7082,7 +7079,6 @@ export function App() {
           tossEvent={chipTossEvent}
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
-          cardDrawEvent={cardDrawEvent}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
         <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />

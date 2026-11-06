@@ -286,7 +286,9 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const cardBaseClasses = "gc-panel rounded-gc-lg p-5 sm:p-7 transition-[opacity,border-color,box-shadow] duration-300 relative group overflow-hidden";
   const glowClasses = powerUpUsedThisRound ? "ring-2 ring-inset ring-purple-400/70" : "";
   const bankruptClasses = isEliminated ? "opacity-55 grayscale" : "";
-  const frozenClasses = isFrozen ? "!border-cyan-400/70 bg-cyan-50/50 dark:bg-cyan-950/30" : "";
+  const frozenClasses = isFrozen
+    ? "!border-cyan-300/90 ring-2 ring-inset ring-cyan-300/50 shadow-[inset_0_0_44px_rgba(34,211,238,0.34),0_0_28px_rgba(6,182,212,0.22)] bg-cyan-50/60 dark:bg-cyan-950/40"
+    : "";
   const timerClasses = !showTimer ? ""
     : isWarning ? "!border-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.45)]"
     : timerStatus === 'running' && !turnTimer?.held ? "!border-emerald-400/80 shadow-[0_0_30px_rgba(16,185,129,0.25)]"
@@ -485,11 +487,94 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
     <div className={`${cardBaseClasses} ${glowClasses} ${bankruptClasses} ${frozenClasses} ${timerClasses}`}>
       {isEliminated && <div className="bankrupt-stamp">BANKRUPT</div>}
       {isFrozen && (
-        <div className="absolute inset-0 bg-gc-bg/45 backdrop-blur-[1px] z-20 flex items-center justify-center pointer-events-none rounded-gc-lg animate-gc-fade">
-          <span className="inline-flex items-center gap-2.5 text-gc-display font-extrabold text-gc-info -rotate-6 border-[3px] border-current px-6 py-2.5 rounded-gc bg-gc-card/95 shadow-gc-2">
-            <Snowflake className="w-8 h-8" aria-hidden="true" />
-            Frozen this hand
-          </span>
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none rounded-gc-lg overflow-hidden animate-gc-fade backdrop-blur-[2.5px]"
+          style={{
+            background:
+              'radial-gradient(circle at 12% 14%, rgba(165, 243, 252, 0.34) 0%, transparent 42%), radial-gradient(circle at 88% 86%, rgba(56, 189, 248, 0.30) 0%, transparent 46%), linear-gradient(135deg, rgba(8, 51, 68, 0.62) 0%, rgba(14, 116, 144, 0.36) 48%, rgba(6, 182, 212, 0.54) 100%)',
+          }}
+        >
+          {/* Diagonal glacial specular refraction streaks */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 opacity-45"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(125deg, rgba(255,255,255,0.22) 0px, rgba(255,255,255,0.22) 2px, transparent 2px, transparent 28px, rgba(165,243,252,0.14) 28px, rgba(165,243,252,0.14) 36px, transparent 36px, transparent 74px)',
+            }}
+          />
+
+          {/* Inner rime frost border vignette */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 rounded-gc-lg border-[3px] border-cyan-200/60 shadow-[inset_0_0_52px_rgba(165,243,252,0.55)]"
+          />
+
+          {/* Top hanging crystalline icicles */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 800 54"
+            preserveAspectRatio="none"
+            className="absolute top-0 inset-x-0 w-full h-8 sm:h-11 text-cyan-200/85 drop-shadow-[0_4px_8px_rgba(8,145,178,0.55)]"
+          >
+            <defs>
+              <linearGradient id={`gc-icicles-${player.id}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ecfeff" stopOpacity="0.95" />
+                <stop offset="55%" stopColor="#67e8f9" stopOpacity="0.80" />
+                <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.25" />
+              </linearGradient>
+            </defs>
+            <path
+              fill={`url(#gc-icicles-${player.id})`}
+              d="M0,0 L800,0 L800,10 L782,34 L768,12 L748,46 L730,14 L714,28 L698,10 L676,50 L654,12 L636,32 L620,10 L598,42 L578,12 L556,26 L538,10 L514,52 L492,14 L472,34 L456,10 L432,44 L410,12 L392,30 L374,10 L350,50 L328,14 L308,36 L290,10 L266,46 L246,12 L226,28 L208,10 L184,52 L162,14 L142,34 L124,10 L98,44 L78,12 L58,32 L40,10 L18,38 L0,12 Z"
+            />
+          </svg>
+
+          {/* Corner crystalline frost fractures */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 120 120"
+            className="absolute top-0 left-0 w-24 h-24 sm:w-32 sm:h-32 text-cyan-100/65"
+          >
+            <g stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round">
+              <path d="M0,0 L68,42 M36,22 L58,12 M36,22 L42,46" />
+              <path d="M0,0 L40,74 M22,40 L12,62 M22,40 L44,52" />
+              <path d="M0,26 L52,58 M28,43 L44,34" />
+            </g>
+          </svg>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 120 120"
+            className="absolute bottom-0 right-0 w-24 h-24 sm:w-32 sm:h-32 text-cyan-100/65 rotate-180"
+          >
+            <g stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round">
+              <path d="M0,0 L68,42 M36,22 L58,12 M36,22 L42,46" />
+              <path d="M0,0 L40,74 M22,40 L12,62 M22,40 L44,52" />
+              <path d="M0,26 L52,58 M28,43 L44,34" />
+            </g>
+          </svg>
+
+          {/* Ambient drifting snowflakes */}
+          <Snowflake aria-hidden="true" className="absolute top-7 left-10 w-5 h-5 text-cyan-100/75 animate-pulse" />
+          <Snowflake aria-hidden="true" className="absolute bottom-6 left-16 w-4 h-4 text-cyan-200/65 animate-pulse [animation-delay:0.4s]" />
+          <Snowflake aria-hidden="true" className="absolute top-9 right-14 w-6 h-6 text-cyan-100/70 animate-pulse [animation-delay:0.8s]" />
+          <Snowflake aria-hidden="true" className="absolute bottom-8 right-12 w-4 h-4 text-cyan-200/75 animate-pulse [animation-delay:1.1s]" />
+
+          {/* Center Crystalline Ice Block Stamp */}
+          <div className="relative -rotate-6 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl border-[3px] border-cyan-200/95 bg-gradient-to-b from-cyan-900/95 via-sky-950/95 to-slate-950/95 shadow-[0_14px_38px_rgba(6,182,212,0.48),inset_0_2px_0_rgba(255,255,255,0.65),inset_0_-3px_12px_rgba(34,211,238,0.45)] flex items-center gap-3.5">
+            <span className="w-11 h-11 rounded-xl bg-cyan-400/20 border border-cyan-300/60 grid place-items-center text-cyan-200 shadow-inner shrink-0">
+              <Snowflake className="w-7 h-7 animate-pulse" aria-hidden="true" />
+            </span>
+            <div className="text-left">
+              <div className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-300/90 leading-none mb-1">
+                Sub-Zero Deep Freeze
+              </div>
+              <div className="text-gc-display font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-white via-cyan-100 to-cyan-300 leading-none drop-shadow-[0_2px_8px_rgba(34,211,238,0.55)]">
+                Frozen this hand
+              </div>
+            </div>
+            <Snowflake className="w-6 h-6 text-cyan-300/80 shrink-0 hidden sm:block" aria-hidden="true" />
+          </div>
         </div>
       )}
       {!isFrozen && !isEliminated && isSatOut && (

@@ -7,10 +7,18 @@ interface ActionButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement
   playSound?: (sound: SoundEffect, ...args: any[]) => void;
   sound?: SoundEffect;
   /** 'primary' is style A's one main button per screen: navy (light theme) or gold (dark), sentence case, pill-shaped. */
-  variant?: 'primary' | 'ghost' | 'gold' | 'red' | 'blue' | 'green' | 'purple' | 'outline-gold' | 'outline-green' | 'outline-red' | 'secondary';
+  variant?: 'primary' | 'ghost' | 'gold' | 'red' | 'danger' | 'blue' | 'green' | 'purple' | 'outline-gold' | 'outline-green' | 'outline-red' | 'secondary';
 }
 
 const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound = 'click', children, className, variant = 'gold', ...rest }) => {
+  const {
+    onDrag: _onDrag,
+    onDragStart: _onDragStart,
+    onDragEnd: _onDragEnd,
+    onAnimationStart: _onAnimationStart,
+    ...motionSafeRest
+  } = rest;
+
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (playSound) {
       playSound(sound);
@@ -41,6 +49,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
         gradientClasses = "bg-gradient-to-b from-red-50/90 to-red-100/70 dark:from-red-950/60 dark:to-red-950/90 border border-red-500/70 dark:border-red-400/60 text-red-800 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 shadow-sm dark:shadow-[0_4px_14px_rgba(0,0,0,0.5)]";
         break;
       case 'red':
+      case 'danger':
         gradientClasses = "bg-gradient-to-b from-rose-600 via-red-700 to-red-950 text-white border border-rose-400/80 shadow-[0_6px_18px_-3px_rgba(225,29,72,0.45),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-2px_0_rgba(69,10,10,0.7)] hover:brightness-110";
         break;
       case 'green':
@@ -75,7 +84,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
       whileTap={{ scale: rest.disabled ? 1 : 0.97, y: rest.disabled ? 0 : 1 }}
       onClick={handleClick} 
       className={twMerge(baseClasses, gradientClasses, className)} 
-      {...rest}
+      {...motionSafeRest}
     >
       <span className={`block w-full ${(variant === 'primary' || variant === 'ghost') ? '' : variant === 'gold' ? 'drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]' : 'drop-shadow-sm'}`}>{children}</span>
     </motion.button>

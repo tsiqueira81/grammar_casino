@@ -204,14 +204,20 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
 
     history.forEach((round) => {
       const qType = round.sentence.questionType || 'binary';
-      const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation';
+      const isCloze =
+        qType === 'multipleChoice' ||
+        qType === 'openCloze' ||
+        qType === 'wordFormation' ||
+        qType === 'keyWordTransformation';
       if (isCloze) {
         const modeLabel =
           qType === 'multipleChoice'
             ? 'MULTIPLE-CHOICE CLOZE'
             : qType === 'wordFormation'
               ? `WORD FORMATION (${round.sentence.baseWord || 'ROOT'})`
-              : 'OPEN CLOZE';
+              : qType === 'keyWordTransformation'
+                ? `KEY WORD TRANSFORMATION (${round.sentence.baseWord || 'KEY'})`
+                : 'OPEN CLOZE';
         report += `[Round ${round.round}] [${modeLabel}] - Official Answer: "${round.sentence.correctAnswer || ''}"\n`;
         report += `Prompt: "${round.sentence.text}"${qType === 'wordFormation' && round.sentence.baseWord ? ` (${round.sentence.baseWord})` : ''}\n`;
         if (qType === 'multipleChoice' && round.sentence.options) {
