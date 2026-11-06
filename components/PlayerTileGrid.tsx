@@ -79,6 +79,11 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
       {tiles.map(({ player, status, badges }, i) => {
         const isOpen = openPlayerId === player.id;
         const statusText = status === 'out' ? outLabel : STATUS_TEXT[status];
+        const hasShield = badges.some(b => b.icon === '🛡️' || b.icon === '👼' || b.label.toLowerCase().includes('shield') || b.label.toLowerCase().includes('guardian'));
+        const isFrozen = status === 'frozen' || badges.some(b => b.icon === '❄️' || b.label.toLowerCase().includes('sub-zero') || b.label.toLowerCase().includes('sub_zero'));
+        const isOnFire = player.winStreak >= 3;
+        const hasBetIn = status === 'placed' || status === 'locked';
+
         return (
           // The wrapper slides in when the hand is dealt; the button inside lifts on hover
           // (one element can't do both, the animation would pin its transform).
@@ -90,22 +95,98 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}
             className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 ${
               projectorMode ? 'px-4 pt-5 pb-4 gap-2.5' : 'px-3 pt-4 pb-3.5 gap-2'
-            } flex flex-col items-center text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 ${
+            } flex flex-col items-center text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 overflow-hidden ${
               isOpen
                 ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn' : 'ring-2 ring-inset ring-gc-turn'
                 : status === 'turn'
                   ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn/90' : 'ring-2 ring-inset ring-gc-turn/80'
-                  : ''
+                  : isFrozen
+                    ? 'ring-2 ring-inset ring-cyan-300/75'
+                    : hasShield
+                      ? 'ring-2 ring-inset ring-amber-300/80'
+                      : ''
             } ${status === 'out' ? 'opacity-65' : ''}`}
           >
-            <span
-              className={`${
-                projectorMode ? 'w-16 h-16 text-4xl border-[3px]' : 'w-14 h-14 text-3xl border-2'
-              } rounded-full grid place-items-center leading-none bg-gc-line/[0.1] border-gc-turn/85 select-none shrink-0`}
-              aria-hidden="true"
-            >
-              {player.avatar}
+            {/* Subtle reactive tile aura for frozen / shielded / win-streak states */}
+            {isFrozen && (
+              <span
+                className="pointer-events-none absolute inset-0 bg-gradient-to-b from-cyan-400/15 via-transparent to-cyan-300/10"
+                aria-hidden="true"
+              />
+            )}
+            {hasShield && !isFrozen && (
+              <span
+                className="pointer-events-none absolute inset-0 bg-gradient-to-b from-amber-300/15 via-transparent to-transparent"
+                aria-hidden="true"
+              />
+            )}
+
+            {/* Win streak corner ribbon */}
+            {isOnFire && status !== 'out' && (
+              <span
+                title={`${player.winStreak} hands won in a row!`}
+                className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-amber-400/25 border border-amber-400/70 text-gc-money text-[11px] font-black tabular-nums leading-none flex items-center gap-0.5 shadow-sm"
+              >
+                <span aria-hidden="true">🔥</span>
+                <span>{player.winStreak}×</span>
+              </span>
+            )}
+
+            <span className="relative inline-flex items-center justify-center shrink-0">
+              {/* Shield dome ring */}
+              {hasShield && (
+                <span
+                  className="pointer-events-none absolute -inset-1.5 rounded-full border-2 border-dashed border-amber-300/90 bg-amber-300/10 animate-pulse"
+                  aria-hidden="true"
+                />
+              )}
+              {/* Win streak golden aura */}
+              {isOnFire && !isFrozen && (
+                <span
+                  className="pointer-events-none absolute -inset-1 rounded-full ring-2 ring-amber-400/80 shadow-[0_0_16px_rgba(251,191,36,0.55)]"
+                  aria-hidden="true"
+                />
+              )}
+              <span
+                className={`${
+                  projectorMode ? 'w-16 h-16 text-4xl border-[3px]' : 'w-14 h-14 text-3xl border-2'
+                } rounded-full grid place-items-center leading-none ${
+                  isFrozen
+                    ? 'bg-cyan-500/20 border-cyan-300'
+                    : hasShield
+                      ? 'bg-amber-400/15 border-amber-300'
+                      : 'bg-gc-line/[0.1] border-gc-turn/85'
+                } select-none shrink-0 relative z-10`}
+                aria-hidden="true"
+              >
+                {player.avatar}
+              </span>
+
+              {/* Tactile corner status badge on avatar */}
+              {isFrozen ? (
+                <span
+                  className="absolute -bottom-1 -right-1 z-20 w-6 h-6 rounded-full bg-cyan-400 text-slate-950 border-2 border-gc-card grid place-items-center text-xs shadow-md"
+                  aria-hidden="true"
+                >
+                  ❄️
+                </span>
+              ) : hasShield ? (
+                <span
+                  className="absolute -bottom-1 -right-1 z-20 w-6 h-6 rounded-full bg-amber-300 text-slate-950 border-2 border-gc-card grid place-items-center text-xs shadow-md"
+                  aria-hidden="true"
+                >
+                  🛡️
+                </span>
+              ) : hasBetIn ? (
+                <span
+                  className="absolute -bottom-1 -right-1 z-20 w-6 h-6 rounded-full bg-gc-win text-[#042418] border-2 border-gc-card grid place-items-center shadow-md animate-gc-pop"
+                  aria-hidden="true"
+                >
+                  <Check className="w-3.5 h-3.5" strokeWidth={3.5} />
+                </span>
+              ) : null}
             </span>
+
             <span className={`w-full ${projectorMode ? 'text-[23px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} text-gc-ink truncate`}>
               {player.name}
             </span>

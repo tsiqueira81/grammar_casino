@@ -29,6 +29,15 @@ import DeckConfigModal from './components/DeckConfigModal';
 import MultiplayerLobbyModal from './components/MultiplayerLobbyModal';
 import StudentControllerView from './components/StudentControllerView';
 import CloudManagerModal, { CloudManagerTab } from './components/CloudManagerModal';
+import BroadcastCutIn, { BroadcastCutInPayload } from './components/BroadcastCutIn';
+import ThemeAmbience from './components/ThemeAmbience';
+import Tabletop3DOverlay, {
+  ChipTossEvent,
+  PotSweepEvent,
+  BoomerangArcEvent,
+  CardDrawEvent,
+  Seat3DState,
+} from './components/Tabletop3DOverlay';
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -87,6 +96,10 @@ const initializeSounds = (): typeof soundManagerInstance => {
           success: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
           tick: new window.Tone.Synth({ volume: -8, oscillator: { type: 'triangle' }, envelope: { attack: 0.002, decay: 0.06, sustain: 0, release: 0.03 } }).toDestination(),
           timeUp: new window.Tone.PolySynth(window.Tone.Synth, { volume: -4 }).toDestination(),
+          chipClink: new window.Tone.Synth({ volume: -7, oscillator: { type: 'sine' }, envelope: { attack: 0.001, decay: 0.085, sustain: 0, release: 0.04 } }).toDestination(),
+          chipBody: new window.Tone.MembraneSynth({ volume: -14, pitchDecay: 0.008, octaves: 2.5, envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.03 } }).toDestination(),
+          rakeBrush: new window.Tone.NoiseSynth({ volume: -14, noise: { type: 'pink' }, envelope: { attack: 0.02, decay: 0.28, sustain: 0, release: 0.12 } }).toDestination(),
+          whoosh: new window.Tone.Synth({ volume: -8, oscillator: { type: 'triangle' }, envelope: { attack: 0.03, decay: 0.45, sustain: 0.1, release: 0.25 } }).toDestination(),
       };
 
       const play = (sound: SoundEffect, ...args: any[]) => {
@@ -107,6 +120,39 @@ const initializeSounds = (): typeof soundManagerInstance => {
               case 'success': sounds.success.triggerAttackRelease(['C5', 'E5', 'G5'], '8n', now); break;
               case 'tick': sounds.tick.triggerAttackRelease('A5', '32n', now); break;
               case 'timeUp': sounds.timeUp.triggerAttackRelease(['G4', 'Eb4', 'C4'], '8n', now); break;
+              case 'chipClink': {
+                  // Denomination-aware pitch + ±45 cents organic detune so rapid chip stacks never sound robotic
+                  const denom = Number(args[0]) || 25;
+                  const baseFreq =
+                    denom >= 500 ? 523.25 : // C5 deeper clay thud
+                    denom >= 100 ? 622.25 : // Eb5
+                    denom >= 50  ? 783.99 : // G5
+                    denom >= 25  ? 932.33 : // Bb5
+                                   1046.50; // C6 crisp clink
+                  const detuneCents = (Math.random() * 90) - 45;
+                  const freq = baseFreq * Math.pow(2, detuneCents / 1200);
+                  sounds.chipClink.triggerAttackRelease(freq, '32n', now);
+                  sounds.chipBody.triggerAttackRelease(freq * 0.25, '32n', now + 0.005);
+                  break;
+              }
+              case 'potSweep': {
+                  sounds.rakeBrush.triggerAttackRelease('8n', now);
+                  const notes = ['C5', 'E5', 'G5', 'B5', 'D6'];
+                  notes.forEach((note, idx) => {
+                    sounds.chipClink.triggerAttackRelease(note, '32n', now + 0.05 + idx * 0.045);
+                  });
+                  break;
+              }
+              case 'boomerangWhoosh': {
+                  sounds.whoosh.triggerAttackRelease('A4', '4n', now);
+                  if (sounds.whoosh.frequency) {
+                    sounds.whoosh.frequency.setValueAtTime(320, now);
+                    sounds.whoosh.frequency.exponentialRampToValueAtTime(880, now + 0.22);
+                    sounds.whoosh.frequency.exponentialRampToValueAtTime(280, now + 0.48);
+                  }
+                  sounds.chipClink.triggerAttackRelease('E6', '32n', now + 0.22);
+                  break;
+              }
               default: break;
           }
       };
@@ -739,6 +785,11 @@ export function App() {
       return false;
     }
   });
+  const [activeCutIn, setActiveCutIn] = useState<BroadcastCutInPayload | null>(null);
+  const [chipTossEvent, setChipTossEvent] = useState<ChipTossEvent | null>(null);
+  const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
+  const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
+  const [cardDrawEvent, setCardDrawEvent] = useState<CardDrawEvent | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
@@ -910,6 +961,22 @@ export function App() {
     return allPowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === playerId) ||
            player.effects.some(e => e.type === 'SUB_ZERO');
   }, [players, activePowerUps]);
+
+  const seat3DStates = useMemo<Seat3DState[]>(() => {
+    const totalSeats = Math.max(1, activePlayers.length);
+    return activePlayers.map((p, idx) => {
+      const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+      const hasShield = pActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      return {
+        playerId: p.id,
+        seatIndex: idx,
+        totalSeats,
+        hasShield,
+        isFrozen: isPlayerFrozen(p.id),
+        winStreak: p.winStreak,
+      };
+    });
+  }, [activePlayers, activePowerUps, isPlayerFrozen]);
 
   const hasPlayerPlacedBet = useCallback((playerId: number): boolean => {
     const playerBet = bets[playerId];
@@ -1980,6 +2047,8 @@ export function App() {
       }
     }
     setBets(prev => {
+      const prevBetVal = prev[playerId]?.bet;
+      const prevBetNum = typeof prevBetVal === 'number' && !isNaN(prevBetVal) ? prevBetVal : 0;
       const newBets = {
         ...prev,
         [playerId]: {
@@ -1987,12 +2056,28 @@ export function App() {
           [field]: finalValue
         }
       };
-      if (field === 'opinion' || field === 'bet' || field === 'selectedOption' || field === 'splitOptions') {
+      if (field === 'bet') {
+        const nextBetNum = typeof finalValue === 'number' && !isNaN(finalValue) ? finalValue : 0;
+        const delta = nextBetNum - prevBetNum;
+        if (delta > 0) {
+          playSound('chipClink', delta);
+          const seatIdx = Math.max(0, activePlayers.findIndex(p => p.id === playerId));
+          setChipTossEvent({
+            id: `${playerId}-${Date.now()}-${Math.random()}`,
+            playerId,
+            seatIndex: seatIdx,
+            totalSeats: Math.max(1, activePlayers.length),
+            amountDelta: delta,
+          });
+        } else {
           playSound('bet');
+        }
+      } else if (field === 'opinion' || field === 'selectedOption' || field === 'splitOptions') {
+        playSound('bet');
       }
       return newBets;
     });
-  }, [canPlayerAct, players, activePowerUps, playSound]);
+  }, [canPlayerAct, players, activePlayers, activePowerUps, playSound]);
 
   const handleUpdatePlayerMoney = useCallback((playerId: number, newAmount: number) => {
     const validAmount = Math.max(0, newAmount);
@@ -2159,6 +2244,7 @@ export function App() {
     }
 
     playSound('powerUp');
+    setCardDrawEvent({ id: `${playerId}-${powerUpKey}-${Date.now()}` });
     const newMoney = player.money - POWERUP_COST;
 
     setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: newMoney} : p));
@@ -2307,6 +2393,15 @@ export function App() {
               setActivePowerUps(nextActive);
               const casterName = players.find(p => p.id === reflectedCasterId)?.name || 'the attacker';
               modalMessage = `${powerUp.icon} Boomerang immediately reflected ${POWER_UPS[reflectedDebuff.type]?.name} back onto ${casterName}!`;
+              playSound('boomerangWhoosh');
+              const attackerIdx = Math.max(0, activePlayers.findIndex(p => p.id === reflectedCasterId));
+              const defenderIdx = Math.max(0, activePlayers.findIndex(p => p.id === playerId));
+              setBoomerangArcEvent({
+                id: `${reflectedCasterId}-${playerId}-${Date.now()}`,
+                attackerSeatIndex: attackerIdx,
+                defenderSeatIndex: defenderIdx,
+                totalSeats: Math.max(1, activePlayers.length),
+              });
             } else {
               setActivePowerUps(prev => ({
                 ...prev,
@@ -2492,6 +2587,14 @@ export function App() {
             [playerId]: { id: String(Date.now()), title: powerUp.name, message: modalMessage, icon: powerUp.icon },
           }));
         }
+        setActiveCutIn({
+          id: `${playerId}-${powerUpKey}-${Date.now()}`,
+          attackerName: player.name,
+          attackerAvatar: player.avatar,
+          powerUpName: powerUp.name,
+          powerUpIcon: powerUp.icon,
+          subtitle: modalMessage,
+        });
         setShowPowerUpModal({ title: powerUp.name, message: modalMessage, icon: powerUp.icon });
     }
   }, [canPlayerAct, players, activePlayers, currentSentence, availablePowerUps, bets, powerUpsUsedThisRound, playSound, activePowerUps, mpRoomCode, mpSeats]); 
@@ -3051,7 +3154,17 @@ export function App() {
       }));
     }
 
-    playSound('powerUp');
+    playSound(targetHasBoomerang ? 'boomerangWhoosh' : 'powerUp');
+    if (targetHasBoomerang) {
+      const attackerIdx = Math.max(0, activePlayers.findIndex(p => p.id === playerId));
+      const defenderIdx = Math.max(0, activePlayers.findIndex(p => p.id === targetId));
+      setBoomerangArcEvent({
+        id: `${playerId}-${targetId}-${Date.now()}`,
+        attackerSeatIndex: attackerIdx,
+        defenderSeatIndex: defenderIdx,
+        totalSeats: Math.max(1, activePlayers.length),
+      });
+    }
     const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${powerUpInfo.description}`;
     if (isRemoteBuyer) {
       setMpStudentPendingTarget(prev => {
@@ -3066,6 +3179,17 @@ export function App() {
     } else {
       setShowTargetModal(null);
     }
+    setActiveCutIn({
+      id: `${playerId}-${targetId}-${powerUpKey}-${Date.now()}`,
+      attackerName: targetHasBoomerang ? targetPlayer.name : sourcePlayer.name,
+      attackerAvatar: targetHasBoomerang ? targetPlayer.avatar : sourcePlayer.avatar,
+      targetName: targetHasBoomerang ? sourcePlayer.name : targetPlayer.name,
+      targetAvatar: targetHasBoomerang ? sourcePlayer.avatar : targetPlayer.avatar,
+      powerUpName: powerUpInfo.name,
+      powerUpIcon: powerUpInfo.icon,
+      isBoomerang: targetHasBoomerang,
+      subtitle: finalMsg,
+    });
     setShowPowerUpModal({
       title: targetHasBoomerang ? '🪃 Boomerang Reflected!' : powerUpInfo.name,
       message: finalMsg,
@@ -3796,6 +3920,23 @@ export function App() {
     const updatedPlayers = settlement.updatedPlayers;
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
+
+    // Trigger 3D pot sweep & croupier rake audio toward winning seats (or House bank if no winners)
+    const winnerIds = new Set(
+      newRoundPlayerResults.filter(r => r.amountChanged > 0).map(r => r.playerId)
+    );
+    const winnerSeatIndices: number[] = [];
+    activePlayers.forEach((p, idx) => {
+      if (winnerIds.has(p.id)) {
+        winnerSeatIndices.push(idx);
+      }
+    });
+    playSound('potSweep', winnerSeatIndices.length);
+    setPotSweepEvent({
+      id: `round-${currentRound}-${Date.now()}`,
+      winnerSeatIndices,
+      totalSeats: Math.max(1, activePlayers.length),
+    });
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
@@ -6467,6 +6608,45 @@ export function App() {
                         <p className={`font-sentence italic text-gc-ink ${isProjectorMode ? 'text-3xl sm:text-4xl font-semibold' : 'text-2xl sm:text-[30px]'} leading-snug`}>
                           &ldquo;{currentSentence.correction}&rdquo;
                         </p>
+
+                        {resultQuestionType === 'keyWordTransformation' &&
+                          currentSentence.mark1Parts && currentSentence.mark1Parts.length > 0 &&
+                          currentSentence.mark2Parts && currentSentence.mark2Parts.length > 0 && (
+                            <div className="mt-4 pt-3.5 border-t border-gc-line/[0.12]">
+                              <div className="text-gc-cap font-bold uppercase tracking-wider text-gc-quiet mb-2">
+                                Cambridge Part 4 · 2-Mark Split Breakdown
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div className="rounded-gc bg-gc-win/[0.08] border border-gc-win/30 px-3.5 py-2.5 flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-gc-cap font-extrabold uppercase tracking-wider text-gc-win">
+                                      1st Half · 1 Mark
+                                    </div>
+                                    <div className={`font-sentence italic font-semibold text-gc-ink ${isProjectorMode ? 'text-2xl' : 'text-lg'}`}>
+                                      &ldquo;{currentSentence.mark1Parts[0]}&rdquo;
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 px-2.5 py-1 rounded-full bg-gc-win/20 text-gc-win text-gc-cap font-black tabular-nums">
+                                    +1 pt
+                                  </span>
+                                </div>
+
+                                <div className="rounded-gc bg-gc-gold/[0.10] border border-gc-gold/35 px-3.5 py-2.5 flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-gc-cap font-extrabold uppercase tracking-wider text-gc-money">
+                                      2nd Half · 1 Mark
+                                    </div>
+                                    <div className={`font-sentence italic font-semibold text-gc-ink ${isProjectorMode ? 'text-2xl' : 'text-lg'}`}>
+                                      &ldquo;{currentSentence.mark2Parts[0]}&rdquo;
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 px-2.5 py-1 rounded-full bg-gc-gold/25 text-gc-money text-gc-cap font-black tabular-nums">
+                                    +1 pt
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                     </div>
                 )}
 
@@ -6892,7 +7072,20 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
-      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300">
+      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300 relative">
+        <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
+        <Tabletop3DOverlay
+          active={step === 'IN_GAME' || step === 'RESULTS'}
+          calmMode={isCalmMode}
+          projectorMode={isProjectorMode}
+          seatStates={seat3DStates}
+          tossEvent={chipTossEvent}
+          sweepEvent={potSweepEvent}
+          boomerangEvent={boomerangArcEvent}
+          cardDrawEvent={cardDrawEvent}
+          onChipImpactSound={(denom) => playSound('chipClink', denom)}
+        />
+        <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
              <button

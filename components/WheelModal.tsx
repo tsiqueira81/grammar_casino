@@ -20,19 +20,22 @@ export const WheelModal: React.FC<WheelModalProps> = ({
   const [isSpinning, setIsSpinning] = useState(false);
   const [hasSpun, setHasSpun] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [flapperTilt, setFlapperTilt] = useState(0);
+  const [activeStudIndex, setActiveStudIndex] = useState<number | null>(null);
   const [selectedItem, setSelectedItem] = useState<WheelItem | null>(null);
   const [showOddsList, setShowOddsList] = useState(false);
   const wheelRef = useRef<SVGGElement>(null);
-  const audioIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const numSlices = WHEEL_ITEMS.length; // 10
   const sliceAngle = 360 / numSlices; // 36 deg
+  const studStepDeg = 18; // 20 brass studs around the rim
 
-  // Clean up any audio intervals on unmount
+  // Clean up animation frame on unmount
   useEffect(() => {
     return () => {
-      if (audioIntervalRef.current) {
-        clearInterval(audioIntervalRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
       }
     };
   }, []);
@@ -53,48 +56,65 @@ export const WheelModal: React.FC<WheelModalProps> = ({
 
     // Calculate rotation so targetIndex lands at pointer (12 o'clock = 270 deg)
     const sliceCenterAngle = targetIndex * sliceAngle + sliceAngle / 2;
-    // We want (sliceCenterAngle + R) % 360 === 270
-    // So targetAngle = 270 - sliceCenterAngle
     const targetOffset = (270 - sliceCenterAngle + 360) % 360;
 
     // Minimum 6 full revolutions (6 * 360 = 2160 deg) plus extra to land on target
-    const currentBase = Math.floor(rotation / 360) * 360;
+    const startRotation = rotation;
+    const currentBase = Math.floor(startRotation / 360) * 360;
     const extraSpins = 360 * 6;
     const finalRotation = currentBase + extraSpins + targetOffset + jitter;
+    const totalDelta = finalRotation - startRotation;
 
-    // Simulate clicking ticks as wheel spins
-    let tickCount = 0;
-    const totalTicks = 24;
-    const tickInterval = 160;
+    const durationMs = 4250;
+    const startTime = performance.now();
+    let lastPegSlot = Math.floor(startRotation / studStepDeg);
+    let currentFlapperDeflection = 0;
 
-    if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
-    audioIntervalRef.current = setInterval(() => {
-      tickCount++;
-      if (tickCount <= totalTicks) {
+    // Quintic ease-out matching a heavy brass roulette wheel
+    const easeOutWheel = (t: number) => 1 - Math.pow(1 - t, 4.2);
+
+    const stepPhysics = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(1, Math.max(0, elapsed / durationMs));
+      const eased = easeOutWheel(t);
+      const currentAngle = startRotation + totalDelta * eased;
+
+      setRotation(currentAngle);
+
+      // Detect every time a brass stud (every 18 deg) strikes the 12 o'clock flapper
+      const currentPegSlot = Math.floor(currentAngle / studStepDeg);
+      if (currentPegSlot > lastPegSlot) {
+        lastPegSlot = currentPegSlot;
+        const speedFactor = Math.max(0.28, 1 - t * 0.72);
+        currentFlapperDeflection = -32 * speedFactor;
+        setActiveStudIndex(((currentPegSlot % 20) + 20) % 20);
         playSound('click');
       } else {
-        if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
+        // Spring return of the leather flapper
+        currentFlapperDeflection *= 0.82;
+        if (Math.abs(currentFlapperDeflection) < 0.4) currentFlapperDeflection = 0;
       }
-    }, tickInterval);
+      setFlapperTilt(currentFlapperDeflection);
 
-    setRotation(finalRotation);
-
-    // After 4.2 seconds, finish spin and declare result
-    setTimeout(() => {
-      setIsSpinning(false);
-      setHasSpun(true);
-      setSelectedItem(targetItem);
-
-      if (audioIntervalRef.current) {
-        clearInterval(audioIntervalRef.current);
-      }
-
-      if (targetItem.type === 'positive') {
-        playSound('win');
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(stepPhysics);
       } else {
-        playSound('lose');
+        setFlapperTilt(0);
+        setActiveStudIndex(null);
+        setIsSpinning(false);
+        setHasSpun(true);
+        setSelectedItem(targetItem);
+
+        if (targetItem.type === 'positive') {
+          playSound('win');
+        } else {
+          playSound('lose');
+        }
       }
-    }, 4300);
+    };
+
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(stepPhysics);
   };
 
   const handleClaim = () => {
@@ -191,12 +211,18 @@ export const WheelModal: React.FC<WheelModalProps> = ({
 
         {/* The Wheel Stage */}
         <div className="relative flex justify-center items-center my-4 select-none">
-          {/* Top Pointer Needle */}
-          <div className="absolute -top-3 z-30 flex flex-col items-center pointer-events-none filter drop-shadow-[0_4px_6px_rgba(0,0,0,0.5)]">
-            <div className="w-6 h-6 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 rounded-full border-2 border-white shadow-md flex items-center justify-center text-[10px] font-black text-amber-950">
+          {/* Physically Deflecting Top Brass & Leather Flapper Needle */}
+          <div
+            style={{
+              transformOrigin: '50% 10px',
+              transform: `rotate(${flapperTilt}deg)`,
+            }}
+            className="absolute -top-3.5 z-30 flex flex-col items-center pointer-events-none filter drop-shadow-[0_6px_8px_rgba(0,0,0,0.65)]"
+          >
+            <div className="w-7 h-7 bg-gradient-to-b from-amber-200 via-amber-400 to-amber-700 rounded-full border-2 border-white shadow-md flex items-center justify-center text-[10px] font-black text-amber-950">
               ▼
             </div>
-            <div className="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[18px] border-t-amber-500 -mt-1"></div>
+            <div className="w-0 h-0 border-l-[11px] border-l-transparent border-r-[11px] border-r-transparent border-t-[22px] border-t-amber-500 -mt-1.5"></div>
           </div>
 
           {/* SVG Wheel Container */}
@@ -205,13 +231,21 @@ export const WheelModal: React.FC<WheelModalProps> = ({
               viewBox="0 0 400 400"
               className="w-full h-full filter drop-shadow-2xl overflow-visible"
             >
-              {/* Outer Golden Casing Rim */}
+              {/* Outer 3D Beveled Golden Casing Rim */}
+              <circle
+                cx="200"
+                cy="200"
+                r="196"
+                fill="none"
+                stroke="#78350f"
+                strokeWidth="16"
+              />
               <circle
                 cx="200"
                 cy="200"
                 r="194"
                 fill="none"
-                stroke="#ca8a04"
+                stroke="url(#goldGradient)"
                 strokeWidth="12"
               />
               <circle
@@ -221,38 +255,35 @@ export const WheelModal: React.FC<WheelModalProps> = ({
                 fill="none"
                 stroke="#fef08a"
                 strokeWidth="2"
-                opacity="0.8"
+                opacity="0.85"
               />
               
-              {/* Casino Decorative Studs */}
-              {Array.from({ length: 20 }).map((_, i) => {
-                const angle = (i * 18 * Math.PI) / 180;
-                const studX = 200 + 194 * Math.cos(angle);
-                const studY = 200 + 194 * Math.sin(angle);
-                return (
-                  <circle
-                    key={i}
-                    cx={studX}
-                    cy={studY}
-                    r="3.5"
-                    fill={i % 2 === 0 ? "#fef08a" : "#ca8a04"}
-                    stroke="#78350f"
-                    strokeWidth="1"
-                  />
-                );
-              })}
-
-              {/* Spinning Wheel Group */}
+              {/* Spinning Wheel Group (Slices + Rim Studs) */}
               <g
                 ref={wheelRef}
                 style={{
                   transformOrigin: '200px 200px',
                   transform: `rotate(${rotation}deg)`,
-                  transition: isSpinning
-                    ? 'transform 4.2s cubic-bezier(0.12, 0.95, 0.18, 1)'
-                    : 'none',
                 }}
               >
+                {/* Casino Decorative Brass Studs that strike the flapper */}
+                {Array.from({ length: 20 }).map((_, i) => {
+                  const angle = (i * 18 * Math.PI) / 180;
+                  const studX = 200 + 191 * Math.cos(angle);
+                  const studY = 200 + 191 * Math.sin(angle);
+                  const isGlowing = activeStudIndex === i;
+                  return (
+                    <circle
+                      key={i}
+                      cx={studX}
+                      cy={studY}
+                      r={isGlowing ? '5' : '3.8'}
+                      fill={isGlowing ? '#ffffff' : i % 2 === 0 ? '#fef08a' : '#f59e0b'}
+                      stroke="#451a03"
+                      strokeWidth="1.2"
+                    />
+                  );
+                })}
                 {WHEEL_ITEMS.map((item, index) => {
                   const midAngle = index * sliceAngle + sliceAngle / 2;
                   const rad = (midAngle * Math.PI) / 180;

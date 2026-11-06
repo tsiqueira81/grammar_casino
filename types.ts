@@ -3,7 +3,24 @@ export type Step = 'PLAYER_SETUP' | 'SETTINGS' | 'IN_GAME' | 'RESULTS' | 'GAME_O
 
 export type GameMode = 'lastPlayer' | 'rounds' | 'targetAmount';
 
-export type SoundEffect = 'click' | 'addPlayer' | 'startGame' | 'win' | 'lose' | 'hint' | 'powerUp' | 'gameOver' | 'bet' | 'flip' | 'error' | 'success' | 'tick' | 'timeUp';
+export type SoundEffect =
+  | 'click'
+  | 'addPlayer'
+  | 'startGame'
+  | 'win'
+  | 'lose'
+  | 'hint'
+  | 'powerUp'
+  | 'gameOver'
+  | 'bet'
+  | 'flip'
+  | 'error'
+  | 'success'
+  | 'tick'
+  | 'timeUp'
+  | 'chipClink'
+  | 'potSweep'
+  | 'boomerangWhoosh';
 
 // --- Per-player betting turn timer ---
 // 'idle'    -> turn not started yet (player cannot act while the timer feature is on)
