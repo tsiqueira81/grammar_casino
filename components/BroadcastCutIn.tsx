@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { PlayerAvatar } from './PlayerAvatar';
 
 export interface BroadcastCutInPayload {
   id: string;
@@ -115,9 +116,11 @@ export const BroadcastCutIn: React.FC<BroadcastCutInProps> = ({
                 transition={{ delay: 0.08, type: 'spring', stiffness: 320 }}
                 className="flex items-center gap-3"
               >
-                <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white/10 border-2 border-white/60 grid place-items-center text-4xl sm:text-5xl shadow-lg">
-                  {cutIn.attackerAvatar}
-                </span>
+                <PlayerAvatar
+                  value={cutIn.attackerAvatar}
+                  size="xl"
+                  className="ring-2 ring-white/70 shadow-lg"
+                />
                 <div className="text-left">
                   <div className="text-xs sm:text-sm uppercase tracking-widest text-white/75 font-bold">
                     {cutIn.isBoomerang ? 'Reflected By' : 'Caster'}
@@ -166,9 +169,11 @@ export const BroadcastCutIn: React.FC<BroadcastCutInProps> = ({
                   <div className="text-2xl sm:text-3xl font-black text-white/80" aria-hidden="true">
                     ➔
                   </div>
-                  <span className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white/10 border-2 border-rose-300/80 grid place-items-center text-4xl sm:text-5xl shadow-lg">
-                    {cutIn.targetAvatar || '🎯'}
-                  </span>
+                  <PlayerAvatar
+                    value={cutIn.targetAvatar || '🎯'}
+                    size="xl"
+                    className="ring-2 ring-rose-300/80 shadow-lg"
+                  />
                   <div className="text-left">
                     <div className="text-xs sm:text-sm uppercase tracking-widest text-rose-200 font-bold">
                       {cutIn.isBoomerang ? 'Backfired On' : 'Target'}

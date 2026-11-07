@@ -13,6 +13,7 @@ import {
   CEFRLevel,
   GameMode,
   Player,
+  QuestionType,
   RoundHistoryRecord,
   Settings,
   SoundEffect,
@@ -20,18 +21,23 @@ import {
 import { CEFR_LEVELS, GRAMMAR_TOPICS } from '../constants';
 import ActionButton from './ActionButton';
 import GrammarReportCard from './GrammarReportCard';
+import { PlayerAvatar } from './PlayerAvatar';
 import { getStaticBankCounts } from '../services/fallbackSentences';
+import { generateSentence } from '../services/geminiService';
 import {
+  archiveSentenceToCloudBank,
   CloudCuratedSentence,
   CloudRoster,
   CloudSessionReport,
   deleteCloudCuratedSentence,
   deleteCloudRoster,
   deleteCloudSessionReport,
+  getMissingBuiltInCloudSeedCount,
   listCloudRosters,
   listCloudSessionReports,
   saveCloudRoster,
   saveCloudSessionReport,
+  seedBuiltInBankToCloud,
   signInTeacherWithGoogle,
   syncCloudSentenceBank,
   VERIFIED_TEACHER_EMAIL,
@@ -120,7 +126,23 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   const [sentenceFormatFilter, setSentenceFormatFilter] = useState<string>('ALL');
   const [confirmDeleteSentenceId, setConfirmDeleteSentenceId] = useState<string | null>(null);
 
+  // Cloud Seeder & AI Batch Generator state
+  const [isSeedingBuiltIn, setIsSeedingBuiltIn] = useState<boolean>(false);
+  const [seedProgress, setSeedProgress] = useState<{ done: number; total: number } | null>(null);
+  const [batchTopic, setBatchTopic] = useState<string>(
+    settings.topic && settings.topic !== 'My own choice' ? settings.topic : 'Tenses'
+  );
+  const [batchLevel, setBatchLevel] = useState<CEFRLevel>(settings.level || 'B2');
+  const [batchFormat, setBatchFormat] = useState<QuestionType>('binary');
+  const [batchCount, setBatchCount] = useState<number>(5);
+  const [isBatchGenerating, setIsBatchGenerating] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+
   const staticCounts = useMemo(() => getStaticBankCounts(), []);
+  const missingBuiltInSeedCount = useMemo(
+    () => getMissingBuiltInCloudSeedCount(sentences),
+    [sentences]
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -299,6 +321,111 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
     } else {
       playSound('error');
       setNotice({ type: 'error', text: 'Could not delete sentence from Cloud.' });
+    }
+  };
+
+  const handleSeedBuiltInToCloud = async () => {
+    if (isSeedingBuiltIn || isBatchGenerating) return;
+    playSound('click');
+    setIsSeedingBuiltIn(true);
+    setNotice(null);
+    setSeedProgress({ done: 0, total: Math.max(1, missingBuiltInSeedCount) });
+    try {
+      const res = await seedBuiltInBankToCloud(sentences, (done, total) => {
+        setSeedProgress({ done, total });
+      });
+      setSentences(res.updatedList);
+      if (res.ok) {
+        playSound('success');
+        setNotice({
+          type: 'success',
+          text:
+            res.addedCount > 0
+              ? `Pushed ${res.addedCount} curated sentences to Firestore! Cloud bank now holds ${res.totalCloudCount} sentences.`
+              : `All ${staticCounts.totalCount} built-in sentences are already in your Firestore Cloud Bank!`,
+        });
+      } else {
+        playSound('error');
+        setNotice({
+          type: 'error',
+          text: res.error || 'Could not seed built-in sentences to Firestore.',
+        });
+      }
+    } finally {
+      setIsSeedingBuiltIn(false);
+      setSeedProgress(null);
+    }
+  };
+
+  const handleBatchGenerateWithAi = async () => {
+    if (isBatchGenerating || isSeedingBuiltIn) return;
+    playSound('click');
+    setIsBatchGenerating(true);
+    setNotice(null);
+    setBatchProgress({ done: 0, total: batchCount });
+
+    const pastTexts: string[] = sentences
+      .filter((s) => s.level === batchLevel)
+      .map((s) => (s.leadInSentence ? `${s.leadInSentence} -> ${s.correction}` : s.text));
+
+    let added = 0;
+    const newlyArchived: CloudCuratedSentence[] = [];
+
+    try {
+      for (let i = 0; i < batchCount; i++) {
+        const genSettings: Settings = {
+          topic: batchTopic,
+          level: batchLevel,
+          theme: settings.theme || 'General',
+          challengeFormat: batchFormat,
+        };
+        const forceCorrect = batchFormat === 'binary' ? i % 2 === 0 : null;
+        const generated = await generateSentence(
+          genSettings,
+          pastTexts,
+          forceCorrect,
+          null,
+          [],
+          batchFormat
+        );
+        if (generated && generated.text) {
+          pastTexts.push(
+            generated.leadInSentence
+              ? `${generated.leadInSentence} -> ${generated.correction}`
+              : generated.text
+          );
+          const archived = await archiveSentenceToCloudBank(generated, genSettings);
+          if (archived) {
+            added++;
+            newlyArchived.push(archived);
+            setSentences((prev) => [archived, ...prev.filter((p) => p.id !== archived.id)]);
+          }
+        }
+        setBatchProgress({ done: i + 1, total: batchCount });
+      }
+
+      if (added > 0) {
+        playSound('success');
+        setNotice({
+          type: 'success',
+          text: `Generated & archived ${added} new ${batchLevel} ${batchTopic} sentence${added === 1 ? '' : 's'} to Firestore!`,
+        });
+      } else {
+        playSound('error');
+        setNotice({
+          type: 'error',
+          text: 'Could not archive new AI sentences. Check your connection or Groq API status.',
+        });
+      }
+    } catch (err: any) {
+      playSound('error');
+      setNotice({
+        type: 'error',
+        text: err?.message || 'Batch generation encountered an error.',
+      });
+    } finally {
+      setIsBatchGenerating(false);
+      setBatchProgress(null);
     }
   };
 
@@ -753,7 +880,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                   key={`${p.id}_${i}`}
                                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gc-bg/60 border border-gc-line/[0.14] text-gc-cap"
                                 >
-                                  <span>{p.avatar}</span>
+                                  <PlayerAvatar value={p.avatar} size="xs" />
                                   <span className="font-bold text-gc-ink">{p.name}</span>
                                   <span className="tabular-nums font-bold text-gc-win">
                                     ${p.money.toLocaleString()}
@@ -970,22 +1097,149 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               {/* TAB 3: AUTO-GROWING CLOUD SENTENCE BANK */}
               {activeTab === 'sentences' && (
                 <div className="space-y-4">
-                  <div className={`${cardCls} flex flex-wrap items-center justify-between gap-3`}>
-                    <div>
-                      <h3 className="text-gc-body font-bold text-gc-ink">
-                        Auto-growing Cloud sentence bank
-                      </h3>
-                      <p className="text-gc-small text-gc-quiet">
-                        Verified sentences generated by Live AI are automatically archived to Firestore and merged into your curated bank.
-                      </p>
+                  <div className={`${cardCls} space-y-3.5`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-gc-body font-bold text-gc-ink">
+                          Auto-growing Cloud &amp; Offline sentence bank
+                        </h3>
+                        <p className="text-gc-small text-gc-quiet">
+                          Uses incremental delta-syncing so large banks of 1,000+ sentences cost almost zero daily Firestore reads.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className="h-7 px-3 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-ink tabular-nums"
+                          title={`Right/Wrong: ${staticCounts.binaryCount} · MC/Open Cloze: ${staticCounts.clozeCount} · Word Form: ${staticCounts.wordFormationCount} · Key Word: ${staticCounts.keyWordTransformationCount}`}
+                        >
+                          Built-in Offline: {staticCounts.totalCount}
+                        </span>
+                        <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-win/15 border border-gc-win/30 text-gc-cap font-bold text-gc-win tabular-nums">
+                          Firestore Cloud: {sentences.length}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-ink tabular-nums">
-                        Built-in: {staticCounts.totalCount}
-                      </span>
-                      <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-win/15 border border-gc-win/30 text-gc-cap font-bold text-gc-win tabular-nums">
-                        Cloud AI: {sentences.length}
-                      </span>
+
+                    {/* Format Breakdown & One-Click Cloud Seeder */}
+                    <div className="pt-2.5 border-t border-gc-line/[0.1] flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5 text-gc-cap text-gc-quiet tabular-nums">
+                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
+                          ⚖️ Binary: <strong>{staticCounts.binaryCount}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
+                          🔠/✍️ Cloze: <strong>{staticCounts.clozeCount}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
+                          🧬 Word Form: <strong>{staticCounts.wordFormationCount}</strong>
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
+                          🔑 Key Word: <strong>{staticCounts.keyWordTransformationCount}</strong>
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <ActionButton
+                          type="button"
+                          onClick={handleSeedBuiltInToCloud}
+                          playSound={playSound}
+                          variant={missingBuiltInSeedCount > 0 ? 'primary' : 'ghost'}
+                          disabled={isSeedingBuiltIn || isBatchGenerating || missingBuiltInSeedCount === 0}
+                          className="h-9 px-3.5 text-gc-cap font-bold"
+                          title="Batch-upload all built-in curated sentences to Firestore curated_sentences"
+                        >
+                          {isSeedingBuiltIn && seedProgress
+                            ? `Pushing to Cloud (${seedProgress.done}/${seedProgress.total})…`
+                            : missingBuiltInSeedCount > 0
+                              ? `⬆️ Push Built-in Bank to Cloud (+${missingBuiltInSeedCount})`
+                              : '✓ All Built-in Sentences in Cloud'}
+                        </ActionButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* AI Batch Generator into Cloud Bank */}
+                  <div className={`${cardCls} space-y-2.5`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-gc-small font-bold text-gc-ink">
+                          ✨ Batch-Populate Cloud Bank with AI (Groq GPT-OSS 120B)
+                        </h4>
+                        <p className="text-gc-cap text-gc-quiet">
+                          Generate a fresh batch of verified Cambridge-style sentences and archive them directly to Firestore for offline play.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
+                      <select
+                        value={batchTopic}
+                        onChange={(e) => setBatchTopic(e.target.value)}
+                        disabled={isBatchGenerating}
+                        aria-label="Batch generation grammar topic"
+                        className={`sm:col-span-3 ${inputCls}`}
+                      >
+                        {GRAMMAR_TOPICS.filter((t) => t !== 'My own choice').map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                        <option value="Passive Voice">Passive Voice</option>
+                      </select>
+
+                      <select
+                        value={batchLevel}
+                        onChange={(e) => setBatchLevel(e.target.value as CEFRLevel)}
+                        disabled={isBatchGenerating}
+                        aria-label="Batch generation CEFR level"
+                        className={`sm:col-span-2 ${inputCls}`}
+                      >
+                        {CEFR_LEVELS.map((l) => (
+                          <option key={l} value={l}>
+                            Level {l}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={batchFormat}
+                        onChange={(e) => setBatchFormat(e.target.value as QuestionType)}
+                        disabled={isBatchGenerating}
+                        aria-label="Batch generation format"
+                        className={`sm:col-span-3 ${inputCls}`}
+                      >
+                        <option value="binary">⚖️ Right or Wrong</option>
+                        <option value="multipleChoice">🔠 Multiple-Choice Gap</option>
+                        <option value="openCloze">✍️ Open Cloze</option>
+                        <option value="wordFormation">🧬 Word Formation</option>
+                        <option value="keyWordTransformation">🔑 Key Word Transformation</option>
+                      </select>
+
+                      <select
+                        value={batchCount}
+                        onChange={(e) => setBatchCount(Number(e.target.value))}
+                        disabled={isBatchGenerating}
+                        aria-label="Number of sentences to generate"
+                        className={`sm:col-span-2 ${inputCls}`}
+                      >
+                        <option value={3}>3 sentences</option>
+                        <option value={5}>5 sentences</option>
+                        <option value={8}>8 sentences</option>
+                      </select>
+
+                      <div className="sm:col-span-2 flex">
+                        <ActionButton
+                          type="button"
+                          onClick={handleBatchGenerateWithAi}
+                          playSound={playSound}
+                          variant="primary"
+                          disabled={isBatchGenerating || isSeedingBuiltIn}
+                          className="w-full h-11 px-3 text-gc-cap font-bold"
+                        >
+                          {isBatchGenerating && batchProgress
+                            ? `${batchProgress.done}/${batchProgress.total}…`
+                            : 'Generate'}
+                        </ActionButton>
+                      </div>
                     </div>
                   </div>
 
@@ -1009,6 +1263,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                           {t}
                         </option>
                       ))}
+                      <option value="Passive Voice">Passive Voice</option>
                     </select>
                     <select
                       value={sentenceLevelFilter}

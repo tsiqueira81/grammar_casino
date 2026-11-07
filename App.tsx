@@ -18,6 +18,8 @@ import TextInput from './components/TextInput';
 import Modal from './components/Modal';
 import PlayerBettingCard from './components/PlayerBettingCard';
 import PlayerTileGrid, { PlayerTile, SeatStatus } from './components/PlayerTileGrid';
+import { PlayerAvatar, CharacterPickerPanel } from './components/PlayerAvatar';
+import { getRandomCharacterAvatar } from './utils/characterAvatars';
 import CountUp from './components/CountUp';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
@@ -294,7 +296,7 @@ const loadInitialState = () => {
       if (parsed.players) {
         parsed.players = parsed.players.map((p: any) => ({
             ...p,
-            avatar: p.avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+            avatar: p.avatar || getRandomCharacterAvatar(),
             winStreak: p.winStreak || 0,
             effects: p.effects || []
         }));
@@ -1603,16 +1605,18 @@ export function App() {
   const handleAddPlayer = () => { 
     if (newPlayerName.trim()) { 
       playSound('addPlayer'); 
-      const randomAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
-      setPlayers(prev => [...prev, { 
-        id: Date.now(), 
-        name: newPlayerName.trim(), 
-        money: startingCash, 
-        history: [], 
-        avatar: randomAvatar, 
-        winStreak: 0,
-        effects: []
-      }]); 
+      setPlayers(prev => {
+        const randomAvatar = getRandomCharacterAvatar(prev.map(p => p.avatar));
+        return [...prev, { 
+          id: Date.now(), 
+          name: newPlayerName.trim(), 
+          money: startingCash, 
+          history: [], 
+          avatar: randomAvatar, 
+          winStreak: 0,
+          effects: []
+        }];
+      }); 
       setNewPlayerName(''); 
       playerNameInputRef.current?.focus(); 
     } 
@@ -1623,8 +1627,6 @@ export function App() {
   };
   const handleUpdateAvatar = (playerId: number, newAvatar: string) => {
     setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, avatar: newAvatar } : p));
-    setShowAvatarModal(null);
-    playSound('click');
   };
   const handleOpenAvatarModal = useCallback((playerId: number) => {
     playSound('click');
@@ -3257,7 +3259,7 @@ export function App() {
               name,
               money: startingCash,
               history: [],
-              avatar: avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+              avatar: avatar || getRandomCharacterAvatar(prev.map(p => p.avatar)),
               winStreak: 0,
               effects: [],
             },
@@ -4171,7 +4173,7 @@ export function App() {
       if (parsed.players) {
         parsed.players = parsed.players.map((p: any) => ({
             ...p,
-            avatar: p.avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)],
+            avatar: p.avatar || getRandomCharacterAvatar(),
             winStreak: p.winStreak || 0,
             effects: p.effects || []
         }));
@@ -4261,7 +4263,7 @@ export function App() {
     const loadedPlayers: Player[] = (roster.players || []).map((s, idx) => ({
       id: s.id || Date.now() + idx,
       name: s.name,
-      avatar: s.avatar || '🎰',
+      avatar: s.avatar || getRandomCharacterAvatar(),
       money: mode === 'saved' ? (typeof s.money === 'number' ? s.money : startStack) : startStack,
       winStreak: mode === 'saved' ? (typeof s.winStreak === 'number' ? s.winStreak : 0) : 0,
       effects: [],
@@ -4631,12 +4633,12 @@ export function App() {
                           type="button"
                           onClick={() => handleOpenAvatarModal(player.id)}
                           aria-label={`Change ${player.name}'s avatar`}
-                          className="relative w-9 h-9 rounded-full bg-gc-card grid place-items-center text-[22px] leading-none ring-2 ring-gc-gold/50 hover:ring-gc-gold cursor-pointer transition-shadow"
+                          className="relative w-9 h-9 rounded-full bg-gc-card p-0.5 grid place-items-center leading-none ring-2 ring-gc-gold/50 hover:ring-gc-gold cursor-pointer transition-shadow"
                         >
-                          {player.avatar}
+                          <PlayerAvatar value={player.avatar} size="sm" className="w-full h-full" />
                           {mpSeat && (
                             <span
-                              className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gc-card ${mpSeat.connected ? 'bg-gc-win' : 'bg-gc-gold'}`}
+                              className={`absolute -bottom-0.5 -right-0.5 z-20 w-3 h-3 rounded-full border-2 border-gc-card ${mpSeat.connected ? 'bg-gc-win' : 'bg-gc-gold'}`}
                               aria-hidden="true"
                             />
                           )}
@@ -6123,8 +6125,8 @@ export function App() {
                           return (
                             <React.Fragment key={p.id}>
                               {idx > 0 && <span className="text-gc-quiet/60 text-xs select-none" aria-hidden="true">&rarr;</span>}
-                              <span className={`h-8 px-3 rounded-full text-gc-small font-semibold border flex items-center gap-1.5 ${badgeClass}`}>
-                                <span>{p.avatar}</span>
+                              <span className={`h-8 pl-1.5 pr-3 rounded-full text-gc-small font-semibold border flex items-center gap-1.5 ${badgeClass}`}>
+                                <PlayerAvatar value={p.avatar} size="xs" />
                                 <span>{p.name}</span>
                                 <span className="text-[10px]">
                                   {frozen ? '❄️' : st === 'running' ? '⏱️' : st === 'paused' ? '⏸' : st === 'locked' ? '🔒' : '⏳'}
@@ -6237,11 +6239,11 @@ export function App() {
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-12 h-12 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] flex items-center justify-center text-2xl relative shrink-0">
-                                {player.avatar}
+                              <div className="w-12 h-12 rounded-full border-2 border-gc-turn/70 p-0.5 bg-gc-line/[0.08] flex items-center justify-center relative shrink-0">
+                                <PlayerAvatar value={player.avatar} size="md" className="w-full h-full" />
                                 {mpSeat && (
                                   <span
-                                    className={`w-3.5 h-3.5 rounded-full border-2 border-gc-card absolute -bottom-0.5 -right-0.5 ${
+                                    className={`w-3.5 h-3.5 rounded-full border-2 border-gc-card absolute -bottom-0.5 -right-0.5 z-20 ${
                                       mpSeat.connected ? 'bg-gc-win' : 'bg-gc-gold'
                                     }`}
                                     title={mpSeat.connected ? 'Connected on a phone' : 'Disconnected'}
@@ -6417,7 +6419,7 @@ export function App() {
                                             : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-quiet hover:text-gc-ink hover:border-gc-line/30 cursor-pointer'
                                       }`}
                                     >
-                                      <span aria-hidden="true">{p.avatar}</span>
+                                      <PlayerAvatar value={p.avatar} size="xs" />
                                       <span className="max-w-[6rem] truncate">{p.name}</span>
                                       {status === 'placed' && <Check className="w-3.5 h-3.5 text-gc-win shrink-0" strokeWidth={3} aria-hidden="true" />}
                                     </button>
@@ -6797,10 +6799,10 @@ export function App() {
                                     <button
                                       type="button"
                                       onClick={() => handleOpenAvatarModal(player.id)}
-                                      className="w-11 h-11 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-2xl leading-none hover:scale-110 transition-transform cursor-pointer shrink-0"
+                                      className="w-11 h-11 rounded-full border-2 border-gc-turn/70 p-0.5 bg-gc-line/[0.08] grid place-items-center leading-none hover:scale-110 transition-transform cursor-pointer shrink-0"
                                       title={`Change ${player.name}'s avatar`}
                                     >
-                                      {player.avatar}
+                                      <PlayerAvatar value={player.avatar} size="md" className="w-full h-full" />
                                     </button>
                                   ) : (
                                     <span className="text-2xl">{'👤'}</span>
@@ -7012,8 +7014,8 @@ export function App() {
                     <li key={p.id} className="w-24 sm:w-40 flex flex-col items-center animate-gc-rise" style={{ animationDelay: st.delay }}>
                       <span className="sr-only">Place {st.place}: </span>
                       {isFirst && winner && <span className="text-[30px] sm:text-[38px] leading-none mb-1" aria-hidden="true">👑</span>}
-                      <span className={`${st.avatar} rounded-full bg-gc-card grid place-items-center leading-none ring-4 ${isFirst ? 'ring-gc-gold' : 'ring-gc-line/20'} shadow-gc-1`} aria-hidden="true">
-                        {p.avatar}
+                      <span className={`${st.avatar} rounded-full bg-gc-card p-1 grid place-items-center leading-none ring-4 ${isFirst ? 'ring-gc-gold' : 'ring-gc-line/20'} shadow-gc-1`} aria-hidden="true">
+                        <PlayerAvatar value={p.avatar} size={isFirst ? '2xl' : 'xl'} className="w-full h-full" animated={isFirst} />
                       </span>
                       <span className={`mt-2 max-w-full truncate font-bold text-gc-ink ${isFirst ? 'text-gc-title' : 'text-gc-body sm:text-gc-lead'}`}>{p.name}</span>
                       <span className="text-gc-small sm:text-gc-body font-bold text-gc-money tabular-nums">${p.money.toLocaleString()}</span>
@@ -7360,7 +7362,7 @@ export function App() {
                       > 
                           <div className="flex items-center justify-between w-full gap-3">
                             <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="text-2xl select-none">{p.avatar}</span>
+                              <PlayerAvatar value={p.avatar} size="sm" />
                               <div className="text-left truncate">
                                 <span className="font-bold text-lg tracking-wide block truncate">{p.name}</span>
                                 {isShielded && (
@@ -7399,47 +7401,17 @@ export function App() {
         const modalPlayer = players.find(p => p.id === showAvatarModal.playerId);
         return (
           <Modal 
-            title={modalPlayer ? `Pick Avatar for ${modalPlayer.name}` : "Select Avatar"} 
+            title={modalPlayer ? `Customize Character · ${modalPlayer.name}` : "Customize Character"} 
             onClose={() => setShowAvatarModal(null)} 
             playSound={playSound}
+            maxWidth="max-w-2xl"
           >
-            <div className="space-y-4">
-              {modalPlayer && (
-                <div className="flex items-center justify-between px-3 py-2 bg-amber-50 dark:bg-[#0a1f14] border border-amber-200 dark:border-amber-800/60 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Current:</span>
-                    <span className="text-2xl">{modalPlayer.avatar || '👤'}</span>
-                    <span className="font-sans font-bold text-slate-900 dark:text-white uppercase">{modalPlayer.name}</span>
-                  </div>
-                  <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">Choose below:</span>
-                </div>
-              )}
-              <div className="grid grid-cols-5 sm:grid-cols-6 gap-3 max-h-[55vh] overflow-y-auto p-2 modal-content-scroll">
-                {AVATARS.map(avatar => {
-                  const isCurrent = modalPlayer?.avatar === avatar;
-                  return (
-                    <button 
-                      key={avatar}
-                      type="button"
-                      onClick={() => handleUpdateAvatar(showAvatarModal.playerId, avatar)}
-                      className={`text-3xl p-3 rounded-lg transition-all shadow-sm hover:shadow-lg hover:scale-110 transform duration-100 cursor-pointer relative ${
-                        isCurrent
-                          ? 'bg-amber-100 dark:bg-amber-950/80 border-2 border-amber-500 ring-2 ring-amber-400/40'
-                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-amber-500 dark:hover:bg-amber-600 border border-slate-200 dark:border-transparent'
-                      }`}
-                      title={isCurrent ? 'Current avatar' : `Select ${avatar}`}
-                    >
-                      {avatar}
-                      {isCurrent && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-black rounded-full text-[9px] font-bold flex items-center justify-center shadow">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <CharacterPickerPanel
+              value={modalPlayer?.avatar || ''}
+              onChange={(av) => handleUpdateAvatar(showAvatarModal.playerId, av)}
+              playerName={modalPlayer?.name}
+              playSound={playSound}
+            />
           </Modal>
         );
       })()}
@@ -7474,7 +7446,7 @@ export function App() {
                 {pendingLoadGame.players?.map((p: any) => (
                   <li key={p.id} className="flex justify-between items-center gap-3 px-3 py-2 rounded-gc-sm bg-gc-line/[0.05]">
                     <span className="flex items-center gap-2 min-w-0">
-                      <span className="text-[20px] leading-none">{p.avatar || '👤'}</span>
+                      <PlayerAvatar value={p.avatar} size="xs" />
                       <span className="text-gc-body font-bold text-gc-ink truncate">{p.name}</span>
                     </span>
                     <span className="text-gc-body font-bold text-gc-money tabular-nums">${Number(p.money).toLocaleString()}</span>
@@ -7563,7 +7535,7 @@ export function App() {
             className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] gc-panel rounded-gc-lg border-gc-gold/60 p-4"
           >
             <div className="flex items-start gap-3">
-              <span className="text-3xl leading-none" aria-hidden="true">{request.avatar || '📱'}</span>
+              <PlayerAvatar value={request.avatar || '📱'} size="md" />
               <div className="flex-1 min-w-0">
                 <p className="text-gc-body font-bold text-gc-ink">
                   A new phone wants to play as {request.name}.

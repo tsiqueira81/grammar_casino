@@ -8,6 +8,7 @@ import { QuickChipTray, WagerChipsDisplay } from './ChipStacks';
 import { TimerAvatarRing, TurnTimerControls, useTurnCountdown } from './TurnTimer';
 import { HINT_COST, POWERUP_COST, BET_CAP_AMOUNT, POWER_UPS } from '../constants';
 import { isValidKeyWordTransformationPhrase, AudiencePollSummary } from '../utils/multiplayerProtocol';
+import { PlayerAvatar } from './PlayerAvatar';
 
 interface PlayerBettingCardProps {
   player: Player;
@@ -604,17 +605,19 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               type="button"
               onClick={() => onChangeAvatar?.(player.id)}
               disabled={!onChangeAvatar}
-              className={`w-14 h-14 rounded-full border-2 border-gc-turn/70 p-0.5 relative bg-gc-line/[0.08] flex items-center justify-center text-3xl group/avatar transition-transform duration-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/50 ${
+              className={`w-14 h-14 rounded-full border-2 border-gc-turn/70 p-0.5 relative bg-gc-line/[0.08] flex items-center justify-center group/avatar transition-transform duration-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/50 ${
                 onChangeAvatar ? 'cursor-pointer hover:scale-105 active:scale-95' : ''
               }`}
-              title={onChangeAvatar ? `Click to change ${player.name}'s avatar` : undefined}
+              title={onChangeAvatar ? `Click to customize ${player.name}'s character` : undefined}
               aria-label={`Change avatar for ${player.name}`}
             >
-              <span className="filter drop-shadow-md transition-transform group-hover/avatar:scale-110 select-none">
-                {player.avatar || '👤'}
-              </span>
+              <PlayerAvatar
+                value={player.avatar}
+                size="lg"
+                className="w-full h-full transition-transform group-hover/avatar:scale-105"
+              />
               {onChangeAvatar && (
-                <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-gc-gold text-gc-on-gold text-[10px] rounded-full flex items-center justify-center shadow-md opacity-85 group-hover/avatar:opacity-100 group-hover/avatar:scale-110 transition-all font-sans font-bold select-none">
+                <span className="absolute -bottom-1 -right-1 z-20 w-5 h-5 bg-gc-gold text-gc-on-gold text-[10px] rounded-full flex items-center justify-center shadow-md opacity-90 group-hover/avatar:opacity-100 group-hover/avatar:scale-110 transition-all font-sans font-bold select-none">
                   🎭
                 </span>
               )}

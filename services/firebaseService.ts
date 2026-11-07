@@ -20,6 +20,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   writeBatch,
@@ -34,6 +35,7 @@ import {
   RoundHistoryRecord,
   Settings,
 } from '../types';
+import { getBuiltInCuratedSentencesForCloudSeed } from './fallbackSentences';
 import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
 
 // Initialize Firebase App singleton
@@ -856,8 +858,9 @@ export interface CloudCuratedSentence {
 }
 
 const CLOUD_SENTENCE_STORAGE_KEY = 'grammar_casino_cloud_sentences_v1';
+const MAX_CACHED_CLOUD_SENTENCES = 2500;
 
-function computeSentenceFingerprintId(text: string, questionType: QuestionType): string {
+export function computeSentenceFingerprintId(text: string, questionType: QuestionType): string {
   const normalized = `${questionType}:${text.trim().toLowerCase().replace(/\s+/g, ' ')}`;
   let h1 = 0xdeadbeef ^ normalized.length;
   let h2 = 0x41c6ce57 ^ normalized.length;
@@ -887,47 +890,233 @@ export function loadCachedCloudSentences(): CloudCuratedSentence[] {
 export function saveCachedCloudSentences(sentences: CloudCuratedSentence[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(CLOUD_SENTENCE_STORAGE_KEY, JSON.stringify(sentences.slice(0, 600)));
+    localStorage.setItem(
+      CLOUD_SENTENCE_STORAGE_KEY,
+      JSON.stringify(sentences.slice(0, MAX_CACHED_CLOUD_SENTENCES))
+    );
   } catch {}
 }
 
-export async function syncCloudSentenceBank(): Promise<CloudCuratedSentence[]> {
+function mapDocToCloudSentence(id: string, d: Record<string, any>): CloudCuratedSentence | null {
+  if (!d || !d.text) return null;
+  return {
+    id,
+    topic: String(d.topic || 'General'),
+    level: (d.level as CEFRLevel) || 'B1',
+    questionType: (d.questionType as QuestionType) || 'binary',
+    text: String(d.text),
+    isCorrect: Boolean(d.isCorrect),
+    correction: String(d.correction || d.text),
+    explanation: String(d.explanation || ''),
+    grammarPhrase: String(d.grammarPhrase || ''),
+    errorPhrase: d.errorPhrase ? String(d.errorPhrase) : '',
+    mistakeType: d.mistakeType ? String(d.mistakeType) : '',
+    correctAnswer: d.correctAnswer ? String(d.correctAnswer) : undefined,
+    baseWord: d.baseWord ? String(d.baseWord) : undefined,
+    leadInSentence: d.leadInSentence ? String(d.leadInSentence) : undefined,
+    mark1Parts: Array.isArray(d.mark1Parts) ? d.mark1Parts : undefined,
+    mark2Parts: Array.isArray(d.mark2Parts) ? d.mark2Parts : undefined,
+    acceptedAnswers: Array.isArray(d.acceptedAnswers) ? d.acceptedAnswers : undefined,
+    options: Array.isArray(d.options) ? d.options : undefined,
+    subtype: d.subtype ? String(d.subtype) : undefined,
+    createdAt: Number(d.createdAt || Date.now()),
+  };
+}
+
+export async function syncCloudSentenceBank(options?: {
+  forceFullSync?: boolean;
+}): Promise<CloudCuratedSentence[]> {
   const path = 'curated_sentences';
+  const cached = loadCachedCloudSentences();
   try {
-    const q = query(collection(db, 'curated_sentences'), orderBy('createdAt', 'desc'), limit(400));
-    const snap = await getDocs(q);
+    const latestCachedTimestamp =
+      !options?.forceFullSync && cached.length > 0
+        ? cached.reduce((max, item) => Math.max(max, Number(item.createdAt) || 0), 0)
+        : 0;
+
+    if (latestCachedTimestamp > 0) {
+      // Incremental delta sync: only read documents created after our newest cached entry
+      const deltaQuery = query(
+        collection(db, 'curated_sentences'),
+        where('createdAt', '>', latestCachedTimestamp),
+        orderBy('createdAt', 'desc'),
+        limit(500)
+      );
+      const snap = await getDocs(deltaQuery);
+      if (snap.empty) {
+        return cached;
+      }
+      const deltaItems: CloudCuratedSentence[] = [];
+      snap.forEach((docSnap) => {
+        const mapped = mapDocToCloudSentence(docSnap.id, docSnap.data());
+        if (mapped) deltaItems.push(mapped);
+      });
+      const byId = new Map<string, CloudCuratedSentence>();
+      for (const item of [...deltaItems, ...cached]) {
+        if (!byId.has(item.id)) byId.set(item.id, item);
+      }
+      const merged = Array.from(byId.values()).sort((a, b) => b.createdAt - a.createdAt);
+      saveCachedCloudSentences(merged);
+      return merged;
+    }
+
+    const fullQuery = query(
+      collection(db, 'curated_sentences'),
+      orderBy('createdAt', 'desc'),
+      limit(1200)
+    );
+    const snap = await getDocs(fullQuery);
     const list: CloudCuratedSentence[] = [];
     snap.forEach((docSnap) => {
-      const d = docSnap.data();
-      if (!d || !d.text) return;
-      list.push({
-        id: docSnap.id,
-        topic: String(d.topic || 'General'),
-        level: (d.level as CEFRLevel) || 'B1',
-        questionType: (d.questionType as QuestionType) || 'binary',
-        text: String(d.text),
-        isCorrect: Boolean(d.isCorrect),
-        correction: String(d.correction || d.text),
-        explanation: String(d.explanation || ''),
-        grammarPhrase: String(d.grammarPhrase || ''),
-        errorPhrase: d.errorPhrase ? String(d.errorPhrase) : '',
-        mistakeType: d.mistakeType ? String(d.mistakeType) : '',
-        correctAnswer: d.correctAnswer ? String(d.correctAnswer) : undefined,
-        baseWord: d.baseWord ? String(d.baseWord) : undefined,
-        leadInSentence: d.leadInSentence ? String(d.leadInSentence) : undefined,
-        mark1Parts: Array.isArray(d.mark1Parts) ? d.mark1Parts : undefined,
-        mark2Parts: Array.isArray(d.mark2Parts) ? d.mark2Parts : undefined,
-        acceptedAnswers: Array.isArray(d.acceptedAnswers) ? d.acceptedAnswers : undefined,
-        options: Array.isArray(d.options) ? d.options : undefined,
-        subtype: d.subtype ? String(d.subtype) : undefined,
-        createdAt: Number(d.createdAt || Date.now()),
-      });
+      const mapped = mapDocToCloudSentence(docSnap.id, docSnap.data());
+      if (mapped) list.push(mapped);
     });
     saveCachedCloudSentences(list);
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);
-    return loadCachedCloudSentences();
+    return cached;
+  }
+}
+
+export function getMissingBuiltInCloudSeedCount(
+  currentCloudSentences: CloudCuratedSentence[]
+): number {
+  const existingIds = new Set(currentCloudSentences.map((s) => s.id));
+  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
+  let missing = 0;
+  for (const item of builtIn) {
+    const id = computeSentenceFingerprintId(item.text, item.questionType);
+    if (!existingIds.has(id)) missing++;
+  }
+  return missing;
+}
+
+export async function seedBuiltInBankToCloud(
+  currentCloudSentences: CloudCuratedSentence[],
+  onProgress?: (seededCount: number, totalToSeed: number) => void
+): Promise<{
+  ok: boolean;
+  addedCount: number;
+  totalCloudCount: number;
+  updatedList: CloudCuratedSentence[];
+  error?: string;
+}> {
+  if (!isVerifiedTeacherUser(auth.currentUser)) {
+    return {
+      ok: false,
+      addedCount: 0,
+      totalCloudCount: currentCloudSentences.length,
+      updatedList: currentCloudSentences,
+      error: `Sign in with ${VERIFIED_TEACHER_EMAIL} first to seed the Cloud Sentence Bank.`,
+    };
+  }
+
+  const existingIds = new Set(currentCloudSentences.map((s) => s.id));
+  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
+  const baseNow = Date.now();
+
+  const toWrite: { id: string; payload: Record<string, any>; entry: CloudCuratedSentence }[] = [];
+
+  builtIn.forEach((item, idx) => {
+    const sentenceId = computeSentenceFingerprintId(item.text, item.questionType);
+    if (existingIds.has(sentenceId)) return;
+    existingIds.add(sentenceId);
+
+    const createdAt = baseNow + idx;
+    const entry: CloudCuratedSentence = {
+      id: sentenceId,
+      topic: (item.topic || 'General').slice(0, 100),
+      level: item.level || 'B1',
+      questionType: item.questionType,
+      text: item.text.trim().slice(0, 1000),
+      isCorrect: Boolean(item.isCorrect),
+      correction: (item.correction || item.text).trim().slice(0, 1000),
+      explanation: item.explanation.trim().slice(0, 2500),
+      grammarPhrase: (item.grammarPhrase || '').trim().slice(0, 300),
+      errorPhrase: (item.errorPhrase || '').trim().slice(0, 300),
+      mistakeType: (item.mistakeType || '').trim().slice(0, 200),
+      correctAnswer: item.correctAnswer,
+      baseWord: item.baseWord,
+      leadInSentence: item.leadInSentence,
+      mark1Parts: item.mark1Parts,
+      mark2Parts: item.mark2Parts,
+      acceptedAnswers: item.acceptedAnswers,
+      options: item.options,
+      subtype: item.subtype,
+      createdAt,
+    };
+
+    const firestorePayload: Record<string, any> = {
+      topic: entry.topic,
+      level: entry.level,
+      questionType: entry.questionType,
+      text: entry.text,
+      isCorrect: entry.isCorrect,
+      correction: entry.correction,
+      explanation: entry.explanation,
+      grammarPhrase: entry.grammarPhrase,
+      errorPhrase: entry.errorPhrase || '',
+      mistakeType: entry.mistakeType || '',
+      createdAt: entry.createdAt,
+    };
+    if (entry.correctAnswer) firestorePayload.correctAnswer = entry.correctAnswer;
+    if (entry.baseWord) firestorePayload.baseWord = entry.baseWord;
+    if (entry.leadInSentence) firestorePayload.leadInSentence = entry.leadInSentence;
+    if (entry.mark1Parts) firestorePayload.mark1Parts = entry.mark1Parts;
+    if (entry.mark2Parts) firestorePayload.mark2Parts = entry.mark2Parts;
+    if (entry.acceptedAnswers) firestorePayload.acceptedAnswers = entry.acceptedAnswers;
+    if (entry.options) firestorePayload.options = entry.options;
+    if (entry.subtype) firestorePayload.subtype = entry.subtype;
+
+    toWrite.push({ id: sentenceId, payload: firestorePayload, entry });
+  });
+
+  if (toWrite.length === 0) {
+    return {
+      ok: true,
+      addedCount: 0,
+      totalCloudCount: currentCloudSentences.length,
+      updatedList: currentCloudSentences,
+    };
+  }
+
+  const CHUNK_SIZE = 200;
+  let written = 0;
+  const newlyAddedEntries: CloudCuratedSentence[] = [];
+
+  try {
+    for (let i = 0; i < toWrite.length; i += CHUNK_SIZE) {
+      const slice = toWrite.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const row of slice) {
+        batch.set(doc(db, 'curated_sentences', row.id), row.payload);
+      }
+      await batch.commit();
+      written += slice.length;
+      newlyAddedEntries.push(...slice.map((r) => r.entry));
+      onProgress?.(written, toWrite.length);
+    }
+
+    const updatedList = [...newlyAddedEntries.reverse(), ...currentCloudSentences];
+    saveCachedCloudSentences(updatedList);
+    return {
+      ok: true,
+      addedCount: written,
+      totalCloudCount: updatedList.length,
+      updatedList,
+    };
+  } catch (err: any) {
+    handleFirestoreError(err, OperationType.WRITE, 'curated_sentences');
+    const partialList = [...newlyAddedEntries.reverse(), ...currentCloudSentences];
+    saveCachedCloudSentences(partialList);
+    return {
+      ok: false,
+      addedCount: written,
+      totalCloudCount: partialList.length,
+      updatedList: partialList,
+      error: err?.message || 'Failed while writing batch to Firestore.',
+    };
   }
 }
 

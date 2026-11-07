@@ -3,6 +3,7 @@ import { Player, SoundEffect, WheelItem } from '../types';
 import { WHEEL_ITEMS } from '../constants';
 import ActionButton from './ActionButton';
 import PowerUpTooltip from './PowerUpTooltip';
+import { PlayerAvatar } from './PlayerAvatar';
 
 interface WheelModalProps {
   player: Player;
@@ -147,9 +148,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
         {/* Header Badge */}
         <div className="flex items-center justify-between pb-3 mb-4 border-b border-amber-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <span className="text-3xl p-1 bg-amber-100 dark:bg-amber-950/60 rounded-full border border-amber-300 dark:border-amber-700">
-              {player.avatar}
-            </span>
+            <PlayerAvatar value={player.avatar} size="md" className="ring-2 ring-amber-400/70" />
             <div className="text-left">
               <h2 className="text-xl md:text-2xl font-sans font-black text-amber-900 dark:text-amber-400 uppercase tracking-wide">
                 The Wheel of Fortune

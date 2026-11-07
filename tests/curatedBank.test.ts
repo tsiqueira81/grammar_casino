@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   getCuratedSentence,
+  getStaticBankCounts,
+  getBuiltInCuratedSentencesForCloudSeed,
   CURATED_SENTENCE_BANK,
   CURATED_CLOZE_BANK,
   CURATED_WORD_FORMATION_BANK,
@@ -176,6 +178,30 @@ describe('Offline picker when the bank runs dry', () => {
       history.push(`${s.leadInSentence} -> ${s.correction}`);
     }
     expect(seenTexts.size).toBe(8);
+  });
+
+  it('expands built-in bank and prepares valid Firestore seed items across all formats and CEFR levels', () => {
+    const counts = getStaticBankCounts();
+    expect(counts.totalCount).toBeGreaterThanOrEqual(350);
+    expect(counts.binaryCount).toBeGreaterThanOrEqual(140);
+    expect(counts.clozeCount).toBeGreaterThanOrEqual(65);
+    expect(counts.wordFormationCount).toBeGreaterThanOrEqual(55);
+    expect(counts.keyWordTransformationCount).toBeGreaterThanOrEqual(65);
+
+    const seedItems = getBuiltInCuratedSentencesForCloudSeed();
+    expect(seedItems.length).toBe(counts.totalCount + counts.clozeCount);
+
+    for (const item of seedItems) {
+      expect(item.topic.length).toBeGreaterThanOrEqual(1);
+      expect(item.topic.length).toBeLessThanOrEqual(100);
+      expect(LEVELS).toContain(item.level);
+      expect(item.text.length).toBeGreaterThanOrEqual(5);
+      expect(item.text.length).toBeLessThanOrEqual(1000);
+      expect(item.correction.length).toBeGreaterThanOrEqual(1);
+      expect(item.correction.length).toBeLessThanOrEqual(1000);
+      expect(item.explanation.length).toBeGreaterThanOrEqual(5);
+      expect(item.explanation.length).toBeLessThanOrEqual(2500);
+    }
   });
 });
 

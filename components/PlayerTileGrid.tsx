@@ -1,6 +1,7 @@
 import React from 'react';
 import { Check, Clock, Snowflake, X } from 'lucide-react';
 import { Player } from '../types';
+import { PlayerAvatar } from './PlayerAvatar';
 
 // Compact projector view for single-screen play: one small tile per player.
 // Picks are never shown on a tile, so players can't copy each other from the board;
@@ -169,8 +170,8 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
               )}
               <span
                 className={`${
-                  projectorMode ? 'w-16 h-16 text-4xl border-[3px]' : 'w-14 h-14 text-3xl border-2'
-                } rounded-full grid place-items-center leading-none ${
+                  projectorMode ? 'w-16 h-16 border-[3px]' : 'w-14 h-14 border-2'
+                } rounded-full grid place-items-center leading-none p-0.5 ${
                   isFrozen
                     ? 'bg-cyan-500/30 border-cyan-200 shadow-[inset_0_0_14px_rgba(165,243,252,0.75)]'
                     : hasShield
@@ -179,7 +180,7 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
                 } select-none shrink-0 relative z-10`}
                 aria-hidden="true"
               >
-                {player.avatar}
+                <PlayerAvatar value={player.avatar} size="lg" className="w-full h-full" />
               </span>
 
               {/* Tactile corner status badge on avatar */}

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  AVATARS,
   HINT_COST,
   POWERUP_COST,
   POWER_UPS,
 } from '../constants';
+import { getRandomCharacterAvatar } from '../utils/characterAvatars';
+import { PlayerAvatar, CharacterPickerPanel } from './PlayerAvatar';
 import { Bet, Player, PowerUpKey, QuestionType, SoundEffect, WheelItem } from '../types';
 import {
   PlayerViewPayload,
@@ -61,7 +62,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 }) => {
   const [roomCodeInput, setRoomCodeInput] = useState(() => initialRoomCode.toUpperCase());
   const [playerNameInput, setPlayerNameInput] = useState('');
-  const [selectedAvatar, setSelectedAvatar] = useState(() => AVATARS[Math.floor(Math.random() * 28)]);
+  const [selectedAvatar, setSelectedAvatar] = useState(() => getRandomCharacterAvatar());
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinWaitingMessage, setJoinWaitingMessage] = useState<string | null>(null);
@@ -588,25 +589,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             className={`${fieldClass} h-14 mb-5 px-4 text-lg font-semibold`}
           />
 
-          <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Pick an avatar</span>
-          <div className="grid grid-cols-6 gap-2" role="group" aria-labelledby="gc-join-avatar">
-            {AVATARS.slice(0, 24).map((av, i) => (
-              <button
-                key={av}
-                type="button"
-                onClick={() => {
-                  playSound('click');
-                  setSelectedAvatar(av);
-                }}
-                aria-label={`Avatar ${i + 1}`}
-                aria-pressed={selectedAvatar === av}
-                className={`h-[50px] rounded-[14px] border-2 grid place-items-center text-[26px] leading-none cursor-pointer transition-colors ${
-                  selectedAvatar === av ? 'border-gc-gold bg-gc-gold/15' : 'border-transparent bg-gc-line/[0.07]'
-                }`}
-              >
-                {av}
-              </button>
-            ))}
+          <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Choose & customize your character</span>
+          <div role="group" aria-labelledby="gc-join-avatar">
+            <CharacterPickerPanel
+              value={selectedAvatar}
+              onChange={setSelectedAvatar}
+              playerName={playerNameInput || 'VIP Guest'}
+              playSound={playSound}
+              compact
+            />
           </div>
 
           <div className="mt-auto pt-6 space-y-2">
@@ -729,11 +720,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <button
             type="button"
             onClick={() => setShowAvatarPicker((v) => !v)}
-            className="w-10 h-10 rounded-full border-2 border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-[22px] shrink-0 cursor-pointer"
+            className="w-10 h-10 rounded-full border-2 border-gc-turn/70 p-0.5 bg-gc-line/[0.08] grid place-items-center shrink-0 cursor-pointer hover:scale-105 transition-transform"
             aria-label="Change your avatar"
             aria-expanded={showAvatarPicker}
           >
-            {view.me.avatar}
+            <PlayerAvatar value={view.me.avatar} size="md" className="w-full h-full" />
           </button>
           <div className="min-w-0">
             <div className="text-[15px] font-bold text-gc-ink truncate leading-tight">{view.me.name}</div>
@@ -769,35 +760,26 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {/* Avatar picker */}
       {showAvatarPicker && (
         <div className="w-full max-w-xl mx-auto px-4 pt-3 animate-gc-slide-up">
-          <div className="gc-surface rounded-gc-lg p-4">
-            <div className="flex items-center justify-between mb-2.5">
-              <span className="text-gc-small font-bold text-gc-ink">Pick a new avatar</span>
+          <div className="gc-surface rounded-gc-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-gc-small font-bold text-gc-ink">Customize your character</span>
               <button
                 type="button"
                 onClick={() => setShowAvatarPicker(false)}
-                className="h-8 px-3 rounded-full text-gc-small font-semibold text-gc-quiet bg-gc-line/[0.07] cursor-pointer"
+                className="h-8 px-3.5 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
               >
-                Close
+                Done
               </button>
             </div>
-            <div className="grid grid-cols-6 gap-2 max-h-44 overflow-y-auto">
-              {AVATARS.slice(0, 42).map((av, i) => (
-                <button
-                  key={av}
-                  type="button"
-                  aria-label={`Avatar ${i + 1}`}
-                  onClick={() => {
-                    sendIntent({ type: 'UPDATE_PROFILE', avatar: av });
-                    setShowAvatarPicker(false);
-                  }}
-                  className={`h-11 rounded-[12px] text-2xl grid place-items-center cursor-pointer ${
-                    view.me.avatar === av ? 'bg-gc-gold/15 ring-2 ring-inset ring-gc-gold' : 'bg-gc-line/[0.06]'
-                  }`}
-                >
-                  {av}
-                </button>
-              ))}
-            </div>
+            <CharacterPickerPanel
+              value={view.me.avatar}
+              onChange={(av) => {
+                sendIntent({ type: 'UPDATE_PROFILE', avatar: av });
+              }}
+              playerName={view.me.name}
+              playSound={playSound}
+              compact
+            />
           </div>
         </div>
       )}
@@ -809,8 +791,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
            ================================================================ */}
         {(view.step === 'PLAYER_SETUP' || view.step === 'SETTINGS') && (
           <div className="pt-8 pb-4 text-center animate-gc-slide-up">
-            <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-gc-turn/70 bg-gc-line/[0.08] grid place-items-center text-[52px] leading-none">
-              {view.me.avatar}
+            <div className="w-24 h-24 mx-auto rounded-full border-[3px] border-gc-turn/70 p-1 bg-gc-line/[0.08] grid place-items-center">
+              <PlayerAvatar value={view.me.avatar} size="2xl" className="w-full h-full" animated />
             </div>
             <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">You're in, {view.me.name}!</h1>
             <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">
@@ -823,11 +805,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 {view.peers.map((p) => (
                   <span
                     key={p.id}
-                    className={`h-9 px-3 rounded-full text-gc-small font-semibold inline-flex items-center gap-1.5 ${
+                    className={`h-9 pl-1.5 pr-3 rounded-full text-gc-small font-semibold inline-flex items-center gap-1.5 ${
                       p.id === view.me.id ? 'bg-gc-gold/15 text-gc-ink ring-1 ring-inset ring-gc-gold/50' : 'bg-gc-line/[0.07] text-gc-ink'
                     }`}
                   >
-                    <span aria-hidden="true">{p.avatar}</span>
+                    <PlayerAvatar value={p.avatar} size="xs" />
                     <span>{p.name}</span>
                   </span>
                 ))}
@@ -995,7 +977,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {view.peekabooSpyFeed.map((spy) => (
                       <div key={spy.targetId} className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gc-line/[0.1]">
                         <div className="flex items-center gap-1.5 font-semibold">
-                          <span aria-hidden="true">{spy.targetAvatar}</span>
+                          <PlayerAvatar value={spy.targetAvatar} size="xs" />
                           <span>{spy.targetName}</span>
                           <span className="text-gc-cap text-gc-quiet">{spy.lockedIn ? 'Locked in' : 'Deciding'}</span>
                         </div>
@@ -1610,7 +1592,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       <li key={p.id} className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold' : 'font-semibold'}`}>
                         <span className="flex items-center gap-2.5 min-w-0">
                           <span className="w-6 text-gc-cap text-gc-quiet tabular-nums">{idx + 1}</span>
-                          <span className="text-xl" aria-hidden="true">{p.avatar}</span>
+                          <PlayerAvatar value={p.avatar} size="xs" />
                           <span className="truncate">{p.name}{p.id === view.me.id ? ' (you)' : ''}</span>
                         </span>
                         <span className="tabular-nums text-gc-money">{money(p.money)}</span>
@@ -1704,8 +1686,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               {view.winner ? (
                 <div className="gc-surface rounded-[20px] p-6 text-center space-y-3">
                   <div className="text-4xl" aria-hidden="true">👑</div>
-                  <div className="w-20 h-20 mx-auto rounded-full border-[3px] border-gc-gold bg-gc-line/[0.08] grid place-items-center text-5xl leading-none">
-                    {view.winner.avatar}
+                  <div className="w-20 h-20 mx-auto rounded-full border-[3px] border-gc-gold p-1 bg-gc-line/[0.08] grid place-items-center">
+                    <PlayerAvatar value={view.winner.avatar} size="xl" className="w-full h-full" animated />
                   </div>
                   <div>
                     <div className="text-gc-small font-bold text-gc-money">{isMeChampion ? 'You won the game!' : 'The winner'}</div>
@@ -1770,7 +1752,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         <span className="w-6 text-center text-gc-cap tabular-nums">
                           {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                         </span>
-                        <span className="text-xl" aria-hidden="true">{p.avatar}</span>
+                        <PlayerAvatar value={p.avatar} size="xs" />
                         <span className="truncate">{p.name}{p.id === view.me.id ? ' (you)' : ''}</span>
                       </span>
                       <span className="tabular-nums text-gc-money">{money(p.money)}</span>
@@ -1835,7 +1817,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
-                      <span className="text-2xl" aria-hidden="true">{t.avatar}</span>
+                      <PlayerAvatar value={t.avatar} size="sm" />
                       <span className="text-left">
                         <span className="block text-gc-body font-bold text-gc-ink">{t.name}</span>
                         {blocked && <span className="block text-gc-cap font-semibold text-gc-quiet">🛡️ Protected this hand</span>}

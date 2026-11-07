@@ -3,6 +3,8 @@ import { RoundHistoryRecord, SoundEffect, Player, Settings, GameMode } from '../
 import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Printer } from 'lucide-react';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { getAlternativeAcceptedAnswers } from '../utils/roundSettlement';
+import { PlayerAvatar } from './PlayerAvatar';
+import { getAvatarPlainText } from '../utils/characterAvatars';
 
 interface GrammarReportCardProps {
   history: RoundHistoryRecord[];
@@ -196,7 +198,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     report += `Total Rounds: ${stats.totalRounds}\n`;
     report += `Class Accuracy: ${stats.accuracyPct}% (${stats.correctVotes}/${stats.totalVotes} correct votes)\n`;
     if (stats.topGrammarian) {
-      report += `MVP Grammarian: ${stats.topGrammarian.avatar} ${stats.topGrammarian.name} (${stats.topGrammarian.accuracy}% accuracy)\n`;
+      report += `MVP Grammarian: ${getAvatarPlainText(stats.topGrammarian.avatar)} ${stats.topGrammarian.name} (${stats.topGrammarian.accuracy}% accuracy)\n`;
     }
     report += `\n-----------------------------------------\n`;
     report += `ROUND-BY-ROUND GRAMMAR BREAKDOWN\n`;
@@ -439,8 +441,8 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             <div className={label}>Best player</div>
             {stats.topGrammarian ? (
               <>
-                <div className="text-gc-lead font-bold text-gc-ink truncate flex items-center gap-1.5 min-h-[40px]">
-                  <span aria-hidden="true">{stats.topGrammarian.avatar}</span>
+                <div className="text-gc-lead font-bold text-gc-ink truncate flex items-center gap-2 min-h-[40px]">
+                  <PlayerAvatar value={stats.topGrammarian.avatar} size="sm" />
                   <span className="truncate">{stats.topGrammarian.name}</span>
                 </div>
                 <div className="text-gc-cap text-gc-quiet tabular-nums">{stats.topGrammarian.accuracy}% of bets right</div>
@@ -612,7 +614,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                             <div key={pidx} className="p-3 rounded-gc-sm border border-gc-line/[0.12] bg-gc-card/50 text-gc-small">
                               <div className="flex items-center justify-between gap-2 mb-1">
                                 <span className="flex items-center gap-1.5 truncate font-bold text-gc-ink">
-                                  <span aria-hidden="true">{pr.playerAvatar}</span>
+                                  <PlayerAvatar value={pr.playerAvatar} size="xs" />
                                   <span className="truncate">{pr.playerName}</span>
                                 </span>
                                 <span className="flex items-center gap-1 shrink-0">

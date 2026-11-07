@@ -1,4 +1,22 @@
 import { GeneratedSentence, CEFRLevel, Settings, QuestionType, GrammarTopic } from '../types';
+import {
+  EXPANDED_SENTENCE_BANK,
+  EXPANDED_CLOZE_BANK,
+  EXPANDED_WORD_FORMATION_BANK,
+  EXPANDED_KEY_WORD_TRANSFORMATION_BANK,
+} from './expandedCuratedBank';
+import {
+  EXPANDED_SENTENCE_BANK_PART2,
+  EXPANDED_CLOZE_BANK_PART2,
+  EXPANDED_WORD_FORMATION_BANK_PART2,
+  EXPANDED_KEY_WORD_TRANSFORMATION_BANK_PART2,
+} from './expandedCuratedBankPart2';
+import {
+  EXPANDED_SENTENCE_BANK_PART3,
+  EXPANDED_CLOZE_BANK_PART3,
+  EXPANDED_WORD_FORMATION_BANK_PART3,
+  EXPANDED_KEY_WORD_TRANSFORMATION_BANK_PART3,
+} from './expandedCuratedBankPart3';
 
 interface CuratedEntry extends GeneratedSentence {
   topic: string;
@@ -573,7 +591,10 @@ export const CURATED_SENTENCE_BANK: CuratedEntry[] = [
     grammarPhrase: 'inflicted havoc on currency markets',
     errorPhrase: 'inflicted havoc',
     mistakeType: 'high-register verb + noun collocation'
-  }
+  },
+  ...EXPANDED_SENTENCE_BANK,
+  ...EXPANDED_SENTENCE_BANK_PART2,
+  ...EXPANDED_SENTENCE_BANK_PART3,
 ];
 
 interface CuratedClozeEntry {
@@ -863,7 +884,10 @@ export const CURATED_CLOZE_BANK: CuratedClozeEntry[] = [
     correctAnswer: 'played',
     acceptedAnswers: ['played', 'wrought', 'wreaked'],
     options: ['played', 'made', 'took', 'gave']
-  }
+  },
+  ...EXPANDED_CLOZE_BANK,
+  ...EXPANDED_CLOZE_BANK_PART2,
+  ...EXPANDED_CLOZE_BANK_PART3,
 ];
 
 function shuffleArray<T>(arr: T[]): T[] {
@@ -1122,6 +1146,9 @@ export const CURATED_WORD_FORMATION_BANK: CuratedWordFormationEntry[] = [
     correctAnswer: 'unprecedented',
     acceptedAnswers: ['unprecedented'],
   },
+  ...EXPANDED_WORD_FORMATION_BANK,
+  ...EXPANDED_WORD_FORMATION_BANK_PART2,
+  ...EXPANDED_WORD_FORMATION_BANK_PART3,
 ];
 
 interface CuratedKeyWordTransformationEntry {
@@ -1693,7 +1720,116 @@ export const CURATED_KEY_WORD_TRANSFORMATION_BANK: CuratedKeyWordTransformationE
     mark1Parts: ['her dialogue'],
     mark2Parts: ['being rewritten'],
   },
+  ...EXPANDED_KEY_WORD_TRANSFORMATION_BANK,
+  ...EXPANDED_KEY_WORD_TRANSFORMATION_BANK_PART2,
+  ...EXPANDED_KEY_WORD_TRANSFORMATION_BANK_PART3,
 ];
+
+export interface BuiltInSeedItem {
+  topic: string;
+  level: CEFRLevel;
+  questionType: QuestionType;
+  text: string;
+  isCorrect: boolean;
+  correction: string;
+  explanation: string;
+  grammarPhrase: string;
+  errorPhrase?: string;
+  mistakeType?: string;
+  correctAnswer?: string;
+  baseWord?: string;
+  leadInSentence?: string;
+  mark1Parts?: string[];
+  mark2Parts?: string[];
+  acceptedAnswers?: string[];
+  options?: string[];
+  subtype?: string;
+}
+
+export function getBuiltInCuratedSentencesForCloudSeed(): BuiltInSeedItem[] {
+  const items: BuiltInSeedItem[] = [];
+
+  for (const b of CURATED_SENTENCE_BANK) {
+    items.push({
+      topic: b.topic,
+      level: b.level,
+      questionType: 'binary',
+      text: b.text,
+      isCorrect: Boolean(b.isCorrect),
+      correction: b.correction,
+      explanation: b.explanation,
+      grammarPhrase: b.grammarPhrase || '',
+      errorPhrase: b.errorPhrase || '',
+      mistakeType: b.mistakeType || '',
+      subtype: b.subtype,
+    });
+  }
+
+  for (const c of CURATED_CLOZE_BANK) {
+    items.push({
+      topic: c.topic,
+      level: c.level,
+      questionType: 'multipleChoice',
+      text: c.text,
+      isCorrect: true,
+      correction: c.correction,
+      explanation: c.explanation,
+      grammarPhrase: c.grammarPhrase || '',
+      correctAnswer: c.correctAnswer,
+      acceptedAnswers: c.acceptedAnswers,
+      options: [...c.options],
+    });
+    items.push({
+      topic: c.topic,
+      level: c.level,
+      questionType: 'openCloze',
+      text: c.text,
+      isCorrect: true,
+      correction: c.correction,
+      explanation: c.explanation,
+      grammarPhrase: c.grammarPhrase || '',
+      correctAnswer: c.correctAnswer,
+      acceptedAnswers: c.acceptedAnswers,
+    });
+  }
+
+  for (const wf of CURATED_WORD_FORMATION_BANK) {
+    items.push({
+      topic: String(wf.topic),
+      level: wf.level,
+      questionType: 'wordFormation',
+      text: wf.text,
+      isCorrect: true,
+      correction: wf.correction,
+      explanation: wf.explanation,
+      grammarPhrase: wf.grammarPhrase || '',
+      baseWord: wf.baseWord,
+      correctAnswer: wf.correctAnswer,
+      acceptedAnswers: wf.acceptedAnswers,
+    });
+  }
+
+  for (const kwt of CURATED_KEY_WORD_TRANSFORMATION_BANK) {
+    items.push({
+      topic: kwt.topic,
+      level: kwt.level,
+      questionType: 'keyWordTransformation',
+      text: kwt.text,
+      isCorrect: true,
+      correction: kwt.correction,
+      explanation: kwt.explanation,
+      grammarPhrase: kwt.grammarPhrase || '',
+      leadInSentence: kwt.leadInSentence,
+      baseWord: kwt.baseWord,
+      correctAnswer: kwt.correctAnswer,
+      acceptedAnswers: kwt.acceptedAnswers,
+      mark1Parts: kwt.mark1Parts,
+      mark2Parts: kwt.mark2Parts,
+    });
+  }
+
+  return items;
+}
 
 export function getStaticBankCounts(): {
   binaryCount: number;

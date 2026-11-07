@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { Player, SoundEffect } from '../types';
 import { MultiplayerSeat } from '../utils/multiplayerProtocol';
 import ActionButton from './ActionButton';
+import { PlayerAvatar } from './PlayerAvatar';
 import { Check, Copy, Lock, LockOpen, X } from 'lucide-react';
 
 interface MultiplayerLobbyModalProps {
@@ -322,7 +323,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                         className="rounded-gc p-2.5 pl-3 flex items-center justify-between gap-2 bg-gc-line/[0.05] border border-gc-line/[0.12]"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-[24px] leading-none shrink-0" aria-hidden="true">{p.avatar}</span>
+                          <PlayerAvatar value={p.avatar} size="sm" />
                           <div className="min-w-0">
                             <div className="text-gc-small font-bold text-gc-ink truncate">{p.name}</div>
                             <div className="text-gc-cap text-gc-quiet flex items-center gap-1.5 tabular-nums">
