@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion } from 'motion/react';
+import {
+  AlertTriangle,
+  Check,
+  Cloud,
+  Lock,
+  RefreshCw,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   CEFRLevel,
   GameMode,
   Player,
-  QuestionType,
   RoundHistoryRecord,
   Settings,
   SoundEffect,
@@ -72,7 +81,6 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   roundHistory,
   winner,
   activeRosterId,
-  activeRosterName,
   onLoadRoster,
   onActiveRosterUpdated,
   onLoadFullGameState,
@@ -188,7 +196,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
       setNewRosterNotes('');
       setNotice({
         type: 'success',
-        text: `Saved roster "${saved.name}" (${saved.playerCount} students) to Firebase Cloud!`,
+        text: `Saved roster "${saved.name}" (${saved.playerCount} students) to Cloud!`,
       });
     } else {
       playSound('error');
@@ -318,40 +326,69 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
 
   const activeRosterObj = rosters.find((r) => r.id === activeRosterId) || null;
 
+  const cardCls = 'p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]';
+  const inputCls =
+    'w-full h-11 px-3 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-body text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30';
+
+  const tabs: { id: CloudManagerTab; label: string; icon: string; count: number }[] = [
+    { id: 'rosters', label: 'Class rosters', icon: '👥', count: rosters.length },
+    { id: 'reports', label: 'Session reports & saves', icon: '📜', count: reports.length },
+    { id: 'sentences', label: 'Sentence bank', icon: '🧠', count: sentences.length },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-md animate-fade-in">
-      <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl glass-panel border-2 border-[#d4af37] shadow-[0_25px_70px_rgba(0,0,0,0.85)] overflow-hidden text-left">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/60 dark:bg-black/75 backdrop-blur-sm flex justify-center items-center z-50 p-3 sm:p-4"
+      onClick={() => {
+        playSound('click');
+        onClose();
+      }}
+    >
+      <motion.div
+        initial={{ scale: 0.96, opacity: 0, y: 12 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.96, opacity: 0, y: 12 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Cloud saves and rosters"
+        className="gc-panel rounded-gc-lg w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden text-left"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Modal Header */}
-        <div className="px-5 py-4 bg-gradient-to-r from-amber-100/90 via-amber-50/90 to-amber-100/90 dark:from-[#04180e] dark:via-[#082a18] dark:to-[#04180e] border-b border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-[#d4af37]/20 border border-[#d4af37]/60 flex items-center justify-center text-xl shadow-inner">
-              ☁️
+        <div className="px-5 sm:px-6 pt-5 pb-4 border-b border-gc-line/[0.12] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="w-10 h-10 shrink-0 rounded-gc-sm bg-gc-gold/15 border border-gc-gold/40 text-gc-gold grid place-items-center">
+              <Cloud className="w-5 h-5" aria-hidden="true" />
             </span>
-            <div>
-              <h2 className="text-lg sm:text-xl font-sans font-extrabold uppercase tracking-widest text-slate-900 dark:text-[#fef08a]">
-                Salon Privé Cloud Vault
-              </h2>
-              <p className="text-xs text-slate-600 dark:text-amber-200/70">
-                Classroom Rosters &middot; Session Reports &amp; Cloud Saves &middot; Auto-Growing AI Sentence Bank
+            <div className="min-w-0">
+              <p className="text-gc-cap font-semibold text-gc-quiet">
+                Class rosters &middot; Session reports &amp; saves &middot; Auto-growing AI sentence bank
               </p>
+              <h2 className="font-logo text-gc-title font-bold text-gc-ink truncate">
+                Cloud saves &amp; rosters
+              </h2>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             {isTeacherSignedIn && (
-            <button
-              type="button"
-              onClick={() => {
-                playSound('click');
-                void refreshAllCloudData();
-              }}
-              disabled={isLoading}
-              className="px-3 py-1.5 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-xs font-sans font-bold uppercase tracking-wider text-amber-900 dark:text-[#fef08a] cursor-pointer transition-all flex items-center gap-1.5"
-              title="Refresh Cloud Data from Firestore"
-            >
-              <span className={isLoading ? 'animate-spin inline-block' : ''}>🔄</span>
-              <span>{isLoading ? 'Syncing...' : 'Sync'}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playSound('click');
+                  void refreshAllCloudData();
+                }}
+                disabled={isLoading}
+                className="h-10 px-3.5 rounded-full bg-gc-line/[0.06] hover:bg-gc-line/[0.12] border border-gc-line/[0.14] text-gc-small font-bold text-gc-ink inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                title="Refresh Cloud data from Firestore"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
+                <span>{isLoading ? 'Syncing…' : 'Sync'}</span>
+              </button>
             )}
             <button
               type="button"
@@ -359,785 +396,782 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                 playSound('click');
                 onClose();
               }}
-              className="w-9 h-9 rounded-full felt-well border border-[#d4af37]/50 hover:border-rose-400 text-slate-700 dark:text-amber-100 flex items-center justify-center text-lg font-bold cursor-pointer"
-              title="Close Cloud Vault"
+              aria-label="Close"
+              className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] hover:bg-gc-line/[0.12] text-gc-quiet hover:text-gc-ink grid place-items-center transition-colors cursor-pointer"
             >
-              &times;
+              <X className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         </div>
 
         {!isTeacherSignedIn ? (
-          <div className="p-5 sm:p-8 overflow-y-auto flex-1 modal-content-scroll">
-            <div className="max-w-xl mx-auto text-center space-y-4">
-              <div className="text-4xl select-none" aria-hidden="true">🔐</div>
-              <h3 className="text-lg font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
-                Teacher sign-in required
-              </h3>
-              <p className="text-sm leading-relaxed text-slate-700 dark:text-amber-100">
-                Class rosters and session reports contain your students' names, so they open only for the
-                teacher's Google account ({VERIFIED_TEACHER_EMAIL}). The Teacher PIN still unlocks Live AI and
-                room hosting, but not the Cloud Vault.
-              </p>
+          <div className="p-6 sm:p-8 overflow-y-auto flex-1 modal-content-scroll text-gc-ink">
+            <div className="max-w-lg mx-auto space-y-4">
+              <div className={`${cardCls} flex items-start gap-3.5`}>
+                <span className="w-10 h-10 shrink-0 rounded-gc-sm bg-gc-gold/15 border border-gc-gold/40 text-gc-gold grid place-items-center mt-0.5">
+                  <Lock className="w-5 h-5" aria-hidden="true" />
+                </span>
+                <div className="space-y-1 min-w-0">
+                  <h3 className="text-gc-body font-bold text-gc-ink">
+                    Teacher sign-in required
+                  </h3>
+                  <p className="text-gc-small text-gc-quiet leading-relaxed">
+                    Class rosters and session reports contain your students&apos; names and scores, so they open only for the teacher&apos;s Google account (<strong>{VERIFIED_TEACHER_EMAIL}</strong>).
+                  </p>
+                </div>
+              </div>
+
               {notice && (
                 <div
-                  className={`p-3 rounded-xl border text-xs sm:text-sm font-semibold text-left ${
+                  role="status"
+                  className={`p-3.5 rounded-gc border text-gc-small font-semibold flex items-start gap-2.5 ${
                     notice.type === 'success'
-                      ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-900 dark:text-emerald-200'
-                      : 'bg-rose-500/15 border-rose-400/50 text-rose-900 dark:text-rose-200'
+                      ? 'bg-gc-win/10 border-gc-win/30 text-gc-win'
+                      : 'bg-gc-loss/10 border-gc-loss/30 text-gc-loss'
                   }`}
                 >
-                  {notice.type === 'success' ? '✓ ' : '⚠️ '}
-                  {notice.text}
+                  {notice.type === 'success' ? (
+                    <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                  )}
+                  <span>{notice.text}</span>
                 </div>
               )}
+
               {isDesktopApp ? (
-                <p className="text-sm leading-relaxed p-3 rounded-xl felt-well border border-[#d4af37]/40 text-slate-800 dark:text-amber-100">
-                  Google sign-in doesn't work inside the desktop app. Open the web version of Grammar Casino in your
-                  browser to use the Cloud Vault.
-                </p>
+                <div className={`${cardCls} text-gc-small text-gc-quiet leading-relaxed`}>
+                  Google sign-in doesn&apos;t open inside the desktop app. Open the web version of Grammar Casino in your browser to manage Cloud rosters and reports.
+                </div>
               ) : (
-                <>
-                  {teacherEmail && (
-                    <p className="text-xs text-slate-600 dark:text-amber-200">
-                      This device is signed in as <strong>{teacherEmail}</strong>. Choose the teacher account instead.
+                <div className={`${cardCls} flex flex-wrap items-center justify-between gap-3`}>
+                  <div className="min-w-0">
+                    <p className="text-gc-body font-bold text-gc-ink">Sign in with Google</p>
+                    <p className="text-gc-small text-gc-quiet">
+                      {teacherEmail
+                        ? `Currently signed in as ${teacherEmail}. Switch to ${VERIFIED_TEACHER_EMAIL}.`
+                        : `Sign in with ${VERIFIED_TEACHER_EMAIL} to open your rosters and saved sessions.`}
                     </p>
-                  )}
+                  </div>
                   <ActionButton
                     type="button"
                     onClick={handleCloudSignIn}
                     playSound={playSound}
-                    variant="gold"
+                    variant="primary"
                     disabled={isSigningIn}
-                    className="py-2.5 px-6 text-sm"
+                    className="h-11 px-5 text-gc-small font-bold"
                   >
-                    {isSigningIn ? 'Signing in...' : teacherEmail ? '🔐 Switch Google account' : '🔐 Sign in with Google'}
+                    {isSigningIn
+                      ? 'Signing in…'
+                      : teacherEmail
+                        ? 'Switch Google account'
+                        : 'Sign in with Google'}
                   </ActionButton>
-                </>
+                </div>
               )}
             </div>
           </div>
         ) : (
-        <>
-        {/* Navigation Tabs */}
-        <div className="px-5 pt-3 bg-amber-50/60 dark:bg-[#03130b] border-b border-[#d4af37]/30 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveTab('rosters');
-              setViewingReport(null);
-            }}
-            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'rosters'
-                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
-                : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
-            }`}
-          >
-            <span>👥</span>
-            <span>Class Rosters ({rosters.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveTab('reports');
-              setViewingReport(null);
-            }}
-            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'reports'
-                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
-                : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
-            }`}
-          >
-            <span>📜</span>
-            <span>Session Reports &amp; Saves ({reports.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              playSound('click');
-              setActiveTab('sentences');
-              setViewingReport(null);
-            }}
-            className={`px-4 py-2.5 rounded-t-xl font-sans text-xs sm:text-sm font-extrabold uppercase tracking-wider border-t border-x transition-all cursor-pointer flex items-center gap-2 ${
-              activeTab === 'sentences'
-                ? 'bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] border-[#fef9c3] shadow'
-                : 'felt-well border-[#d4af37]/30 text-slate-700 dark:text-amber-100/80 hover:text-amber-900 dark:hover:text-[#fef08a]'
-            }`}
-          >
-            <span>🧠</span>
-            <span>Cloud Sentence Bank ({sentences.length})</span>
-          </button>
-        </div>
-
-        {/* Body Content */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-5 modal-content-scroll">
-          {notice && (
-            <div
-              className={`p-3.5 rounded-xl border text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 ${
-                notice.type === 'success'
-                  ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-900 dark:text-emerald-200'
-                  : 'bg-rose-500/15 border-rose-400/50 text-rose-900 dark:text-rose-200'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span>{notice.type === 'success' ? '✓' : '⚠️'}</span>
-                <span>{notice.text}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setNotice(null)}
-                className="text-xs opacity-75 hover:opacity-100 cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-          )}
-
-          {/* TAB 1: CLASSROOM ROSTERS */}
-          {activeTab === 'rosters' && (
-            <div className="space-y-6">
-              {/* Quick Sync Active Roster Banner */}
-              {activeRosterObj && players.length > 0 && (
-                <div className="p-4 rounded-xl bg-emerald-500/15 border-2 border-emerald-400/50 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] font-sans tabular-nums uppercase tracking-widest text-emerald-800 dark:text-emerald-300 font-bold">
-                      Active Classroom Roster Loaded
-                    </div>
-                    <div className="text-base font-sans font-extrabold text-slate-900 dark:text-amber-50">
-                      {activeRosterObj.name} ({players.length} Students Seated)
-                    </div>
-                  </div>
-                  <ActionButton
-                    onClick={() => handleUpdateExistingRoster(activeRosterObj)}
-                    playSound={playSound}
-                    variant="gold"
-                    disabled={isSavingRoster}
-                    className="py-2.5 px-5 text-xs"
-                  >
-                    {isSavingRoster ? 'Syncing...' : '🔄 Sync Current Bankrolls to Roster'}
-                  </ActionButton>
-                </div>
-              )}
-
-              {/* Save Current Table as New Roster */}
-              <div className="p-4 sm:p-5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
-                      💾 Save Seated Table as Cloud Roster
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-amber-200/70">
-                      Save your current {players.length} seated student{players.length === 1 ? '' : 's'} (names, avatars, and current bankrolls) for future classes.
-                    </p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-[#d4af37]/40 font-sans tabular-nums text-xs font-bold text-amber-900 dark:text-[#fef08a]">
-                    {players.length} Seated
-                  </span>
-                </div>
-
-                {players.length === 0 ? (
-                  <div className="text-xs italic text-slate-500 dark:text-amber-200/60 py-1">
-                    Add students to the table first (or have them join via QR code) to save them as a reusable class roster.
-                  </div>
-                ) : (
-                  <form onSubmit={handleCreateNewRoster} className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-1">
-                    <input
-                      type="text"
-                      value={newRosterName}
-                      onChange={(e) => setNewRosterName(e.target.value)}
-                      placeholder="Class Name (e.g. Period 2 — B2 Upper Intermediate)"
-                      maxLength={80}
-                      className="sm:col-span-5 px-3.5 py-2.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-[#fef08a]"
-                    />
-                    <input
-                      type="text"
-                      value={newRosterNotes}
-                      onChange={(e) => setNewRosterNotes(e.target.value)}
-                      placeholder="Optional notes (e.g. Mon/Wed League)"
-                      maxLength={120}
-                      className="sm:col-span-4 px-3.5 py-2.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-[#fef08a]"
-                    />
-                    <div className="sm:col-span-3 flex">
-                      <ActionButton
-                        type="submit"
-                        playSound={playSound}
-                        variant="gold"
-                        disabled={!newRosterName.trim() || isSavingRoster}
-                        className="w-full py-2.5 px-4 text-xs"
-                      >
-                        {isSavingRoster ? 'Saving...' : '+ Save New Roster'}
-                      </ActionButton>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-              {/* Resume Mode Option Toggle */}
-              <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                <div className="text-xs font-sans font-extrabold uppercase tracking-wider text-amber-900 dark:text-[#fef08a]">
-                  Saved Classroom Rosters ({rosters.length})
-                </div>
-                <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-amber-100 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={bailoutZeroOnResume}
-                    onChange={(e) => setBailoutZeroOnResume(e.target.checked)}
-                    className="rounded border-[#d4af37] accent-amber-500 w-4 h-4 cursor-pointer"
-                  />
-                  <span>When resuming saved bankrolls, bail out $0 students to $150</span>
-                </label>
-              </div>
-
-              {/* Rosters List */}
-              {rosters.length === 0 ? (
-                <div className="p-8 rounded-2xl felt-well text-center space-y-2">
-                  <div className="text-3xl opacity-60">👥</div>
-                  <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
-                    No Cloud Rosters Saved Yet
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-amber-200/60 max-w-md mx-auto">
-                    Seat your students at the table and save them above to load your class in one click on any device.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {rosters.map((roster) => {
-                    const isActive = roster.id === activeRosterId;
-                    return (
-                      <div
-                        key={roster.id}
-                        className={`p-4 rounded-2xl felt-well border transition-all space-y-3 ${
-                          isActive
-                            ? 'border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
-                            : 'border-[#d4af37]/35 hover:border-[#d4af37]/70'
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-sans font-extrabold text-base text-slate-900 dark:text-amber-50 uppercase tracking-wide">
-                                {roster.name}
-                              </h4>
-                              {isActive && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50">
-                                  ACTIVE TABLE ROSTER
-                                </span>
-                              )}
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/15 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
-                                {roster.playerCount} Students
-                              </span>
-                            </div>
-                            {roster.notes && (
-                              <p className="text-xs text-slate-600 dark:text-amber-200/75 mt-0.5">{roster.notes}</p>
-                            )}
-                            <div className="text-[10px] font-sans tabular-nums text-slate-500 dark:text-amber-200/50 mt-1">
-                              Updated {new Date(roster.updatedAt).toLocaleString()} &middot; Default Fresh Stack: $
-                              {roster.startingCash.toLocaleString()}
-                            </div>
-                          </div>
-
-                          {/* Roster Action Buttons: Fresh Start vs Saved Bankrolls */}
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playSound('startGame');
-                                onLoadRoster(roster, 'fresh', bailoutZeroOnResume);
-                                onClose();
-                              }}
-                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
-                              title={`Load ${roster.name} with everyone reset to $${startingCash.toLocaleString()}`}
-                            >
-                              <span>🌱</span>
-                              <span>Fresh Start (${startingCash})</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playSound('startGame');
-                                onLoadRoster(roster, 'saved', bailoutZeroOnResume);
-                                onClose();
-                              }}
-                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
-                              title="Load students with their exact saved bankrolls and win streaks from their last session"
-                            >
-                              <span>🏆</span>
-                              <span>Resume Saved Bankrolls</span>
-                            </button>
-
-                            {players.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateExistingRoster(roster)}
-                                disabled={isSavingRoster}
-                                className="px-2.5 py-2 rounded-xl felt-well border border-[#d4af37]/50 hover:border-[#d4af37] text-amber-900 dark:text-[#fef08a] font-sans font-bold uppercase tracking-wider text-[11px] cursor-pointer transition-all"
-                                title="Overwrite this roster with the current table's players and bankrolls"
-                              >
-                                💾 Update
-                              </button>
-                            )}
-
-                            {confirmDeleteRosterId === roster.id ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteRoster(roster.id)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold cursor-pointer"
-                                >
-                                  Confirm
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteRosterId(null)}
-                                  className="px-2 py-1.5 rounded-lg felt-well text-[11px] cursor-pointer"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteRosterId(roster.id)}
-                                className="w-8 h-8 rounded-xl border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center text-xs cursor-pointer"
-                                title="Delete Roster"
-                              >
-                                🗑️
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Student Bankrolls Preview Pills */}
-                        <div className="flex flex-wrap gap-1.5 pt-1 border-t border-[#d4af37]/15">
-                          {roster.players.map((p, i) => (
-                            <span
-                              key={`${p.id}_${i}`}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/75 dark:bg-black/40 border border-[#d4af37]/30 text-xs"
-                            >
-                              <span>{p.avatar}</span>
-                              <span className="font-sans font-bold text-slate-800 dark:text-amber-50">{p.name}</span>
-                              <span className="font-sans tabular-nums font-bold text-emerald-700 dark:text-emerald-400">
-                                ${p.money.toLocaleString()}
-                              </span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: SESSION REPORTS & CLOUD SAVES */}
-          {activeTab === 'reports' && (
-            <div className="space-y-5">
-              {viewingReport ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#d4af37]/30">
-                    <div>
-                      <div className="text-[10px] font-sans tabular-nums uppercase tracking-widest text-amber-800 dark:text-[#d4af37]">
-                        Archived Session Report Card &middot; {new Date(viewingReport.createdAt).toLocaleString()}
-                      </div>
-                      <h3 className="text-lg font-sans font-extrabold text-slate-900 dark:text-amber-50">
-                        {viewingReport.title}
-                      </h3>
-                    </div>
-                    <ActionButton
-                      onClick={() => setViewingReport(null)}
-                      playSound={playSound}
-                      variant="outline-gold"
-                      className="py-2 px-4 text-xs"
+          <>
+            {/* Navigation Tabs */}
+            <div className="px-4 sm:px-6 pt-3 pb-3 border-b border-gc-line/[0.12]">
+              <div className="flex gap-1.5 overflow-x-auto" role="tablist" aria-label="Cloud sections">
+                {tabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => {
+                        playSound('click');
+                        setActiveTab(tab.id);
+                        setViewingReport(null);
+                      }}
+                      className={`shrink-0 h-10 px-3.5 rounded-full border text-gc-small font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
+                        isActive
+                          ? 'bg-gc-gold/15 border-gc-gold text-gc-ink'
+                          : 'border-transparent text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.06]'
+                      }`}
                     >
-                      &larr; Back to All Sessions
-                    </ActionButton>
-                  </div>
+                      <span aria-hidden="true">{tab.icon}</span>
+                      <span className="whitespace-nowrap">{tab.label}</span>
+                      <span className="px-1.5 py-0.5 rounded-full bg-gc-line/[0.08] text-gc-cap tabular-nums">
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                  <GrammarReportCard
-                    history={viewingReport.roundHistory}
-                    players={viewingReport.players.map((p) => ({
-                      id: p.id,
-                      name: p.name,
-                      avatar: p.avatar,
-                      money: p.money,
-                      winStreak: p.winStreak,
-                      history: [],
-                      effects: [],
-                    }))}
-                    winner={
-                      viewingReport.winnerName
-                        ? {
-                            id: 1,
-                            name: viewingReport.winnerName,
-                            avatar: viewingReport.winnerAvatar,
-                            money: viewingReport.winnerMoney,
-                            winStreak: 0,
-                            history: [],
-                            effects: [],
-                          }
-                        : null
-                    }
-                    playSound={playSound}
-                    onRestartGame={() => setViewingReport(null)}
-                    settings={{
-                      topic: viewingReport.topic,
-                      level: (viewingReport.level as CEFRLevel) || 'B1',
-                      theme: viewingReport.theme,
-                    }}
-                    gameMode={(viewingReport.gameMode as GameMode) || 'rounds'}
-                    totalRounds={viewingReport.roundsPlayed}
-                    targetAmount={targetAmount}
-                  />
+            {/* Body Content */}
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-5 text-gc-ink modal-content-scroll">
+              {notice && (
+                <div
+                  role="status"
+                  className={`p-3.5 rounded-gc border text-gc-small font-semibold flex items-center justify-between gap-3 ${
+                    notice.type === 'success'
+                      ? 'bg-gc-win/10 border-gc-win/30 text-gc-win'
+                      : 'bg-gc-loss/10 border-gc-loss/30 text-gc-loss'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {notice.type === 'success' ? (
+                      <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    )}
+                    <span>{notice.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotice(null)}
+                    aria-label="Dismiss notice"
+                    className="text-gc-small opacity-75 hover:opacity-100 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                  </button>
                 </div>
-              ) : (
-                <>
-                  {/* Save Current Session to Cloud */}
-                  <div className="p-4 sm:p-5 rounded-xl felt-well border border-[#d4af37]/40 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+              )}
+
+              {/* TAB 1: CLASSROOM ROSTERS */}
+              {activeTab === 'rosters' && (
+                <div className="space-y-5">
+                  {activeRosterObj && players.length > 0 && (
+                    <div className="p-4 rounded-gc bg-gc-win/10 border border-gc-win/30 flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
-                          ☁️ Save Current Session Report &amp; Table State
-                        </h3>
-                        <p className="text-xs text-slate-600 dark:text-amber-200/70">
-                          Archives the Grammar Report Card ({roundHistory.length} hand{roundHistory.length === 1 ? '' : 's'} played) and full resumable table state to Firestore.
+                        <p className="text-gc-cap font-bold text-gc-win">Active classroom roster loaded</p>
+                        <p className="text-gc-body font-bold text-gc-ink">
+                          {activeRosterObj.name} ({players.length} students seated)
                         </p>
                       </div>
+                      <ActionButton
+                        onClick={() => handleUpdateExistingRoster(activeRosterObj)}
+                        playSound={playSound}
+                        variant="primary"
+                        disabled={isSavingRoster}
+                        className="h-10 px-4 text-gc-small"
+                      >
+                        {isSavingRoster ? 'Syncing…' : 'Sync current bankrolls'}
+                      </ActionButton>
+                    </div>
+                  )}
+
+                  {/* Save Current Table as New Roster */}
+                  <div className={`${cardCls} space-y-3`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-gc-body font-bold text-gc-ink">
+                          Save seated table as a Cloud roster
+                        </h3>
+                        <p className="text-gc-small text-gc-quiet">
+                          Save your current {players.length} seated student{players.length === 1 ? '' : 's'} (names, avatars, and bankrolls) for future classes.
+                        </p>
+                      </div>
+                      <span className="h-7 px-2.5 inline-flex items-center rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-cap font-bold text-gc-ink tabular-nums">
+                        {players.length} seated
+                      </span>
                     </div>
 
                     {players.length === 0 ? (
-                      <div className="text-xs italic text-slate-500 dark:text-amber-200/60">
-                        Start a game or seat players first to save a session report.
-                      </div>
+                      <p className="text-gc-small text-gc-quiet">
+                        Add students to the table first (or have them join via QR code) to save them as a reusable class roster.
+                      </p>
                     ) : (
-                      <form onSubmit={handleSaveCurrentSessionReport} className="flex flex-col sm:flex-row gap-3">
+                      <form onSubmit={handleCreateNewRoster} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-1">
                         <input
                           type="text"
-                          value={newReportTitle}
-                          onChange={(e) => setNewReportTitle(e.target.value)}
-                          placeholder={`Optional title (default: ${settings.topic} (${settings.level}) — Today)`}
-                          maxLength={120}
-                          className="flex-1 px-3.5 py-2.5 rounded-xl bg-white/90 dark:bg-black/50 border border-[#d4af37]/50 text-slate-900 dark:text-white text-xs sm:text-sm focus:outline-none focus:border-[#fef08a]"
+                          value={newRosterName}
+                          onChange={(e) => setNewRosterName(e.target.value)}
+                          placeholder="Class name (e.g. Period 2 — B2 Upper Intermediate)"
+                          maxLength={80}
+                          className={`sm:col-span-5 ${inputCls}`}
                         />
-                        <ActionButton
-                          type="submit"
-                          playSound={playSound}
-                          variant="gold"
-                          disabled={isSavingReport}
-                          className="py-2.5 px-6 text-xs shrink-0"
-                        >
-                          {isSavingReport ? 'Saving...' : '☁️ Save Session to Cloud'}
-                        </ActionButton>
+                        <input
+                          type="text"
+                          value={newRosterNotes}
+                          onChange={(e) => setNewRosterNotes(e.target.value)}
+                          placeholder="Optional notes (e.g. Mon/Wed class)"
+                          maxLength={120}
+                          className={`sm:col-span-4 ${inputCls}`}
+                        />
+                        <div className="sm:col-span-3 flex">
+                          <ActionButton
+                            type="submit"
+                            playSound={playSound}
+                            variant="primary"
+                            disabled={!newRosterName.trim() || isSavingRoster}
+                            className="w-full h-11 px-4 text-gc-small"
+                          >
+                            {isSavingRoster ? 'Saving…' : 'Save roster'}
+                          </ActionButton>
+                        </div>
                       </form>
                     )}
                   </div>
 
-                  {/* Reports List */}
-                  {reports.length === 0 ? (
-                    <div className="p-8 rounded-2xl felt-well text-center space-y-2">
-                      <div className="text-3xl opacity-60">📜</div>
-                      <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
-                        No Cloud Session Reports Yet
-                      </div>
-                      <p className="text-xs text-slate-500 dark:text-amber-200/60 max-w-md mx-auto">
-                        Save a session during or after a game to review full Grammar Report Cards and resume mid-game tables from any computer.
+                  {/* Resume Mode Option Toggle */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                    <p className="text-gc-small font-bold text-gc-ink">
+                      Saved classroom rosters ({rosters.length})
+                    </p>
+                    <label className="flex items-center gap-2 text-gc-small text-gc-quiet cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={bailoutZeroOnResume}
+                        onChange={(e) => setBailoutZeroOnResume(e.target.checked)}
+                        className="rounded border-gc-line/30 accent-amber-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span>When resuming saved bankrolls, bail out $0 students to $150</span>
+                    </label>
+                  </div>
+
+                  {/* Rosters List */}
+                  {rosters.length === 0 ? (
+                    <div className={`${cardCls} py-8 text-center space-y-1.5`}>
+                      <p className="text-gc-body font-bold text-gc-ink">No Cloud rosters saved yet</p>
+                      <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
+                        Seat your students at the table and save them above to load your class in one click on any device.
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {reports.map((report) => (
-                        <div
-                          key={report.id}
-                          className="p-4 rounded-2xl felt-well border border-[#d4af37]/35 hover:border-[#d4af37]/70 transition-all flex flex-wrap items-center justify-between gap-4"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-sans font-extrabold text-base text-slate-900 dark:text-amber-50">
-                                {report.title}
-                              </h4>
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
-                                {report.topic} &middot; {report.level}
-                              </span>
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-sans tabular-nums font-bold bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40">
-                                {report.roundsPlayed} Hands &middot; {report.playerCount} Players
-                              </span>
-                            </div>
-                            <div className="text-xs text-slate-600 dark:text-amber-200/75 flex items-center gap-3 flex-wrap">
-                              <span>
-                                👑 Leader: <strong>{report.winnerAvatar} {report.winnerName}</strong> ($
-                                {report.winnerMoney.toLocaleString()})
-                              </span>
-                              <span>&middot;</span>
-                              <span className="font-sans tabular-nums text-[11px] opacity-75">
-                                {new Date(report.createdAt).toLocaleString()}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                playSound('click');
-                                setViewingReport(report);
-                              }}
-                              className="px-3 py-2 rounded-xl bg-gradient-to-b from-[#fef08a] via-[#eab308] to-[#a16207] text-[#1c0a04] font-sans font-extrabold uppercase tracking-wider text-xs border border-[#fef9c3] shadow cursor-pointer hover:brightness-105 transition-all flex items-center gap-1.5"
-                            >
-                              <span>📊</span>
-                              <span>Report Card</span>
-                            </button>
-
-                            {report.fullGameState && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  playSound('startGame');
-                                  onLoadFullGameState(report.fullGameState);
-                                  onClose();
-                                }}
-                                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-extrabold uppercase tracking-wider text-xs shadow cursor-pointer transition-all flex items-center gap-1.5"
-                                title="Resume this saved game table state"
-                              >
-                                <span>▶️</span>
-                                <span>Resume Table</span>
-                              </button>
-                            )}
-
-                            {confirmDeleteReportId === report.id ? (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteReport(report.id)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold cursor-pointer"
-                                >
-                                  Confirm
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteReportId(null)}
-                                  className="px-2 py-1.5 rounded-lg felt-well text-[11px] cursor-pointer"
-                                >
-                                  Cancel
-                                </button>
+                      {rosters.map((roster) => {
+                        const isActive = roster.id === activeRosterId;
+                        return (
+                          <div
+                            key={roster.id}
+                            className={`p-4 rounded-gc border transition-colors space-y-3 ${
+                              isActive
+                                ? 'bg-gc-win/[0.06] border-gc-win/40'
+                                : 'bg-gc-line/[0.04] border-gc-line/[0.12] hover:border-gc-line/25'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-gc-body font-bold text-gc-ink">{roster.name}</h4>
+                                  {isActive && (
+                                    <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">
+                                      Active roster
+                                    </span>
+                                  )}
+                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-quiet text-gc-cap font-bold tabular-nums">
+                                    {roster.playerCount} students
+                                  </span>
+                                </div>
+                                {roster.notes && (
+                                  <p className="text-gc-small text-gc-quiet mt-0.5">{roster.notes}</p>
+                                )}
+                                <p className="text-gc-cap text-gc-quiet tabular-nums mt-1">
+                                  Updated {new Date(roster.updatedAt).toLocaleString()} &middot; Fresh stack: $
+                                  {roster.startingCash.toLocaleString()}
+                                </p>
                               </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteReportId(report.id)}
-                                className="w-8 h-8 rounded-xl border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center text-xs cursor-pointer"
-                                title="Delete Session Report"
-                              >
-                                🗑️
-                              </button>
-                            )}
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <ActionButton
+                                  type="button"
+                                  onClick={() => {
+                                    playSound('startGame');
+                                    onLoadRoster(roster, 'fresh', bailoutZeroOnResume);
+                                    onClose();
+                                  }}
+                                  variant="ghost"
+                                  className="h-10 px-3.5 text-gc-small font-bold"
+                                  title={`Load ${roster.name} with everyone reset to $${startingCash.toLocaleString()}`}
+                                >
+                                  Fresh start (${startingCash})
+                                </ActionButton>
+
+                                <ActionButton
+                                  type="button"
+                                  onClick={() => {
+                                    playSound('startGame');
+                                    onLoadRoster(roster, 'saved', bailoutZeroOnResume);
+                                    onClose();
+                                  }}
+                                  variant="primary"
+                                  className="h-10 px-3.5 text-gc-small font-bold"
+                                  title="Load students with their exact saved bankrolls and win streaks"
+                                >
+                                  Resume bankrolls
+                                </ActionButton>
+
+                                {players.length > 0 && (
+                                  <ActionButton
+                                    type="button"
+                                    onClick={() => handleUpdateExistingRoster(roster)}
+                                    disabled={isSavingRoster}
+                                    variant="ghost"
+                                    className="h-10 px-3 text-gc-small font-bold"
+                                    title="Overwrite this roster with the current table's players and bankrolls"
+                                  >
+                                    Update
+                                  </ActionButton>
+                                )}
+
+                                {confirmDeleteRosterId === roster.id ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <ActionButton
+                                      type="button"
+                                      onClick={() => handleDeleteRoster(roster.id)}
+                                      variant="danger"
+                                      className="h-9 px-3 text-gc-cap font-bold"
+                                    >
+                                      Confirm
+                                    </ActionButton>
+                                    <ActionButton
+                                      type="button"
+                                      onClick={() => setConfirmDeleteRosterId(null)}
+                                      variant="ghost"
+                                      className="h-9 px-2.5 text-gc-cap font-bold"
+                                    >
+                                      Cancel
+                                    </ActionButton>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteRosterId(roster.id)}
+                                    className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
+                                    title="Delete roster"
+                                    aria-label={`Delete roster ${roster.name}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Student Bankrolls Preview Pills */}
+                            <div className="flex flex-wrap gap-1.5 pt-2 border-t border-gc-line/[0.1]">
+                              {roster.players.map((p, i) => (
+                                <span
+                                  key={`${p.id}_${i}`}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gc-bg/60 border border-gc-line/[0.14] text-gc-cap"
+                                >
+                                  <span>{p.avatar}</span>
+                                  <span className="font-bold text-gc-ink">{p.name}</span>
+                                  <span className="tabular-nums font-bold text-gc-win">
+                                    ${p.money.toLocaleString()}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
-                </>
+                </div>
               )}
-            </div>
-          )}
 
-          {/* TAB 3: AUTO-GROWING CLOUD SENTENCE BANK */}
-          {activeTab === 'sentences' && (
-            <div className="space-y-4">
-              {/* Summary Banner */}
-              <div className="p-4 rounded-xl felt-well border border-[#d4af37]/40 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm sm:text-base font-sans font-extrabold uppercase tracking-wider text-slate-900 dark:text-[#fef08a]">
-                    🧠 Auto-Growing Cloud Sentence Bank
-                  </h3>
-                  <p className="text-xs text-slate-600 dark:text-amber-200/70">
-                    Every verified sentence generated in Live Gemini AI mode is automatically archived to Firestore and merged into your Offline Curated Bank.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-[#d4af37]/40 font-sans tabular-nums text-xs font-bold text-amber-900 dark:text-[#fef08a]">
-                    📚 Built-In: {staticCounts.totalCount}
-                  </span>
-                  <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 font-sans tabular-nums text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                    ☁️ Cloud AI: {sentences.length}
-                  </span>
-                </div>
-              </div>
-
-              {/* Filter Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                <input
-                  type="text"
-                  value={sentenceSearch}
-                  onChange={(e) => setSentenceSearch(e.target.value)}
-                  placeholder="Search sentence or rule..."
-                  className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/40 text-xs text-slate-900 dark:text-white focus:outline-none"
-                />
-                <select
-                  value={sentenceTopicFilter}
-                  onChange={(e) => setSentenceTopicFilter(e.target.value)}
-                  className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/40 text-xs text-slate-900 dark:text-white focus:outline-none"
-                >
-                  <option value="ALL">All Topics</option>
-                  {GRAMMAR_TOPICS.filter((t) => t !== 'My own choice').map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={sentenceLevelFilter}
-                  onChange={(e) => setSentenceLevelFilter(e.target.value)}
-                  className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/40 text-xs text-slate-900 dark:text-white focus:outline-none"
-                >
-                  <option value="ALL">All CEFR Levels</option>
-                  {CEFR_LEVELS.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={sentenceFormatFilter}
-                  onChange={(e) => setSentenceFormatFilter(e.target.value)}
-                  className="px-3 py-2 rounded-xl felt-well border border-[#d4af37]/40 text-xs text-slate-900 dark:text-white focus:outline-none"
-                >
-                  <option value="ALL">All Formats</option>
-                  <option value="binary">⚖️ Valid or Flawed</option>
-                  <option value="multipleChoice">🔠 Multiple-Choice Cloze</option>
-                  <option value="openCloze">✍️ Open Cloze</option>
-                  <option value="wordFormation">🧬 Word Formation</option>
-                </select>
-              </div>
-
-              {/* Cloud Sentences List */}
-              {filteredSentences.length === 0 ? (
-                <div className="p-8 rounded-2xl felt-well text-center space-y-2">
-                  <div className="text-3xl opacity-60">🧠</div>
-                  <div className="text-sm font-sans font-bold text-slate-700 dark:text-amber-100">
-                    {sentences.length === 0
-                      ? 'No Cloud AI Sentences Archived Yet'
-                      : 'No Sentences Match Your Filter'}
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-amber-200/60 max-w-md mx-auto">
-                    {sentences.length === 0
-                      ? 'Play any round with Live Gemini AI unlocked and each generated sentence will automatically appear here for review.'
-                      : 'Try clearing your search or selecting "All Topics" / "All CEFR Levels".'}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5 max-h-[48vh] overflow-y-auto pr-1 modal-content-scroll">
-                  {filteredSentences.map((item) => {
-                    const isCloze =
-                      item.questionType === 'multipleChoice' ||
-                      item.questionType === 'openCloze' ||
-                      item.questionType === 'wordFormation';
-                    return (
-                      <div
-                        key={item.id}
-                        className="p-3.5 rounded-xl felt-well border border-[#d4af37]/30 hover:border-[#d4af37]/60 transition-all flex items-start justify-between gap-3"
-                      >
-                        <div className="space-y-1.5 min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-sans tabular-nums font-bold">
-                            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-[#fef08a] border border-[#d4af37]/40">
-                              {item.topic} &middot; {item.level}
-                            </span>
-                            <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-900 dark:text-purple-200 border border-purple-400/30">
-                              {item.questionType === 'multipleChoice'
-                                ? '🔠 MC Cloze'
-                                : item.questionType === 'openCloze'
-                                  ? '✍️ Open Cloze'
-                                  : item.questionType === 'wordFormation'
-                                    ? `🧬 Word Form (${item.baseWord || 'ROOT'})`
-                                    : '⚖️ Binary'}
-                            </span>
-                            {isCloze ? (
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40">
-                                Answer: &ldquo;{item.correctAnswer}&rdquo;
-                              </span>
-                            ) : (
-                              <span
-                                className={`px-2 py-0.5 rounded border ${
-                                  item.isCorrect
-                                    ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-400/40'
-                                    : 'bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-400/40'
-                                }`}
-                              >
-                                {item.isCorrect ? '✓ VALID' : '✕ FLAWED'}
-                              </span>
-                            )}
-                          </div>
-
-                          <p className="text-sm sm:text-base font-editorial italic text-slate-900 dark:text-amber-50">
-                            &ldquo;{item.text}&rdquo;
+              {/* TAB 2: SESSION REPORTS & CLOUD SAVES */}
+              {activeTab === 'reports' && (
+                <div className="space-y-5">
+                  {viewingReport ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between gap-2 pb-3 border-b border-gc-line/[0.12]">
+                        <div>
+                          <p className="text-gc-cap font-semibold text-gc-quiet tabular-nums">
+                            Archived session report &middot; {new Date(viewingReport.createdAt).toLocaleString()}
                           </p>
-
-                          {(!item.isCorrect || isCloze) && item.correction && (
-                            <div className="text-xs text-emerald-800 dark:text-emerald-300 font-medium">
-                              <strong>Revision:</strong> &ldquo;{item.correction}&rdquo;
-                            </div>
-                          )}
-
-                          <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                            🎓 {item.explanation}
-                          </div>
+                          <h3 className="text-gc-lead font-bold text-gc-ink">{viewingReport.title}</h3>
                         </div>
-
-                        <div className="shrink-0">
-                          {confirmDeleteSentenceId === item.id ? (
-                            <div className="flex flex-col gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSentence(item.id)}
-                                className="px-2.5 py-1 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
-                              >
-                                Delete
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteSentenceId(null)}
-                                className="px-2 py-1 rounded felt-well text-[10px] cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteSentenceId(item.id)}
-                              className="w-8 h-8 rounded-xl border border-rose-500/30 hover:border-rose-500 bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center text-xs cursor-pointer"
-                              title="Remove sentence from Cloud Sentence Bank"
-                            >
-                              🗑️
-                            </button>
-                          )}
-                        </div>
+                        <ActionButton
+                          onClick={() => setViewingReport(null)}
+                          playSound={playSound}
+                          variant="ghost"
+                          className="h-10 px-4 text-gc-small font-bold"
+                        >
+                          &larr; All sessions
+                        </ActionButton>
                       </div>
-                    );
-                  })}
+
+                      <GrammarReportCard
+                        history={viewingReport.roundHistory}
+                        players={viewingReport.players.map((p) => ({
+                          id: p.id,
+                          name: p.name,
+                          avatar: p.avatar,
+                          money: p.money,
+                          winStreak: p.winStreak,
+                          history: [],
+                          effects: [],
+                        }))}
+                        winner={
+                          viewingReport.winnerName
+                            ? {
+                                id: 1,
+                                name: viewingReport.winnerName,
+                                avatar: viewingReport.winnerAvatar,
+                                money: viewingReport.winnerMoney,
+                                winStreak: 0,
+                                history: [],
+                                effects: [],
+                              }
+                            : null
+                        }
+                        playSound={playSound}
+                        onRestartGame={() => setViewingReport(null)}
+                        settings={{
+                          topic: viewingReport.topic,
+                          level: (viewingReport.level as CEFRLevel) || 'B1',
+                          theme: viewingReport.theme,
+                        }}
+                        gameMode={(viewingReport.gameMode as GameMode) || 'rounds'}
+                        totalRounds={viewingReport.roundsPlayed}
+                        targetAmount={targetAmount}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Save Current Session to Cloud */}
+                      <div className={`${cardCls} space-y-3`}>
+                        <div>
+                          <h3 className="text-gc-body font-bold text-gc-ink">
+                            Save current session report &amp; table state
+                          </h3>
+                          <p className="text-gc-small text-gc-quiet">
+                            Archives the Grammar Report Card ({roundHistory.length} hand{roundHistory.length === 1 ? '' : 's'} played) and full resumable table state to Firestore.
+                          </p>
+                        </div>
+
+                        {players.length === 0 ? (
+                          <p className="text-gc-small text-gc-quiet">
+                            Start a game or seat players first to save a session report.
+                          </p>
+                        ) : (
+                          <form onSubmit={handleSaveCurrentSessionReport} className="flex flex-col sm:flex-row gap-2.5">
+                            <input
+                              type="text"
+                              value={newReportTitle}
+                              onChange={(e) => setNewReportTitle(e.target.value)}
+                              placeholder={`Optional title (default: ${settings.topic} (${settings.level}) — Today)`}
+                              maxLength={120}
+                              className={`flex-1 ${inputCls}`}
+                            />
+                            <ActionButton
+                              type="submit"
+                              playSound={playSound}
+                              variant="primary"
+                              disabled={isSavingReport}
+                              className="h-11 px-5 text-gc-small font-bold shrink-0"
+                            >
+                              {isSavingReport ? 'Saving…' : 'Save session'}
+                            </ActionButton>
+                          </form>
+                        )}
+                      </div>
+
+                      {/* Reports List */}
+                      {reports.length === 0 ? (
+                        <div className={`${cardCls} py-8 text-center space-y-1.5`}>
+                          <p className="text-gc-body font-bold text-gc-ink">No Cloud session reports yet</p>
+                          <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
+                            Save a session during or after a game to review full Grammar Report Cards and resume mid-game tables from any computer.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {reports.map((report) => (
+                            <div
+                              key={report.id}
+                              className={`${cardCls} flex flex-wrap items-center justify-between gap-4`}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-gc-body font-bold text-gc-ink">{report.title}</h4>
+                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-cap font-bold text-gc-ink">
+                                    {report.topic} &middot; {report.level}
+                                  </span>
+                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-quiet tabular-nums">
+                                    {report.roundsPlayed} hands &middot; {report.playerCount} players
+                                  </span>
+                                </div>
+                                <p className="text-gc-small text-gc-quiet">
+                                  Leader: <strong className="text-gc-ink">{report.winnerAvatar} {report.winnerName}</strong> (${report.winnerMoney.toLocaleString()}) &middot;{' '}
+                                  <span className="tabular-nums">{new Date(report.createdAt).toLocaleString()}</span>
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <ActionButton
+                                  type="button"
+                                  onClick={() => {
+                                    playSound('click');
+                                    setViewingReport(report);
+                                  }}
+                                  variant="ghost"
+                                  className="h-10 px-3.5 text-gc-small font-bold"
+                                >
+                                  Report card
+                                </ActionButton>
+
+                                {report.fullGameState && (
+                                  <ActionButton
+                                    type="button"
+                                    onClick={() => {
+                                      playSound('startGame');
+                                      onLoadFullGameState(report.fullGameState);
+                                      onClose();
+                                    }}
+                                    variant="primary"
+                                    className="h-10 px-3.5 text-gc-small font-bold"
+                                    title="Resume this saved game table state"
+                                  >
+                                    Resume table
+                                  </ActionButton>
+                                )}
+
+                                {confirmDeleteReportId === report.id ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <ActionButton
+                                      type="button"
+                                      onClick={() => handleDeleteReport(report.id)}
+                                      variant="danger"
+                                      className="h-9 px-3 text-gc-cap font-bold"
+                                    >
+                                      Confirm
+                                    </ActionButton>
+                                    <ActionButton
+                                      type="button"
+                                      onClick={() => setConfirmDeleteReportId(null)}
+                                      variant="ghost"
+                                      className="h-9 px-2.5 text-gc-cap font-bold"
+                                    >
+                                      Cancel
+                                    </ActionButton>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteReportId(report.id)}
+                                    className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
+                                    title="Delete session report"
+                                    aria-label={`Delete report ${report.title}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 3: AUTO-GROWING CLOUD SENTENCE BANK */}
+              {activeTab === 'sentences' && (
+                <div className="space-y-4">
+                  <div className={`${cardCls} flex flex-wrap items-center justify-between gap-3`}>
+                    <div>
+                      <h3 className="text-gc-body font-bold text-gc-ink">
+                        Auto-growing Cloud sentence bank
+                      </h3>
+                      <p className="text-gc-small text-gc-quiet">
+                        Verified sentences generated by Live AI are automatically archived to Firestore and merged into your curated bank.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-ink tabular-nums">
+                        Built-in: {staticCounts.totalCount}
+                      </span>
+                      <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-win/15 border border-gc-win/30 text-gc-cap font-bold text-gc-win tabular-nums">
+                        Cloud AI: {sentences.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Filter Bar */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                    <input
+                      type="text"
+                      value={sentenceSearch}
+                      onChange={(e) => setSentenceSearch(e.target.value)}
+                      placeholder="Search sentence or rule…"
+                      className={inputCls}
+                    />
+                    <select
+                      value={sentenceTopicFilter}
+                      onChange={(e) => setSentenceTopicFilter(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="ALL">All topics</option>
+                      {GRAMMAR_TOPICS.filter((t) => t !== 'My own choice').map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={sentenceLevelFilter}
+                      onChange={(e) => setSentenceLevelFilter(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="ALL">All CEFR levels</option>
+                      {CEFR_LEVELS.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={sentenceFormatFilter}
+                      onChange={(e) => setSentenceFormatFilter(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="ALL">All formats</option>
+                      <option value="binary">⚖️ Right or Wrong</option>
+                      <option value="multipleChoice">🔠 Multiple-Choice Gap</option>
+                      <option value="openCloze">✍️ Open Cloze</option>
+                      <option value="wordFormation">🧬 Word Formation</option>
+                      <option value="keyWordTransformation">🔑 Key Word Transformation</option>
+                    </select>
+                  </div>
+
+                  {/* Cloud Sentences List */}
+                  {filteredSentences.length === 0 ? (
+                    <div className={`${cardCls} py-8 text-center space-y-1.5`}>
+                      <p className="text-gc-body font-bold text-gc-ink">
+                        {sentences.length === 0
+                          ? 'No Cloud AI sentences archived yet'
+                          : 'No sentences match your filter'}
+                      </p>
+                      <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
+                        {sentences.length === 0
+                          ? 'Generated sentences will automatically appear here when you are signed in.'
+                          : 'Try clearing your search or selecting "All topics" and "All CEFR levels".'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-[48vh] overflow-y-auto pr-1 modal-content-scroll">
+                      {filteredSentences.map((item) => {
+                        const isCloze =
+                          item.questionType === 'multipleChoice' ||
+                          item.questionType === 'openCloze' ||
+                          item.questionType === 'wordFormation' ||
+                          item.questionType === 'keyWordTransformation';
+                        return (
+                          <div
+                            key={item.id}
+                            className={`${cardCls} flex items-start justify-between gap-3`}
+                          >
+                            <div className="space-y-1.5 min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5 text-gc-cap font-bold tabular-nums">
+                                <span className="px-2 py-0.5 rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-ink">
+                                  {item.topic} &middot; {item.level}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full bg-gc-line/[0.08] text-gc-quiet">
+                                  {item.questionType === 'multipleChoice'
+                                    ? '🔠 MC Cloze'
+                                    : item.questionType === 'openCloze'
+                                      ? '✍️ Open Cloze'
+                                      : item.questionType === 'wordFormation'
+                                        ? `🧬 Word Form (${item.baseWord || 'ROOT'})`
+                                        : item.questionType === 'keyWordTransformation'
+                                          ? `🔑 Key Word (${item.baseWord || 'KEY'})`
+                                          : '⚖️ Right or Wrong'}
+                                </span>
+                                {isCloze ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-gc-win/15 text-gc-win">
+                                    Answer: &ldquo;{item.correctAnswer}&rdquo;
+                                  </span>
+                                ) : (
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full ${
+                                      item.isCorrect
+                                        ? 'bg-gc-win/15 text-gc-win'
+                                        : 'bg-gc-loss/15 text-gc-loss'
+                                    }`}
+                                  >
+                                    {item.isCorrect ? '✓ Right' : '✕ Wrong'}
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="text-gc-body font-semibold text-gc-ink">
+                                &ldquo;{item.text}&rdquo;
+                              </p>
+
+                              {(!item.isCorrect || isCloze) && item.correction && (
+                                <p className="text-gc-small text-gc-win font-medium">
+                                  <strong>Correct form:</strong> &ldquo;{item.correction}&rdquo;
+                                </p>
+                              )}
+
+                              <p className="text-gc-small text-gc-quiet leading-relaxed">
+                                {item.explanation}
+                              </p>
+                            </div>
+
+                            <div className="shrink-0">
+                              {confirmDeleteSentenceId === item.id ? (
+                                <div className="flex flex-col gap-1">
+                                  <ActionButton
+                                    type="button"
+                                    onClick={() => handleDeleteSentence(item.id)}
+                                    variant="danger"
+                                    className="h-8 px-2.5 text-gc-cap font-bold"
+                                  >
+                                    Delete
+                                  </ActionButton>
+                                  <ActionButton
+                                    type="button"
+                                    onClick={() => setConfirmDeleteSentenceId(null)}
+                                    variant="ghost"
+                                    className="h-8 px-2 text-gc-cap font-bold"
+                                  >
+                                    Cancel
+                                  </ActionButton>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteSentenceId(item.id)}
+                                  className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
+                                  title="Remove sentence from Cloud Sentence Bank"
+                                  aria-label="Remove sentence"
+                                >
+                                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-        </>
+          </>
         )}
 
         {/* Footer */}
-        <div className="px-5 py-3 bg-amber-50/70 dark:bg-[#04180e] border-t border-[#d4af37]/30 flex items-center justify-between">
-          <div className="text-[11px] font-sans text-slate-500 dark:text-amber-200/60">
-            {isTeacherSignedIn ? <>Signed in as {teacherEmail} &middot; Connected to Firestore</> : 'Teacher not signed in'}
-          </div>
-          <ActionButton onClick={onClose} playSound={playSound} variant="outline-gold" className="py-2 px-5 text-xs">
-            Close Vault
+        <div className="px-5 sm:px-6 py-3.5 border-t border-gc-line/[0.12] flex items-center justify-between gap-3">
+          <p className="text-gc-cap text-gc-quiet truncate">
+            {isTeacherSignedIn
+              ? `Signed in as ${teacherEmail} · Connected to Firestore`
+              : 'Not signed in'}
+          </p>
+          <ActionButton
+            onClick={onClose}
+            playSound={playSound}
+            variant="ghost"
+            className="h-10 px-5 text-gc-small font-bold"
+          >
+            Close
           </ActionButton>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };
 export default CloudManagerModal;
