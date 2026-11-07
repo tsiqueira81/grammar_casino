@@ -511,8 +511,8 @@ export function App() {
   }, [mpRoomCode]);
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
   const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
-  // Single-screen table layout: null = automatic (compact grid from 4 players up).
-  const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards' | null>(null);
+  // Single-screen table layout: defaults to compact grid.
+  const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards'>('grid');
   const [openSeatPlayerId, setOpenSeatPlayerId] = useState<number | null>(null);
   const openSeatRef = useRef<HTMLDivElement>(null);
   const [mpStudentPendingTarget, setMpStudentPendingTarget] = useState<Record<number, PowerUpKey | null>>({});
@@ -1065,7 +1065,7 @@ export function App() {
   ]);
 
   // --- Single-screen compact grid ---
-  const effectiveTableLayout: 'grid' | 'cards' = tableLayoutPref ?? (players.length >= 4 ? 'grid' : 'cards');
+  const effectiveTableLayout: 'grid' | 'cards' = tableLayoutPref;
 
   // Close the open betting card when a new hand starts or the screen changes.
   useEffect(() => {
