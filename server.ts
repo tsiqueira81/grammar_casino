@@ -6,34 +6,111 @@ import { fileURLToPath } from 'url';
 import express, { Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Type, Modality, ThinkingLevel } from '@google/genai';
+import {
+  resolveGroqApiKey,
+  callGroqChatCompletion,
+  callGroqOrpheusTts,
+  PersistentAiCache,
+} from './utils/groqUtils';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const isCloudflareWorker =
+  typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
+const isServerlessRuntime = Boolean(
+  isCloudflareWorker ||
+    process.env.NETLIFY ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.CF_PAGES
+);
+const APP_ROOT_DIR = (() => {
+  if (isCloudflareWorker) return '/';
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {}
+  try {
+    return process.cwd();
+  } catch {
+    return '/';
+  }
+})();
 
-const app = express();
-app.use(express.json({ limit: '10mb' }));
+// Automatically load .env from project root if present (without overriding existing environment variables)
+if (!isServerlessRuntime) {
+  try {
+    const envFilePath = path.resolve(APP_ROOT_DIR, '.env');
+    if (fs.existsSync(envFilePath)) {
+      const rawEnv = fs.readFileSync(envFilePath, 'utf-8');
+      for (const line of rawEnv.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx <= 0) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        let val = trimmed.slice(eqIdx + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        if (key && process.env[key] === undefined) {
+          process.env[key] = val;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not parse .env file:', err);
+  }
+}
+
+const app = isCloudflareWorker
+  ? ({
+      use: () => {},
+      get: () => {},
+      post: () => {},
+    } as any)
+  : express();
+if (!isCloudflareWorker) {
+  app.use(express.json({ limit: '10mb' }));
+}
 
 // --- Teacher PIN Gate for Live Gemini AI (Offline-Only Fallback for Students) ---
-const TEACHER_PIN_FILE = path.resolve(__dirname, '.teacher-pin.json');
+const TEACHER_PIN_FILE = path.resolve(APP_ROOT_DIR, '.teacher-pin.json');
 // No default PIN: if TEACHER_PIN is not set (and no saved PIN file exists), Live AI stays locked
 // and the game runs on the free Offline Curated Bank.
 let activeTeacherPin = (process.env.TEACHER_PIN || '').trim();
 
-try {
-  if (fs.existsSync(TEACHER_PIN_FILE)) {
-    const saved = JSON.parse(fs.readFileSync(TEACHER_PIN_FILE, 'utf-8'));
-    if (saved && typeof saved.pin === 'string' && saved.pin.trim().length >= 4) {
-      activeTeacherPin = saved.pin.trim();
+if (!isServerlessRuntime) {
+  try {
+    if (fs.existsSync(TEACHER_PIN_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(TEACHER_PIN_FILE, 'utf-8'));
+      if (saved && typeof saved.pin === 'string' && saved.pin.trim().length >= 4) {
+        activeTeacherPin = saved.pin.trim();
+      }
     }
+  } catch (err) {
+    console.warn('Could not read .teacher-pin.json, using env TEACHER_PIN (if set).');
   }
-} catch (err) {
-  console.warn('Could not read .teacher-pin.json, using env TEACHER_PIN (if set).');
 }
 
 // Cryptographic session token issued when teacher.siqueira@gmail.com signs in via Google OAuth
-const googleVerifiedSessionToken = `gauth_${crypto.randomBytes(24).toString("hex")}`;
+// Derived via HMAC so serverless function instances validate the same token consistently
+function getGoogleVerifiedSessionToken(): string {
+  const sessionHmacSecret =
+    activeTeacherPin ||
+    process.env.TEACHER_PIN ||
+    process.env.GROQ_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    'grammar_casino_default_hmac_seed';
+  return `gauth_${crypto
+    .createHmac('sha256', sessionHmacSecret)
+    .update('teacher.siqueira@gmail.com:grammar_casino_verified')
+    .digest('hex')
+    .slice(0, 48)}`;
+}
 
 function isPinConfigured(): boolean {
+  if (!activeTeacherPin && process.env.TEACHER_PIN) {
+    activeTeacherPin = String(process.env.TEACHER_PIN).trim();
+  }
   return activeTeacherPin.length > 0;
 }
 
@@ -49,9 +126,12 @@ function safeTimingEqual(a: string, b: string): boolean {
 }
 
 function verifyPinMatch(candidate: string): boolean {
+  if (!activeTeacherPin && process.env.TEACHER_PIN) {
+    activeTeacherPin = String(process.env.TEACHER_PIN).trim();
+  }
   const cleanCandidate = String(candidate || '').trim();
   if (!cleanCandidate) return false;
-  if (safeTimingEqual(cleanCandidate, googleVerifiedSessionToken)) return true;
+  if (safeTimingEqual(cleanCandidate, getGoogleVerifiedSessionToken())) return true;
   if (activeTeacherPin && safeTimingEqual(cleanCandidate, activeTeacherPin)) return true;
   return false;
 }
@@ -143,7 +223,11 @@ interface CacheEntry {
   expiresAt: number;
 }
 const responseCache = new Map<string, CacheEntry>();
-const CACHE_TTL_MS = 15 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h TTL to conserve Orpheus 100 RPD free-tier quota
+const cacheFilePath = isServerlessRuntime
+  ? '/tmp/.ai-response-cache.json'
+  : path.resolve(APP_ROOT_DIR, '.ai-response-cache.json');
+const persistentAiCache = new PersistentAiCache(cacheFilePath, 400);
 
 function cleanupCache() {
   const now = Date.now();
@@ -152,7 +236,7 @@ function cleanupCache() {
       responseCache.delete(key);
     }
   }
-  if (responseCache.size > 200) {
+  if (responseCache.size > 300) {
     const oldestKey = responseCache.keys().next().value;
     if (oldestKey) responseCache.delete(oldestKey);
   }
@@ -179,21 +263,29 @@ function checkRateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
   return { allowed: false, retryAfter: Math.ceil(waitMs / 1000) };
 }
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, bucket] of ipBuckets.entries()) {
-    if (now - bucket.lastRefill > 120000 && bucket.tokens >= RATE_LIMIT_CAPACITY - 1) {
-      ipBuckets.delete(ip);
+if (!isServerlessRuntime) {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, bucket] of ipBuckets.entries()) {
+      if (now - bucket.lastRefill > 120000 && bucket.tokens >= RATE_LIMIT_CAPACITY - 1) {
+        ipBuckets.delete(ip);
+      }
     }
-  }
-}, 60000);
+  }, 60000).unref?.();
+}
 
-// --- Gemini Client Setup ---
+// --- Groq & Gemini Client Setup ---
 let aiClient: GoogleGenAI | null = null;
+
+function hasConfiguredAiKey(): boolean {
+  if (resolveGroqApiKey()) return true;
+  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+  return geminiKey.length > 5;
+}
 
 function getAIClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-  if (!apiKey) {
+  if (!apiKey || apiKey.trim().startsWith('gsk_')) {
     throw new Error("GEMINI_API_KEY environment variable is not configured.");
   }
   if (!aiClient) {
@@ -206,7 +298,32 @@ function getAIClient(): GoogleGenAI {
 }
 
 const TEXT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
-const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"];
+const TTS_MODELS = [
+  "gemini-3.8-flash-lite-tts",
+  "gemini-3.8-flash-tts",
+  "gemini-3.1-flash-tts-preview",
+  "gemini-2.5-flash-preview-tts",
+];
+
+function mapOrpheusToGeminiVoice(orpheusVoice?: string): string {
+  const clean = String(orpheusVoice || "troy").trim().toLowerCase();
+  switch (clean) {
+    case "troy":
+      return "Puck";
+    case "austin":
+      return "Charon";
+    case "daniel":
+      return "Fenrir";
+    case "autumn":
+      return "Kore";
+    case "diana":
+      return "Aoede";
+    case "hannah":
+      return "Leda";
+    default:
+      return "Puck";
+  }
+}
 
 // Track per-model cooldown timestamps when a model hits 429 quota or 404
 const modelCooldownUntil = new Map<string, number>();
@@ -318,6 +435,97 @@ async function callWithModelRotation<T>(
   }
 
   throw lastError || new Error("Upstream Gemini API is currently experiencing high load. Please try again.");
+}
+
+async function generateAiText(options: {
+  prompt: string;
+  responseSchema?: any;
+  schemaName?: string;
+  maxCompletionTokens?: number;
+}): Promise<{ text: string }> {
+  const groqKey = resolveGroqApiKey();
+  if (groqKey) {
+    try {
+      return await callGroqChatCompletion({
+        apiKey: groqKey,
+        prompt: options.prompt,
+        responseSchema: options.responseSchema,
+        schemaName: options.schemaName,
+        maxCompletionTokens: options.maxCompletionTokens,
+      });
+    } catch (groqErr: any) {
+      const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+      if (!geminiKey || geminiKey.startsWith('gsk_')) {
+        throw groqErr;
+      }
+      console.warn('[AI Router] Groq text generation failed, falling back to Gemini:', groqErr?.message);
+    }
+  }
+
+  return await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
+    const config: Record<string, any> = {
+      thinkingConfig: getFastThinkingConfig(model),
+    };
+    if (options.responseSchema) {
+      config.responseMimeType = "application/json";
+      config.responseSchema = options.responseSchema;
+    }
+    const resp = await ai.models.generateContent({
+      model,
+      contents: options.prompt,
+      config,
+    });
+    return { text: resp.text ? resp.text.trim() : "" };
+  });
+}
+
+async function generateAiSpeechBase64(safeText: string, requestedVoice?: string): Promise<string> {
+  const targetVoice = requestedVoice || process.env.GROQ_TTS_VOICE || "troy";
+  const groqKey = resolveGroqApiKey();
+  if (groqKey) {
+    try {
+      return await callGroqOrpheusTts(groqKey, safeText, targetVoice);
+    } catch (groqErr: any) {
+      const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+      if (!geminiKey || geminiKey.startsWith('gsk_')) {
+        throw groqErr;
+      }
+      console.warn('[AI Router] Groq Orpheus TTS failed, falling back to Gemini Flash-Lite TTS:', groqErr?.message);
+    }
+  }
+
+  const geminiVoiceName = mapOrpheusToGeminiVoice(targetVoice);
+  return await callWithModelRotation(TTS_MODELS, async (ai, model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: safeText,
+              speechMetadata: {
+                style:
+                  "Clear, warm, articulate English teacher. Read only the exact text naturally and stop cleanly in silence with no trailing breath or sound.",
+              },
+            },
+          ],
+        },
+      ],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: geminiVoiceName },
+          },
+        },
+      },
+    });
+
+    const audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!audio) throw new Error("No audio data returned by TTS model.");
+    return audio;
+  });
 }
 
 // --- CEFR Linguistic Profiles ---
@@ -1060,7 +1268,7 @@ const batchClozeVerificationSchema = {
           },
           feedback: { type: Type.STRING, description: "Brief one-sentence explanation of why the submission earned 2, 1, or 0 marks." },
         },
-        required: ["word", "isCorrect", "marks", "feedback"],
+        required: ["word", "mark1Correct", "mark2Correct", "isCorrect", "marks", "feedback"],
       },
     },
   },
@@ -1069,15 +1277,6 @@ const batchClozeVerificationSchema = {
 
 // --- Gemini Handler for Express ---
 async function handleGeminiRequest(req: Request, res: Response) {
-  // Enforce Teacher PIN: Any visitor without the Teacher PIN plays in 100% free Offline Curated Mode
-  if (!isTeacherAuthorized(req, req.body)) {
-    return res.status(200).json({
-      fallback: true,
-      offlineMode: true,
-      error: "Offline Curated Mode active (Teacher PIN required for live Gemini AI).",
-    });
-  }
-
   const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
 
   const rateCheck = checkRateLimit(clientIp);
@@ -1107,10 +1306,9 @@ async function handleGeminiRequest(req: Request, res: Response) {
       return res.status(400).json({ error: "Missing or invalid 'action' parameter." });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    if (!apiKey) {
+    if (!hasConfiguredAiKey()) {
       return res.status(503).json({
-        error: "GEMINI_API_KEY is not configured.",
+        error: "GROQ_API_KEY or GEMINI_API_KEY is not configured.",
         code: "MISSING_API_KEY",
       });
     }
@@ -1200,9 +1398,14 @@ async function handleGeminiRequest(req: Request, res: Response) {
                 ] as const
               )[Math.floor(Math.random() * 5)];
 
-        const recentSentences = Array.isArray(pastSentences) ? pastSentences.slice(-25).map((s) => String(s).slice(0, 280)) : [];
-        const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-25).map((m) => String(m).slice(0, 160)) : [];
-        const roundIdx = recentSentences.length;
+        const isGroqActive = Boolean(resolveGroqApiKey());
+        const maxPastSentences = isGroqActive ? 10 : 25;
+        const maxSentenceLen = isGroqActive ? 180 : 280;
+        const recentSentences = Array.isArray(pastSentences)
+          ? pastSentences.slice(-maxPastSentences).map((s) => String(s).slice(0, maxSentenceLen))
+          : [];
+        const recentMistakes = Array.isArray(pastMistakes) ? pastMistakes.slice(-20).map((m) => String(m).slice(0, 140)) : [];
+        const roundIdx = Array.isArray(pastSentences) ? pastSentences.length : 0;
 
         const THEME_SCENARIO_POOLS: Record<string, string[]> = {
           "pop culture": [
@@ -1537,16 +1740,11 @@ Respond ONLY with valid JSON matching the schema.`;
         }
 
         const activeSchema = getSentenceSchema(resolvedQuestionType);
-        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-          return await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: activeSchema,
-              thinkingConfig: getFastThinkingConfig(model),
-            },
-          });
+        const response = await generateAiText({
+          prompt,
+          responseSchema: activeSchema,
+          schemaName: `sentence_${resolvedQuestionType}`,
+          maxCompletionTokens: 900,
         });
 
         const jsonText = response.text ? response.text.trim() : "";
@@ -1617,14 +1815,9 @@ Give a very short, cryptic, one-sentence hint about what might be wrong (whether
 If the sentence is actually correct, your hint could be "Sometimes, things are just as they seem."
 Respond ONLY with the hint text.`;
 
-        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-          return await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              thinkingConfig: getFastThinkingConfig(model),
-            },
-          });
+        const response = await generateAiText({
+          prompt,
+          maxCompletionTokens: 200,
         });
 
         const hint = (response.text || "").trim();
@@ -1654,16 +1847,11 @@ A "valid fix" means it is grammatically and lexically natural and fixes the main
 However, if the player's correction introduces a *new* grammatical or lexical error, it is NOT a valid fix.
 Respond ONLY with the JSON object matching the provided schema.`;
 
-        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-          return await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: verificationSchema,
-              thinkingConfig: getFastThinkingConfig(model),
-            },
-          });
+        const response = await generateAiText({
+          prompt,
+          responseSchema: verificationSchema,
+          schemaName: "verify_correction_schema",
+          maxCompletionTokens: 350,
         });
 
         const jsonText = response.text ? response.text.trim() : "";
@@ -1772,16 +1960,11 @@ STRICT RULES:
 
 Respond ONLY with valid JSON matching the schema.`;
 
-        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-          return await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: batchClozeVerificationSchema,
-              thinkingConfig: getFastThinkingConfig(model),
-            },
-          });
+        const response = await generateAiText({
+          prompt,
+          responseSchema: batchClozeVerificationSchema,
+          schemaName: "batch_cloze_verification_schema",
+          maxCompletionTokens: 1200,
         });
 
         const jsonText = response.text ? response.text.trim() : "";
@@ -1832,74 +2015,52 @@ Respond ONLY with valid JSON matching the schema.`;
         if (cached && cached.expiresAt > Date.now()) {
           return res.status(200).json({ simplified: cached.data, detailed: cached.data });
         }
+        const diskCached = persistentAiCache.get(cacheKey);
+        if (diskCached) {
+          responseCache.set(cacheKey, { data: diskCached, expiresAt: Date.now() + CACHE_TTL_MS });
+          return res.status(200).json({ simplified: diskCached, detailed: diskCached });
+        }
 
         const prompt = `You are a senior English linguistics professor. Expand the following plain-English grammar note into a precise, detailed grammatical explanation (2-3 sentences). Name the exact grammatical rule, syntactic structure, or part-of-speech mechanism involved and briefly explain why other forms fail.
 - Topic: ${safeTopic}${safeSentence ? `\n- Sentence: "${safeSentence}"` : ""}${safeCorrection ? `\n- Correct Form: "${safeCorrection}"` : ""}
 - Plain-English Summary: "${safeExpl}"
 - Detailed Grammatical Explanation:`;
 
-        const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-          return await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              thinkingConfig: getFastThinkingConfig(model),
-            },
-          });
+        const response = await generateAiText({
+          prompt,
+          maxCompletionTokens: 350,
         });
 
         const detailed = (response.text || "").trim();
         responseCache.set(cacheKey, { data: detailed, expiresAt: Date.now() + CACHE_TTL_MS });
+        persistentAiCache.set(cacheKey, detailed, CACHE_TTL_MS);
         return res.status(200).json({ simplified: detailed, detailed });
       }
 
       case "generateSpeech": {
-        const { text } = payload;
+        const { text, voice } = payload;
         if (!text || typeof text !== "string") {
           return res.status(400).json({ error: "Missing 'text' parameter for speech generation." });
         }
 
         const safeText = text.slice(0, 600).trim();
-        const cacheKey = `tts_v3:${safeText}`;
+        const activeProvider = resolveGroqApiKey() ? `orpheus_${voice || process.env.GROQ_TTS_VOICE || "troy"}` : "gemini_kore";
+        const cacheKey = `tts_v4:${activeProvider}:${safeText}`;
 
         const cached = responseCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) {
           return res.status(200).json({ base64Audio: cached.data });
         }
+        const diskCachedAudio = persistentAiCache.get(cacheKey);
+        if (diskCachedAudio) {
+          responseCache.set(cacheKey, { data: diskCachedAudio, expiresAt: Date.now() + CACHE_TTL_MS });
+          return res.status(200).json({ base64Audio: diskCachedAudio });
+        }
 
-        const base64Audio = await callWithModelRotation(TTS_MODELS, async (ai, model) => {
-          const response = await ai.models.generateContent({
-            model,
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  {
-                    text: safeText,
-                    speechMetadata: {
-                      style:
-                        "Clear, warm, articulate English teacher. Read only the exact text naturally and stop cleanly in silence with no trailing breath or sound.",
-                    },
-                  },
-                ],
-              },
-            ],
-            config: {
-              responseModalities: [Modality.AUDIO],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: "Kore" },
-                },
-              },
-            },
-          });
-
-          const audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-          if (!audio) throw new Error("No audio data returned by TTS model.");
-          return audio;
-        });
+        const base64Audio = await generateAiSpeechBase64(safeText, voice || process.env.GROQ_TTS_VOICE);
 
         responseCache.set(cacheKey, { data: base64Audio, expiresAt: Date.now() + CACHE_TTL_MS });
+        persistentAiCache.set(cacheKey, base64Audio, CACHE_TTL_MS);
         return res.status(200).json({ base64Audio });
       }
 
@@ -1924,12 +2085,12 @@ Respond ONLY with valid JSON matching the schema.`;
 
 app.post("/api/gemini", handleGeminiRequest);
 
-// Teacher PIN Auth & Status Endpoints
-app.get("/api/teacher-auth/status", (req, res) => {
+// Teacher PIN Auth & Status Endpoints (Live AI enabled by default)
+app.get("/api/teacher-auth/status", (_req, res) => {
   res.json({
-    unlocked: isTeacherAuthorized(req),
-    pinRequired: true,
-    pinConfigured: isPinConfigured(),
+    unlocked: true,
+    pinRequired: false,
+    pinConfigured: true,
   });
 });
 
@@ -2066,7 +2227,7 @@ app.post("/api/teacher-auth/google-verify", async (req, res) => {
 
     const clientIp = getClientIp(req);
     recordPinOutcome(clientIp, true);
-    return res.json({ valid: true, sessionPin: activeTeacherPin || googleVerifiedSessionToken });
+    return res.json({ valid: true, sessionPin: activeTeacherPin || getGoogleVerifiedSessionToken() });
   } catch (err) {
     return res.status(400).json({ valid: false, error: "Could not verify Google ID token." });
   }
@@ -2173,22 +2334,19 @@ function sendViewToStudent(room: RelayRoom, playerId: number, view: any) {
 }
 
 // Clean up stale rooms older than 6 hours
-setInterval(() => {
-  const now = Date.now();
-  for (const [code, room] of rooms.entries()) {
-    if (now - room.lastActivity > 6 * 60 * 60 * 1000) {
-      rooms.delete(code);
+if (!isServerlessRuntime) {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of rooms.entries()) {
+      if (now - room.lastActivity > 6 * 60 * 60 * 1000) {
+        rooms.delete(code);
+      }
     }
-  }
-}, 10 * 60 * 1000);
+  }, 10 * 60 * 1000).unref?.();
+}
 
-// 1. Create Room (Host — requires Teacher PIN)
-app.post("/api/mp/room/create", (req, res) => {
-  if (!isTeacherAuthorized(req, req.body)) {
-    return res.status(403).json({
-      error: "Teacher PIN required to host a Live Classroom Room.",
-    });
-  }
+// 1. Create Room (Host)
+app.post("/api/mp/room/create", (_req, res) => {
   const code = generateRoomCode();
   const hostToken = crypto.randomBytes(16).toString("hex");
   const now = Date.now();
@@ -2434,14 +2592,15 @@ async function startServer() {
   const isProduction = process.env.NODE_ENV === "production";
 
   if (!isProduction) {
-    const { createServer: createViteServer } = await import("vite");
+    const vitePkg = "vite";
+    const { createServer: createViteServer } = await import(/* @vite-ignore */ vitePkg);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(__dirname, "dist");
+    const distPath = path.resolve(APP_ROOT_DIR, "dist");
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
       res.sendFile(path.resolve(distPath, "index.html"));
@@ -2592,8 +2751,253 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-  process.exit(1);
-});
+/**
+ * Serverless Web Request -> Express API dispatcher for Netlify Functions & Cloudflare Workers (`/api/*`).
+ */
+export async function dispatchServerlessApi(
+  webReq: globalThis.Request,
+  clientIp: string = "127.0.0.1",
+  env?: Record<string, any>
+): Promise<globalThis.Response> {
+  if (env && typeof env === "object") {
+    for (const [k, v] of Object.entries(env)) {
+      if (typeof v === "string" && v.length > 0) {
+        process.env[k] = v;
+      }
+    }
+    if (typeof env.TEACHER_PIN === "string" && env.TEACHER_PIN.trim().length > 0 && !activeTeacherPin) {
+      activeTeacherPin = env.TEACHER_PIN.trim();
+    }
+  }
+  const url = new URL(webReq.url);
+  let parsedBody: any = {};
+  if (webReq.method !== "GET" && webReq.method !== "HEAD") {
+    try {
+      parsedBody = await webReq.json();
+    } catch {
+      parsedBody = {};
+    }
+  }
+
+  const headersObj: Record<string, string> = {};
+  webReq.headers.forEach((value, key) => {
+    headersObj[key.toLowerCase()] = value;
+  });
+  if (!headersObj["x-forwarded-for"] && clientIp) {
+    headersObj["x-forwarded-for"] = clientIp;
+  }
+
+  const queryObj: Record<string, string> = {};
+  url.searchParams.forEach((value, key) => {
+    queryObj[key] = value;
+  });
+
+  return await new Promise<globalThis.Response>((resolve) => {
+    let statusCode = 200;
+    const respHeaders: Record<string, string> = {
+      "content-type": "application/json; charset=utf-8",
+    };
+
+    const mockReq: any = {
+      method: webReq.method,
+      url: url.pathname + url.search,
+      path: url.pathname,
+      headers: headersObj,
+      body: parsedBody,
+      query: queryObj,
+      params: {},
+      socket: { remoteAddress: clientIp },
+    };
+
+    const mockRes: any = {
+      status(code: number) {
+        statusCode = code;
+        return mockRes;
+      },
+      setHeader(name: string, value: string) {
+        respHeaders[name.toLowerCase()] = String(value);
+        return mockRes;
+      },
+      json(payload: any) {
+        resolve(
+          new globalThis.Response(JSON.stringify(payload), {
+            status: statusCode,
+            headers: respHeaders,
+          })
+        );
+        return mockRes;
+      },
+      send(payload: any) {
+        const bodyStr = typeof payload === "string" ? payload : JSON.stringify(payload);
+        resolve(
+          new globalThis.Response(bodyStr, {
+            status: statusCode,
+            headers: respHeaders,
+          })
+        );
+        return mockRes;
+      },
+    };
+
+    if (url.pathname === "/api/gemini" && webReq.method === "POST") {
+      handleGeminiRequest(mockReq, mockRes).catch((err) => {
+        resolve(
+          new globalThis.Response(
+            JSON.stringify({ fallback: true, error: err?.message || "Serverless handler error." }),
+            { status: 200, headers: respHeaders }
+          )
+        );
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/health") {
+      mockRes.json({ status: "ok", app: "grammar-casino" });
+      return;
+    }
+
+    if (url.pathname === "/api/teacher-auth/status" && webReq.method === "GET") {
+      mockRes.json({
+        unlocked: true,
+        pinRequired: false,
+        pinConfigured: true,
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/teacher-auth/verify" && webReq.method === "POST") {
+      if (!isPinConfigured()) {
+        mockRes.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+        return;
+      }
+      const reqIp = getClientIp(mockReq);
+      const lockout = checkPinLockout(reqIp);
+      if (lockout.locked) {
+        const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
+        mockRes.status(429).json({
+          valid: false,
+          error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
+        });
+        return;
+      }
+      const candidate = String(parsedBody?.pin || "").trim();
+      const valid = verifyPinMatch(candidate);
+      const outcome = recordPinOutcome(reqIp, valid);
+      if (!valid) {
+        if (outcome.locked) {
+          mockRes.status(429).json({ valid: false, error: "Too many failed PIN attempts. Locked for 15 minutes." });
+          return;
+        }
+        mockRes.status(401).json({ valid: false, error: "Incorrect Teacher PIN." });
+        return;
+      }
+      mockRes.json({ valid: true });
+      return;
+    }
+
+    if (url.pathname === "/api/teacher-auth/change-pin" && webReq.method === "POST") {
+      if (!isPinConfigured()) {
+        mockRes.status(503).json({ ok: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
+        return;
+      }
+      const reqIp = getClientIp(mockReq);
+      const lockout = checkPinLockout(reqIp);
+      if (lockout.locked) {
+        const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
+        mockRes.status(429).json({
+          ok: false,
+          error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
+        });
+        return;
+      }
+      const currentPin = String(parsedBody?.currentPin || "").trim();
+      const newPin = String(parsedBody?.newPin || "").trim();
+      const currentValid = verifyPinMatch(currentPin);
+      const outcome = recordPinOutcome(reqIp, currentValid);
+      if (!currentValid) {
+        if (outcome.locked) {
+          mockRes.status(429).json({ ok: false, error: "Too many failed PIN attempts. Locked for 15 minutes." });
+          return;
+        }
+        mockRes.status(401).json({ ok: false, error: "Current Teacher PIN is incorrect." });
+        return;
+      }
+      if (newPin.length < 4 || newPin.length > 32) {
+        mockRes.status(400).json({ ok: false, error: "New PIN must be between 4 and 32 characters." });
+        return;
+      }
+      activeTeacherPin = newPin;
+      mockRes.json({ ok: true });
+      return;
+    }
+
+    if (url.pathname === "/api/teacher-auth/google-verify" && webReq.method === "POST") {
+      (async () => {
+        try {
+          const idToken = String(parsedBody?.idToken || "").trim();
+          const parts = idToken.split(".");
+          if (!idToken || parts.length !== 3) {
+            mockRes.status(400).json({ valid: false, error: "Invalid Google ID token." });
+            return;
+          }
+          const [headerB64, payloadB64, signatureB64] = parts;
+          const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf-8"));
+          const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
+          const certs = await getGoogleSecureTokenCerts();
+          const cert = certs[header?.kid];
+          if (!cert || header?.alg !== "RS256") {
+            mockRes.status(401).json({ valid: false, error: "Unrecognized token signature key." });
+            return;
+          }
+          const verifier = crypto.createVerify("RSA-SHA256");
+          verifier.update(`${headerB64}.${payloadB64}`);
+          verifier.end();
+          const signatureValid = verifier.verify(cert, Buffer.from(signatureB64, "base64url"));
+          if (!signatureValid) {
+            mockRes.status(401).json({ valid: false, error: "Invalid token signature." });
+            return;
+          }
+          const email = String(claims?.email || "").trim().toLowerCase();
+          const emailVerified = Boolean(claims?.email_verified);
+          const exp = Number(claims?.exp || 0) * 1000;
+          const aud = String(claims?.aud || "");
+          const iss = String(claims?.iss || "");
+          if (
+            !emailVerified ||
+            email !== "teacher.siqueira@gmail.com" ||
+            exp < Date.now() ||
+            aud !== "cool-citadel-456408-k5" ||
+            iss !== "https://securetoken.google.com/cool-citadel-456408-k5"
+          ) {
+            mockRes.status(403).json({
+              valid: false,
+              error: "Access denied: Only teacher.siqueira@gmail.com can unlock Live AI via Google Sign-In.",
+            });
+            return;
+          }
+          recordPinOutcome(getClientIp(mockReq), true);
+          mockRes.json({ valid: true, sessionPin: activeTeacherPin || getGoogleVerifiedSessionToken() });
+        } catch {
+          mockRes.status(400).json({ valid: false, error: "Could not verify Google ID token." });
+        }
+      })();
+      return;
+    }
+
+    resolve(
+      new globalThis.Response(JSON.stringify({ error: `Not found: ${url.pathname}` }), {
+        status: 404,
+        headers: respHeaders,
+      })
+    );
+  });
+}
+
+if (!isServerlessRuntime) {
+  startServer().catch((err) => {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  });
+}
+
 

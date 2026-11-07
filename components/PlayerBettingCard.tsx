@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { AlertTriangle, Check, Lock, Pencil, Snowflake, X } from 'lucide-react';
 import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
 import ActionButton from './ActionButton';
@@ -98,6 +98,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const isBlocked = isEliminated || isFrozen || !canAct;
   const effectiveBetCap = isBetCapped ? betCapAmount : Infinity;
   const effectiveMinBet = isHighRoller ? Math.min(player.money, Math.max(1, minBetAmount)) : 0;
+  const lastCorrectionTapRef = useRef<number>(0);
 
   const { remainingMs, fraction, isWarning } = useTurnCountdown(
     timerEnabled ? turnTimer : undefined,
@@ -1607,8 +1608,20 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           onBetChange(player.id, 'userCorrection', currentSentenceText);
                         }
                       }}
+                      onTouchEnd={() => {
+                        const now = Date.now();
+                        if (now - lastCorrectionTapRef.current <= 350) {
+                          lastCorrectionTapRef.current = 0;
+                          if (!isBlocked && currentSentenceText) {
+                            playSound('click');
+                            onBetChange(player.id, 'userCorrection', currentSentenceText);
+                          }
+                        } else {
+                          lastCorrectionTapRef.current = now;
+                        }
+                      }}
                       disabled={isBlocked}
-                      placeholder="Write the corrected sentence (double-click to copy the original)"
+                      placeholder="Write the corrected sentence (double-click or double-tap to copy the original)"
                       className="w-full bg-gc-line/[0.05] border border-gc-line/[0.2] rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-20 text-gc-body"
                     />
                  </div>
@@ -1743,8 +1756,20 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           onBetChange(player.id, 'userCorrection', currentSentenceText);
                         }
                       }}
+                      onTouchEnd={() => {
+                        const now = Date.now();
+                        if (now - lastCorrectionTapRef.current <= 350) {
+                          lastCorrectionTapRef.current = 0;
+                          if (!isBlocked && currentSentenceText) {
+                            playSound('click');
+                            onBetChange(player.id, 'userCorrection', currentSentenceText);
+                          }
+                        } else {
+                          lastCorrectionTapRef.current = now;
+                        }
+                      }}
                       disabled={isBlocked}
-                      placeholder="Rewrite the sentence without the mistake for a bonus (double-click to copy it here)"
+                      placeholder="Rewrite the sentence without the mistake for a bonus (double-click or double-tap to copy it here)"
                       className="w-full bg-gc-line/[0.05] border border-gc-line/[0.2] rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-24 text-gc-lead"
                     />
                  </div>

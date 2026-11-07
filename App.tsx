@@ -402,6 +402,21 @@ export function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [orpheusVoice, setOrpheusVoice] = useState<GeminiService.OrpheusVoiceId>(() => {
+    try {
+      const saved = localStorage.getItem('grammar_casino_orpheus_voice_v2');
+      if (saved && GeminiService.ORPHEUS_VOICE_OPTIONS.some(v => v.id === saved)) {
+        return saved as GeminiService.OrpheusVoiceId;
+      }
+    } catch {}
+    return GeminiService.DEFAULT_ORPHEUS_VOICE;
+  });
+  const handleOrpheusVoiceChange = useCallback((nextVoice: GeminiService.OrpheusVoiceId) => {
+    setOrpheusVoice(nextVoice);
+    try {
+      localStorage.setItem('grammar_casino_orpheus_voice_v2', nextVoice);
+    } catch {}
+  }, []);
   const [ttsAudioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 }));
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -929,8 +944,8 @@ export function App() {
     };
 
     try {
-        // Try Gemini TTS
-        const base64Audio = await GeminiService.generateSpeech(sanitizedText);
+        // Try Orpheus / AI TTS (used for both challenge sentences and grammar explanations)
+        const base64Audio = await GeminiService.generateSpeech(sanitizedText, orpheusVoice);
         
         if (ttsAudioContext.state === 'suspended') {
             await ttsAudioContext.resume();
@@ -946,10 +961,10 @@ export function App() {
         source.start();
 
     } catch (e) { 
-      console.warn("Gemini TTS failed, falling back to browser TTS:", e); 
+      console.warn("AI TTS failed, falling back to browser TTS:", e); 
       fallbackSpeak();
     } 
-  }, [isMuted, ttsVoices, isSpeaking, ttsAudioContext]);
+  }, [isMuted, ttsVoices, isSpeaking, ttsAudioContext, orpheusVoice]);
 
   // --- Betting Turn Timer Helpers, Effects & Controls ---
   const isPlayerFrozen = useCallback((playerId: number): boolean => {
@@ -3409,21 +3424,8 @@ export function App() {
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
-    if (!desktopStatus.isDesktop && !GeminiService.isTeacherPinUnlocked()) {
-      playSound('click');
-      pendingCreateRoomAfterPinRef.current = true;
-      setTeacherPinInput('');
-      setNewTeacherPinInput('');
-      setShowChangePinForm(false);
-      setTeacherPinNotice({
-        type: 'info',
-        text: 'Opening a live room needs the teacher PIN. Enter it below.',
-      });
-      setShowTeacherPinModal(true);
-      return;
-    }
     await startHostMultiplayerRoom();
-  }, [desktopStatus.isDesktop, playSound]);
+  }, []);
 
   const handleCloseMpRoom = useCallback(() => {
     playSound('click');
@@ -3439,9 +3441,6 @@ export function App() {
     setMpStudentPendingWheel({});
     setMpStudentNotifications({});
     setShowMpLobbyModal(false);
-    // Automatically lock Teacher PIN when closing the live room so students or subsequent sessions cannot re-host without the PIN
-    GeminiService.clearSavedTeacherPin();
-    setIsTeacherAiUnlocked(false);
     prefetchRef.current = null;
   }, [playSound]);
 
@@ -3985,9 +3984,6 @@ export function App() {
              if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
         } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
         setWinner(finalWinnerPlayer);
-        // Automatically lock Live Mode when the game finishes so starting a new live game requires the Teacher PIN
-        GeminiService.clearSavedTeacherPin();
-        setIsTeacherAiUnlocked(false);
         prefetchRef.current = null;
         setStep('GAME_OVER');
     } else {
@@ -4068,9 +4064,6 @@ export function App() {
          if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
     }
     setWinner(finalWinnerPlayer);
-    // Automatically lock Live Mode when the game ends early so starting a new live game requires the Teacher PIN
-    GeminiService.clearSavedTeacherPin();
-    setIsTeacherAiUnlocked(false);
     prefetchRef.current = null;
     setStep('GAME_OVER');
   }, [players, gameMode, targetAmount, playSound]);
@@ -4078,7 +4071,7 @@ export function App() {
   const handleRestartGame = useCallback(() => {
     localStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
-    // Automatically close any open multiplayer room and lock Teacher PIN on restart / returning to lobby
+    // Automatically close any open multiplayer room on restart / returning to lobby
     if (mpControllerRef.current) {
       mpControllerRef.current.destroy();
       mpControllerRef.current = null;
@@ -4091,8 +4084,6 @@ export function App() {
     setMpStudentPendingWheel({});
     setMpStudentNotifications({});
     setShowMpLobbyModal(false);
-    GeminiService.clearSavedTeacherPin();
-    setIsTeacherAiUnlocked(false);
     setStep('PLAYER_SETUP');
     setSettingsPart(1);
     prefetchRef.current = null;
@@ -5756,6 +5747,19 @@ export function App() {
                                     <Volume2 className="w-3 h-3 shrink-0" aria-hidden="true" />
                                     <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                   </button>
+                                  <select
+                                    value={orpheusVoice}
+                                    onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
+                                    aria-label="Orpheus TTS voice for challenge sentence"
+                                    title="Select Orpheus English voice"
+                                    className="h-7 px-2 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                  >
+                                    {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
+                                      <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
+                                        {v.label} ({v.gender})
+                                      </option>
+                                    ))}
+                                  </select>
                                   <button
                                     type="button"
                                     onClick={handleToggleSettingsDeckExpanded}
@@ -5805,6 +5809,19 @@ export function App() {
                                         <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                                         <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                       </button>
+                                      <select
+                                        value={orpheusVoice}
+                                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
+                                        aria-label="Orpheus TTS voice"
+                                        title="Select Orpheus English voice"
+                                        className="h-8 px-2.5 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                      >
+                                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
+                                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
+                                            {v.label} ({v.gender})
+                                          </option>
+                                        ))}
+                                      </select>
                                   </div>
                                 )}
 
@@ -6706,6 +6723,19 @@ export function App() {
                           <Volume2 className="w-4 h-4 shrink-0" aria-hidden="true" />
                           {isSpeaking ? 'Speaking…' : 'Listen'}
                       </button>
+                      <select
+                        value={orpheusVoice}
+                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
+                        aria-label="Orpheus TTS voice for explanation"
+                        title="Select Orpheus English voice"
+                        className={`${chipButton} pr-3 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn`}
+                      >
+                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
+                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
+                            Voice: {v.label} ({v.gender})
+                          </option>
+                        ))}
+                      </select>
                       {currentSentence?.explanation && (
                         <button 
                             onClick={handleSimplifyExplanation} 
@@ -7052,14 +7082,12 @@ export function App() {
         playSound={playSound}
         isDarkMode={isDarkMode}
         onToggleTheme={toggleTheme}
-        onExitStudentMode={() => {
+          onExitStudentMode={() => {
           if (typeof window !== 'undefined' && window.location.search.includes('room=')) {
             const url = new URL(window.location.href);
             url.searchParams.delete('room');
             window.history.replaceState({}, '', url.toString());
           }
-          GeminiService.clearSavedTeacherPin();
-          setIsTeacherAiUnlocked(false);
           setIsStudentControllerMode(false);
         }}
       />
@@ -7133,26 +7161,6 @@ export function App() {
             <span className="hidden sm:inline">Cloud</span>
           </button>
 
-          {!desktopStatus.isDesktop && (
-            <button
-              type="button"
-              onClick={handleOpenTeacherPinModal}
-              className={`h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold ${isTeacherAiUnlocked ? '!border-gc-win/50' : ''}`}
-              title={
-                isTeacherAiUnlocked
-                  ? 'Live Gemini AI Unlocked (Teacher Mode) — Click to lock or manage Teacher PIN'
-                  : 'Offline Curated Bank Mode (0 API usage) — Click to enter Teacher PIN or Sign In with Google for Live AI'
-              }
-            >
-              <span className={`w-2 h-2 rounded-full ${isTeacherAiUnlocked ? 'bg-gc-win animate-pulse' : 'bg-gc-gold'}`} />
-              {isTeacherAiUnlocked ? <Sparkles className="w-4 h-4 shrink-0" aria-hidden="true" /> : <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />}
-              <span className="sr-only sm:not-sr-only">{isTeacherAiUnlocked ? 'Live AI' : 'Offline bank'}</span>
-              {isTeacherAiUnlocked
-                ? <LockOpen className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
-                : <Lock className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />}
-            </button>
-          )}
-
           <button
             type="button"
             onClick={() => {
@@ -7211,6 +7219,23 @@ export function App() {
               {isMuted ? <VolumeX className="w-5 h-5" aria-hidden="true" /> : <Volume2 className="w-5 h-5" aria-hidden="true" />}
             </button>
           )}
+
+          <select
+            value={orpheusVoice}
+            onChange={(e) => {
+              playSound('click');
+              handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId);
+            }}
+            aria-label="Croupier TTS voice"
+            title="Select Orpheus English TTS voice (used for challenge sentences and grammar explanations)"
+            className="h-11 px-2.5 rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink text-gc-cap font-semibold shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+          >
+            {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
+              <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
+                🎙️ {v.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="main-content-wrapper w-full flex flex-col justify-center items-center py-12 md:py-16"> 
@@ -7594,195 +7619,6 @@ export function App() {
           onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
           playSound={playSound}
         />
-      )}
-      {showTeacherPinModal && (
-        <Modal
-          title={isTeacherAiUnlocked ? 'Teacher tools are on' : 'Unlock teacher tools'}
-          onClose={() => setShowTeacherPinModal(false)}
-          playSound={playSound}
-          hideOkButton
-        >
-          <div className="space-y-4 text-left">
-            <div className={`p-3.5 rounded-gc border flex items-start gap-3 ${isTeacherAiUnlocked ? 'bg-gc-win/10 border-gc-win/40' : 'bg-gc-line/[0.04] border-gc-line/[0.12]'}`}>
-              <span className="text-[24px] leading-none mt-0.5" aria-hidden="true">{isTeacherAiUnlocked ? '✨' : '📚'}</span>
-              <div className="text-gc-small text-gc-quiet leading-relaxed">
-                {isTeacherAiUnlocked ? (
-                  <>
-                    <strong className="block text-gc-body font-bold text-gc-ink mb-0.5">The live room and AI sentences are on for this game</strong>
-                    You can open a live room for phones and use Gemini for new sentences, answer checks, hints and the natural voice. For safety this is never saved in the browser: it locks again when the game ends, when you go back to the lobby, or when the page is reloaded or its address changes.
-                  </>
-                ) : (
-                  <>
-                    <strong className="block text-gc-body font-bold text-gc-ink mb-0.5">You're playing with the free offline bank</strong>
-                    Without the teacher PIN, the game uses ready-made sentences (no Gemini use) and can't open a live room. Sign in or enter the PIN to turn on the live room and AI sentences for this game.
-                  </>
-                )}
-              </div>
-            </div>
-
-            {teacherPinNotice && (
-              <p
-                role="status"
-                className={`flex items-start gap-2 text-gc-small font-semibold ${
-                  teacherPinNotice.type === 'success' ? 'text-gc-win' : teacherPinNotice.type === 'error' ? 'text-gc-loss' : 'text-gc-info'
-                }`}
-              >
-                {teacherPinNotice.type === 'success'
-                  ? <Check className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                  : teacherPinNotice.type === 'error'
-                    ? <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                    : <Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />}
-                {teacherPinNotice.text}
-              </p>
-            )}
-
-            {!isTeacherAiUnlocked ? (
-              <div className="space-y-3">
-                <div className="p-3.5 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-gc-body font-bold text-gc-ink">Sign in with Google</p>
-                    <p className="text-gc-small text-gc-quiet">For the teacher's Google account. It also opens the cloud saves.</p>
-                  </div>
-                  <ActionButton
-                    type="button"
-                    onClick={handleSignInWithGoogle}
-                    variant="ghost"
-                    disabled={isSigningInGoogle || isVerifyingTeacherPin}
-                    className="h-11 px-4 text-gc-small font-bold"
-                  >
-                    {isSigningInGoogle ? 'Signing in…' : 'Sign in with Google'}
-                  </ActionButton>
-                </div>
-
-                <div className="flex items-center gap-3 text-gc-cap font-semibold text-gc-quiet" aria-hidden="true">
-                  <span className="flex-1 h-px bg-gc-line/[0.14]" />or<span className="flex-1 h-px bg-gc-line/[0.14]" />
-                </div>
-
-                <form onSubmit={handleUnlockTeacherPin} className="space-y-3">
-                  <div>
-                    <label htmlFor="teacher-pin" className="block text-gc-small font-bold text-gc-ink mb-1.5">Teacher PIN</label>
-                    <input
-                      id="teacher-pin"
-                      type="password"
-                      value={teacherPinInput}
-                      onChange={(e) => setTeacherPinInput(e.target.value)}
-                      placeholder="Enter the PIN"
-                      autoFocus
-                      autoComplete="off"
-                      className="w-full h-12 px-4 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-lead text-gc-ink tracking-[0.2em] tabular-nums placeholder:tracking-normal placeholder:text-gc-body placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30"
-                    />
-                  </div>
-                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
-                    <ActionButton
-                      type="button"
-                      onClick={() => setShowTeacherPinModal(false)}
-                      playSound={playSound}
-                      variant="ghost"
-                      className="h-12 px-5 text-gc-body font-bold"
-                    >
-                      Keep playing offline
-                    </ActionButton>
-                    <ActionButton
-                      type="submit"
-                      playSound={playSound}
-                      variant="primary"
-                      disabled={!teacherPinInput.trim() || isVerifyingTeacherPin}
-                      className="h-12 px-7 text-gc-body"
-                    >
-                      {isVerifyingTeacherPin ? 'Checking…' : 'Unlock'}
-                    </ActionButton>
-                  </div>
-                </form>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {teacherGoogleEmail && (
-                  <p className="px-3 py-2 rounded-gc-sm bg-gc-win/10 border border-gc-win/30 text-gc-small text-gc-ink flex flex-wrap items-center justify-between gap-2">
-                    <span className="min-w-0 break-all">Signed in as <strong>{teacherGoogleEmail}</strong></span>
-                    <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">Google verified</span>
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <ActionButton
-                    type="button"
-                    onClick={() => {
-                      setShowTeacherPinModal(false);
-                      setShowCloudModal(true);
-                    }}
-                    playSound={playSound}
-                    variant="ghost"
-                    className="h-11 px-4 text-gc-small font-bold"
-                  >
-                    Open cloud saves
-                  </ActionButton>
-                  <ActionButton
-                    type="button"
-                    onClick={() => {
-                      playSound('click');
-                      setShowChangePinForm((prev) => !prev);
-                      setTeacherPinNotice(null);
-                    }}
-                    variant="ghost"
-                    aria-expanded={showChangePinForm}
-                    className="h-11 px-4 text-gc-small font-bold"
-                  >
-                    {showChangePinForm ? 'Keep the current PIN' : 'Change the PIN'}
-                  </ActionButton>
-                  <ActionButton
-                    type="button"
-                    onClick={handleLockTeacherPin}
-                    variant="ghost"
-                    className="h-11 px-4 text-gc-small font-bold text-gc-loss border-gc-loss/40"
-                  >
-                    Lock and play offline
-                  </ActionButton>
-                </div>
-
-                {showChangePinForm && (
-                  <form
-                    onSubmit={handleChangeTeacherPin}
-                    className="p-3.5 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-3"
-                  >
-                    <div>
-                      <label htmlFor="teacher-new-pin" className="block text-gc-small font-bold text-gc-ink">New teacher PIN</label>
-                      <p className="text-gc-cap text-gc-quiet">4 to 32 characters.</p>
-                      <input
-                        id="teacher-new-pin"
-                        type="password"
-                        value={newTeacherPinInput}
-                        onChange={(e) => setNewTeacherPinInput(e.target.value)}
-                        placeholder="New PIN"
-                        autoComplete="new-password"
-                        className="mt-2 w-full h-11 px-3 rounded-gc-sm border border-gc-line/[0.2] bg-gc-bg/60 text-gc-body text-gc-ink tabular-nums placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30"
-                      />
-                    </div>
-                    <div className="flex justify-end">
-                      <ActionButton
-                        type="submit"
-                        variant="primary"
-                        disabled={newTeacherPinInput.trim().length < 4 || isVerifyingTeacherPin}
-                        className="h-11 px-5 text-gc-small"
-                      >
-                        {isVerifyingTeacherPin ? 'Saving…' : 'Save the new PIN'}
-                      </ActionButton>
-                    </div>
-                  </form>
-                )}
-
-                <div className="flex justify-end pt-3 border-t border-gc-line/[0.12]">
-                  <ActionButton
-                    onClick={() => setShowTeacherPinModal(false)}
-                    playSound={playSound}
-                    variant="primary"
-                    className="h-12 px-8 text-gc-body"
-                  >
-                    Done
-                  </ActionButton>
-                </div>
-              </div>
-            )}
-          </div>
-        </Modal>
       )}
       {showCloudModal && (
         <CloudManagerModal

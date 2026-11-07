@@ -129,8 +129,33 @@ function getStatus() {
 
 // --- Gemini Client & Rotation Setup ---
 const TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
-const TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+const TTS_MODELS = [
+  'gemini-3.8-flash-lite-tts',
+  'gemini-3.8-flash-tts',
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-preview-tts',
+];
 const modelCooldownUntil = new Map();
+
+function mapOrpheusToGeminiVoice(orpheusVoice) {
+  const clean = String(orpheusVoice || 'troy').trim().toLowerCase();
+  switch (clean) {
+    case 'troy':
+      return 'Puck';
+    case 'austin':
+      return 'Charon';
+    case 'daniel':
+      return 'Fenrir';
+    case 'autumn':
+      return 'Kore';
+    case 'diana':
+      return 'Aoede';
+    case 'hannah':
+      return 'Leda';
+    default:
+      return 'Puck';
+  }
+}
 
 function getFastThinkingConfig(model) {
   if (model === 'gemini-3.8-flash') {
@@ -256,6 +281,246 @@ async function callWithModelRotation(models, runner, customKey) {
   }
 
   throw lastError || new Error('Gemini API request failed. Please check connection and quota.');
+}
+
+// --- Groq API Support (openai/gpt-oss-120b + canopylabs/orpheus-v1-english) ---
+const GROQ_CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_SPEECH_URL = 'https://api.groq.com/openai/v1/audio/speech';
+const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
+const GROQ_TTS_MODEL = 'canopylabs/orpheus-v1-english';
+const VALID_ORPHEUS_VOICES = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'];
+
+function resolveDesktopGroqKey(customKey) {
+  const candidates = [customKey, getStoredApiKey(), process.env.GROQ_API_KEY, process.env.GEMINI_API_KEY, process.env.API_KEY];
+  for (const raw of candidates) {
+    const trimmed = String(raw || '').trim();
+    if (trimmed && trimmed.startsWith('gsk_')) {
+      return trimmed;
+    }
+  }
+  const envGroq = String(process.env.GROQ_API_KEY || '').trim();
+  if (envGroq.length > 5) return envGroq;
+  return null;
+}
+
+function convertToStrictGroqSchema(node) {
+  if (!node || typeof node !== 'object') return { type: 'string' };
+  const rawType = String(node.type || 'OBJECT').toLowerCase();
+  const result = { type: rawType };
+  if (node.description) result.description = node.description;
+  if (rawType === 'object') {
+    const props = node.properties || {};
+    const convertedProps = {};
+    const allKeys = Object.keys(props);
+    for (const k of allKeys) {
+      convertedProps[k] = convertToStrictGroqSchema(props[k]);
+    }
+    result.properties = convertedProps;
+    result.required = allKeys;
+    result.additionalProperties = false;
+  } else if (rawType === 'array') {
+    result.items = convertToStrictGroqSchema(node.items || { type: 'string' });
+  }
+  return result;
+}
+
+function extractCleanJson(raw) {
+  const trimmed = String(raw || '').trim();
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence && fence[1]) return fence[1].trim();
+  const first = trimmed.indexOf('{');
+  const last = trimmed.lastIndexOf('}');
+  if (first !== -1 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
+}
+
+function chunkTextForOrpheus(text, maxChars = 190) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxChars) return [normalized];
+  const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const chunks = [];
+  let current = '';
+
+  const splitWords = (seg) => {
+    const words = seg.split(/\s+/).filter(Boolean);
+    for (const w of words) {
+      if (w.length > maxChars) {
+        if (current) { chunks.push(current); current = ''; }
+        for (let i = 0; i < w.length; i += maxChars) chunks.push(w.slice(i, i + maxChars));
+      } else if (!current) {
+        current = w;
+      } else if (current.length + 1 + w.length <= maxChars) {
+        current = `${current} ${w}`;
+      } else {
+        chunks.push(current);
+        current = w;
+      }
+    }
+  };
+
+  for (const s of sentences) {
+    if (s.length <= maxChars) {
+      if (!current) current = s;
+      else if (current.length + 1 + s.length <= maxChars) current = `${current} ${s}`;
+      else { chunks.push(current); current = s; }
+    } else {
+      if (current) { chunks.push(current); current = ''; }
+      splitWords(s);
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function stitchWavBuffersCjs(wavBuffers) {
+  if (!wavBuffers || wavBuffers.length === 0) throw new Error('No WAV buffers to stitch.');
+  if (wavBuffers.length === 1) return wavBuffers[0];
+  const parsed = wavBuffers.map((buf) => {
+    let audioFormat = 1, numChannels = 1, sampleRate = 24000, byteRate = 48000, blockAlign = 2, bitsPerSample = 16;
+    let pcmData = null;
+    let offset = 12;
+    while (offset + 8 <= buf.length) {
+      const id = buf.toString('ascii', offset, offset + 4);
+      const sz = buf.readUInt32LE(offset + 4);
+      const start = offset + 8;
+      if (id === 'fmt ' && start + 16 <= buf.length) {
+        audioFormat = buf.readUInt16LE(start);
+        numChannels = buf.readUInt16LE(start + 2);
+        sampleRate = buf.readUInt32LE(start + 4);
+        byteRate = buf.readUInt32LE(start + 8);
+        blockAlign = buf.readUInt16LE(start + 12);
+        bitsPerSample = buf.readUInt16LE(start + 14);
+      } else if (id === 'data') {
+        pcmData = buf.subarray(start, Math.min(buf.length, start + sz));
+        break;
+      }
+      offset = start + sz + (sz % 2);
+    }
+    if (!pcmData) pcmData = buf.subarray(44);
+    return { audioFormat, numChannels, sampleRate, byteRate, blockAlign, bitsPerSample, pcmData };
+  });
+  const first = parsed[0];
+  const combinedPcm = Buffer.concat(parsed.map((p) => p.pcmData));
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 4, 'ascii');
+  header.writeUInt32LE(36 + combinedPcm.length, 4);
+  header.write('WAVE', 8, 4, 'ascii');
+  header.write('fmt ', 12, 4, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(first.audioFormat, 20);
+  header.writeUInt16LE(first.numChannels, 22);
+  header.writeUInt32LE(first.sampleRate, 24);
+  header.writeUInt32LE(first.byteRate, 28);
+  header.writeUInt16LE(first.blockAlign, 32);
+  header.writeUInt16LE(first.bitsPerSample, 34);
+  header.write('data', 36, 4, 'ascii');
+  header.writeUInt32LE(combinedPcm.length, 40);
+  return Buffer.concat([header, combinedPcm]);
+}
+
+async function callGroqDesktopText({ apiKey, prompt, responseSchema, schemaName = 'desktop_schema', maxCompletionTokens = 1000 }) {
+  assertNetworkOnline();
+  let lastErr = null;
+  for (const model of GROQ_TEXT_MODELS) {
+    let useStrict = Boolean(responseSchema);
+    let attempts = 2;
+    while (attempts > 0) {
+      attempts--;
+      try {
+        const body = {
+          model,
+          messages: [
+            { role: 'system', content: 'You are an expert Cambridge English linguistics examiner.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.6,
+          max_completion_tokens: maxCompletionTokens,
+        };
+        if (model.startsWith('openai/gpt-oss')) {
+          body.reasoning_effort = 'low';
+        }
+        if (responseSchema) {
+          body.response_format = useStrict
+            ? { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema: convertToStrictGroqSchema(responseSchema) } }
+            : { type: 'json_object' };
+        }
+        const res = await fetch(GROQ_CHAT_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          if (res.status === 400 && useStrict && responseSchema) {
+            useStrict = false;
+            attempts++;
+            continue;
+          }
+          const err = new Error(`Groq API Error (${res.status}): ${errText.slice(0, 240)}`);
+          err.status = res.status;
+          throw err;
+        }
+        const data = await res.json();
+        const raw = data?.choices?.[0]?.message?.content || '';
+        const text = responseSchema ? extractCleanJson(raw) : String(raw).trim();
+        if (!text) throw new Error('Empty response returned by Groq.');
+        return { text };
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+  }
+  throw lastErr || new Error('Groq text request failed.');
+}
+
+async function callGroqDesktopSpeech(apiKey, text, requestedVoice) {
+  assertNetworkOnline();
+  const chunks = chunkTextForOrpheus(text, 190);
+  if (chunks.length === 0) throw new Error('Empty speech text.');
+  const rawVoice = String(requestedVoice || process.env.GROQ_TTS_VOICE || 'troy').trim().toLowerCase();
+  const voice = VALID_ORPHEUS_VOICES.includes(rawVoice) ? rawVoice : 'troy';
+  const wavBuffers = [];
+  for (const chunk of chunks) {
+    const res = await fetch(GROQ_SPEECH_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: GROQ_TTS_MODEL,
+        input: chunk,
+        voice,
+        response_format: 'wav',
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      const err = new Error(`Groq Orpheus TTS Error (${res.status}): ${errText.slice(0, 240)}`);
+      err.status = res.status;
+      throw err;
+    }
+    const ab = await res.arrayBuffer();
+    wavBuffers.push(Buffer.from(ab));
+  }
+  return stitchWavBuffersCjs(wavBuffers).toString('base64');
+}
+
+async function generateDesktopText({ prompt, responseSchema, schemaName, maxCompletionTokens, customKey }) {
+  const groqKey = resolveDesktopGroqKey(customKey);
+  if (groqKey) {
+    return await callGroqDesktopText({ apiKey: groqKey, prompt, responseSchema, schemaName, maxCompletionTokens });
+  }
+  return await callWithModelRotation(
+    TEXT_MODELS,
+    async (ai, model) => {
+      const config = { thinkingConfig: getFastThinkingConfig(model) };
+      if (responseSchema) {
+        config.responseMimeType = 'application/json';
+        config.responseSchema = responseSchema;
+      }
+      return await ai.models.generateContent({ model, contents: prompt, config });
+    },
+    customKey
+  );
 }
 
 // --- CEFR Linguistic Profiles ---
@@ -711,7 +976,7 @@ const batchClozeVerificationSchema = {
           marks: { type: Type.INTEGER },
           feedback: { type: Type.STRING },
         },
-        required: ['word', 'isCorrect', 'marks', 'feedback'],
+        required: ['word', 'mark1Correct', 'mark2Correct', 'isCorrect', 'marks', 'feedback'],
       },
     },
   },
@@ -919,16 +1184,11 @@ Respond ONLY with valid JSON matching the schema.`;
   }
 
   const activeSchema = getSentenceSchema(resolvedQuestionType);
-  const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-    return await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: activeSchema,
-        thinkingConfig: getFastThinkingConfig(model),
-      },
-    });
+  const response = await generateDesktopText({
+    prompt,
+    responseSchema: activeSchema,
+    schemaName: `sentence_${resolvedQuestionType}`,
+    maxCompletionTokens: 900,
   });
 
   const jsonText = response.text ? response.text.trim() : '';
@@ -975,15 +1235,7 @@ For example, if the error is a wrong tense, you could say "Think about when this
 If the sentence is actually correct, your hint could be "Sometimes, things are just as they seem."
 Respond ONLY with the hint text.`;
 
-  const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-    return await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        thinkingConfig: getFastThinkingConfig(model),
-      },
-    });
-  });
+  const response = await generateDesktopText({ prompt, maxCompletionTokens: 200 });
 
   const hint = (response.text || '').trim();
   return { hint };
@@ -1005,16 +1257,11 @@ A "valid fix" means it's grammatically correct and fixes the main error, even if
 However, if the player's correction introduces a *new* grammatical error, it is NOT a valid fix.
 Respond ONLY with the JSON object matching the provided schema.`;
 
-  const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-    return await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: verificationSchema,
-        thinkingConfig: getFastThinkingConfig(model),
-      },
-    });
+  const response = await generateDesktopText({
+    prompt,
+    responseSchema: verificationSchema,
+    schemaName: 'verify_correction_schema',
+    maxCompletionTokens: 350,
   });
 
   const jsonText = response.text ? response.text.trim() : '';
@@ -1121,16 +1368,11 @@ STRICT RULES:
 
 Respond ONLY with valid JSON matching the schema.`;
 
-  const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-    return await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: batchClozeVerificationSchema,
-        thinkingConfig: getFastThinkingConfig(model),
-      },
-    });
+  const response = await generateDesktopText({
+    prompt,
+    responseSchema: batchClozeVerificationSchema,
+    schemaName: 'batch_cloze_verification_schema',
+    maxCompletionTokens: 1200,
   });
 
   const jsonText = response.text ? response.text.trim() : '';
@@ -1180,27 +1422,34 @@ async function simplifyExplanation(payload) {
 - Plain-English Summary: "${safeExpl}"
 - Detailed Grammatical Explanation:`;
 
-  const response = await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
-    return await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        thinkingConfig: getFastThinkingConfig(model),
-      },
-    });
-  });
+  const response = await generateDesktopText({ prompt, maxCompletionTokens: 350 });
 
   const detailed = (response.text || '').trim();
   return { simplified: detailed, detailed };
 }
 
 async function generateSpeech(payload) {
-  const { text } = payload || {};
+  const { text, voice } = payload || {};
   if (!text || typeof text !== 'string') {
     throw new Error("Missing 'text' parameter for speech generation.");
   }
 
   const safeText = text.slice(0, 600).trim();
+  const groqKey = resolveDesktopGroqKey();
+  if (groqKey) {
+    try {
+      const base64Audio = await callGroqDesktopSpeech(groqKey, safeText, voice);
+      return { base64Audio };
+    } catch (groqErr) {
+      const storedKey = (getStoredApiKey() || '').trim();
+      if (!storedKey || storedKey.startsWith('gsk_')) {
+        throw groqErr;
+      }
+      console.warn('[GeminiHandler] Groq Orpheus TTS failed, falling back to Gemini Flash-Lite TTS:', groqErr.message);
+    }
+  }
+
+  const geminiVoiceName = mapOrpheusToGeminiVoice(voice);
   const base64Audio = await callWithModelRotation(TTS_MODELS, async (ai, model) => {
     const response = await ai.models.generateContent({
       model,
@@ -1222,7 +1471,7 @@ async function generateSpeech(payload) {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
+            prebuiltVoiceConfig: { voiceName: geminiVoiceName },
           },
         },
       },
@@ -1244,20 +1493,11 @@ async function testApiKey(testKey) {
   }
 
   try {
-    const response = await callWithModelRotation(
-      TEXT_MODELS,
-      async (ai, model) => {
-        return await ai.models.generateContent({
-          model,
-          contents: 'Respond with the word OK.',
-          config: {
-            maxOutputTokens: 5,
-            thinkingConfig: getFastThinkingConfig(model),
-          },
-        });
-      },
-      keyToTest
-    );
+    const response = await generateDesktopText({
+      prompt: 'Respond with the word OK.',
+      maxCompletionTokens: 15,
+      customKey: keyToTest,
+    });
     const text = (response.text || '').trim();
     return { valid: true, text };
   } catch (err) {

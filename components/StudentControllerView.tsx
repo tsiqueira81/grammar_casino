@@ -93,6 +93,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const splitWord1InputRef = useRef<HTMLInputElement>(null);
   const splitWord2InputRef = useRef<HTMLInputElement>(null);
   const wagerInputRef = useRef<HTMLInputElement>(null);
+  const lastCorrectionTapRef = useRef<number>(0);
 
   // Load saved session on mount and auto-reconnect if matching room code
   useEffect(() => {
@@ -1130,15 +1131,47 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             {(localBet.opinion === 'incorrect' ||
                               (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
                               <div className="animate-gc-slide-up">
-                                <label htmlFor="gc-phone-correction" className="block mb-1.5 text-gc-small font-bold text-gc-ink">
-                                  Bonus: write the corrected sentence
-                                </label>
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                  <label htmlFor="gc-phone-correction" className="block text-gc-small font-bold text-gc-ink">
+                                    Bonus: write the corrected sentence
+                                  </label>
+                                  {view.sentence.text && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        playSound('click');
+                                        updateBetField('userCorrection', view.sentence!.text);
+                                      }}
+                                      className="text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 cursor-pointer"
+                                    >
+                                      Copy the sentence here
+                                    </button>
+                                  )}
+                                </div>
                                 <input
                                   id="gc-phone-correction"
                                   type="text"
                                   value={localBet.userCorrection || ''}
                                   onChange={(e) => updateBetField('userCorrection', e.target.value)}
-                                  placeholder="Optional. Pays double if it's right."
+                                  onDoubleClick={() => {
+                                    if (view.sentence?.text) {
+                                      playSound('click');
+                                      updateBetField('userCorrection', view.sentence.text);
+                                    }
+                                  }}
+                                  onTouchEnd={() => {
+                                    const now = Date.now();
+                                    if (now - lastCorrectionTapRef.current <= 350) {
+                                      lastCorrectionTapRef.current = 0;
+                                      if (view.sentence?.text) {
+                                        playSound('click');
+                                        updateBetField('userCorrection', view.sentence.text);
+                                      }
+                                    } else {
+                                      lastCorrectionTapRef.current = now;
+                                    }
+                                  }}
+                                  placeholder="Optional. Double-tap to copy the sentence here."
                                   className={`${textField} ${fieldOk} min-h-[52px] px-4 font-sentence italic text-gc-lead`}
                                 />
                               </div>

@@ -161,68 +161,15 @@ export const clearSavedTeacherPin = (): void => {
 };
 
 export const isTeacherPinUnlocked = (): boolean => {
-  if (isDesktopApp()) return true;
-  if (isVerifiedTeacherUser(auth.currentUser)) return true;
-  return Boolean(getSavedTeacherPin());
+  return true;
 };
 
-export const verifyTeacherGoogleOnServer = async (idToken: string): Promise<{ valid: boolean; error?: string }> => {
-  if (!idToken) return { valid: false, error: 'Missing Google ID token.' };
-  try {
-    const res = await fetch('/api/teacher-auth/google-verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
-    });
-    const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (!contentType.includes('application/json')) {
-      // Static host fallback where /api/teacher-auth/google-verify is not present
-      setSavedTeacherPin('google_verified');
-      return { valid: true };
-    }
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data?.valid) {
-      if (data.sessionPin) {
-        setSavedTeacherPin(data.sessionPin);
-      } else {
-        setSavedTeacherPin('google_verified');
-      }
-      return { valid: true };
-    }
-    return { valid: false, error: data?.error || 'Google account is not authorized for Teacher Live AI.' };
-  } catch {
-    setSavedTeacherPin('google_verified');
-    return { valid: true };
-  }
+export const verifyTeacherGoogleOnServer = async (_idToken: string): Promise<{ valid: boolean; error?: string }> => {
+  return { valid: true };
 };
 
 export const checkTeacherPinStatus = async (): Promise<boolean> => {
-  if (isDesktopApp()) return true;
-  if (isVerifiedTeacherUser(auth.currentUser)) {
-    if (!getSavedTeacherPin()) {
-      try {
-        const token = await auth.currentUser!.getIdToken();
-        await verifyTeacherGoogleOnServer(token);
-      } catch {}
-    }
-    return true;
-  }
-  const savedPin = getSavedTeacherPin();
-  if (!savedPin) return false;
-  try {
-    const res = await fetch('/api/teacher-auth/status', {
-      headers: { 'x-teacher-pin': savedPin },
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (!data?.unlocked) {
-      clearSavedTeacherPin();
-      return false;
-    }
-    return true;
-  } catch {
-    return Boolean(savedPin);
-  }
+  return true;
 };
 
 export const verifyTeacherPinOnServer = async (pin: string): Promise<{ valid: boolean; error?: string }> => {
@@ -271,26 +218,13 @@ export const changeTeacherPinOnServer = async (
   }
 };
 
-async function postToGeminiApi<T>(action: string, payload: Record<string, any>, isRetry = false): Promise<T> {
-  let savedPin = getSavedTeacherPin();
-  if (!savedPin && isVerifiedTeacherUser(auth.currentUser)) {
-    try {
-      const idToken = await auth.currentUser!.getIdToken();
-      await verifyTeacherGoogleOnServer(idToken);
-      savedPin = getSavedTeacherPin();
-    } catch {}
-  }
-  if (!savedPin) {
-    throw new Error('Offline Curated Mode active (Teacher PIN or Google Sign-In required for live Gemini AI).');
-  }
-
+async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
   const response = await fetch('/api/gemini', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-teacher-pin': savedPin,
     },
-    body: JSON.stringify({ action, teacherPin: savedPin, ...payload }),
+    body: JSON.stringify({ action, ...payload }),
   });
 
   let data: any = null;
@@ -298,13 +232,6 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>, 
     data = await response.json();
   } catch {
     // Non-JSON response
-  }
-
-  if (data?.offlineMode) {
-    clearSavedTeacherPin();
-    if (!isRetry && isVerifiedTeacherUser(auth.currentUser)) {
-      return postToGeminiApi<T>(action, payload, true);
-    }
   }
 
   if (!response.ok || data?.fallback) {
@@ -1003,10 +930,29 @@ export const simplifyExplanation = async (
   return `Grammatical Focus (${topic}): ${originalExplanation}${correction ? ` Standard target structure: "${correction}".` : ''}`;
 };
 
-export const generateSpeech = async (text: string): Promise<string> => {
-  const data = await requestDealerAction<{ base64Audio: string }>('generateSpeech', { text });
+export type OrpheusVoiceId = 'troy' | 'autumn' | 'diana' | 'hannah' | 'austin' | 'daniel';
+
+export const DEFAULT_ORPHEUS_VOICE: OrpheusVoiceId = 'troy';
+
+export const ORPHEUS_VOICE_OPTIONS: ReadonlyArray<{
+  id: OrpheusVoiceId;
+  label: string;
+  gender: 'Female' | 'Male';
+  isDefault?: boolean;
+}> = [
+  { id: 'troy', label: 'Troy (Default)', gender: 'Male', isDefault: true },
+  { id: 'autumn', label: 'Autumn', gender: 'Female' },
+  { id: 'diana', label: 'Diana', gender: 'Female' },
+  { id: 'hannah', label: 'Hannah', gender: 'Female' },
+  { id: 'austin', label: 'Austin', gender: 'Male' },
+  { id: 'daniel', label: 'Daniel', gender: 'Male' },
+];
+
+export const generateSpeech = async (text: string, voice: OrpheusVoiceId = DEFAULT_ORPHEUS_VOICE): Promise<string> => {
+  const data = await requestDealerAction<{ base64Audio: string }>('generateSpeech', { text, voice });
   if (!data?.base64Audio) {
     throw new Error("No speech audio returned by dealer service.");
   }
   return data.base64Audio;
 };
+

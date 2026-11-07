@@ -10,6 +10,7 @@
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
+    "deploy:cloudflare": "vite build && wrangler pages deploy dist --project-name grammarcasino --branch main",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run"
