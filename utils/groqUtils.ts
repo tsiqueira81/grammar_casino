@@ -24,27 +24,90 @@ export function resolveOrpheusVoice(envVoice?: string): OrpheusVoice {
 }
 
 /**
- * Resolves the active Groq API key from GROQ_API_KEY, or from GEMINI_API_KEY / API_KEY / customKey
- * if the user dropped a `gsk_...` key into their existing key slot.
+ * Per-key cooldown tracker (timestamp in ms until which a rate-limited key is cooling down).
+ * When Key 1 hits a 429 limit, it is placed on cooldown so subsequent calls immediately prefer Key 2.
  */
-export function resolveGroqApiKey(customKey?: string | null): string | null {
-  const candidates = [
-    customKey,
-    process.env.GROQ_API_KEY,
-    process.env.GEMINI_API_KEY,
-    process.env.API_KEY,
+const groqKeyCooldownUntil = new Map<string, number>();
+
+export function markGroqKeyCooldown(apiKey: string, durationMs: number): void {
+  if (!apiKey) return;
+  const safeDuration = Math.max(1_000, Math.min(durationMs, 10 * 60 * 1000));
+  groqKeyCooldownUntil.set(apiKey, Date.now() + safeDuration);
+}
+
+export function clearGroqKeyCooldowns(): void {
+  groqKeyCooldownUntil.clear();
+}
+
+function parseKeyList(raw: string | null | undefined, requireGskPrefix: boolean): string[] {
+  if (!raw) return [];
+  return String(raw)
+    .split(/[,;\r\n]+/)
+    .map((s) => s.trim())
+    .filter((k) => k.length > 5 && (!requireGskPrefix || k.startsWith('gsk_')));
+}
+
+/**
+ * Resolves all configured Groq API keys from:
+ * - `customKey` (supports single key or comma-separated keys `gsk_1...,gsk_2...`)
+ * - `GROQ_API_KEY` (supports single key or comma-separated keys)
+ * - `GROQ_API_KEYS`
+ * - `GROQ_API_KEY_2`, `GROQ_API_KEY_3`, `GROQ_API_KEY_4`, `GROQ_API_KEY_5`, `GROQ_API_KEY_FALLBACK`
+ * - `GEMINI_API_KEY` / `API_KEY` (if `gsk_...` keys were placed there)
+ *
+ * Returns deduplicated keys ordered with non-cooling-down keys first.
+ */
+export function resolveGroqApiKeys(customKey?: string | null): string[] {
+  const rawList: string[] = [
+    ...parseKeyList(customKey, true),
+    ...parseKeyList(process.env.GROQ_API_KEY, false),
+    ...parseKeyList(process.env.GROQ_API_KEYS, false),
+    ...parseKeyList(process.env.GROQ_API_KEY_2, false),
+    ...parseKeyList(process.env.GROQ_API_KEY_3, false),
+    ...parseKeyList(process.env.GROQ_API_KEY_4, false),
+    ...parseKeyList(process.env.GROQ_API_KEY_5, false),
+    ...parseKeyList(process.env.GROQ_API_KEY_FALLBACK, false),
+    ...parseKeyList(process.env.GEMINI_API_KEY, true),
+    ...parseKeyList(process.env.API_KEY, true),
   ];
-  for (const raw of candidates) {
-    const trimmed = String(raw || '').trim();
-    if (trimmed && trimmed.startsWith('gsk_')) {
-      return trimmed;
+
+  const seen = new Set<string>();
+  const uniqueKeys: string[] = [];
+  for (const k of rawList) {
+    if (!seen.has(k)) {
+      seen.add(k);
+      uniqueKeys.push(k);
     }
   }
-  const explicitGroq = String(process.env.GROQ_API_KEY || '').trim();
-  if (explicitGroq.length > 5) {
-    return explicitGroq;
+
+  if (uniqueKeys.length <= 1) {
+    return uniqueKeys;
   }
-  return null;
+
+  const now = Date.now();
+  const readyKeys: string[] = [];
+  const coolingKeys: Array<{ key: string; until: number }> = [];
+
+  for (const k of uniqueKeys) {
+    const until = groqKeyCooldownUntil.get(k) || 0;
+    if (until > now) {
+      coolingKeys.push({ key: k, until });
+    } else {
+      if (until > 0) groqKeyCooldownUntil.delete(k);
+      readyKeys.push(k);
+    }
+  }
+
+  coolingKeys.sort((a, b) => a.until - b.until);
+  return [...readyKeys, ...coolingKeys.map((c) => c.key)];
+}
+
+/**
+ * Resolves the primary active Groq API key (preferring keys not currently on rate-limit cooldown).
+ */
+export function resolveGroqApiKey(customKey?: string | null): string | null {
+  const keys = resolveGroqApiKeys(customKey);
+  return keys[0] || null;
 }
 
 /**
@@ -336,7 +399,7 @@ export function extractGroqRetryDelayMs(errorMessage: string, retryAfterHeader?:
 }
 
 export interface GroqChatOptions {
-  apiKey: string;
+  apiKey?: string | string[];
   prompt: string;
   systemPrompt?: string;
   responseSchema?: any;
@@ -345,9 +408,50 @@ export interface GroqChatOptions {
   temperature?: number;
 }
 
+function buildOrderedKeyPool(explicitKey?: string | string[]): string[] {
+  const pool: string[] = [];
+  const seen = new Set<string>();
+  const addKey = (k: string) => {
+    const trimmed = k.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      pool.push(trimmed);
+    }
+  };
+
+  if (Array.isArray(explicitKey)) {
+    for (const item of explicitKey) {
+      for (const k of parseKeyList(item, false)) addKey(k);
+    }
+  } else if (typeof explicitKey === 'string' && explicitKey.trim()) {
+    for (const k of parseKeyList(explicitKey, false)) addKey(k);
+  }
+
+  for (const envKey of resolveGroqApiKeys()) {
+    addKey(envKey);
+  }
+
+  if (pool.length <= 1) return pool;
+
+  const now = Date.now();
+  const ready: string[] = [];
+  const cooling: Array<{ key: string; until: number }> = [];
+  for (const k of pool) {
+    const until = groqKeyCooldownUntil.get(k) || 0;
+    if (until > now) {
+      cooling.push({ key: k, until });
+    } else {
+      ready.push(k);
+    }
+  }
+  cooling.sort((a, b) => a.until - b.until);
+  return [...ready, ...cooling.map((c) => c.key)];
+}
+
 /**
  * Calls Groq's `openai/gpt-oss-120b` model with `reasoning_effort: "low"` (to protect the 8,000 TPM
- * free-tier limit) and strict JSON Schema enforcement when `responseSchema` is provided.
+ * free-tier limit), automatic multi-key failover (`GROQ_API_KEY`, `GROQ_API_KEY_2`, etc.),
+ * and strict JSON Schema enforcement when `responseSchema` is provided.
  */
 export async function callGroqChatCompletion(options: GroqChatOptions): Promise<{ text: string }> {
   const {
@@ -360,92 +464,117 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
     temperature = 0.6,
   } = options;
 
+  const keys = buildOrderedKeyPool(apiKey);
+  if (keys.length === 0) {
+    throw new Error('No Groq API key configured.');
+  }
+
   let lastError: any = null;
 
   for (const model of GROQ_TEXT_FALLBACK_MODELS) {
-    let useStrictSchema = Boolean(responseSchema);
-    let attempts = 2;
+    for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
+      const currentKey = keys[keyIdx];
+      const hasAnotherKey = keyIdx < keys.length - 1;
+      let useStrictSchema = Boolean(responseSchema);
+      let attempts = 2;
 
-    while (attempts > 0) {
-      attempts--;
-      try {
-        const body: Record<string, any> = {
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt },
-          ],
-          temperature,
-          max_completion_tokens: maxCompletionTokens,
-        };
+      while (attempts > 0) {
+        attempts--;
+        try {
+          const body: Record<string, any> = {
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt },
+            ],
+            temperature,
+            max_completion_tokens: maxCompletionTokens,
+          };
 
-        if (model.startsWith('openai/gpt-oss')) {
-          body.reasoning_effort = 'low';
-        }
-
-        if (responseSchema) {
-          if (useStrictSchema) {
-            body.response_format = toStrictGroqResponseFormat(responseSchema, schemaName);
-          } else {
-            body.response_format = { type: 'json_object' };
+          if (model.startsWith('openai/gpt-oss')) {
+            body.reasoning_effort = 'low';
           }
-        }
 
-        const res = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          // If json_schema is not supported by a fallback model or fails validation, retry immediately with json_object
-          if (res.status === 400 && useStrictSchema && responseSchema) {
-            useStrictSchema = false;
-            attempts++;
-            continue;
-          }
-          if (res.status === 429 && attempts > 0) {
-            const waitMs = extractGroqRetryDelayMs(errText, res.headers.get('retry-after'));
-            if (waitMs <= 8000) {
-              await new Promise((r) => setTimeout(r, waitMs));
-              continue;
+          if (responseSchema) {
+            if (useStrictSchema) {
+              body.response_format = toStrictGroqResponseFormat(responseSchema, schemaName);
+            } else {
+              body.response_format = { type: 'json_object' };
             }
           }
-          const err: any = new Error(`Groq Chat API Error (${res.status}): ${errText.slice(0, 300)}`);
-          err.status = res.status;
-          throw err;
-        }
 
-        const data: any = await res.json();
-        const rawContent = data?.choices?.[0]?.message?.content || '';
-        const text = responseSchema ? extractJsonFromText(rawContent) : String(rawContent).trim();
-        if (!text) {
-          throw new Error('Empty response content returned by Groq model.');
-        }
-        return { text };
-      } catch (e: any) {
-        lastError = e;
-        if (e?.status === 401 || e?.status === 403) {
-          throw e;
+          const res = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${currentKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            // If json_schema is not supported by a fallback model or fails validation, retry immediately with json_object
+            if (res.status === 400 && useStrictSchema && responseSchema) {
+              useStrictSchema = false;
+              attempts++;
+              continue;
+            }
+            if (res.status === 429) {
+              const waitMs = extractGroqRetryDelayMs(errText, res.headers.get('retry-after'));
+              markGroqKeyCooldown(currentKey, waitMs);
+              // If we have a fallback Groq API key, switch to it immediately with zero wait!
+              if (hasAnotherKey) {
+                const err: any = new Error(`Groq Chat API Error (429): ${errText.slice(0, 300)}`);
+                err.status = 429;
+                throw err;
+              }
+              if (attempts > 0 && waitMs <= 8000) {
+                await new Promise((r) => setTimeout(r, waitMs));
+                continue;
+              }
+            }
+            if (res.status === 401 || res.status === 403) {
+              markGroqKeyCooldown(currentKey, 5 * 60 * 1000);
+            }
+            const err: any = new Error(`Groq Chat API Error (${res.status}): ${errText.slice(0, 300)}`);
+            err.status = res.status;
+            throw err;
+          }
+
+          const data: any = await res.json();
+          const rawContent = data?.choices?.[0]?.message?.content || '';
+          const text = responseSchema ? extractJsonFromText(rawContent) : String(rawContent).trim();
+          if (!text) {
+            throw new Error('Empty response content returned by Groq model.');
+          }
+          return { text };
+        } catch (e: any) {
+          lastError = e;
+          if (e?.status === 401 || e?.status === 403) {
+            if (hasAnotherKey) {
+              break; // Try the next Groq API key
+            }
+            throw e;
+          }
+          if (e?.status === 429 && hasAnotherKey) {
+            break; // Immediately fail over to the next Groq API key
+          }
         }
       }
     }
   }
 
-  throw lastError || new Error('Groq text generation failed across all available models.');
+  throw lastError || new Error('Groq text generation failed across all available keys and models.');
 }
 
 /**
  * Generates seamless WAV audio (returned as base64) using Groq's `canopylabs/orpheus-v1-english`.
- * Automatically chunks inputs longer than 190 chars to respect Orpheus's 200-char limit and
- * stitches the resulting WAV PCM buffers into a single RIFF WAVE file.
+ * Automatically chunks inputs longer than 190 chars to respect Orpheus's 200-char limit,
+ * rotates across fallback Groq API keys on 429/401, and stitches the resulting WAV PCM buffers.
  */
 export async function callGroqOrpheusTts(
-  apiKey: string,
+  apiKey: string | string[],
   text: string,
   voice?: string
 ): Promise<string> {
@@ -454,50 +583,72 @@ export async function callGroqOrpheusTts(
     throw new Error('Cannot generate speech for empty text.');
   }
 
+  const keys = buildOrderedKeyPool(apiKey);
+  if (keys.length === 0) {
+    throw new Error('No Groq API key configured for Orpheus TTS.');
+  }
+
   const resolvedVoice = resolveOrpheusVoice(voice);
   const wavBuffers: Buffer[] = [];
 
   for (const chunk of chunks) {
-    let attempts = 2;
     let chunkBuffer: Buffer | null = null;
     let lastErr: any = null;
 
-    while (attempts > 0) {
-      attempts--;
-      try {
-        const res = await fetch(GROQ_AUDIO_SPEECH_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: GROQ_TTS_MODEL,
-            input: chunk,
-            voice: resolvedVoice,
-            response_format: 'wav',
-          }),
-        });
+    for (let keyIdx = 0; keyIdx < keys.length && !chunkBuffer; keyIdx++) {
+      const currentKey = keys[keyIdx];
+      const hasAnotherKey = keyIdx < keys.length - 1;
+      let attempts = 2;
 
-        if (!res.ok) {
-          const errText = await res.text();
-          if (res.status === 429 && attempts > 0) {
-            const waitMs = extractGroqRetryDelayMs(errText, res.headers.get('retry-after'));
-            if (waitMs <= 8000) {
-              await new Promise((r) => setTimeout(r, waitMs));
-              continue;
+      while (attempts > 0) {
+        attempts--;
+        try {
+          const res = await fetch(GROQ_AUDIO_SPEECH_URL, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${currentKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: GROQ_TTS_MODEL,
+              input: chunk,
+              voice: resolvedVoice,
+              response_format: 'wav',
+            }),
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            if (res.status === 429) {
+              const waitMs = extractGroqRetryDelayMs(errText, res.headers.get('retry-after'));
+              markGroqKeyCooldown(currentKey, waitMs);
+              if (hasAnotherKey) {
+                const err: any = new Error(`Groq Orpheus TTS Error (429): ${errText.slice(0, 300)}`);
+                err.status = 429;
+                throw err;
+              }
+              if (attempts > 0 && waitMs <= 8000) {
+                await new Promise((r) => setTimeout(r, waitMs));
+                continue;
+              }
             }
+            if (res.status === 401 || res.status === 403) {
+              markGroqKeyCooldown(currentKey, 5 * 60 * 1000);
+            }
+            const err: any = new Error(`Groq Orpheus TTS Error (${res.status}): ${errText.slice(0, 300)}`);
+            err.status = res.status;
+            throw err;
           }
-          const err: any = new Error(`Groq Orpheus TTS Error (${res.status}): ${errText.slice(0, 300)}`);
-          err.status = res.status;
-          throw err;
-        }
 
-        const arrayBuf = await res.arrayBuffer();
-        chunkBuffer = Buffer.from(arrayBuf);
-        break;
-      } catch (e: any) {
-        lastErr = e;
+          const arrayBuf = await res.arrayBuffer();
+          chunkBuffer = Buffer.from(arrayBuf);
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          if ((e?.status === 429 || e?.status === 401 || e?.status === 403) && hasAnotherKey) {
+            break; // Immediately switch to the next Groq API key
+          }
+        }
       }
     }
 

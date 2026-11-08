@@ -5,6 +5,7 @@ export interface Env {
     fetch: (request: Request) => Promise<Response>;
   };
   GROQ_API_KEY?: string;
+  GROQ_API_KEY_2?: string;
   GROQ_TTS_VOICE?: string;
   GEMINI_API_KEY?: string;
   TEACHER_PIN?: string;

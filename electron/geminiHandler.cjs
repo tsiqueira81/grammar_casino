@@ -290,17 +290,39 @@ const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
 const GROQ_TTS_MODEL = 'canopylabs/orpheus-v1-english';
 const VALID_ORPHEUS_VOICES = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'];
 
-function resolveDesktopGroqKey(customKey) {
-  const candidates = [customKey, getStoredApiKey(), process.env.GROQ_API_KEY, process.env.GEMINI_API_KEY, process.env.API_KEY];
-  for (const raw of candidates) {
-    const trimmed = String(raw || '').trim();
-    if (trimmed && trimmed.startsWith('gsk_')) {
-      return trimmed;
+function resolveDesktopGroqKeys(customKey) {
+  const parseList = (raw, requireGsk) =>
+    String(raw || '')
+      .split(/[,;\r\n]+/)
+      .map((s) => s.trim())
+      .filter((k) => k.length > 5 && (!requireGsk || k.startsWith('gsk_')));
+
+  const rawList = [
+    ...parseList(customKey, true),
+    ...parseList(getStoredApiKey(), true),
+    ...parseList(process.env.GROQ_API_KEY, false),
+    ...parseList(process.env.GROQ_API_KEYS, false),
+    ...parseList(process.env.GROQ_API_KEY_2, false),
+    ...parseList(process.env.GROQ_API_KEY_3, false),
+    ...parseList(process.env.GROQ_API_KEY_FALLBACK, false),
+    ...parseList(process.env.GEMINI_API_KEY, true),
+    ...parseList(process.env.API_KEY, true),
+  ];
+
+  const seen = new Set();
+  const unique = [];
+  for (const k of rawList) {
+    if (!seen.has(k)) {
+      seen.add(k);
+      unique.push(k);
     }
   }
-  const envGroq = String(process.env.GROQ_API_KEY || '').trim();
-  if (envGroq.length > 5) return envGroq;
-  return null;
+  return unique;
+}
+
+function resolveDesktopGroqKey(customKey) {
+  const keys = resolveDesktopGroqKeys(customKey);
+  return keys[0] || null;
 }
 
 function convertToStrictGroqSchema(node) {
@@ -421,53 +443,61 @@ function stitchWavBuffersCjs(wavBuffers) {
 
 async function callGroqDesktopText({ apiKey, prompt, responseSchema, schemaName = 'desktop_schema', maxCompletionTokens = 1000 }) {
   assertNetworkOnline();
+  const keys = Array.isArray(apiKey) ? apiKey : resolveDesktopGroqKeys(apiKey);
+  if (keys.length === 0) throw new Error('No Groq API key configured.');
   let lastErr = null;
   for (const model of GROQ_TEXT_MODELS) {
-    let useStrict = Boolean(responseSchema);
-    let attempts = 2;
-    while (attempts > 0) {
-      attempts--;
-      try {
-        const body = {
-          model,
-          messages: [
-            { role: 'system', content: 'You are an expert Cambridge English linguistics examiner.' },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0.6,
-          max_completion_tokens: maxCompletionTokens,
-        };
-        if (model.startsWith('openai/gpt-oss')) {
-          body.reasoning_effort = 'low';
-        }
-        if (responseSchema) {
-          body.response_format = useStrict
-            ? { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema: convertToStrictGroqSchema(responseSchema) } }
-            : { type: 'json_object' };
-        }
-        const res = await fetch(GROQ_CHAT_URL, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          if (res.status === 400 && useStrict && responseSchema) {
-            useStrict = false;
-            attempts++;
-            continue;
+    for (let kIdx = 0; kIdx < keys.length; kIdx++) {
+      const currentKey = keys[kIdx];
+      let useStrict = Boolean(responseSchema);
+      let attempts = 2;
+      while (attempts > 0) {
+        attempts--;
+        try {
+          const body = {
+            model,
+            messages: [
+              { role: 'system', content: 'You are an expert Cambridge English linguistics examiner.' },
+              { role: 'user', content: prompt },
+            ],
+            temperature: 0.6,
+            max_completion_tokens: maxCompletionTokens,
+          };
+          if (model.startsWith('openai/gpt-oss')) {
+            body.reasoning_effort = 'low';
           }
-          const err = new Error(`Groq API Error (${res.status}): ${errText.slice(0, 240)}`);
-          err.status = res.status;
-          throw err;
+          if (responseSchema) {
+            body.response_format = useStrict
+              ? { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema: convertToStrictGroqSchema(responseSchema) } }
+              : { type: 'json_object' };
+          }
+          const res = await fetch(GROQ_CHAT_URL, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${currentKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            if (res.status === 400 && useStrict && responseSchema) {
+              useStrict = false;
+              attempts++;
+              continue;
+            }
+            const err = new Error(`Groq API Error (${res.status}): ${errText.slice(0, 240)}`);
+            err.status = res.status;
+            throw err;
+          }
+          const data = await res.json();
+          const raw = data?.choices?.[0]?.message?.content || '';
+          const text = responseSchema ? extractCleanJson(raw) : String(raw).trim();
+          if (!text) throw new Error('Empty response returned by Groq.');
+          return { text };
+        } catch (e) {
+          lastErr = e;
+          if ((e.status === 429 || e.status === 401 || e.status === 403) && kIdx < keys.length - 1) {
+            break; // Immediately fail over to the next Groq key
+          }
         }
-        const data = await res.json();
-        const raw = data?.choices?.[0]?.message?.content || '';
-        const text = responseSchema ? extractCleanJson(raw) : String(raw).trim();
-        if (!text) throw new Error('Empty response returned by Groq.');
-        return { text };
-      } catch (e) {
-        lastErr = e;
       }
     }
   }
@@ -476,38 +506,50 @@ async function callGroqDesktopText({ apiKey, prompt, responseSchema, schemaName 
 
 async function callGroqDesktopSpeech(apiKey, text, requestedVoice) {
   assertNetworkOnline();
+  const keys = Array.isArray(apiKey) ? apiKey : resolveDesktopGroqKeys(apiKey);
+  if (keys.length === 0) throw new Error('No Groq API key configured.');
   const chunks = chunkTextForOrpheus(text, 190);
   if (chunks.length === 0) throw new Error('Empty speech text.');
   const rawVoice = String(requestedVoice || process.env.GROQ_TTS_VOICE || 'troy').trim().toLowerCase();
   const voice = VALID_ORPHEUS_VOICES.includes(rawVoice) ? rawVoice : 'troy';
   const wavBuffers = [];
   for (const chunk of chunks) {
-    const res = await fetch(GROQ_SPEECH_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: GROQ_TTS_MODEL,
-        input: chunk,
-        voice,
-        response_format: 'wav',
-      }),
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      const err = new Error(`Groq Orpheus TTS Error (${res.status}): ${errText.slice(0, 240)}`);
-      err.status = res.status;
-      throw err;
+    let chunkBuf = null;
+    let lastErr = null;
+    for (let kIdx = 0; kIdx < keys.length && !chunkBuf; kIdx++) {
+      try {
+        const res = await fetch(GROQ_SPEECH_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${keys[kIdx]}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: GROQ_TTS_MODEL,
+            input: chunk,
+            voice,
+            response_format: 'wav',
+          }),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          const err = new Error(`Groq Orpheus TTS Error (${res.status}): ${errText.slice(0, 240)}`);
+          err.status = res.status;
+          throw err;
+        }
+        const ab = await res.arrayBuffer();
+        chunkBuf = Buffer.from(ab);
+      } catch (e) {
+        lastErr = e;
+      }
     }
-    const ab = await res.arrayBuffer();
-    wavBuffers.push(Buffer.from(ab));
+    if (!chunkBuf) throw lastErr || new Error('Groq Orpheus TTS failed across all keys.');
+    wavBuffers.push(chunkBuf);
   }
   return stitchWavBuffersCjs(wavBuffers).toString('base64');
 }
 
 async function generateDesktopText({ prompt, responseSchema, schemaName, maxCompletionTokens, customKey }) {
-  const groqKey = resolveDesktopGroqKey(customKey);
-  if (groqKey) {
-    return await callGroqDesktopText({ apiKey: groqKey, prompt, responseSchema, schemaName, maxCompletionTokens });
+  const groqKeys = resolveDesktopGroqKeys(customKey);
+  if (groqKeys.length > 0) {
+    return await callGroqDesktopText({ apiKey: groqKeys, prompt, responseSchema, schemaName, maxCompletionTokens });
   }
   return await callWithModelRotation(
     TEXT_MODELS,

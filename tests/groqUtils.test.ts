@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   chunkTextForOrpheusTts,
   parseWavBuffer,
@@ -8,6 +8,10 @@ import {
   extractJsonFromText,
   extractGroqRetryDelayMs,
   resolveGroqApiKey,
+  resolveGroqApiKeys,
+  markGroqKeyCooldown,
+  clearGroqKeyCooldowns,
+  callGroqChatCompletion,
   resolveOrpheusVoice,
   ORPHEUS_MAX_INPUT_CHARS,
 } from '../utils/groqUtils';
@@ -35,6 +39,11 @@ function createMockWavBuffer(pcmSamples: number[], sampleRate = 24000): Buffer {
 }
 
 describe('Groq Free Tier Utilities (openai/gpt-oss-120b & canopylabs/orpheus-v1-english)', () => {
+  afterEach(() => {
+    clearGroqKeyCooldowns();
+    vi.restoreAllMocks();
+  });
+
   describe('chunkTextForOrpheusTts (200-char limit protection)', () => {
     it('keeps short sentences as a single chunk', () => {
       const text = 'Rarely had the engineers witnessed such a dramatic breakthrough in solar architecture.';
@@ -160,8 +169,47 @@ describe('Groq Free Tier Utilities (openai/gpt-oss-120b & canopylabs/orpheus-v1-
       expect(resolveOrpheusVoice('invalid_voice')).toBe('troy');
     });
 
-    it('detects gsk_ keys passed as customKey', () => {
+    it('detects single and comma-separated gsk_ keys and rotates past keys on cooldown', () => {
       expect(resolveGroqApiKey('gsk_test123456789')).toBe('gsk_test123456789');
+
+      const keys = resolveGroqApiKeys('gsk_primaryKey111, gsk_fallbackKey222');
+      expect(keys.slice(0, 2)).toEqual(['gsk_primaryKey111', 'gsk_fallbackKey222']);
+
+      // Put primary key on cooldown -> fallback key becomes primary immediately
+      markGroqKeyCooldown('gsk_primaryKey111', 30_000);
+      expect(resolveGroqApiKey('gsk_primaryKey111, gsk_fallbackKey222')).toBe('gsk_fallbackKey222');
+    });
+
+    it('automatically fails over to Key 2 with zero delay when Key 1 returns 429', async () => {
+      const usedAuthHeaders: string[] = [];
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init: any) => {
+        const auth = init?.headers?.Authorization || '';
+        usedAuthHeaders.push(auth);
+        if (auth === 'Bearer gsk_keyOneRateLimited') {
+          return new Response('Rate limit reached. Please try again in 45s.', {
+            status: 429,
+            headers: { 'retry-after': '45' },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"isCorrect": true}' } }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      });
+
+      const res = await callGroqChatCompletion({
+        apiKey: ['gsk_keyOneRateLimited', 'gsk_keyTwoHealthy'],
+        prompt: 'Verify sentence.',
+      });
+
+      expect(res.text).toBe('{"isCorrect": true}');
+      expect(usedAuthHeaders).toEqual([
+        'Bearer gsk_keyOneRateLimited',
+        'Bearer gsk_keyTwoHealthy',
+      ]);
     });
   });
 });
+
