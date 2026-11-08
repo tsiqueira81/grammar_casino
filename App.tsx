@@ -52,6 +52,7 @@ import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './ser
 import * as GeminiService from './services/geminiService';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
+import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
   signInTeacherWithGoogle,
   signOutTeacherGoogle,
@@ -2452,15 +2453,25 @@ export function App() {
              setPlayers(updatedTithePlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p));
              modalMessage = `${powerUp.icon} Tithed 10% per rival — collected $${taxCollected.toLocaleString()} total!`;
         } else if (powerUpKey === 'GENEROUS') {
-            const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
-            const totalGiftCost = activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT;
+            const otherActivePlayers = activePlayers.filter(p => p.id !== playerId);
+            const activeOtherPlayersCount = otherActivePlayers.length;
+            // Cap gift per player so total gifts never exceed the caster's remaining money (newMoney)
+            const giftPerPlayer = activeOtherPlayersCount > 0
+                ? Math.min(GENEROUS_GIFT_AMOUNT, Math.floor(newMoney / activeOtherPlayersCount))
+                : 0;
+            const totalGiftCost = activeOtherPlayersCount * giftPerPlayer;
             const playerMoneyAfterGift = Math.max(0, newMoney - totalGiftCost);
             setPlayers(ps => ps.map(p => {
-                if (p.id === playerId) return {...p, money: playerMoneyAfterGift };
-                if (activePlayers.find(ap => ap.id === p.id)) return {...p, money: p.money + GENEROUS_GIFT_AMOUNT}; 
+                if (p.id === playerId) return { ...p, money: playerMoneyAfterGift };
+                if (otherActivePlayers.some(ap => ap.id === p.id)) return { ...p, money: p.money + giftPerPlayer };
                 return p;
             }));
-             modalMessage = `${powerUp.icon} Gave $${GENEROUS_GIFT_AMOUNT} to ${activeOtherPlayersCount} other player(s).`;
+            if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > playerMoneyAfterGift) {
+                setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: playerMoneyAfterGift } }));
+            }
+            modalMessage = giftPerPlayer > 0
+                ? `${powerUp.icon} Gave $${giftPerPlayer} to ${activeOtherPlayersCount} other player(s).`
+                : `${powerUp.icon} You had no remaining funds to gift after buying the power-up!`;
         } else if (powerUpKey === 'GUARDIAN_ANGEL') {
             const newActivePowerUps = { ...activePowerUps };
             Object.keys(newActivePowerUps).forEach(sourceId => {
@@ -2761,10 +2772,13 @@ export function App() {
     if (usage >= limit) return;
 
     const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
     const drawablePool = availablePowerUps.filter(k => {
       if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
       if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(k)) return false;
       if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(k)) return false;
+      if (k === 'GENEROUS' && player.money < POWERUP_COST + activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT) return false;
+      if (k === 'UNDERDOG' && !isPlayerUnderdog(playerId, players)) return false;
       return true;
     });
 
@@ -3601,7 +3615,9 @@ export function App() {
             const res = await GeminiService.verifyCorrection(
               currentSentence.text,
               group.rawText,
-              currentSentence.correction
+              currentSentence.correction,
+              currentSentence.errorPhrase,
+              currentSentence.acceptedAnswers
             );
             group.playerIds.forEach((pid) => {
               verifications[pid] = res;
@@ -4916,22 +4932,39 @@ export function App() {
                       );
                     })}
                   </div>
-                  {levelProfile && (
-                    <dl className="mt-4 p-4 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] grid sm:grid-cols-3 gap-3 text-gc-small">
-                      <div>
-                        <dt className="font-bold text-gc-ink">Sentences</dt>
-                        <dd className="text-gc-quiet">{levelProfile.syntax}</dd>
+                  {levelProfile && (() => {
+                    const activeTopicSpec = settings.topic !== 'My own choice'
+                      ? getCefrTopicRuleSpec(settings.topic, settings.level)
+                      : null;
+                    return (
+                      <div className="mt-4 p-4 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] space-y-3 text-gc-small">
+                        <dl className="grid sm:grid-cols-3 gap-3">
+                          <div>
+                            <dt className="font-bold text-gc-ink">Sentences</dt>
+                            <dd className="text-gc-quiet">{levelProfile.syntax}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-bold text-gc-ink">Vocabulary</dt>
+                            <dd className="text-gc-quiet">{levelProfile.lexis}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-bold text-gc-ink">Mistakes</dt>
+                            <dd className="text-gc-quiet">{levelProfile.mistakeIdentification}</dd>
+                          </div>
+                        </dl>
+                        {activeTopicSpec && (
+                          <div className="pt-3 border-t border-gc-line/[0.1]">
+                            <div className="font-bold text-gc-ink">
+                              Cambridge EGP Focus ({settings.topic} · {settings.level})
+                            </div>
+                            <div className="text-gc-quiet mt-0.5">
+                              {activeTopicSpec.classroomSummary}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div>
-                        <dt className="font-bold text-gc-ink">Vocabulary</dt>
-                        <dd className="text-gc-quiet">{levelProfile.lexis}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-bold text-gc-ink">Mistakes</dt>
-                        <dd className="text-gc-quiet">{levelProfile.mistakeIdentification}</dd>
-                      </div>
-                    </dl>
-                  )}
+                    );
+                  })()}
                 </section>
 
                 {/* Theme */}

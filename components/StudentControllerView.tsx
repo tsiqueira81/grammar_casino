@@ -1111,53 +1111,75 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             )}
 
                             {(localBet.opinion === 'incorrect' ||
-                              (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (
-                              <div className="animate-gc-slide-up">
-                                <div className="flex items-center justify-between gap-2 mb-1.5">
-                                  <label htmlFor="gc-phone-correction" className="block text-gc-small font-bold text-gc-ink">
-                                    Bonus: write the corrected sentence
-                                  </label>
-                                  {view.sentence.text && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        playSound('click');
-                                        updateBetField('userCorrection', view.sentence!.text);
-                                      }}
-                                      className="text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 cursor-pointer"
-                                    >
-                                      Copy the sentence here
-                                    </button>
-                                  )}
-                                </div>
-                                <input
-                                  id="gc-phone-correction"
-                                  type="text"
-                                  value={localBet.userCorrection || ''}
-                                  onChange={(e) => updateBetField('userCorrection', e.target.value)}
-                                  onDoubleClick={() => {
-                                    if (view.sentence?.text) {
-                                      playSound('click');
-                                      updateBetField('userCorrection', view.sentence.text);
-                                    }
-                                  }}
-                                  onTouchEnd={() => {
-                                    const now = Date.now();
-                                    if (now - lastCorrectionTapRef.current <= 350) {
-                                      lastCorrectionTapRef.current = 0;
+                              (hasSplitBet && (localBet.splitCorrectPercent ?? 50) < 100)) && (() => {
+                              const hasDoubleOrNothing = view.myActivePowerUps.some((pu) => pu.type === 'DOUBLE_OR_NOTHING');
+                              return (
+                                <div className="animate-gc-slide-up">
+                                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                                    <label htmlFor="gc-phone-correction" className="block text-gc-small font-bold text-gc-ink">
+                                      {hasDoubleOrNothing ? (
+                                        <span className="text-amber-600 dark:text-amber-400 font-extrabold">
+                                          🎲 Double or Nothing: correction required for 3× win
+                                        </span>
+                                      ) : (
+                                        'Bonus: write the corrected sentence'
+                                      )}
+                                    </label>
+                                    {view.sentence.text && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          playSound('click');
+                                          updateBetField('userCorrection', view.sentence!.text);
+                                        }}
+                                        className="text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 cursor-pointer"
+                                      >
+                                        Copy the sentence here
+                                      </button>
+                                    )}
+                                  </div>
+                                  <input
+                                    id="gc-phone-correction"
+                                    type="text"
+                                    value={localBet.userCorrection || ''}
+                                    onChange={(e) => updateBetField('userCorrection', e.target.value)}
+                                    onDoubleClick={() => {
                                       if (view.sentence?.text) {
                                         playSound('click');
                                         updateBetField('userCorrection', view.sentence.text);
                                       }
-                                    } else {
-                                      lastCorrectionTapRef.current = now;
+                                    }}
+                                    onTouchEnd={() => {
+                                      const now = Date.now();
+                                      if (now - lastCorrectionTapRef.current <= 350) {
+                                        lastCorrectionTapRef.current = 0;
+                                        if (view.sentence?.text) {
+                                          playSound('click');
+                                          updateBetField('userCorrection', view.sentence.text);
+                                        }
+                                      } else {
+                                        lastCorrectionTapRef.current = now;
+                                      }
+                                    }}
+                                    placeholder={
+                                      hasDoubleOrNothing
+                                        ? 'Write the corrected sentence (blank/wrong loses 1.5× bet)...'
+                                        : 'Optional. Double-tap to copy the sentence here.'
                                     }
-                                  }}
-                                  placeholder="Optional. Double-tap to copy the sentence here."
-                                  className={`${textField} ${fieldOk} min-h-[52px] px-4 font-sentence italic text-gc-lead`}
-                                />
-                              </div>
-                            )}
+                                    className={`${textField} ${
+                                      hasDoubleOrNothing && !localBet.userCorrection?.trim()
+                                        ? 'border-amber-500/70 bg-amber-500/[0.04]'
+                                        : fieldOk
+                                    } min-h-[52px] px-4 font-sentence italic text-gc-lead`}
+                                  />
+                                  {hasDoubleOrNothing && !localBet.userCorrection?.trim() && (
+                                    <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
+                                      ⚠️ Heads up: With Double or Nothing active, locking in Flawed without a valid correction results in a −1.5× loss.
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
 

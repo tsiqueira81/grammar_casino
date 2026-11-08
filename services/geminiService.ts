@@ -1,6 +1,11 @@
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getCuratedSentence } from './fallbackSentences';
 import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
+import {
+  evaluateBinaryCorrectionOffline,
+  evaluateWordFormationOffline,
+  evaluateOpenClozeOffline,
+} from '../utils/offlineGrammarEngine';
 
 // Desktop Electron IPC interface exposed securely via contextBridge preload
 export interface DesktopStatus {
@@ -378,8 +383,29 @@ export const getHint = async (
 export const verifyCorrection = async (
   originalSentence: string,
   userCorrection: string,
-  intendedCorrection: string
+  intendedCorrection: string,
+  errorPhrase?: string,
+  acceptedAnswers?: string[]
 ): Promise<{ isCorrect: boolean; feedback: string }> => {
+  // Fast deterministic pre-check: if the submission is identical to the original flawed sentence,
+  // or matches the intended correction (including contractions, UK/US spelling, or movable adverbials),
+  // resolve immediately without an API call.
+  const offlineEval = evaluateBinaryCorrectionOffline(
+    originalSentence,
+    userCorrection,
+    intendedCorrection,
+    errorPhrase,
+    acceptedAnswers
+  );
+  if (offlineEval.isCorrect) {
+    return offlineEval;
+  }
+  const cleanUser = (userCorrection || '').trim().toLowerCase().replace(/[.,!?;:'"“”]/g, '').replace(/\s+/g, ' ');
+  const cleanOriginal = (originalSentence || '').trim().toLowerCase().replace(/[.,!?;:'"“”]/g, '').replace(/\s+/g, ' ');
+  if (!cleanUser || cleanUser === cleanOriginal) {
+    return offlineEval;
+  }
+
   try {
     const data = await requestDealerAction<{ isCorrect: boolean; feedback: string }>('verifyCorrection', {
       originalSentence,
@@ -390,24 +416,10 @@ export const verifyCorrection = async (
       return data;
     }
   } catch (err) {
-    console.warn("Using smart verification heuristic:", err);
+    console.warn("Using deterministic offline grammar engine fallback:", err);
   }
 
-  // Smart heuristic evaluation fallback
-  const cleanUser = (userCorrection || '').trim().toLowerCase().replace(/[.,!?;:'"“”]/g, '').replace(/\s+/g, ' ');
-  const cleanIntended = (intendedCorrection || '').trim().toLowerCase().replace(/[.,!?;:'"“”]/g, '').replace(/\s+/g, ' ');
-  const cleanOriginal = (originalSentence || '').trim().toLowerCase().replace(/[.,!?;:'"“”]/g, '').replace(/\s+/g, ' ');
-
-  if (cleanUser === cleanIntended) {
-    return { isCorrect: true, feedback: "Excellent correction! Your fix matches the intended grammar rule." };
-  }
-  if (cleanUser === cleanOriginal) {
-    return { isCorrect: false, feedback: "Your submitted sentence is identical to the original uncorrected sentence." };
-  }
-  if (cleanUser.length > 5 && Math.abs(cleanUser.length - cleanIntended.length) < 15) {
-    return { isCorrect: true, feedback: "Accepted! Your submission effectively fixes the grammatical issue." };
-  }
-  return { isCorrect: false, feedback: `Expected fix was close to: "${intendedCorrection}"` };
+  return offlineEval;
 };
 
 export function normalizeContractionsForKwt(input: string): string {
@@ -870,39 +882,23 @@ export const verifyOpenClozeBatch = async (
     return fallbackResults;
   }
 
-  // Offline heuristic fallback for single-word Open Cloze & Word Formation
-  const cleanBase = (baseWord || '').trim().toLowerCase();
-  const acceptedSet = new Set(
-    [intendedAnswer, ...(acceptedAnswers || [])]
-      .map(a => (a || '').trim().toLowerCase())
-      .filter(a => Boolean(a) && (questionType !== 'wordFormation' || a !== cleanBase))
-  );
+  // Offline deterministic evaluation for single-word Word Formation & Open Cloze
   uniqueWords.forEach(word => {
     const key = word.trim().toLowerCase();
-    if (key.includes(' ')) {
-      fallbackResults[key] = {
-        isCorrect: false,
-        marks: 0,
-        feedback: 'Single-word gaps require one word only.',
-      };
-    } else if (questionType === 'wordFormation' && cleanBase && key === cleanBase) {
-      fallbackResults[key] = {
-        isCorrect: false,
-        marks: 0,
-        feedback: `You must transform the base word (${baseWord?.toUpperCase()}) into a different grammatical form.`,
-      };
-    } else if (acceptedSet.has(key)) {
-      fallbackResults[key] = {
-        isCorrect: true,
-        marks: 1,
-        feedback: `Accepted! "${word}" fits the grammatical gap.`,
-      };
+    if (questionType === 'wordFormation') {
+      fallbackResults[key] = evaluateWordFormationOffline(
+        word,
+        intendedAnswer,
+        acceptedAnswers,
+        baseWord
+      );
     } else {
-      fallbackResults[key] = {
-        isCorrect: false,
-        marks: 0,
-        feedback: `"${word}" does not fit the grammatical context (expected "${intendedAnswer}").`,
-      };
+      fallbackResults[key] = evaluateOpenClozeOffline(
+        word,
+        intendedAnswer,
+        acceptedAnswers,
+        sentenceWithBlank
+      );
     }
   });
   return fallbackResults;

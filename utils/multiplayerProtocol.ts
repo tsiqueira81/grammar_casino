@@ -17,6 +17,8 @@ import {
 } from '../types';
 import {
   BET_CAP_AMOUNT,
+  POWERUP_COST,
+  GENEROUS_GIFT_AMOUNT,
   CLOZE_DISABLED_POWER_UPS,
   BINARY_DISABLED_POWER_UPS,
   NON_OFFENSIVE_TARGETED_POWER_UPS,
@@ -158,7 +160,7 @@ export interface AudiencePollSummary {
 /**
  * Determines whether a player qualifies for the Underdog Surge (2.5× comeback payout).
  * A player qualifies if they are in the bottom half of active players by bankroll
- * or strictly trailing the table leader's bankroll (or playing solo).
+ * and strictly trailing the table leader's bankroll (or playing solo).
  */
 export function isPlayerUnderdog(playerId: number, players: Player[]): boolean {
   const active = players.filter(p => p.money > 0);
@@ -166,11 +168,11 @@ export function isPlayerUnderdog(playerId: number, players: Player[]): boolean {
   const me = active.find(p => p.id === playerId);
   if (!me) return false;
   const maxMoney = Math.max(...active.map(p => p.money));
-  if (me.money < maxMoney) return true;
+  if (me.money >= maxMoney) return false;
   const sortedAsc = [...active].sort((a, b) => a.money - b.money);
-  const bottomHalfCutoffIdx = Math.ceil(sortedAsc.length / 2) - 1;
+  const bottomHalfCutoffIdx = Math.floor(sortedAsc.length / 2) - 1;
   const medianCutoffMoney = sortedAsc[Math.max(0, bottomHalfCutoffIdx)]?.money ?? 0;
-  return me.money <= medianCutoffMoney && me.money < maxMoney;
+  return me.money <= medianCutoffMoney;
 }
 
 /**
@@ -714,6 +716,17 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
         ? roundResults.find(r => r.name === player.name) || null
         : null;
 
+    const activeOtherCount = players.filter(p => p.id !== player.id && p.money > 0).length;
+    const playerDrawablePool = drawablePool.filter(k => {
+      if (k === 'GENEROUS' && player.money < POWERUP_COST + activeOtherCount * GENEROUS_GIFT_AMOUNT) {
+        return false;
+      }
+      if (k === 'UNDERDOG' && !isPlayerUnderdog(player.id, players)) {
+        return false;
+      }
+      return true;
+    });
+
     views[player.id] = {
       roomCode,
       roomLocked,
@@ -740,8 +753,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
         !seats[player.id]?.lockedIn &&
         player.money >= 50 &&
         myUsed.length < powerUpLimit &&
-        drawablePool.length > 0,
-      availablePowerUpsCount: drawablePool.length,
+        playerDrawablePool.length > 0,
+      availablePowerUpsCount: playerDrawablePool.length,
       isBetCapped,
       betCapAmount,
       isHighRoller,

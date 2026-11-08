@@ -351,7 +351,7 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
   },
   DOUBLE_OR_NOTHING: {
     name: "Double or Nothing",
-    description: "Win 3× (+200% payout, requires valid correction if flawed in Binary mode), or lose 1.5× your bet if wrong.",
+    description: "Win 3× (+200% payout, requires a valid correction on Flawed sentences in Binary mode), or lose 1.5× your bet if wrong.",
     icon: "🎲",
     requiresTarget: false,
   },
@@ -375,7 +375,7 @@ export const POWER_UPS: Record<PowerUpKey, PowerUp> = {
   },
   UNDERDOG: {
     name: "Underdog Surge",
-    description: "Win a 2.5× comeback payout (+150% winnings) if you are in the bottom half of the standings (or trailing the leader).",
+    description: "Win a 2.5× comeback payout (+150% winnings) if you are in the bottom half of the standings.",
     icon: "🚀",
     requiresTarget: false,
   },

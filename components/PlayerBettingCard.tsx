@@ -1600,7 +1600,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                {splitPercent < 100 && (
                  <div className="mt-4 animate-fade-in text-left relative z-10">
                     <label className="block text-gc-small font-bold text-gc-ink mb-1.5">
-                      Bonus: write the corrected sentence
+                      {hasDoubleOrNothing ? (
+                        <span className="text-amber-600 dark:text-amber-400 font-extrabold">
+                          🎲 Double or Nothing: correction required for 3× win
+                        </span>
+                      ) : (
+                        'Bonus: write the corrected sentence'
+                      )}
                     </label>
                     <textarea 
                       value={bet?.userCorrection || ''}
@@ -1624,9 +1630,22 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         }
                       }}
                       disabled={isBlocked}
-                      placeholder="Write the corrected sentence (double-click or double-tap to copy the original)"
-                      className="w-full bg-gc-line/[0.05] border border-gc-line/[0.2] rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-20 text-gc-body"
+                      placeholder={
+                        hasDoubleOrNothing
+                          ? 'Write the corrected sentence (leaving this blank or wrong on a Flawed sentence loses 1.5× your bet)...'
+                          : 'Write the corrected sentence (double-click or double-tap to copy the original)'
+                      }
+                      className={`w-full bg-gc-line/[0.05] border rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-20 text-gc-body ${
+                        hasDoubleOrNothing && !bet?.userCorrection?.trim()
+                          ? 'border-amber-500/60 bg-amber-500/[0.04]'
+                          : 'border-gc-line/[0.2]'
+                      }`}
                     />
+                    {hasDoubleOrNothing && !bet?.userCorrection?.trim() && (
+                      <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
+                        ⚠️ Heads up: With Double or Nothing active, flagging a Flawed sentence without a valid correction results in a −1.5× loss.
+                      </p>
+                    )}
                  </div>
               )}
             </div>
@@ -1735,7 +1754,13 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                  <div className="animate-fade-in pt-1">
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="block text-gc-small font-bold text-gc-ink">
-                        Bonus: write the corrected sentence
+                        {hasDoubleOrNothing ? (
+                          <span className="text-amber-600 dark:text-amber-400 font-extrabold">
+                            🎲 Double or Nothing: correction required for 3× win
+                          </span>
+                        ) : (
+                          'Bonus: write the corrected sentence'
+                        )}
                       </label>
                       {currentSentenceText && !isBlocked && (
                         <button
@@ -1772,9 +1797,22 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         }
                       }}
                       disabled={isBlocked}
-                      placeholder="Rewrite the sentence without the mistake for a bonus (double-click or double-tap to copy it here)"
-                      className="w-full bg-gc-line/[0.05] border border-gc-line/[0.2] rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-24 text-gc-lead"
+                      placeholder={
+                        hasDoubleOrNothing
+                          ? 'Write the corrected sentence (leaving this blank or wrong on a Flawed sentence loses 1.5× your bet)...'
+                          : 'Rewrite the sentence without the mistake for a bonus (double-click or double-tap to copy it here)'
+                      }
+                      className={`w-full bg-gc-line/[0.05] border rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-24 text-gc-lead ${
+                        hasDoubleOrNothing && !bet?.userCorrection?.trim()
+                          ? 'border-amber-500/60 bg-amber-500/[0.04]'
+                          : 'border-gc-line/[0.2]'
+                      }`}
                     />
+                    {hasDoubleOrNothing && !bet?.userCorrection?.trim() && (
+                      <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
+                        ⚠️ Heads up: With Double or Nothing active, choosing Flawed without a valid correction results in a −1.5× loss.
+                      </p>
+                    )}
                  </div>
               )}
             </>

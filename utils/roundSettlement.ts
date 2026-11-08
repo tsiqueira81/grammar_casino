@@ -11,6 +11,7 @@ import {
 import { BET_CAP_AMOUNT, JACKPOT_MULTIPLIER } from '../constants';
 import { isPlayerUnderdog } from './multiplayerProtocol';
 import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
+import { normalizeUkUsSpelling } from './offlineGrammarEngine';
 
 const GeminiService = { evaluateKeyWordTransformationDeterministic };
 
@@ -56,18 +57,22 @@ export interface SettleRoundOutput {
 export function buildAcceptedAnswerSet(sentence: GeneratedSentence, qType: QuestionType): { acceptedSet: Set<string>; baseWordNorm: string } {
   const baseWordNorm = qType === 'wordFormation' ? (sentence.baseWord || '').trim().toLowerCase() : '';
   const acceptedSet = new Set<string>();
-  if (sentence.correctAnswer) {
-    const cNorm = sentence.correctAnswer.trim().toLowerCase();
-    if (!baseWordNorm || cNorm !== baseWordNorm) {
-      acceptedSet.add(cNorm);
+  const addVariant = (raw: string) => {
+    const norm = raw.trim().toLowerCase();
+    if (!norm) return;
+    if (baseWordNorm && norm === baseWordNorm) return;
+    acceptedSet.add(norm);
+    const canonical = normalizeUkUsSpelling(norm);
+    if (canonical && (!baseWordNorm || canonical !== normalizeUkUsSpelling(baseWordNorm))) {
+      acceptedSet.add(canonical);
     }
+  };
+  if (sentence.correctAnswer) {
+    addVariant(sentence.correctAnswer);
   }
   (sentence.acceptedAnswers || []).forEach(ans => {
     if (ans && ans.trim()) {
-      const aNorm = ans.trim().toLowerCase();
-      if (!baseWordNorm || aNorm !== baseWordNorm) {
-        acceptedSet.add(aNorm);
-      }
+      addVariant(ans);
     }
   });
   return { acceptedSet, baseWordNorm };
@@ -140,8 +145,9 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     }
     const norm = (word || '').trim().toLowerCase();
     if (!norm) return false;
-    if (baseWordNorm && norm === baseWordNorm) return false;
-    if (acceptedSet.has(norm)) return true;
+    const canonical = normalizeUkUsSpelling(norm);
+    if (baseWordNorm && (norm === baseWordNorm || canonical === normalizeUkUsSpelling(baseWordNorm))) return false;
+    if (acceptedSet.has(norm) || acceptedSet.has(canonical)) return true;
     return Boolean(clozeWordVerifications[norm]?.isCorrect);
   };
 

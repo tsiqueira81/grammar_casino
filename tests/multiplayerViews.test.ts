@@ -7,7 +7,10 @@ import {
   SHARED_VIEW_KEYS,
   splitPlayerViews,
   mergePlayerView,
+  isPlayerUnderdog,
+  buildAllPlayerViews,
 } from '../utils/multiplayerProtocol';
+import { Player } from '../types';
 
 const peers = [
   { id: 101, name: 'Ana', avatar: '🦊', money: 500, lockedIn: true, hasDraftBet: true },
@@ -102,3 +105,90 @@ describe('splitPlayerViews', () => {
     expect(splitPlayerViews({})).toEqual({ table: {}, privateByPlayer: {} });
   });
 });
+
+describe('isPlayerUnderdog (bottom-half qualification)', () => {
+  const mkPlayer = (id: number, money: number): Player => ({
+    id,
+    name: `P${id}`,
+    money,
+    history: [],
+    avatar: '🦊',
+    winStreak: 0,
+    effects: [],
+  });
+
+  it('returns false for everyone when all active players are tied at the top (e.g. Round 1)', () => {
+    const tied = [mkPlayer(1, 1000), mkPlayer(2, 1000), mkPlayer(3, 1000), mkPlayer(4, 1000)];
+    for (const p of tied) {
+      expect(isPlayerUnderdog(p.id, tied)).toBe(false);
+    }
+  });
+
+  it('in a 2-player game, only the trailing player qualifies', () => {
+    const two = [mkPlayer(1, 1200), mkPlayer(2, 800)];
+    expect(isPlayerUnderdog(1, two)).toBe(false);
+    expect(isPlayerUnderdog(2, two)).toBe(true);
+  });
+
+  it('in a 5-player game [200, 400, 900, 1200, 1500], only the bottom 2 players qualify', () => {
+    const five = [
+      mkPlayer(1, 200),
+      mkPlayer(2, 400),
+      mkPlayer(3, 900),
+      mkPlayer(4, 1200),
+      mkPlayer(5, 1500),
+    ];
+    expect(isPlayerUnderdog(1, five)).toBe(true);
+    expect(isPlayerUnderdog(2, five)).toBe(true);
+    expect(isPlayerUnderdog(3, five)).toBe(false);
+    expect(isPlayerUnderdog(4, five)).toBe(false);
+    expect(isPlayerUnderdog(5, five)).toBe(false);
+  });
+
+  it('excludes GENEROUS when player cannot afford gifts and UNDERDOG when in top half', () => {
+    const players = [mkPlayer(1, 80), mkPlayer(2, 1200), mkPlayer(3, 1500)];
+    const built = buildAllPlayerViews({
+      roomCode: 'TEST',
+      roomLocked: false,
+      step: 'IN_GAME',
+      currentRound: 2,
+      gameMode: 'rounds',
+      totalRounds: 10,
+      targetAmount: 2000,
+      settings: { topic: 'Tenses', level: 'B2', theme: 'General', challengeFormat: 'binary' },
+      customTopic: '',
+      customTheme: '',
+      isLoading: false,
+      isProcessing: false,
+      players,
+      seats: {},
+      bets: {},
+      hints: {},
+      activePowerUps: {},
+      powerUpsUsedThisRound: {},
+      availablePowerUps: ['GENEROUS', 'UNDERDOG'],
+      currentSentence: {
+        text: 'She has lived here for ten years.',
+        isCorrect: true,
+        correction: 'She has lived here for ten years.',
+        explanation: 'Correct.',
+        grammarPhrase: 'has lived',
+        questionType: 'binary',
+      },
+      roundResults: [],
+      winner: null,
+      studentPendingTarget: {},
+      studentPendingWheel: {},
+      studentNotifications: {},
+    });
+
+    // Player 1 ($80) is in bottom half (so UNDERDOG is eligible), but cannot afford GENEROUS ($50 + 2*$50 = $150) -> 1 card eligible
+    expect(built[1].availablePowerUpsCount).toBe(1);
+    expect(built[1].canBuyPowerUp).toBe(true);
+
+    // Player 2 ($1200) is NOT in bottom half (so UNDERDOG is excluded), but CAN afford GENEROUS ($150) -> 1 card eligible
+    expect(built[2].availablePowerUpsCount).toBe(1);
+    expect(built[2].canBuyPowerUp).toBe(true);
+  });
+});
+

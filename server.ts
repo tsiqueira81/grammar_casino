@@ -12,6 +12,8 @@ import {
   callGroqOrpheusTts,
   PersistentAiCache,
 } from './utils/groqUtils';
+import { formatCefrPromptDirective } from './utils/cefrGrammarMatrix';
+import { sanitizeMultipleChoiceDistractors } from './utils/offlineGrammarEngine';
 
 const isCloudflareWorker =
   typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers';
@@ -984,7 +986,7 @@ function enforceMultipleChoiceIntegrity(data: any) {
   data.correction = corr;
   data.text = txt;
   data.correctAnswer = answer;
-  data.options = deduped;
+  data.options = answer ? sanitizeMultipleChoiceDistractors(answer, deduped, data.acceptedAnswers || []) : deduped;
   data.acceptedAnswers = answer ? [answer] : [];
 }
 
@@ -1587,6 +1589,8 @@ async function handleGeminiRequest(req: Request, res: Response) {
           ? `\n=== CUSTOM LANGUAGE / LEXICAL DOMAIN FOCUS ("${topic}") ===\n- Connect the sentence and the derived word in the gap to the topic "${topic}" (for example, deriving a profession, specialist noun, adjective, or adverb related to "${topic}", such as "HISTORIAN" from "HISTORY", "SCIENTIFIC" from "SCIENCE", "BAKERY" from "BAKE", "MEDICAL" from "MEDICINE").`
           : "";
 
+        const cefrMatrixDirective = isCustomDomain ? "" : formatCefrPromptDirective(topic, level as any);
+
         let prompt = "";
 
         if (resolvedQuestionType === "multipleChoice") {
@@ -1599,7 +1603,7 @@ ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
-- LEXIS & VOCABULARY: ${profile.lexis}
+- LEXIS & VOCABULARY: ${profile.lexis}${cefrMatrixDirective}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
@@ -1630,7 +1634,7 @@ ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
-- LEXIS & VOCABULARY: ${profile.lexis}
+- LEXIS & VOCABULARY: ${profile.lexis}${cefrMatrixDirective}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
@@ -1659,7 +1663,7 @@ ${varietyDirective}
 - MORPHOLOGICAL COMPLEXITY BY LEVEL:
   * A1–A2: Clear, high-frequency suffixes or prefixes (e.g., TEACH -> teacher, CARE -> carefully, FRIEND -> friendly, DECIDE -> decision, POSSIBLE -> impossible, HAPPY -> happiness).
   * B1–B2: Multi-step derivations, negative prefixes + suffixes, or internal vowel/consonant shifts (e.g., COMFORT -> uncomfortable, AMAZE -> amazement, MAINTAIN -> maintenance, TIRE -> tirelessly, LONG -> length, BELIEVE -> belief).
-  * C1–C2: Sophisticated academic/idiomatic derivations, double affixes, or compound stems (e.g., RECONCILE -> irreconcilably, SUBSTANCE -> unsubstantiated, PRECEDENT -> unprecedented, APPEAR -> disappearance, OUTRAGE -> outrageously).
+  * C1–C2: Sophisticated academic/idiomatic derivations, double affixes, or compound stems (e.g., RECONCILE -> irreconcilably, SUBSTANCE -> unsubstantiated, PRECEDENT -> unprecedented, APPEAR -> disappearance, OUTRAGE -> outrageously).${cefrMatrixDirective}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
@@ -1686,7 +1690,7 @@ ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
-- LEXIS & VOCABULARY: ${profile.lexis}
+- LEXIS & VOCABULARY: ${profile.lexis}${cefrMatrixDirective}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
@@ -1727,7 +1731,7 @@ ${varietyDirective}
 The sentence MUST strictly conform to the linguistic, syntactic, and pedagogical profile of CEFR Level ${level}:
 - SYNTAX (${profile.targetLength}): ${profile.syntax}
 - LEXIS & VOCABULARY: ${profile.lexis}
-- MISTAKE IDENTIFICATION: ${profile.mistakeIdentification}
+- MISTAKE IDENTIFICATION: ${profile.mistakeIdentification}${cefrMatrixDirective}
 ${avoidSentencesClause}
 ${avoidMistakesClause}
 
