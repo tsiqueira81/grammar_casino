@@ -51,12 +51,6 @@ export interface Tabletop3DOverlayProps {
   onChipImpactSound?: (denomination: number) => void;
 }
 
-declare global {
-  interface Window {
-    grammarCasinoGodot?: (eventJson: string) => void;
-  }
-}
-
 interface RigidChipBody {
   mesh: THREE.Object3D;
   baseScale: number;
@@ -686,19 +680,6 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     const chipsToSpawn = decomposeBetIntoChips(tossEvent.amountDelta);
 
-    if (typeof window !== 'undefined' && typeof window.grammarCasinoGodot === 'function') {
-      try {
-        window.grammarCasinoGodot(
-          JSON.stringify({
-            action: 'toss_bet',
-            seatIndex: tossEvent.seatIndex,
-            chipCount: chipsToSpawn.length,
-          })
-        );
-      } catch {
-        // Ignore bridge errors
-      }
-    }
 
     if (!ctx) return;
 
@@ -761,18 +742,6 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     if (ctx && ctx.lastProcessedSweepId === sweepEvent.id) return;
     if (ctx) ctx.lastProcessedSweepId = sweepEvent.id;
 
-    if (typeof window !== 'undefined' && typeof window.grammarCasinoGodot === 'function') {
-      try {
-        window.grammarCasinoGodot(
-          JSON.stringify({
-            action: 'sweep_pot',
-            winnerSeats: sweepEvent.winnerSeatIndices,
-          })
-        );
-      } catch {
-        // Ignore bridge errors
-      }
-    }
 
     if (!ctx) return;
 
@@ -834,19 +803,6 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     if (ctx && ctx.lastProcessedBoomerangId === boomerangEvent.id) return;
     if (ctx) ctx.lastProcessedBoomerangId = boomerangEvent.id;
 
-    if (typeof window !== 'undefined' && typeof window.grammarCasinoGodot === 'function') {
-      try {
-        window.grammarCasinoGodot(
-          JSON.stringify({
-            action: 'boomerang_reflect',
-            attackerSeat: boomerangEvent.attackerSeatIndex,
-            defenderSeat: boomerangEvent.defenderSeatIndex,
-          })
-        );
-      } catch {
-        // Ignore bridge errors
-      }
-    }
 
     if (!ctx) return;
 

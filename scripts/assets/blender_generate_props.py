@@ -2,7 +2,7 @@
 Grammar Casino — Headless Blender 3D Prop Generator (Enhanced PBR + Animations)
 ===============================================================================
 Run in Antigravity (or terminal) via:
-    blender --background --python antigravity-toolkit/blender_generate_props.py
+    blender --background --python scripts/assets/blender_generate_props.py
 
 Generates and exports 4 low-poly, PBR-ready glTF (.glb) assets into `public/models/`:
   1. public/models/poker_chips.glb      (5 beveled clay casino chips: $10, $25, $50, $100, $500 with edge-spots & brass inlay)
