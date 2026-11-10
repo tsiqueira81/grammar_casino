@@ -35,7 +35,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | --- | --- |
 | `App.tsx` | The host screen and almost all game flow (very large; being split up in a later phase) |
 | `components/` | Screens and widgets. `StudentControllerView.tsx` is the phone app, `PlayerBettingCard.tsx` the single-screen seat card, `Tabletop3DOverlay.tsx` the lazy-loaded three.js table |
-| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner). Change a rule here, not in `App.tsx` |
+| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner), `revealGate.ts` (who is in, may the answer be revealed). Change a rule here, not in `App.tsx` |
 | `utils/` | Pure helpers: `roundSettlement.ts` (payouts), `multiplayerProtocol.ts` (per-phone views), `soundEngine.ts` (Web Audio synthesis), `sentenceSegments.ts`, and others |
 | `services/` | AI client (`geminiService.ts`), offline banks (`fallbackSentences.ts`, `expandedCuratedBank*.ts`), Firebase, room transport (`multiplayerService.ts`) |
 | `server.ts` | Dev server plus the serverless API used by the Pages Function |

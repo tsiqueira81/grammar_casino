@@ -1,3 +1,4 @@
+import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
 import { checkBet, isBetComplete } from './game/betValidity';
 import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
@@ -3576,10 +3577,13 @@ export function App() {
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (mpRoomCode) {
-      const allMpReady = unfrozenPlayers.every(p => {
-        if (mpSeats[p.id]?.lockedIn) return true;
-        const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit, currentSentence?.baseWord);
+      const allMpReady = isEveryRoomPlayerReady({
+        playerIds: unfrozenPlayers.map(p => p.id),
+        bets,
+        activePowerUps,
+        questionType: qType,
+        baseWord: currentSentence?.baseWord,
+        seats: mpSeats,
       });
       if (!allMpReady && !teacherRevealOverride) {
         setError({
@@ -5259,33 +5263,29 @@ export function App() {
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
 
-            const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
-                const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-                return isBetComplete(bets[p.id], currentQuestionType, hasSplitBet, currentSentence?.baseWord, { strictSplitBaseWord: true });
+            // Who is in, and whether the answer may be revealed (game/revealGate.ts).
+            const revealGate = getRevealGate({
+              playerIds: unfrozenActivePlayers.map(p => p.id),
+              bets,
+              activePowerUps,
+              questionType: currentQuestionType,
+              baseWord: currentSentence?.baseWord,
+              mode: mpRoomCode ? 'room' : isTurnTimerEnabled ? 'turnTimer' : 'free',
+              seats: mpSeats,
+              turnTimers,
+              teacherOverride: teacherRevealOverride,
             });
-
-            const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
-            const lockedCount = unfrozenActivePlayers.filter(p => turnTimers[p.id]?.status === 'locked').length;
-            const mpLockedCount = unfrozenActivePlayers.filter(p => {
-              if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
-              const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-              return isBetCompleteForQuestionType(bets[p.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
-            }).length;
-            const allMpPlayersLocked = unfrozenActivePlayers.length > 0 && mpLockedCount === unfrozenActivePlayers.length;
-            const canRevealResults = mpRoomCode
-              ? (allMpPlayersLocked || allValidBetsFinalized || teacherRevealOverride)
-              : isTurnTimerEnabled
-                ? (allActivePlayersLocked || teacherRevealOverride)
-                : (allValidBetsFinalized || teacherRevealOverride);
+            const allValidBetsFinalized = revealGate.allBetsValid;
+            const allActivePlayersLocked = revealGate.allTimersLocked;
+            const lockedCount = revealGate.timerLockedCount;
+            const mpLockedCount = revealGate.roomLockedCount;
+            const allMpPlayersLocked = revealGate.allRoomLocked;
+            const canRevealResults = revealGate.canReveal;
 
             // Bets bar and reveal button: how many players are in, and what the reveal waits for.
-            const betsReadyCount = mpRoomCode
-              ? mpLockedCount
-              : isTurnTimerEnabled
-                ? lockedCount
-                : unfrozenActivePlayers.filter(p => hasPlayerPlacedBet(p.id)).length;
+            const betsReadyCount = revealGate.readyCount;
             const betsReadyWord = mpRoomCode || isTurnTimerEnabled ? 'locked in' : 'bets placed';
-            const everyoneIn = unfrozenActivePlayers.length > 0 && betsReadyCount === unfrozenActivePlayers.length;
+            const everyoneIn = revealGate.everyoneIn;
             const revealNote = !canRevealResults
               ? `when all ${unfrozenActivePlayers.length} ${mpRoomCode || isTurnTimerEnabled ? 'are locked in' : 'have bet'}`
               : teacherRevealOverride && !everyoneIn
