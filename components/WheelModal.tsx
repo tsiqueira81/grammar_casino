@@ -89,7 +89,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
         const speedFactor = Math.max(0.28, 1 - t * 0.72);
         currentFlapperDeflection = -32 * speedFactor;
         setActiveStudIndex(((currentPegSlot % 20) + 20) % 20);
-        playSound('click');
+        playSound('wheelTick');
       } else {
         // Spring return of the leather flapper
         currentFlapperDeflection *= 0.82;

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 export interface Seat3DState {
   playerId: number;
@@ -32,6 +33,12 @@ export interface BoomerangArcEvent {
   totalSeats: number;
 }
 
+/** A shower of spinning gold coins (big wins, game over). intensity is 0..1. */
+export interface JackpotEvent {
+  id: string;
+  intensity: number;
+}
+
 export interface Tabletop3DOverlayProps {
   active: boolean;
   calmMode: boolean;
@@ -40,6 +47,7 @@ export interface Tabletop3DOverlayProps {
   tossEvent: ChipTossEvent | null;
   sweepEvent: PotSweepEvent | null;
   boomerangEvent: BoomerangArcEvent | null;
+  jackpotEvent?: JackpotEvent | null;
   onChipImpactSound?: (denomination: number) => void;
 }
 
@@ -64,6 +72,20 @@ interface RigidChipBody {
   sweepTarget?: THREE.Vector3;
   sweepProgress: number;
   sweepDelay: number;
+  /** Euler's-disk wobble after landing: amplitude decays to 0. */
+  wobble: number;
+  wobblePhase: number;
+  shadow?: THREE.Mesh;
+}
+
+interface FallingCoin {
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  rotation: THREE.Euler;
+  spin: THREE.Vector3;
+  delay: number;
+  life: number;
+  bounced: boolean;
 }
 
 interface ActiveBoomerangFlight {
@@ -72,6 +94,29 @@ interface ActiveBoomerangFlight {
   backCurve: THREE.QuadraticBezierCurve3;
   elapsed: number;
   duration: number;
+  trailTimer: number;
+}
+
+const MAX_SPARKS = 420;
+const MAX_COINS = 72;
+
+/** Soft round sprite used for sparkles and contact shadows. */
+function makeRadialTexture(inner: string, outer: string): THREE.Texture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const g = canvas.getContext('2d');
+  if (g) {
+    const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, inner);
+    grad.addColorStop(1, outer);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 /**
@@ -137,6 +182,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   tossEvent,
   sweepEvent,
   boomerangEvent,
+  jackpotEvent,
   onChipImpactSound,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -154,6 +200,11 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     lastProcessedTossId: string | null;
     lastProcessedSweepId: string | null;
     lastProcessedBoomerangId: string | null;
+    lastProcessedJackpotId: string | null;
+    spawnSparks: (at: THREE.Vector3, count: number, palette?: number[], speed?: number) => void;
+    makeShadow: () => THREE.Mesh;
+    coins: FallingCoin[];
+    wake: () => void;
   } | null>(null);
 
   // Initialize Three.js WebGL scene & load `.glb` chip/boomerang models
@@ -183,11 +234,21 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
+    // Image-based lighting so lacquered chips and gold inlays pick up real reflections.
+    // RoomEnvironment is procedural: nothing is downloaded.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = envTexture;
+    pmrem.dispose();
+
     // Warm casino lighting for transient 3D chips and Boomerang arcs
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambientLight);
 
     const overheadLight = new THREE.DirectionalLight(0xfff3d1, 1.85);
@@ -246,8 +307,93 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       lastProcessedTossId: null as string | null,
       lastProcessedSweepId: null as string | null,
       lastProcessedBoomerangId: null as string | null,
+      lastProcessedJackpotId: null as string | null,
+      spawnSparks: (() => {}) as (at: THREE.Vector3, count: number, palette?: number[], speed?: number) => void,
+      makeShadow: (() => new THREE.Mesh()) as () => THREE.Mesh,
+      coins: [] as FallingCoin[],
+      wake: () => {},
     };
     sceneRef.current = stateObj;
+
+    // --- Contact shadows: a soft dark disc under every chip that shrinks and fades with height ---
+    const shadowTexture = makeRadialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)');
+    const shadowGeometry = new THREE.PlaneGeometry(0.5, 0.5);
+    shadowGeometry.rotateX(-Math.PI / 2);
+    stateObj.makeShadow = () => {
+      const m = new THREE.Mesh(
+        shadowGeometry,
+        new THREE.MeshBasicMaterial({ map: shadowTexture, transparent: true, depthWrite: false, opacity: 0.8 })
+      );
+      m.position.y = 0.005;
+      m.renderOrder = -1;
+      scene.add(m);
+      return m;
+    };
+    const updateShadow = (chip: RigidChipBody, visibility = 1) => {
+      if (!chip.shadow) return;
+      const h = Math.max(0, chip.position.y - 0.02);
+      chip.shadow.position.set(chip.position.x, 0.005, chip.position.z);
+      const spread = 1 + h * 0.9;
+      chip.shadow.scale.setScalar(spread * (chip.mesh.scale.x / (chip.baseScale || 1)));
+      (chip.shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0, (0.85 / (1 + h * 2.2)) * visibility);
+    };
+    const removeChip = (index: number) => {
+      const chip = stateObj.chips[index];
+      scene.remove(chip.mesh);
+      if (chip.shadow) {
+        scene.remove(chip.shadow);
+        (chip.shadow.material as THREE.Material).dispose();
+      }
+      stateObj.chips.splice(index, 1);
+    };
+
+    // --- Sparkle particles (additive, fade to black = invisible) ---
+    const sparkPositions = new Float32Array(MAX_SPARKS * 3);
+    const sparkColors = new Float32Array(MAX_SPARKS * 3);
+    const sparkGeometry = new THREE.BufferGeometry();
+    sparkGeometry.setAttribute('position', new THREE.BufferAttribute(sparkPositions, 3));
+    sparkGeometry.setAttribute('color', new THREE.BufferAttribute(sparkColors, 3));
+    sparkGeometry.setDrawRange(0, 0);
+    const sparkTexture = makeRadialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+    const sparkMaterial = new THREE.PointsMaterial({
+      size: 0.15,
+      map: sparkTexture,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+    });
+    const sparkPoints = new THREE.Points(sparkGeometry, sparkMaterial);
+    sparkPoints.frustumCulled = false;
+    scene.add(sparkPoints);
+    type Spark = { p: THREE.Vector3; v: THREE.Vector3; life: number; max: number; c: THREE.Color };
+    const sparks: Spark[] = [];
+    const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
+    stateObj.spawnSparks = (at, count, palette = GOLD_PALETTE, speed = 1) => {
+      for (let i = 0; i < count && sparks.length < MAX_SPARKS; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const up = 0.6 + Math.random() * 1.6;
+        const out = (0.4 + Math.random() * 1.3) * speed;
+        sparks.push({
+          p: at.clone(),
+          v: new THREE.Vector3(Math.cos(theta) * out, up * speed, Math.sin(theta) * out),
+          life: 0,
+          max: 0.45 + Math.random() * 0.5,
+          c: new THREE.Color(palette[i % palette.length]),
+        });
+      }
+      stateObj.wake();
+    };
+
+    // --- Jackpot coin shower (one draw call via InstancedMesh) ---
+    const coinGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.016, 28);
+    const coinMaterial = new THREE.MeshStandardMaterial({ color: 0xd9a93a, metalness: 1, roughness: 0.38, envMapIntensity: 0.75 });
+    const coinMesh = new THREE.InstancedMesh(coinGeometry, coinMaterial, MAX_COINS);
+    coinMesh.count = 0;
+    coinMesh.frustumCulled = false;
+    scene.add(coinMesh);
+    const coinDummy = new THREE.Object3D();
 
     const loader = new GLTFLoader();
 
@@ -293,8 +439,19 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const SETTLED_HOLD_SEC = 0.18;
     const SETTLED_FADE_SEC = 0.28;
 
-    const animate = () => {
+    let running = false;
+    const hasWork = () =>
+      stateObj.chips.length > 0 || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
+
+    // Render only while something is moving; an idle overlay costs nothing on the projector laptop.
+    stateObj.wake = () => {
+      if (running) return;
+      running = true;
+      clock.getDelta();
       rafId = requestAnimationFrame(animate);
+    };
+
+    const animate = () => {
       const dt = Math.min(clock.getDelta(), 0.05);
 
       for (let i = stateObj.chips.length - 1; i >= 0; i--) {
@@ -318,25 +475,37 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
             chip.mesh.scale.setScalar(chip.baseScale * fadeOut);
           }
 
+          updateShadow(chip, 1 - chip.sweepProgress);
           if (chip.sweepProgress >= 1) {
-            scene.remove(chip.mesh);
-            stateObj.chips.splice(i, 1);
+            // A small burst of gold where the winnings land
+            if (Math.random() < 0.6) stateObj.spawnSparks(chip.position, 10, undefined, 0.8);
+            removeChip(i);
           }
           continue;
         }
 
         if (chip.settled) {
           chip.settledTime += dt;
+          if (chip.wobble > 0.002) {
+            // Rolling wobble that speeds up as it dies away, like a real chip settling
+            chip.wobblePhase += dt * (14 + (1 - chip.wobble / 0.35) * 30);
+            chip.wobble *= Math.pow(0.012, dt);
+            chip.mesh.rotation.x = Math.cos(chip.wobblePhase) * chip.wobble;
+            chip.mesh.rotation.z = Math.sin(chip.wobblePhase) * chip.wobble;
+          } else {
+            chip.mesh.rotation.x = 0;
+            chip.mesh.rotation.z = 0;
+          }
           if (chip.settledTime > SETTLED_HOLD_SEC) {
             const fadeT = (chip.settledTime - SETTLED_HOLD_SEC) / SETTLED_FADE_SEC;
             if (fadeT >= 1) {
-              scene.remove(chip.mesh);
-              stateObj.chips.splice(i, 1);
+              removeChip(i);
               continue;
             }
             const scaleFactor = Math.max(0.001, 1 - fadeT * fadeT);
             chip.mesh.scale.setScalar(chip.baseScale * scaleFactor);
           }
+          updateShadow(chip);
           continue;
         }
 
@@ -362,13 +531,15 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
           } else {
             chip.velocity.set(0, 0, 0);
             chip.angularVelocity.set(0, 0, 0);
-            chip.mesh.rotation.x = 0;
-            chip.mesh.rotation.z = 0;
+            chip.wobble = 0.22 + Math.random() * 0.12;
+            chip.wobblePhase = Math.random() * Math.PI * 2;
             chip.settled = true;
+            stateObj.spawnSparks(chip.position, 3, [0xfff1c1, 0xffffff], 0.35);
           }
         }
 
         chip.mesh.position.copy(chip.position);
+        updateShadow(chip);
       }
 
       // Step 3D Boomerang flights along quadratic Bezier curves
@@ -383,6 +554,11 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         b.mesh.position.copy(pos);
         b.mesh.rotation.y += dt * 22.0;
         b.mesh.rotation.z = Math.sin(progress * Math.PI * 2) * 0.35;
+        b.trailTimer += dt;
+        if (b.trailTimer > 0.03) {
+          b.trailTimer = 0;
+          stateObj.spawnSparks(pos, 2, [0xffb347, 0xff7a18, 0xffe08a], 0.15);
+        }
 
         if (progress >= 1) {
           scene.remove(b.mesh);
@@ -390,10 +566,87 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         }
       }
 
+      // Sparkles: integrate, fade, and compact into the GPU buffer
+      for (let i = sparks.length - 1; i >= 0; i--) {
+        const sp = sparks[i];
+        sp.life += dt;
+        if (sp.life >= sp.max) {
+          sparks.splice(i, 1);
+          continue;
+        }
+        sp.v.y -= 4.2 * dt;
+        sp.v.multiplyScalar(Math.pow(0.35, dt));
+        sp.p.addScaledVector(sp.v, dt);
+      }
+      for (let i = 0; i < sparks.length; i++) {
+        const sp = sparks[i];
+        const k = 1 - sp.life / sp.max;
+        const twinkle = 0.7 + 0.3 * Math.sin(sp.life * 40 + i);
+        sparkPositions[i * 3] = sp.p.x;
+        sparkPositions[i * 3 + 1] = sp.p.y;
+        sparkPositions[i * 3 + 2] = sp.p.z;
+        sparkColors[i * 3] = sp.c.r * k * twinkle;
+        sparkColors[i * 3 + 1] = sp.c.g * k * twinkle;
+        sparkColors[i * 3 + 2] = sp.c.b * k * twinkle;
+      }
+      sparkGeometry.setDrawRange(0, sparks.length);
+      (sparkGeometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+      (sparkGeometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+
+      // Jackpot coins: tumble down, bounce once on the felt, then shrink away
+      let coinCount = 0;
+      for (let i = stateObj.coins.length - 1; i >= 0; i--) {
+        const coin = stateObj.coins[i];
+        if (coin.delay > 0) {
+          coin.delay -= dt;
+          continue;
+        }
+        coin.life += dt;
+        coin.velocity.y += GRAVITY * 0.55 * dt;
+        coin.position.addScaledVector(coin.velocity, dt);
+        coin.rotation.x += coin.spin.x * dt;
+        coin.rotation.y += coin.spin.y * dt;
+        coin.rotation.z += coin.spin.z * dt;
+        if (coin.position.y <= 0.03 && coin.velocity.y < 0) {
+          coin.position.y = 0.03;
+          if (!coin.bounced) {
+            coin.bounced = true;
+            coin.velocity.y *= -0.35;
+            coin.velocity.x *= 0.6;
+            coin.velocity.z *= 0.6;
+            coin.spin.multiplyScalar(0.4);
+            if (Math.random() < 0.25) impactCallbackRef.current?.(500);
+          } else {
+            coin.velocity.set(0, 0, 0);
+          }
+        }
+        if (coin.life > 2.6) {
+          stateObj.coins.splice(i, 1);
+        }
+      }
+      for (let i = 0; i < stateObj.coins.length && coinCount < MAX_COINS; i++) {
+        const coin = stateObj.coins[i];
+        if (coin.delay > 0) continue;
+        const fade = coin.life > 2.1 ? Math.max(0.001, 1 - (coin.life - 2.1) / 0.5) : 1;
+        coinDummy.position.copy(coin.position);
+        coinDummy.rotation.copy(coin.rotation);
+        coinDummy.scale.setScalar(fade);
+        coinDummy.updateMatrix();
+        coinMesh.setMatrixAt(coinCount++, coinDummy.matrix);
+      }
+      coinMesh.count = coinCount;
+      coinMesh.instanceMatrix.needsUpdate = true;
+
       renderer.render(scene, camera);
+
+      if (hasWork()) {
+        rafId = requestAnimationFrame(animate);
+      } else {
+        running = false;
+      }
     };
 
-    rafId = requestAnimationFrame(animate);
+    renderer.render(scene, camera);
 
     const handleResize = () => {
       if (!container) return;
@@ -402,12 +655,23 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      renderer.render(scene, camera);
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
+      running = false;
+      envTexture.dispose();
+      shadowTexture.dispose();
+      shadowGeometry.dispose();
+      sparkTexture.dispose();
+      sparkGeometry.dispose();
+      sparkMaterial.dispose();
+      coinGeometry.dispose();
+      coinMaterial.dispose();
+      coinMesh.dispose();
       renderer.dispose();
       sceneRef.current = null;
     };
@@ -482,8 +746,12 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         sweeping: false,
         sweepProgress: 0,
         sweepDelay: 0,
+        wobble: 0,
+        wobblePhase: 0,
+        shadow: ctx.makeShadow(),
       });
     });
+    ctx.wake();
   }, [tossEvent, calmMode]);
 
   // Handle celebratory 3D Pot Sweep on Round Settlement (spawns transient payout chips that arc to winners and vanish)
@@ -549,8 +817,14 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         sweepTarget: targetPos,
         sweepProgress: 0,
         sweepDelay: idx * 0.035,
+        wobble: 0,
+        wobblePhase: 0,
+        shadow: ctx.makeShadow(),
       });
     });
+    // Gold burst from the pot as it is swept; red-tinted embers when the House takes it
+    ctx.spawnSparks(potCenter, hasWinners ? 36 : 14, hasWinners ? undefined : [0xff6b6b, 0xffb347, 0x8b1e1e], hasWinners ? 1.1 : 0.6);
+    ctx.wake();
   }, [sweepEvent, calmMode]);
 
   // Handle 3D Boomerang Parabolic Reflection Flight
@@ -592,8 +866,35 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       backCurve: new THREE.QuadraticBezierCurve3(reflectPos, midBack, startPos),
       elapsed: 0,
       duration: 0.9,
+      trailTimer: 0,
     });
+    ctx.wake();
   }, [boomerangEvent, calmMode]);
+
+  // Jackpot coin shower: gold coins tumble in from above the table
+  useEffect(() => {
+    if (!jackpotEvent || calmMode) return;
+    const ctx = sceneRef.current;
+    if (!ctx || ctx.lastProcessedJackpotId === jackpotEvent.id) return;
+    ctx.lastProcessedJackpotId = jackpotEvent.id;
+
+    const intensity = Math.max(0.1, Math.min(1, jackpotEvent.intensity));
+    const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 700;
+    const count = Math.round((isSmallScreen ? 36 : MAX_COINS) * intensity);
+    for (let i = 0; i < count; i++) {
+      ctx.coins.push({
+        position: new THREE.Vector3((Math.random() - 0.5) * 7, 3.6 + Math.random() * 1.2, -1.8 + Math.random() * 3.2),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.8, -1 - Math.random() * 1.5, (Math.random() - 0.3) * 0.8),
+        rotation: new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI),
+        spin: new THREE.Vector3((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 16),
+        delay: Math.random() * 0.9 * intensity,
+        life: 0,
+        bounced: false,
+      });
+    }
+    ctx.spawnSparks(new THREE.Vector3(0, 0.4, -0.35), Math.round(60 * intensity), undefined, 1.4);
+    ctx.wake();
+  }, [jackpotEvent, calmMode]);
 
   if (!active || calmMode) {
     return null;

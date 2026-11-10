@@ -33,12 +33,15 @@ import StudentControllerView from './components/StudentControllerView';
 import CloudManagerModal, { CloudManagerTab } from './components/CloudManagerModal';
 import BroadcastCutIn, { BroadcastCutInPayload } from './components/BroadcastCutIn';
 import ThemeAmbience from './components/ThemeAmbience';
-import Tabletop3DOverlay, {
+import type {
   ChipTossEvent,
   PotSweepEvent,
+  JackpotEvent,
   BoomerangArcEvent,
   Seat3DState,
 } from './components/Tabletop3DOverlay';
+// three.js is only needed on the teacher's table, so phones never download it.
+const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -50,6 +53,7 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
@@ -67,104 +71,15 @@ const HOUSE_BAILOUT_AMOUNT = 150;
 // fixed top buttons (16 px margin + 44 px buttons + 16 px gap), so it never slides under them.
 const STICKY_TOP_PX = 76;
 
-// --- Tone.js Sound Manager ---
-declare global {
-  interface Window {
-    Tone: any; // Or a more specific type if you have Tone.js typings
+// --- Sound engine (Web Audio, no downloads; see utils/soundEngine.ts) ---
+const readStoredSfxVolume = (): number => {
+  try {
+    return clampVolume(localStorage.getItem(SFX_VOLUME_STORAGE_KEY), DEFAULT_SFX_VOLUME);
+  } catch {
+    return DEFAULT_SFX_VOLUME;
   }
-}
-
-let soundManagerInstance: { play: (sound: SoundEffect, ...args: any[]) => void } | null = null;
-
-const initializeSounds = (): typeof soundManagerInstance => {
-    if (typeof window.Tone === 'undefined') {
-        return null;
-    }
-    if (soundManagerInstance) return soundManagerInstance;
-
-    try {
-      const sounds = {
-          click: new window.Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination(),
-          addPlayer: new window.Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 0.2 } }).toDestination(),
-          startGame: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
-          win: new window.Tone.Synth({ volume: -6, oscillator: { type: 'pulse', width: 0.2 }, envelope: { attack: 0.01, decay: 0.4, sustain: 0, release: 0.2 } }).toDestination(),
-          lose: new window.Tone.Synth({ volume: -6, oscillator: { type: 'fmsquare', modulationIndex: 10 }, envelope: { attack: 0.05, decay: 0.3, sustain: 0, release: 0.1 } }).toDestination(),
-          hint: new window.Tone.PluckSynth().toDestination(),
-          powerUp: new window.Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 5, envelope: { attack: 0.001, decay: 0.2, sustain: 0.01, release: 0.1}}).toDestination(),
-          gameOver: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
-          bet: new window.Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination(),
-          flip: new window.Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.05 } }).toDestination(),
-          error: new window.Tone.DuoSynth({ harmonicity: 1.5, voice0: { oscillator: { type: 'sine' } }, voice1: { oscillator: { type: 'sine' } } }).toDestination(),
-          success: new window.Tone.PolySynth(window.Tone.Synth).toDestination(),
-          tick: new window.Tone.Synth({ volume: -8, oscillator: { type: 'triangle' }, envelope: { attack: 0.002, decay: 0.06, sustain: 0, release: 0.03 } }).toDestination(),
-          timeUp: new window.Tone.PolySynth(window.Tone.Synth, { volume: -4 }).toDestination(),
-          chipClink: new window.Tone.Synth({ volume: -7, oscillator: { type: 'sine' }, envelope: { attack: 0.001, decay: 0.085, sustain: 0, release: 0.04 } }).toDestination(),
-          chipBody: new window.Tone.MembraneSynth({ volume: -14, pitchDecay: 0.008, octaves: 2.5, envelope: { attack: 0.001, decay: 0.06, sustain: 0, release: 0.03 } }).toDestination(),
-          rakeBrush: new window.Tone.NoiseSynth({ volume: -14, noise: { type: 'pink' }, envelope: { attack: 0.02, decay: 0.28, sustain: 0, release: 0.12 } }).toDestination(),
-          whoosh: new window.Tone.Synth({ volume: -8, oscillator: { type: 'triangle' }, envelope: { attack: 0.03, decay: 0.45, sustain: 0.1, release: 0.25 } }).toDestination(),
-      };
-
-      const play = (sound: SoundEffect, ...args: any[]) => {
-          if (!window.Tone) return;
-          const now = window.Tone.now();
-          switch (sound) {
-              case 'click': sounds.click.triggerAttackRelease('C4', '16n', now); break; // Raised pitch slightly
-              case 'addPlayer': sounds.addPlayer.triggerAttackRelease('E4', '8n', now); break;
-              case 'startGame': sounds.startGame.triggerAttackRelease(['C4', 'E4', 'G4'], '8n', now); break;
-              case 'win': sounds.win.triggerAttackRelease('G5', '16n', now + (args[0] || 0) * 0.15); break; // Faster sequence
-              case 'lose': sounds.lose.triggerAttackRelease('C2', '8n', now + (args[0] || 0) * 0.15); break;
-              case 'hint': sounds.hint.triggerAttackRelease('A5', now); break; // Higher pitch for hint
-              case 'powerUp': sounds.powerUp.triggerAttackRelease('C3', '8n', now); break;
-              case 'gameOver': sounds.gameOver.triggerAttackRelease(['C5', 'E5', 'G5', 'C6'], '4n', now); break;
-              case 'bet': sounds.bet.triggerAttackRelease('G3', '16n', now); break;
-              case 'flip': sounds.flip.triggerAttackRelease('16n', now); break;
-              case 'error': sounds.error.triggerAttackRelease('G2', '8n', now); break;
-              case 'success': sounds.success.triggerAttackRelease(['C5', 'E5', 'G5'], '8n', now); break;
-              case 'tick': sounds.tick.triggerAttackRelease('A5', '32n', now); break;
-              case 'timeUp': sounds.timeUp.triggerAttackRelease(['G4', 'Eb4', 'C4'], '8n', now); break;
-              case 'chipClink': {
-                  // Denomination-aware pitch + ±45 cents organic detune so rapid chip stacks never sound robotic
-                  const denom = Number(args[0]) || 25;
-                  const baseFreq =
-                    denom >= 500 ? 523.25 : // C5 deeper clay thud
-                    denom >= 100 ? 622.25 : // Eb5
-                    denom >= 50  ? 783.99 : // G5
-                    denom >= 25  ? 932.33 : // Bb5
-                                   1046.50; // C6 crisp clink
-                  const detuneCents = (Math.random() * 90) - 45;
-                  const freq = baseFreq * Math.pow(2, detuneCents / 1200);
-                  sounds.chipClink.triggerAttackRelease(freq, '32n', now);
-                  sounds.chipBody.triggerAttackRelease(freq * 0.25, '32n', now + 0.005);
-                  break;
-              }
-              case 'potSweep': {
-                  sounds.rakeBrush.triggerAttackRelease('8n', now);
-                  const notes = ['C5', 'E5', 'G5', 'B5', 'D6'];
-                  notes.forEach((note, idx) => {
-                    sounds.chipClink.triggerAttackRelease(note, '32n', now + 0.05 + idx * 0.045);
-                  });
-                  break;
-              }
-              case 'boomerangWhoosh': {
-                  sounds.whoosh.triggerAttackRelease('A4', '4n', now);
-                  if (sounds.whoosh.frequency) {
-                    sounds.whoosh.frequency.setValueAtTime(320, now);
-                    sounds.whoosh.frequency.exponentialRampToValueAtTime(880, now + 0.22);
-                    sounds.whoosh.frequency.exponentialRampToValueAtTime(280, now + 0.48);
-                  }
-                  sounds.chipClink.triggerAttackRelease('E6', '32n', now + 0.22);
-                  break;
-              }
-              default: break;
-          }
-      };
-      soundManagerInstance = { play };
-    } catch (e) {
-      console.error("Failed to initialize Tone.js sounds:", e);
-      soundManagerInstance = null;
-    }
-    return soundManagerInstance;
 };
+const soundEngine = createSoundEngine(typeof window !== 'undefined' ? readStoredSfxVolume() : DEFAULT_SFX_VOLUME);
 
 // --- Audio Decoding Helpers for Gemini TTS ---
 function base64ToBytes(base64: string) {
@@ -402,8 +317,15 @@ export function App() {
   const [winner, setWinner] = useState<Player | null>(initialGameState?.winner || null);
   const [error, setError] = useState<GameError | null>(null);
   
-  const [isMuted, setIsMuted] = useState(false);
-  const [audioReady, setAudioReady] = useState(false);
+  const [isMuted, setIsMuted] = useState(() => {
+    try {
+      return localStorage.getItem(SFX_MUTED_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [sfxVolume, setSfxVolume] = useState(() => soundEngine.getVolume());
+  const audioReady = soundEngine.isSupported();
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [orpheusVoice, setOrpheusVoice] = useState<GeminiService.OrpheusVoiceId>(() => {
     try {
@@ -805,6 +727,7 @@ export function App() {
   const [activeCutIn, setActiveCutIn] = useState<BroadcastCutInPayload | null>(null);
   const [chipTossEvent, setChipTossEvent] = useState<ChipTossEvent | null>(null);
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
+  const [jackpotEvent, setJackpotEvent] = useState<JackpotEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
 
   useEffect(() => {
@@ -838,21 +761,27 @@ export function App() {
 
   const activePlayers = players.filter(p => p.money > 0);
 
-  // Sound and TTS setup
-  useEffect(() => { 
-    const script = document.createElement('script'); 
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"; 
-    script.async = true; 
-    script.onload = () => { 
-      initializeSounds(); 
-      setAudioReady(true); 
-    }; 
-    document.body.appendChild(script); 
-    return () => { 
-      if (script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
-    }; 
+  // Sound and TTS setup. Browsers keep audio locked until the first tap,
+  // so unlock the engine on the first user gesture anywhere on the page.
+  useEffect(() => {
+    const unlock = () => { soundEngine.unlock(); };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
+  }, [isMuted]);
+
+  const handleSfxVolumeChange = useCallback((next: number) => {
+    const v = clampVolume(next);
+    setSfxVolume(v);
+    soundEngine.setVolume(v);
+    try { localStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(v)); } catch {}
   }, []);
 
   useEffect(() => { 
@@ -881,17 +810,9 @@ export function App() {
     } 
   }, [step]);
 
-  const playSound = useCallback(async (sound: SoundEffect, ...args: any[]) => { 
-    if (isMuted || !audioReady || !soundManagerInstance) return; 
-    if (window.Tone && window.Tone.context.state !== 'running') { 
-      try {
-        await window.Tone.start(); 
-      } catch (e) {
-        console.error("Error starting Tone.js audio context:", e);
-        return;
-      }
-    } 
-    soundManagerInstance.play(sound, ...args); 
+  const playSound = useCallback((sound: SoundEffect, ...args: any[]) => {
+    if (isMuted || !audioReady) return;
+    soundEngine.play(sound, ...args);
   }, [isMuted, audioReady]);
 
   const handleToggleSettingsDeckExpanded = useCallback(() => {
@@ -3777,7 +3698,7 @@ export function App() {
       (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !teacherRevealOverride
     );
 
-    playSound('flip');
+    playSound('drumroll');
     setIsProcessing(true);
 
     // 1. Binary mode correction verification
@@ -3932,6 +3853,12 @@ export function App() {
     });
     settlement.sounds.forEach(({ sound, index }) => playSound(sound, index));
     const updatedPlayers = settlement.updatedPlayers;
+    const someoneWentBust = updatedPlayers.some(p =>
+      p.money <= 0 && (players.find(o => o.id === p.id)?.money ?? 0) > 0
+    );
+    if (someoneWentBust) {
+      window.setTimeout(() => playSound('bankrupt'), 950);
+    }
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
 
@@ -3951,6 +3878,14 @@ export function App() {
       winnerSeatIndices,
       totalSeats: Math.max(1, activePlayers.length),
     });
+    // A small coin shower when someone at least doubles their stack this round
+    const bigWin = newRoundPlayerResults.some(r => {
+      const before = players.find(p => p.id === r.playerId)?.money ?? 0;
+      return r.amountChanged > 0 && before > 0 && r.amountChanged >= before;
+    });
+    if (bigWin) {
+      window.setTimeout(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
+    }
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
@@ -3986,6 +3921,7 @@ export function App() {
 
     if (isGameOver) {
         playSound('gameOver');
+    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
         let finalWinnerPlayer: Player | null = null;
         const pool = stillActivePlayers.length > 0 ? stillActivePlayers : players;
         if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
@@ -4067,6 +4003,7 @@ export function App() {
 
   const handleEndGameEarly = useCallback(() => {
     playSound('gameOver');
+    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
     const stillActivePlayers = players.filter(p => p.money > 0);
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     let finalWinnerPlayer: Player | null = null;
@@ -5735,6 +5672,11 @@ export function App() {
                           ? 'stuck py-2.5 sm:py-3'
                           : 'gc-panel shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
                       }`}> 
+                        {isSentenceRevealed && !isLoading && !isSentenceHeaderStuck && (
+                          <span aria-hidden="true" className="gc-sheen pointer-events-none absolute inset-0 overflow-hidden rounded-gc-lg">
+                            <span className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/25 to-transparent animate-gc-sheen [animation-delay:0.7s]" />
+                          </span>
+                        )}
                         {currentSentence && (
                           <>
                             {isSentenceHeaderStuck ? (
@@ -6868,7 +6810,7 @@ export function App() {
                                     </div>
                                   )}
                               </td>
-                              <td className={`py-3.5 px-3 text-right tabular-nums font-extrabold text-gc-lead whitespace-nowrap ${result.amountChanged > 0 ? 'text-gc-win' : result.amountChanged < 0 ? 'text-gc-loss' : 'text-gc-quiet'}`}>
+                              <td className={`py-3.5 px-3 text-right tabular-nums font-extrabold text-gc-lead whitespace-nowrap ${result.amountChanged > 0 ? 'text-gc-win animate-gc-glow' : result.amountChanged < 0 ? 'text-gc-loss' : 'text-gc-quiet'}`}>
                                   {result.amountChanged > 0 ? `+$${result.amountChanged.toLocaleString()}` : result.amountChanged < 0 ? `-$${Math.abs(result.amountChanged).toLocaleString()}` : '$0'}
                               </td>
                               <td className="py-3.5 px-3 text-right tabular-nums font-extrabold text-gc-lead text-gc-money whitespace-nowrap">
@@ -7134,16 +7076,19 @@ export function App() {
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300 relative">
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
+        <React.Suspense fallback={null}>
         <Tabletop3DOverlay
-          active={step === 'IN_GAME' || step === 'RESULTS'}
+          active={step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER'}
           calmMode={isCalmMode}
           projectorMode={isProjectorMode}
           seatStates={seat3DStates}
           tossEvent={chipTossEvent}
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
+          jackpotEvent={jackpotEvent}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
+        </React.Suspense>
         <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
@@ -7238,21 +7183,40 @@ export function App() {
           </button>
 
           {audioReady && (
-            <button 
-              onClick={() => { 
-                const newMutedState = !isMuted; 
-                setIsMuted(newMutedState); 
-                if (newMutedState && 'speechSynthesis' in window) { 
-                  window.speechSynthesis.cancel(); 
-                } 
-                playSound('click'); 
-              }} 
-              className="w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer" 
-              aria-label={isMuted ? "Unmute" : "Mute"}
-              title={isMuted ? "Sound on" : "Sound off"}
-            > 
-              {isMuted ? <VolumeX className="w-5 h-5" aria-hidden="true" /> : <Volume2 className="w-5 h-5" aria-hidden="true" />}
-            </button>
+            <div className="group relative inline-flex items-center">
+              <button
+                onClick={() => {
+                  const newMutedState = !isMuted;
+                  setIsMuted(newMutedState);
+                  if (newMutedState && 'speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                  }
+                  if (!newMutedState) soundEngine.play('click');
+                }}
+                className="w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer"
+                aria-label={isMuted ? "Unmute" : "Mute"}
+                title={isMuted ? "Sound on" : "Sound off"}
+              >
+                {isMuted ? <VolumeX className="w-5 h-5" aria-hidden="true" /> : <Volume2 className="w-5 h-5" aria-hidden="true" />}
+              </button>
+              {!isMuted && (
+                <label className="absolute right-0 top-full mt-2 hidden group-hover:flex group-focus-within:flex items-center gap-2 px-3 py-2 rounded-gc-sm bg-gc-card/95 border border-gc-line/[0.14] shadow-gc-1 backdrop-blur-md text-gc-cap font-semibold text-gc-quiet whitespace-nowrap z-50">
+                  Effects
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={sfxVolume}
+                    onChange={(e) => handleSfxVolumeChange(parseFloat(e.target.value))}
+                    onPointerUp={() => soundEngine.play('chipClink', 100)}
+                    onKeyUp={() => soundEngine.play('chipClink', 100)}
+                    className="w-28 accent-amber-500 cursor-pointer"
+                    aria-label="Sound effects volume"
+                  />
+                </label>
+              )}
+            </div>
           )}
 
           <select
