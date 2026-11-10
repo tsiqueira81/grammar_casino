@@ -35,6 +35,7 @@ import {
 import CountUp from './components/CountUp';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
+import SentenceText from './components/SentenceText';
 import PowerUpTooltip from './components/PowerUpTooltip';
 import GrammarReportCard from './components/GrammarReportCard';
 import { ChipRack, PokerChip } from './components/ChipStacks';
@@ -474,6 +475,8 @@ export function App() {
   const [teacherPinInput, setTeacherPinInput] = useState<string>('');
   const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
   const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
+  // A yes/no question before an action that cannot be undone (F4 fix 10)
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
   const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
   const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
   const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
@@ -3605,7 +3608,7 @@ export function App() {
     return verifications;
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
-  const handleRevealResults = useCallback(async () => {
+  const revealResultsCore = useCallback(async () => {
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
@@ -3746,6 +3749,7 @@ export function App() {
 
     playSound('drumroll');
     setIsProcessing(true);
+    let aiGradingFailed = false;
 
     // 1. Binary mode correction verification
     const verifications = await verifyPlayerCorrections();
@@ -3806,6 +3810,7 @@ export function App() {
           });
         } catch (err) {
           console.error("Failed batched cloze verification:", err);
+          aiGradingFailed = true;
         }
       }
     } else if (qType === 'keyWordTransformation') {
@@ -3873,6 +3878,7 @@ export function App() {
           });
         } catch (err) {
           console.error("Failed batched Key Word Transformation verification:", err);
+          aiGradingFailed = true;
         }
       }
     }
@@ -3950,9 +3956,32 @@ export function App() {
     setIsProcessing(false);
     setProcessingStatus('');
     setStep('RESULTS');
+    if (aiGradingFailed) {
+      setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
+    }
   }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+
+  // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
+  const handleRevealResults = useCallback(async () => {
+    const failure = await runAlwaysClearing(revealResultsCore, () => {
+      setIsProcessing(false);
+      setProcessingStatus('');
+    });
+    if (failure) {
+      console.error('Reveal failed:', failure);
+      setError({ title: 'Reveal failed', message: 'Something went wrong while marking this hand. Try revealing again.' });
+    }
+  }, [revealResultsCore]);
   
+  // A double click on "Deal the next hand" must not skip a hand (F4 fix 9).
+  // The guard is released once the screen moves on or the new sentence arrives.
+  const nextRoundGuardRef = useRef(createReentryGuard());
+  useEffect(() => {
+    nextRoundGuardRef.current.release();
+  }, [step, currentSentence]);
+
   const handleNextRound = useCallback(() => {
+    if (!nextRoundGuardRef.current.tryEnter()) return;
     const stillActivePlayers = players.filter(p => p.money > 0);
     const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
@@ -5428,21 +5457,6 @@ export function App() {
               ? unfrozenActivePlayers.find(p => (turnTimers[p.id]?.status ?? 'idle') === 'idle')
               : undefined;
 
-            let sentenceHtml = highlightedPhrase && currentSentence ? 
-              currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-gc-gold/20 text-gc-ink border-b-2 border-gc-gold px-1 rounded-sm">$1</span>`) 
-              : currentSentence?.text || '';
-
-            if (isClozeRound && sentenceHtml) {
-              const inlineBaseWordBadge =
-                currentQuestionType === 'wordFormation' && currentSentence?.baseWord
-                  ? ` <span class="inline-block mx-1 px-3 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.55em] align-middle select-none">(${currentSentence.baseWord.toUpperCase()})</span>`
-                  : '';
-              sentenceHtml = sentenceHtml.replace(
-                /_{3,}([,.;:!?)]*)/g,
-                `<span class="whitespace-nowrap"><span class="inline-block min-w-[4.5em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.6em] align-baseline select-none">_____</span>${inlineBaseWordBadge}$1</span>`
-              );
-            }
-
             const renderPlayerSeat = (player: Player) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
@@ -5881,8 +5895,14 @@ export function App() {
 
                                 <p 
                                   className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
-                                  dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
-                                />
+                                >
+                                  <SentenceText
+                                    text={currentSentence?.text || ''}
+                                    highlight={highlightedPhrase}
+                                    showGaps={isClozeRound}
+                                    baseWord={currentQuestionType === 'wordFormation' ? currentSentence?.baseWord : null}
+                                  />
+                                </p>
                             </div> 
                             
                             {/* Settings chips under the sentence; hidden when compact sticky unless the settings drawer is open */}
@@ -6514,7 +6534,8 @@ export function App() {
                     </ActionButton>
                   </div>
 
-                  {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
+                  {/* Always offer an early reveal, so one player who never bets cannot block the hand (F4 fix 12) */}
+                  {(mpRoomCode ? !allMpPlayersLocked : isTurnTimerEnabled ? !allActivePlayersLocked : !allValidBetsFinalized) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -6957,7 +6978,12 @@ export function App() {
                   <div className="flex-1 flex justify-end">
                     {!isGameOver && (
                       <ActionButton 
-                        onClick={handleEndGameEarly} 
+                        onClick={() => setConfirmAction({
+                          title: 'End the game now?',
+                          message: 'The game stops here and the final results are shown. You cannot go back to this hand.',
+                          confirmLabel: 'End the game',
+                          onConfirm: handleEndGameEarly,
+                        })}
                         variant="ghost"
                         className="h-10 px-4 text-gc-small font-semibold text-gc-loss"
                         title="End the game now and go to the final results"
@@ -7140,7 +7166,17 @@ export function App() {
           <div className="fixed top-4 left-4 z-50">
              <button
                 type="button"
-                onClick={() => { playSound('click'); handleRestartGame(); }}
+                onClick={() => {
+                  playSound('click');
+                  setConfirmAction({
+                    title: 'Leave this game?',
+                    message: step === 'GAME_OVER'
+                      ? 'You go back to the lobby and these final results close.'
+                      : 'You go back to the lobby. This game ends, its scores are cleared and any open room is closed.',
+                    confirmLabel: 'Leave the game',
+                    onConfirm: handleRestartGame,
+                  });
+                }}
                 className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold"
                 title="Leave the table and go back to the lobby"
              >
@@ -7342,6 +7378,27 @@ export function App() {
             </div> 
         </Modal>
       }
+      {confirmAction && (
+        <Modal title={confirmAction.title} onClose={() => setConfirmAction(null)} playSound={playSound} hideOkButton>
+          <p className="text-gc-body text-gc-ink mb-5">{confirmAction.message}</p>
+          <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+            <ActionButton onClick={() => setConfirmAction(null)} variant="secondary" className="min-h-[44px] px-5">
+              Stay
+            </ActionButton>
+            <ActionButton
+              onClick={() => {
+                const action = confirmAction.onConfirm;
+                setConfirmAction(null);
+                action();
+              }}
+              variant="danger"
+              className="min-h-[44px] px-5"
+            >
+              {confirmAction.confirmLabel}
+            </ActionButton>
+          </div>
+        </Modal>
+      )}
       {showTargetModal && (() => {
         const isSwap = showTargetModal.powerUp === 'SWAP';
         const buyerPlayer = players.find(p => p.id === showTargetModal.playerId);
