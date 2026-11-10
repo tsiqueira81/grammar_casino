@@ -81,11 +81,33 @@ jobs:
       - name: Check firestore.rules against the emulator
         run: npx firebase emulators:exec --config scripts/firestore-emulator.json --project demo-grammar-casino --only firestore "node scripts/check-firestore-rules.mjs"
 
+  browser-tests:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Play a local game and a live room
+        run: npm run test:e2e
+        env:
+          CI: "true"
+
   preview:
     name: Preview on Cloudflare Pages
     # Only for pull requests from this repository (forks cannot see the deploy secret).
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [checks, firestore-rules]
+    needs: [checks, firestore-rules, browser-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
