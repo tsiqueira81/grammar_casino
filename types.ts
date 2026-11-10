@@ -20,7 +20,13 @@ export type SoundEffect =
   | 'timeUp'
   | 'chipClink'
   | 'potSweep'
-  | 'boomerangWhoosh';
+  | 'boomerangWhoosh'
+  | 'drumroll'
+  | 'lockIn'
+  | 'bankrupt'
+  | 'wheelTick'
+  | 'roundWin'
+  | 'roundLose';
 
 // --- Per-player betting turn timer ---
 // 'idle'    -> turn not started yet (player cannot act while the timer feature is on)

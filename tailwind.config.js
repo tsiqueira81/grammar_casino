@@ -104,6 +104,34 @@ export default {
           '80%': { opacity: '1' },
           '100%': { opacity: '0', transform: 'translate3d(var(--gc-drift, 0px), 105vh, 0) rotate(640deg)' },
         },
+        // Gold coins spinning on their edge as they fall (phone win screen).
+        'gc-coin-fall': {
+          '0%': { opacity: '0', transform: 'translate3d(0, -8vh, 0) rotateY(0deg) rotateZ(0deg)' },
+          '8%': { opacity: '1' },
+          '85%': { opacity: '1' },
+          '100%': { opacity: '0', transform: 'translate3d(var(--gc-drift, 0px), 100vh, 0) rotateY(1440deg) rotateZ(40deg)' },
+        },
+        // A losing hand gives the result a short shake.
+        'gc-shake': {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '15%': { transform: 'translateX(-9px) rotate(-1deg)' },
+          '30%': { transform: 'translateX(8px) rotate(1deg)' },
+          '45%': { transform: 'translateX(-6px)' },
+          '60%': { transform: 'translateX(4px)' },
+          '75%': { transform: 'translateX(-2px)' },
+        },
+        // Winning numbers glow gold for a moment.
+        'gc-glow': {
+          '0%': { textShadow: '0 0 0 rgb(241 207 114 / 0)' },
+          '35%': { textShadow: '0 0 28px rgb(241 207 114 / 0.85), 0 0 4px rgb(255 255 255 / 0.6)' },
+          '100%': { textShadow: '0 0 10px rgb(241 207 114 / 0.25)' },
+        },
+        // A light sheen that sweeps once across a card face.
+        'gc-sheen': {
+          '0%': { transform: 'translateX(-120%) skewX(-18deg)', opacity: '0' },
+          '20%': { opacity: '1' },
+          '100%': { transform: 'translateX(220%) skewX(-18deg)', opacity: '0' },
+        },
         // The "locked in" badge on phones: a soft green ring that spreads out.
         'gc-ring': {
           '0%': { boxShadow: '0 0 0 0 rgb(74 222 128 / 0.45)' },
@@ -122,6 +150,10 @@ export default {
         'gc-ring': 'gc-ring 1.8s ease-out infinite',
         'gc-rise': 'gc-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both',
         'gc-confetti': 'gc-confetti 2s cubic-bezier(0.25, 0.6, 0.45, 1) both',
+        'gc-coin-fall': 'gc-coin-fall 2.2s cubic-bezier(0.35, 0.1, 0.6, 1) both',
+        'gc-shake': 'gc-shake 0.55s 0.15s ease-in-out both',
+        'gc-glow': 'gc-glow 1.6s 0.2s ease-out both',
+        'gc-sheen': 'gc-sheen 1.1s 0.25s ease-out both',
       },
       // Seven text steps. Nothing smaller than 12 px on the projector or 14 px on phones.
       fontSize: {

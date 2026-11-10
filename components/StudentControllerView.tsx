@@ -194,6 +194,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             navigator.vibrate(won ? [80, 50, 120] : [180]);
           } catch {}
         }
+        if (nextView.step === 'RESULTS') {
+          const delta = nextView.myRoundResult?.amountChanged ?? 0;
+          if (delta > 0) playSound('roundWin');
+          else if (delta < 0) playSound(nextView.me && nextView.me.money <= 0 ? 'bankrupt' : 'roundLose');
+        }
         lastStepRef.current = nextView.step;
       }
 
@@ -511,7 +516,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     }
 
     setLockWarning(null);
-    playSound('bet');
+    playSound('lockIn');
     sendIntent({ type: 'SET_FULL_BET', bet: localBet });
     sendIntent({ type: 'LOCK_IN', locked: true, bet: localBet });
   };
@@ -1527,6 +1532,27 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             s && !isClozeRound && !s.isCorrect && s.correction ? diffWords(s.text, s.correction).corrected : null;
           return (
             <div className="space-y-4 animate-gc-fade">
+              {/* Gold coins rain down on a win (reduced motion and calm mode skip it via index.css). */}
+              {won && (
+                <div className="gc-confetti pointer-events-none fixed inset-0 z-40 overflow-hidden [perspective:600px]" aria-hidden="true">
+                  {Array.from({ length: 18 }, (_, i) => (
+                    <span
+                      key={i}
+                      className="absolute -top-8 block rounded-full animate-gc-coin-fall"
+                      style={{
+                        left: `${(i * 41 + 7) % 96}%`,
+                        width: i % 3 === 0 ? 30 : 24,
+                        height: i % 3 === 0 ? 30 : 24,
+                        background: 'radial-gradient(circle at 35% 30%, #fff6d5 0%, #f5c542 38%, #c8901e 72%, #8a5a10 100%)',
+                        boxShadow: 'inset 0 0 0 3px rgb(255 236 170 / 0.55), 0 2px 6px rgb(0 0 0 / 0.25)',
+                        animationDelay: `${(i % 6) * 0.12 + (i % 4) * 0.05}s`,
+                        animationDuration: `${1.8 + ((i * 7) % 8) / 10}s`,
+                        ['--gc-drift' as string]: `${((i * 37) % 80) - 40}px`,
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                </div>
+              )}
               {view.myRoundResult && (
                 <div
                   className={`-mx-4 -mt-4 px-4 pt-8 pb-2 text-center ${
@@ -1537,13 +1563,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         : ''
                   }`}
                 >
-                  <p className="m-0 text-lg font-bold text-gc-quiet">
+                  <p className={`m-0 text-lg font-bold ${won ? 'text-gc-money animate-gc-glow' : 'text-gc-quiet'}`}>
                     {won ? 'You called it!' : lost ? 'Not this time' : 'No change this hand'}
                   </p>
                   <p
                     role="status"
-                    className={`m-0 mt-1 text-[64px] leading-none font-extrabold tabular-nums animate-gc-pop ${
-                      won ? 'text-gc-win' : lost ? 'text-gc-loss' : 'text-gc-ink'
+                    className={`m-0 mt-1 text-[64px] leading-none font-extrabold tabular-nums ${
+                      won ? 'text-gc-win animate-gc-pop' : lost ? 'text-gc-loss animate-gc-shake' : 'text-gc-ink animate-gc-pop'
                     }`}
                   >
                     {won ? '+' : ''}
