@@ -1877,7 +1877,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               })}
             </div>
 
-            {view.pendingTarget.powerUp !== 'SWAP' && (
+            {(view.pendingTarget.powerUp !== 'SWAP' ||
+              view.pendingTarget.eligibleTargets.every((t) => t.isShielded || t.targetedThisRound)) && (
               <button
                 type="button"
                 onClick={() =>
@@ -1899,6 +1900,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {view.pendingWheelSpin && (
         <WheelModal
           player={view.me}
+          forcedItemId={view.pendingWheelItemId}
           onClose={() => {}}
           onApplyResult={(item: WheelItem) => {
             sendIntent({ type: 'APPLY_WHEEL_RESULT', itemId: item.id });

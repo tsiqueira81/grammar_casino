@@ -20,6 +20,18 @@ import PlayerBettingCard from './components/PlayerBettingCard';
 import PlayerTileGrid, { PlayerTile, SeatStatus } from './components/PlayerTileGrid';
 import { PlayerAvatar, CharacterPickerPanel } from './components/PlayerAvatar';
 import { getRandomCharacterAvatar } from './utils/characterAvatars';
+import {
+  canCancelPowerUpTarget,
+  canSubmitBetWithLock,
+  createReentryGuard,
+  drawWheelItem,
+  isKnownAvatar,
+  refundHint,
+  resolvePendingPowerUp,
+  resolveWheelResult,
+  runAlwaysClearing,
+  sanitizePlayerName,
+} from './game/intents';
 import CountUp from './components/CountUp';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
@@ -439,7 +451,7 @@ export function App() {
   const [openSeatPlayerId, setOpenSeatPlayerId] = useState<number | null>(null);
   const openSeatRef = useRef<HTMLDivElement>(null);
   const [mpStudentPendingTarget, setMpStudentPendingTarget] = useState<Record<number, PowerUpKey | null>>({});
-  const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, boolean>>({});
+  const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, string>>({});
   const [mpStudentNotifications, setMpStudentNotifications] = useState<
     Record<number, { id: string; title: string; message: string; icon?: string } | null>
   >({});
@@ -1555,7 +1567,7 @@ export function App() {
     setShowAvatarModal({ playerId });
   }, [playSound]);
   const handleUpdatePlayerName = useCallback((playerId: number, newName: string) => {
-    const trimmed = newName.trim();
+    const trimmed = sanitizePlayerName(newName);
     if (!trimmed) return;
     setPlayers(prev => {
       const oldPlayer = prev.find(p => p.id === playerId);
@@ -1950,9 +1962,14 @@ export function App() {
         );
         setHints(h => ({...h, [playerId]: { text: hintText, isLoading: false }}));
       } catch (err: any) {
-        setHints(h => ({...h, [playerId]: { text: 'Hint error. Please try again.', isLoading: false }}));
-        setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: player.money } : p)); 
-        setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) - HINT_COST }));
+        // Clear the hint so the student can try again, and refund against current money (F4 fix 6).
+        setHints(h => {
+          const next = { ...h };
+          delete next[playerId];
+          return next;
+        });
+        setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: refundHint(p.money) } : p));
+        setRoundSpending(s => ({...s, [playerId]: Math.max(0, (s[playerId] || 0) - HINT_COST) }));
         setError({title: "Hint Error", message: "Could not fetch hint from AI."})
       }
   }, [canPlayerAct, players, currentSentence, settings.topic, settings.level, playSound, hints]); 
@@ -2477,7 +2494,8 @@ export function App() {
 
         } else if (powerUpKey === 'THE_WHEEL') {
             if (mpRoomCode && mpSeats[playerId]) {
-              setMpStudentPendingWheel(prev => ({ ...prev, [playerId]: true }));
+              // The host draws the prize now; the phone only animates towards it (F4 fix 1).
+              setMpStudentPendingWheel(prev => ({ ...prev, [playerId]: drawWheelItem().id }));
             } else {
               setShowWheelModal({ playerId });
             }
@@ -3146,11 +3164,25 @@ export function App() {
     });
   }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats, bets, currentSentence]); 
 
+  // True when the buyer of a targeted power-up has at least one player they can pick
+  const hasSelectableTarget = useCallback((buyerId: number, powerUpKey: PowerUpKey): boolean => {
+    const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
+    const ignoresShield = powerUpKey === 'COPYCAT';
+    return players.some(p => {
+      if (p.id === buyerId || p.money <= 0) return false;
+      const targetActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+      const hasShield = !ignoresShield && targetActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+      return !hasShield && !alreadyAttacked;
+    });
+  }, [players, activePowerUps, mpRoomCode, powerUpsUsedThisRound]);
+
   const handleCancelTargetModal = useCallback((overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
     const playerId = overridePlayerId ?? showTargetModal?.playerId;
     const powerUpKey = overridePowerUpKey ?? showTargetModal?.powerUp;
     if (playerId === undefined || !powerUpKey) return;
-    if (powerUpKey === 'SWAP') return; // The Swap power-up cannot be refunded
+    // Swap is refundable only when nobody can be targeted, so the dialog always has an exit (F4 fix 11)
+    if (!canCancelPowerUpTarget(powerUpKey, hasSelectableTarget(playerId, powerUpKey))) return;
     setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
     setPowerUpsUsedThisRound(prev => {
       const list = prev[playerId] || [];
@@ -3174,7 +3206,7 @@ export function App() {
       setShowTargetModal(null);
     }
     playSound('click');
-  }, [showTargetModal, playSound, mpRoomCode, mpSeats]);
+  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget]);
 
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
@@ -3254,9 +3286,10 @@ export function App() {
             break;
           }
           case 'SET_FULL_BET': {
+            // Normal lock checks apply; only the LOCK_IN intent itself may push past them (F4 fix 4).
             const entries = Object.entries(intent.bet || {}) as [keyof Bet, any][];
             entries.forEach(([field, val]) => {
-              handleBetChange(playerId, field, val, true);
+              handleBetChange(playerId, field, val);
             });
             break;
           }
@@ -3283,7 +3316,14 @@ export function App() {
               });
             }
 
-            if (intent.bet) {
+            const seatWasLocked = Boolean(mpSeats[playerId]?.lockedIn);
+            const mayLockIn = canSubmitBetWithLock({
+              isLockingIntent: Boolean(intent.locked),
+              seatLocked: seatWasLocked,
+              timeUp: isMpTimeUp,
+              frozen: isPlayerFrozen(playerId),
+            });
+            if (intent.bet && mayLockIn) {
               const entries = Object.entries(intent.bet) as [keyof Bet, any][];
               entries.forEach(([field, val]) => {
                 handleBetChange(playerId, field, val, true);
@@ -3312,30 +3352,34 @@ export function App() {
             break;
           }
           case 'SELECT_POWER_UP_TARGET': {
-            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            // Only a purchase the host recorded can be used; the phone's key is ignored (F4 fix 2).
+            const pendingKey = resolvePendingPowerUp(mpStudentPendingTarget[playerId]);
             if (pendingKey) {
               handleTargetedPowerUp(intent.targetId, playerId, pendingKey);
             }
             break;
           }
           case 'CANCEL_POWER_UP_TARGET': {
-            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            // Refund only a purchase the host recorded (F4 fix 3).
+            const pendingKey = resolvePendingPowerUp(mpStudentPendingTarget[playerId]);
             if (pendingKey) {
               handleCancelTargetModal(playerId, pendingKey);
             }
             break;
           }
           case 'APPLY_WHEEL_RESULT': {
-            if (mpStudentPendingWheel[playerId]) {
-              const matchedItem = WHEEL_ITEMS.find(w => w.id === intent.itemId) || WHEEL_ITEMS[Math.floor(Math.random() * WHEEL_ITEMS.length)];
+            // The prize is the one the host drew at purchase; intent.itemId is ignored (F4 fix 1).
+            const drawnItem = resolveWheelResult(mpStudentPendingWheel[playerId]);
+            if (drawnItem) {
               playSound('powerUp');
-              handleApplyWheelResult(playerId, matchedItem);
+              handleApplyWheelResult(playerId, drawnItem);
             }
             break;
           }
           case 'UPDATE_PROFILE': {
-            if (intent.name?.trim()) handleUpdatePlayerName(playerId, intent.name.trim());
-            if (intent.avatar) handleUpdateAvatar(playerId, intent.avatar);
+            const cleanName = sanitizePlayerName(intent.name);
+            if (cleanName) handleUpdatePlayerName(playerId, cleanName);
+            if (isKnownAvatar(intent.avatar)) handleUpdateAvatar(playerId, intent.avatar.trim());
             break;
           }
         }
@@ -3358,6 +3402,8 @@ export function App() {
     mpStudentPendingWheel,
     handleApplyWheelResult,
     handleUpdatePlayerName,
+    mpSeats,
+    isPlayerFrozen,
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
@@ -7378,7 +7424,7 @@ export function App() {
                   )})) : <p className="text-center text-slate-500 py-4">No available targets.</p>}
                   </div>
 
-                  {!isSwap && (
+                  {canCancelPowerUpTarget(showTargetModal.powerUp, hasSelectableTarget(showTargetModal.playerId, showTargetModal.powerUp)) && (
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
                       <ActionButton
                         onClick={() => handleCancelTargetModal()}
