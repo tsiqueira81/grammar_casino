@@ -1,3 +1,4 @@
+import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
   Player,
   Settings,
@@ -16,7 +17,6 @@ import {
   RoundHistoryRecord,
 } from '../types';
 import {
-  BET_CAP_AMOUNT,
   POWERUP_COST,
   GENEROUS_GIFT_AMOUNT,
   CLOZE_DISABLED_POWER_UPS,
@@ -541,33 +541,9 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) ||
       player.effects.some(e => e.type === ('SUB_ZERO' as any));
 
-    const playerCaps = allActive.filter(
-      pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : myActive.includes(pu))
-    );
-    const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === ('BET_CAP' as any));
-    const betCapAmount =
-      playerCaps.length > 0
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : isBetCapped
-          ? 50
-          : BET_CAP_AMOUNT;
-
-    const playerHighRollers = allActive.filter(
-      pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id
-    );
-    const isHighRoller = playerHighRollers.length > 0;
-    const minBetAmount = isHighRoller
-      ? Math.min(
-          player.money,
-          Math.max(
-            1,
-            playerHighRollers.reduce(
-              (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-              Math.ceil(player.money * 0.5)
-            )
-          )
-        )
-      : 0;
+    const { isCapped: isBetCapped, capAmount: betCapAmount } = getBetCap(player, activePowerUps);
+    const { isHighRoller } = getHighRoller(player, activePowerUps);
+    const minBetAmount = getDisplayedMinBet(player, activePowerUps);
 
     // Build 50/50 Scalpel hint without leaking full answer
     const scalpelPu = myActive.find(pu => pu.type === 'SCALPEL');

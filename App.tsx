@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
 import { 
   Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, 
   PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload,
@@ -1986,24 +1987,7 @@ export function App() {
 
     let finalValue = value;
     if (field === 'bet') {
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
-      const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-      const capLimit = playerCaps.length > 0 
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : (isCapped ? 50 : BET_CAP_AMOUNT);
-      const maxBetAmount = isCapped ? Math.min(player.money, capLimit) : player.money;
-
-      if (value === '') {
-        finalValue = '';
-      } else {
-        const num = parseInt(String(value), 10);
-        if (isNaN(num)) {
-            finalValue = ''; 
-        } else {
-            finalValue = Math.max(0, Math.min(num, maxBetAmount));
-        }
-      }
+      finalValue = clampBetInput(value, getBetLimits(player, activePowerUps).max);
     }
     setBets(prev => {
       const prevBetVal = prev[playerId]?.bet;
@@ -2049,13 +2033,8 @@ export function App() {
       const currentBetNum = Number(playerBet.bet);
       if (isNaN(currentBetNum)) return prevBets;
 
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
-      const isCapped = playerCaps.length > 0 || (players.find(p => p.id === playerId)?.effects.some(e => e.type === 'BET_CAP') ?? false);
-      const capLimit = playerCaps.length > 0 
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : (isCapped ? 50 : BET_CAP_AMOUNT);
-      const maxAllowed = isCapped ? Math.min(validAmount, capLimit) : validAmount;
+      const effects = players.find(p => p.id === playerId)?.effects ?? [];
+      const maxAllowed = getBetLimits({ id: playerId, money: validAmount, effects }, activePowerUps).max;
 
       if (validAmount <= 0) {
         if (currentBetNum !== 0) {
@@ -2083,31 +2062,10 @@ export function App() {
     setBets(prevBets => {
       let changed = false;
       const updatedBets = { ...prevBets };
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
 
       players.forEach(player => {
         const playerBet = updatedBets[player.id];
-        const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : (activePowerUps[player.id] || []).includes(pu)));
-        const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-        const capLimit = playerCaps.length > 0 
-          ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-          : (isCapped ? 50 : BET_CAP_AMOUNT);
-        const maxLimit = isCapped ? Math.min(Math.max(0, player.money), capLimit) : Math.max(0, player.money);
-
-        const playerHighRollers = allPowerUps.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-        const isHighRoller = playerHighRollers.length > 0;
-        const minLimit = isHighRoller && player.money > 0
-          ? Math.min(
-              maxLimit,
-              Math.max(
-                1,
-                playerHighRollers.reduce(
-                  (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-                  Math.ceil(player.money * 0.5)
-                )
-              )
-            )
-          : 0;
+        const { max: maxLimit, min: minLimit, isHighRoller } = getBetLimits(player, activePowerUps);
 
         if (player.money <= 0) {
           if (playerBet && playerBet.bet !== undefined && playerBet.bet !== '' && playerBet.bet !== 0) {
@@ -5500,26 +5458,10 @@ export function App() {
             const renderPlayerSeat = (player: Player) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                      const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
-                      const isBetCapped = playerCaps.length > 0 || player.effects.some(e => (e.type as string) === 'BET_CAP');
-                      const betCapAmount = playerCaps.length > 0 
-                        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-                        : (isBetCapped ? 50 : BET_CAP_AMOUNT);
-                      const playerHighRollers = allActive.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-                      const isHighRoller = playerHighRollers.length > 0;
-                      const minBetAmount = isHighRoller
-                        ? Math.min(
-                            player.money,
-                            Math.max(
-                              1,
-                              playerHighRollers.reduce(
-                                (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-                                Math.ceil(player.money * 0.5)
-                              )
-                            )
-                          )
-                        : 0;
-                      const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
+                      const { isCapped: isBetCapped, capAmount: betCapAmount } = getBetCap(player, activePowerUps);
+                      const { isHighRoller } = getHighRoller(player, activePowerUps);
+                      const minBetAmount = getDisplayedMinBet(player, activePowerUps);
+const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
                       if (scalpelPu && currentSentence) {
                         if (currentQuestionType === 'multipleChoice') {
