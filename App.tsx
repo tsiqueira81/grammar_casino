@@ -1,3 +1,4 @@
+import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
 import { checkBet, isBetComplete } from './game/betValidity';
 import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -3901,36 +3902,14 @@ export function App() {
   const handleNextRound = useCallback(() => {
     if (!nextRoundGuardRef.current.tryEnter()) return;
     const stillActivePlayers = players.filter(p => p.money > 0);
-    const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
-    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-    
-    // In Multiplayer Classroom Mode, bankrupt players receive an automatic $150 House Bailout ONLY in Fixed Rounds or Target Bankroll modes (never in High-Roller Survival)
-    const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
-    const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
-    const hasTargetWinner = gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount);
-    const isMultiplayerWinner = !isBailoutEnabled && players.length > 1 && stillActivePlayers.length <= 1;
-    const isAllBankruptGameOver = !isBailoutEnabled && stillActivePlayers.length === 0;
-    const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || isAllBankruptGameOver;
+    // In a live room, bankrupt players get the $150 House Bailout, except in last player standing.
+    const gameEndInput = { players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) };
+    const { isGameOver, bailoutEnabled: isBailoutEnabled } = checkGameEnd(gameEndInput);
 
     if (isGameOver) {
         playSound('gameOver');
-    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
-        let finalWinnerPlayer: Player | null = null;
-        const pool = stillActivePlayers.length > 0 ? stillActivePlayers : players;
-        if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
-            const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
-            finalWinnerPlayer = qualifiers[0];
-            if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) {
-                finalWinnerPlayer = null; // Tied
-            }
-        } else if (stillActivePlayers.length === 1 && !isBailoutEnabled) {
-            finalWinnerPlayer = stillActivePlayers[0];
-        } else if (pool.length >= 1 && isRoundLimitReached) {
-             const sortedPlayers = [...pool].sort((a,b) => b.money - a.money);
-             finalWinnerPlayer = sortedPlayers[0]; 
-             if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
-        } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
-        setWinner(finalWinnerPlayer);
+        setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+        setWinner(pickWinnerAtGameEnd(gameEndInput));
         prefetchRef.current = null;
         setStep('GAME_OVER');
     } else {
@@ -3997,21 +3976,7 @@ export function App() {
   const handleEndGameEarly = useCallback(() => {
     playSound('gameOver');
     setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
-    const stillActivePlayers = players.filter(p => p.money > 0);
-    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-    let finalWinnerPlayer: Player | null = null;
-    if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
-      const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
-      finalWinnerPlayer = qualifiers[0];
-      if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null;
-    } else if (stillActivePlayers.length === 1) {
-        finalWinnerPlayer = stillActivePlayers[0];
-    } else if (stillActivePlayers.length > 1) {
-         const sortedPlayers = [...stillActivePlayers].sort((a,b) => b.money - a.money);
-         finalWinnerPlayer = sortedPlayers[0]; 
-         if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
-    }
-    setWinner(finalWinnerPlayer);
+    setWinner(pickWinnerWhenEndedEarly({ players, gameMode, targetAmount }));
     prefetchRef.current = null;
     setStep('GAME_OVER');
   }, [players, gameMode, targetAmount, playSound]);
@@ -6423,14 +6388,15 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             ); 
         }
         case 'RESULTS': {
-            const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
             const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-            const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
-            const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
-            const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
-            const isEliminationVictory = !isBailoutEnabled && players.length > 1 && activePlayers.length <= 1;
-            const isAllBankrupt = !isBailoutEnabled && activePlayers.length === 0;
-            const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || isAllBankrupt;
+            const {
+              isGameOver,
+              isRoundLimitReached,
+              hasTargetWinner,
+              isEliminationVictory,
+              isAllBankrupt,
+              bailoutEnabled: isBailoutEnabled,
+            } = checkGameEnd({ players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) });
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
             // Flawed Valid/Flawed sentences: underline the mistake and highlight the fix.

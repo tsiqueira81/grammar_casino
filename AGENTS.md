@@ -35,7 +35,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | --- | --- |
 | `App.tsx` | The host screen and almost all game flow (very large; being split up in a later phase) |
 | `components/` | Screens and widgets. `StudentControllerView.tsx` is the phone app, `PlayerBettingCard.tsx` the single-screen seat card, `Tabletop3DOverlay.tsx` the lazy-loaded three.js table |
-| `game/` | Pure game rules with no React. `intents.ts` checks what phones may do |
+| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner). Change a rule here, not in `App.tsx` |
 | `utils/` | Pure helpers: `roundSettlement.ts` (payouts), `multiplayerProtocol.ts` (per-phone views), `soundEngine.ts` (Web Audio synthesis), `sentenceSegments.ts`, and others |
 | `services/` | AI client (`geminiService.ts`), offline banks (`fallbackSentences.ts`, `expandedCuratedBank*.ts`), Firebase, room transport (`multiplayerService.ts`) |
 | `server.ts` | Dev server plus the serverless API used by the Pages Function |
@@ -74,7 +74,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Every control on the student screens is at least 44 by 44 CSS pixels and nothing scrolls sideways at 320 pixels wide. `e2e/phone-inputs.spec.ts` checks both.
 
 ### Game modes and elimination
-- `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer'`).
+- `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled` in `game/flow.ts`). When the game ends and who wins is decided only in `game/flow.ts`.
 - `rounds` and `targetAmount`: in a live room, a bankrupt player gets the $150 House Bailout at the start of the next hand.
 
 ### Power-up compatibility (`constants.ts`)
