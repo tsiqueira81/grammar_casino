@@ -1,3 +1,4 @@
+import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
 import { 
@@ -912,16 +913,14 @@ export function App() {
   const isPlayerFrozen = useCallback((playerId: number): boolean => {
     const player = players.find(p => p.id === playerId);
     if (!player) return false;
-    const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-    return allPowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === playerId) ||
-           player.effects.some(e => e.type === 'SUB_ZERO');
+    return isFrozenBySubZero(player, Object.values(activePowerUps).flat() as ActivePowerUp[]);
   }, [players, activePowerUps]);
 
   const seat3DStates = useMemo<Seat3DState[]>(() => {
     const totalSeats = Math.max(1, activePlayers.length);
     return activePlayers.map((p, idx) => {
       const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-      const hasShield = pActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const hasShield = hasShieldProtection(pActive);
       return {
         playerId: p.id,
         seatIndex: idx,
@@ -2135,7 +2134,7 @@ export function App() {
       const ignoresShield = powerUpKey === 'COPYCAT';
       const unshieldedTargets = eligibleTargets.filter(p => {
         const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-        const hasShield = !ignoresShield && pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+        const hasShield = !ignoresShield && hasShieldProtection(pActivePowerUps);
         const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
         return !hasShield && !alreadyAttacked;
       });
@@ -2329,7 +2328,7 @@ export function App() {
             let taxCollected = 0;
             const updatedTaxedPlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                const isShielded = hasShieldProtection(pActivePowerUps);
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.min(TAXMAN_AMOUNT, p.money);
                     taxCollected += tax;
@@ -2343,7 +2342,7 @@ export function App() {
              let taxCollected = 0;
              const updatedTithePlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                const isShielded = hasShieldProtection(pActivePowerUps);
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.floor(p.money * 0.10);
                     taxCollected += tax;
@@ -2419,7 +2418,7 @@ export function App() {
              // Phase 1: Steal from Richest
              const newPlayerState = players.map(p => {
                  const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                 const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                 const isShielded = hasShieldProtection(pActivePowerUps);
                  
                  if (richestPlayers.find(rp => rp.id === p.id) && !isShielded) {
                      const stolen = Math.floor(p.money * 0.20);
@@ -2569,7 +2568,7 @@ export function App() {
           const updated = ps.map(p => {
             if (p.id !== playerId && p.money > 0) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              const isShielded = hasPlainShield(pActive);
               if (!isShielded) {
                 const take = Math.min(100, p.money);
                 stolen += take;
@@ -2586,7 +2585,7 @@ export function App() {
           players.forEach(p => {
             if (p.id !== playerId && nextBets[p.id]?.bet) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              const isShielded = hasPlainShield(pActive);
               if (!isShielded) {
                 const remainingMoney = Math.max(0, p.money - 100);
                 if (Number(nextBets[p.id].bet) > remainingMoney) {
@@ -2784,7 +2783,7 @@ export function App() {
     const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
     const ignoresShield = powerUpKey === 'COPYCAT';
     const targetActivePowerUps = (activePowerUps[targetId] || []) as ActivePowerUp[];
-    const isTargetShielded = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+    const isTargetShielded = !ignoresShield && hasShieldProtection(targetActivePowerUps);
     const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(targetId, powerUpsUsedThisRound, activePowerUps);
     if (isTargetShielded || alreadyAttacked) {
         if (isRemoteBuyer) {
@@ -3134,7 +3133,7 @@ export function App() {
     return players.some(p => {
       if (p.id === buyerId || p.money <= 0) return false;
       const targetActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-      const hasShield = !ignoresShield && targetActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const hasShield = !ignoresShield && hasShieldProtection(targetActive);
       const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
       return !hasShield && !alreadyAttacked;
     });
@@ -5507,7 +5506,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           }
                         }
                       }
-                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => (e.type as string) === 'SUB_ZERO');
+                      const isFrozen = isFrozenBySubZero(player, allActive);
                       const myActive = playerActive[0]; 
                       const playerTimer = turnTimers[player.id];
                       const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
@@ -6245,7 +6244,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     {players.map((player, idx) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+                      const isFrozen = isFrozenBySubZero(player, allActive);
                       const mpSeat = mpSeats[player.id];
                       const hasSplit = playerActive.some(pu => pu.type === 'SPLIT_BET');
                       const isBetReady = mpSeat
@@ -7430,7 +7429,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       const targetActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
                       const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(showTargetModal.powerUp);
                       const ignoresShield = showTargetModal.powerUp === 'COPYCAT';
-                      const hasShield = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                      const hasShield = !ignoresShield && hasShieldProtection(targetActivePowerUps);
                       const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
                       const isShielded = hasShield || alreadyAttacked;
                       return ( 

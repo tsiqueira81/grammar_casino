@@ -5,6 +5,7 @@
 // unit tested. The asynchronous answer checking (AI judge, correction checks) still
 // happens in App.tsx; its results are passed in as `verifications` and
 // `clozeWordVerifications`. Sounds are returned in order instead of played here.
+import { isFrozenBySubZero } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
   Player, Bet, GeneratedSentence, ActivePowerUp, PlayerEffect, RoundResultInfo, RoundPlayerResult, QuestionType,
@@ -281,7 +282,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     if (!activePlayers.find(ap => ap.id === player.id)) return;
     const playerPowerUps = (activePowerUps[player.id] || []) as ActivePowerUp[];
 
-    const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === ('SUB_ZERO' as any));
+    const isFrozen = isFrozenBySubZero(player, allActivePowerUps);
     if (isFrozen) {
       draftsById.set(player.id, {
         player,

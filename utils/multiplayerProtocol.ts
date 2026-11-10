@@ -1,3 +1,4 @@
+import { hasShieldProtection, isFrozenBySubZero, isSilencedThisHand } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
   Player,
@@ -504,9 +505,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
   const peers: PeerSummary[] = players.map(p => {
     const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
     const isFrozen =
-      allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === p.id) ||
-      p.effects.some(e => e.type === ('SUB_ZERO' as any));
-    const isShielded = pActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      isFrozenBySubZero(p, allActive);
+    const isShielded = hasShieldProtection(pActive);
     const targetedThisRound = isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
     const hasSplitBet = pActive.some(pu => pu.type === 'SPLIT_BET');
     const seat = seats[p.id];
@@ -536,10 +536,9 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     const myUsed = powerUpsUsedThisRound[player.id] || [];
     const hasPowerSurge = myActive.some(pu => pu.type === 'POWER_SURGE');
     const powerUpLimit = hasPowerSurge ? 3 : 1;
-    const isSilenced = player.effects.some(e => e.type === 'SILENCED');
+    const isSilenced = isSilencedThisHand(player);
     const isFrozen =
-      allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) ||
-      player.effects.some(e => e.type === ('SUB_ZERO' as any));
+      isFrozenBySubZero(player, allActive);
 
     const { isCapped: isBetCapped, capAmount: betCapAmount } = getBetCap(player, activePowerUps);
     const { isHighRoller } = getHighRoller(player, activePowerUps);

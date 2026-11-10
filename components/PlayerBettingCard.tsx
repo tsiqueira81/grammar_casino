@@ -1,3 +1,4 @@
+import { hasPlainShield, isSilencedThisHand } from '../game/status';
 import React, { useRef } from 'react';
 import { ANSWER_INPUT_PROPS } from '../utils/answerInputProps';
 import { AlertTriangle, Check, Lock, Pencil, Snowflake, X } from 'lucide-react';
@@ -301,11 +302,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const hasSafetyNet = activePowerUps.some(p => p.type === 'SAFETY_NET');
   const hasImmunity = activePowerUps.some(p => p.type === 'IMMUNITY_IDOL');
   const hasJackpot = activePowerUps.some(p => p.type === 'JACKPOT');
-  const hasShield = activePowerUps.some(p => p.type === 'SHIELD');
+  const hasShield = hasPlainShield(activePowerUps);
   const hasSplitBet = activePowerUps.some(p => p.type === 'SPLIT_BET');
   const hasBlessing = player.effects.some(e => e.type === 'BLESSING');
   const hasCrucio = player.effects.some(e => e.type === 'CRUCIO');
-  const isSilenced = player.effects.some(e => e.type === 'SILENCED');
+  const isSilenced = isSilencedThisHand(player);
   const hasSecondChance = player.effects.some(e => e.type === 'SECOND_CHANCE');
   const hasTeachersPet = activePowerUps.some(p => p.type === 'TEACHERS_PET') || player.effects.some(e => e.type === 'TEACHERS_PET');
   const hasSavings = activePowerUps.some(p => p.type === 'SAVINGS_ACCOUNT');
