@@ -4,7 +4,7 @@ import { E2E_URL, KNOWN, clickButton } from './helpers';
 /**
  * A live room: the teacher's screen opens a room, three phones join by code,
  * bet and lock in, one phone is reloaded mid-hand and must get its seat back,
- * the teacher reveals, and each phone shows its own result and the explanation.
+ * the teacher's page is reloaded and must reopen the same room, the teacher reveals, and each phone shows its own result and the explanation.
  * Runs over the dev server's local relay (no Firestore).
  */
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
@@ -24,7 +24,7 @@ async function placeBet(phone: Page, option: string, amount: number) {
   await phone.getByRole('textbox', { name: 'Your bet in dollars' }).fill(String(amount));
 }
 
-test('three phones play a hand in a live room, and a reloaded phone keeps its seat', async ({ page: host, browser }) => {
+test('three phones play a hand in a live room, surviving a phone reload and a teacher reload', async ({ page: host, browser }) => {
   const errors: string[] = [];
   host.on('pageerror', e => errors.push(`host: ${e.message}`));
 
@@ -68,6 +68,15 @@ test('three phones play a hand in a live room, and a reloaded phone keeps its se
   await expect(phones[1].getByRole('region', { name: 'The sentence' })).toContainText('more time');
   // The seat came back with its bet: the lock-in button already names the stake.
   await expect(phones[1].getByRole('button', { name: /^Lock in \$50 on/ })).toBeVisible();
+
+  // The teacher's page reloads mid-hand (package R1): the same room opens again within
+  // five seconds, and every phone keeps its seat and its stake.
+  await host.reload();
+  await expect(host.getByRole('status').filter({ hasText: `Room ${code} is open again` })).toBeVisible({ timeout: 5000 });
+  for (let i = 0; i < players.length; i++) {
+    const lockIn = new RegExp(`^Lock in \\$${players[i].bet} on`);
+    await expect(phones[i].getByRole('button', { name: lockIn })).toBeVisible({ timeout: 5000 });
+  }
 
   for (let i = 0; i < players.length; i++) {
     await clickButton(phones[i], new RegExp(`^Lock in \\$${players[i].bet} on`));

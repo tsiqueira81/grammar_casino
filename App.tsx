@@ -64,7 +64,7 @@ import {
   buildAudiencePollSummary,
   isPlayerUnderdog,
 } from './utils/multiplayerProtocol';
-import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './services/multiplayerService';
+import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
@@ -446,6 +446,8 @@ export function App() {
     setMpTakeoverRequests([]);
   }, [mpRoomCode]);
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
+  // Shown for a few seconds after a reload reopened the live room.
+  const [mpResumeNotice, setMpResumeNotice] = useState<string | null>(null);
   const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
   // Single-screen table layout: defaults to compact grid.
   const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards'>('grid');
@@ -3455,12 +3457,50 @@ export function App() {
     setPlayers(prev => prev.map(p => p.money <= 0 ? { ...p, money: HOUSE_BAILOUT_AMOUNT } : p));
   }, [playSound]);
 
-  // Cleanup multiplayer room controller on unmount
+  // On unmount, stop listening but keep the room open and saved: a real page close never
+  // runs this, and in development React unmounts once on purpose (StrictMode).
   useEffect(() => {
     return () => {
-      mpControllerRef.current?.destroy();
+      mpControllerRef.current?.detach();
     };
   }, []);
+
+  // Reopen the live room after the teacher's page reloads (package R1). Phones keep their
+  // seats and bets: the room code, seats and handled intents were saved by the controller,
+  // and the game itself comes back from the saved game state.
+  useEffect(() => {
+    if (isStudentControllerMode) return;
+    const saved = loadSavedHostRoom();
+    if (!saved) return;
+    const controller = HostRoomController.resumeRoom(
+      saved,
+      (ev) => mpEventHandlerRef.current(ev),
+      (connected) => setMpHostConnected(connected)
+    );
+    mpControllerRef.current = controller;
+    const seats: Record<number, MultiplayerSeat> = {};
+    controller.getSeats().forEach((seat) => {
+      seats[seat.playerId] = seat;
+    });
+    setMpSeats(seats);
+    setMpRoomLocked(controller.isLocked());
+    setMpRoomCode(controller.code);
+    setMpResumeNotice(`Room ${controller.code} is open again. Phones keep their seats and bets.`);
+    return () => {
+      if (mpControllerRef.current === controller) {
+        controller.detach();
+        mpControllerRef.current = null;
+      }
+    };
+    // Runs once on load; the phone view never hosts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mpResumeNotice) return;
+    const timer = setTimeout(() => setMpResumeNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [mpResumeNotice]);
 
   // Broadcast per-player filtered views whenever relevant game state changes
   useEffect(() => {
@@ -7624,6 +7664,22 @@ export function App() {
           }}
           playSound={playSound}
         />
+      )}
+      {mpResumeNotice && mpRoomCode && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] gc-panel rounded-gc-lg border-gc-win/50 px-4 py-3 flex items-center gap-3"
+        >
+          <span className="w-2 h-2 shrink-0 rounded-full bg-gc-win" aria-hidden="true" />
+          <p className="flex-1 min-w-0 text-gc-body font-bold text-gc-ink">{mpResumeNotice}</p>
+          <button
+            type="button"
+            onClick={() => setMpResumeNotice(null)}
+            className="h-10 px-4 rounded-full border border-gc-line/[0.2] text-gc-small font-bold text-gc-ink cursor-pointer"
+          >
+            OK
+          </button>
+        </div>
       )}
       {mpRoomCode && mpTakeoverRequests.length > 0 && (() => {
         const request = mpTakeoverRequests[0];

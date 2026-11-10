@@ -294,6 +294,29 @@ export async function writeFirestoreRoom(params: {
   }
 }
 
+/**
+ * Whether this device may host a room under this code: nobody has it, its host is this
+ * device, or it was left over from an earlier class (the rules then allow a takeover).
+ * If Firestore cannot be reached the code is treated as free; the lesson must not stall.
+ */
+export async function isFirestoreRoomCodeFree(code: string): Promise<boolean> {
+  const cleanCode = code.trim().toUpperCase();
+  try {
+    const user = await ensureFirebaseUser();
+    // Opening the room must stay quick even on a slow school network.
+    const snap = await Promise.race([
+      getDoc(doc(db, 'rooms', cleanCode)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+    ]);
+    if (!snap || !snap.exists()) return true;
+    const data = snap.data() || {};
+    if (!data.hostUid || (user && data.hostUid === user.uid)) return true;
+    return typeof data.updatedAt !== 'number' || data.updatedAt < Date.now() - 6 * 60 * 60 * 1000;
+  } catch {
+    return true;
+  }
+}
+
 export async function deleteFirestoreRoom(
   code: string,
   extra: { seatClientIds?: string[]; intentClientIds?: string[] } = {}

@@ -100,6 +100,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | --- | --- | --- |
 | `grammarCasinoGameState` | local | The saved single game (players, round, settings) |
 | `grammar_casino_student_session_v1` | local | A phone's room and seat, for reconnecting |
+| `grammar_casino_host_room_v1` | local | The teacher's open live room (code, seats, handled intents), so a reload reopens it for up to 6 hours |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
 | `grammar_casino_teacher_pin` | session | Teacher PIN unlock (being replaced by a signed token, package R7) |
 | `grammar_casino_theme` | local | Light or dark theme |

@@ -8,6 +8,7 @@ import { getSavedTeacherPin, isDesktopApp, isTeacherPinUnlocked } from './gemini
 import {
   writeFirestoreRoom,
   deleteFirestoreRoom,
+  isFirestoreRoomCodeFree,
   listenToFirestoreRoomIntents,
   sendFirestoreStudentIntent,
   listenToFirestoreSeat,
@@ -120,6 +121,73 @@ function publicSeat(seat: MultiplayerSeat): NonNullable<FirestoreJoinResponseIte
   };
 }
 
+/** Where the teacher's tab keeps its open room, so a reload or a crash does not end the lesson. */
+export const HOST_ROOM_STORAGE_KEY = 'grammar_casino_host_room_v1';
+/** A saved room older than this is not reopened (Firestore lets a new host take it over then). */
+export const HOST_ROOM_RESUME_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+/** Everything the host needs to carry on the same room after the page reloads. */
+export interface SavedHostRoom {
+  version: 1;
+  code: string;
+  hostToken: string;
+  localServerAvailable: boolean;
+  locked: boolean;
+  nextPlayerId: number;
+  rev: number;
+  seats: MultiplayerSeat[];
+  clientUids: [string, string][];
+  /** Newest intent handled per phone, so intents re-read after the reload are not applied twice. */
+  lastIntentSeq: [string, number][];
+  joinResponses: Record<string, FirestoreJoinResponseItem>;
+  kickedPlayerIds: number[];
+  kickedClientIds: string[];
+  intentClientIds: string[];
+  writtenSeatIds: string[];
+  savedAt: number;
+}
+
+function getLocalStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The room this browser was hosting, if it is recent enough to reopen. */
+export function loadSavedHostRoom(now = Date.now()): SavedHostRoom | null {
+  try {
+    const raw = getLocalStorage()?.getItem(HOST_ROOM_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as SavedHostRoom;
+    const valid =
+      saved &&
+      saved.version === 1 &&
+      typeof saved.code === 'string' &&
+      /^[A-Z0-9]{3,12}$/.test(saved.code) &&
+      typeof saved.hostToken === 'string' &&
+      saved.hostToken.length > 0 &&
+      typeof saved.savedAt === 'number' &&
+      Array.isArray(saved.seats) &&
+      Array.isArray(saved.lastIntentSeq);
+    if (!valid || now - saved.savedAt > HOST_ROOM_RESUME_MAX_AGE_MS || saved.savedAt > now + 60_000) {
+      clearSavedHostRoom();
+      return null;
+    }
+    return saved;
+  } catch {
+    clearSavedHostRoom();
+    return null;
+  }
+}
+
+export function clearSavedHostRoom() {
+  try {
+    getLocalStorage()?.removeItem(HOST_ROOM_STORAGE_KEY);
+  } catch {}
+}
+
 // ============================================================================
 // Teacher Host Room Controller (Firestore + Local Server)
 // ============================================================================
@@ -174,13 +242,15 @@ export class HostRoomController {
     hostToken: string,
     localServerAvailable: boolean,
     onEvent: (event: HostEventPayload) => void,
-    onConnectionChange?: (connected: boolean) => void
+    onConnectionChange?: (connected: boolean) => void,
+    restore?: SavedHostRoom
   ) {
     this.code = code;
     this.hostToken = hostToken;
     this.localServerAvailable = localServerAvailable;
     this.onEventCallback = onEvent;
     this.onConnectionChange = onConnectionChange;
+    if (restore) this.restoreFrom(restore);
 
     // Initialize Firestore room state. Student intents are read once the room doc exists,
     // because the Firestore rules only let the room's recorded host read them.
@@ -200,6 +270,7 @@ export class HostRoomController {
 
   private scheduleFirestoreFlush(delayMs = 100) {
     if (this.destroyed) return;
+    this.saveRoom();
     if (this.firestoreFlushTimer) {
       clearTimeout(this.firestoreFlushTimer);
     }
@@ -370,7 +441,12 @@ export class HostRoomController {
     }
 
     // Static host (Netlify / Electron / Google-verified without local server) -> generate room code directly
-    const generatedCode = generateRoomCode();
+    // A code another teacher is still using would be refused by the Firestore rules, so draw again.
+    let generatedCode = generateRoomCode();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (await isFirestoreRoomCodeFree(generatedCode)) break;
+      generatedCode = generateRoomCode();
+    }
     const generatedToken = generateToken('host');
     return new HostRoomController(
       generatedCode,
@@ -397,6 +473,8 @@ export class HostRoomController {
         .sort((a: any, b: any) => a.seq - b.seq);
       if (fresh.length === 0) return;
       this.lastIntentSeq.set(clientId, fresh[fresh.length - 1].seq);
+      // Save before applying, so a reload never applies these intents twice.
+      this.saveRoom();
       fresh.forEach((entry: any) => this.applyStudentIntent(clientId, entry));
     } else if (msg.type === 'CLOUD_STUDENT_INTENT') {
       this.applyStudentIntent(clientId, msg);
@@ -600,6 +678,7 @@ export class HostRoomController {
       if (ev.seat.playerId >= this.nextPlayerId) {
         this.nextPlayerId = ev.seat.playerId + 1;
       }
+      this.saveRoom();
     }
     this.onEventCallback(ev);
   }
@@ -767,7 +846,101 @@ export class HostRoomController {
     }
   }
 
+  /** Reopens the room this browser was hosting before the page reloaded. */
+  public static resumeRoom(
+    saved: SavedHostRoom,
+    onEvent: (event: HostEventPayload) => void,
+    onConnectionChange?: (connected: boolean) => void
+  ): HostRoomController {
+    return new HostRoomController(
+      saved.code,
+      saved.hostToken,
+      Boolean(saved.localServerAvailable),
+      onEvent,
+      onConnectionChange,
+      saved
+    );
+  }
+
+  /** The seats as they were saved, for the host screen to show straight after a reload. */
+  public getSeats(): MultiplayerSeat[] {
+    return Array.from(this.seatsByPlayerId.values()).map((seat) => ({ ...seat }));
+  }
+
+  public isLocked(): boolean {
+    return this.roomLocked;
+  }
+
+  public exportState(): SavedHostRoom {
+    const seats = this.getSeats();
+    return {
+      version: 1,
+      code: this.code,
+      hostToken: this.hostToken,
+      localServerAvailable: this.localServerAvailable,
+      locked: this.roomLocked,
+      nextPlayerId: this.nextPlayerId,
+      rev: this.rev,
+      seats,
+      clientUids: Array.from(this.clientUids.entries()),
+      lastIntentSeq: Array.from(this.lastIntentSeq.entries()),
+      joinResponses: { ...this.joinResponses },
+      kickedPlayerIds: [...this.kickedPlayerIds],
+      kickedClientIds: Array.from(this.kickedClientIds),
+      intentClientIds: Array.from(this.intentClientIds),
+      writtenSeatIds: Array.from(this.writtenSeatIds),
+      savedAt: Date.now(),
+    };
+  }
+
+  private restoreFrom(saved: SavedHostRoom) {
+    this.roomLocked = Boolean(saved.locked);
+    this.rev = Number.isFinite(saved.rev) ? saved.rev : 0;
+    let maxPlayerId = 100;
+    for (const seat of saved.seats || []) {
+      if (!seat || typeof seat.playerId !== 'number') continue;
+      this.seatsByPlayerId.set(seat.playerId, { ...seat });
+      maxPlayerId = Math.max(maxPlayerId, seat.playerId);
+    }
+    this.nextPlayerId = Math.max(Number(saved.nextPlayerId) || 101, maxPlayerId + 1);
+    (saved.clientUids || []).forEach(([clientId, uid]) => this.clientUids.set(clientId, uid));
+    (saved.lastIntentSeq || []).forEach(([clientId, seq]) => this.lastIntentSeq.set(clientId, seq));
+    this.joinResponses = { ...(saved.joinResponses || {}) };
+    this.kickedPlayerIds = [...(saved.kickedPlayerIds || [])];
+    (saved.kickedClientIds || []).forEach((id) => this.kickedClientIds.add(id));
+    (saved.intentClientIds || []).forEach((id) => this.intentClientIds.add(id));
+    (saved.writtenSeatIds || []).forEach((id) => this.writtenSeatIds.add(id));
+  }
+
+  private saveRoom() {
+    if (this.destroyed) return;
+    try {
+      getLocalStorage()?.setItem(HOST_ROOM_STORAGE_KEY, JSON.stringify(this.exportState()));
+    } catch {
+      // Storage full or blocked: the room still works, it just cannot survive a reload.
+    }
+  }
+
+  /**
+   * Stops listening without closing the room, e.g. when the host screen unmounts during
+   * development. The saved room stays, so it can be reopened.
+   */
+  public detach() {
+    this.stop();
+  }
+
+  /** Closes the room for good: phones are told it ended and the saved copy is removed. */
   public destroy() {
+    this.stop();
+    clearSavedHostRoom();
+    void deleteFirestoreRoom(this.code, {
+      seatClientIds: Array.from(this.writtenSeatIds),
+      intentClientIds: Array.from(this.intentClientIds),
+    });
+  }
+
+  private stop() {
+    if (this.destroyed) return;
     this.destroyed = true;
     if (this.authUnsubscribe) {
       this.authUnsubscribe();
@@ -785,10 +958,6 @@ export class HostRoomController {
       } catch {}
       this.firestoreUnsubscribe = null;
     }
-    void deleteFirestoreRoom(this.code, {
-      seatClientIds: Array.from(this.writtenSeatIds),
-      intentClientIds: Array.from(this.intentClientIds),
-    });
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {
