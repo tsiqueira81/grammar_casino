@@ -20,9 +20,22 @@ import PlayerBettingCard from './components/PlayerBettingCard';
 import PlayerTileGrid, { PlayerTile, SeatStatus } from './components/PlayerTileGrid';
 import { PlayerAvatar, CharacterPickerPanel } from './components/PlayerAvatar';
 import { getRandomCharacterAvatar } from './utils/characterAvatars';
+import {
+  canCancelPowerUpTarget,
+  canSubmitBetWithLock,
+  createReentryGuard,
+  drawWheelItem,
+  isKnownAvatar,
+  refundHint,
+  resolvePendingPowerUp,
+  resolveWheelResult,
+  runAlwaysClearing,
+  sanitizePlayerName,
+} from './game/intents';
 import CountUp from './components/CountUp';
 import { getTimerRemainingMs, MultiplayerRoundTimerFrame } from './components/TurnTimer';
 import WheelModal from './components/WheelModal';
+import SentenceText from './components/SentenceText';
 import PowerUpTooltip from './components/PowerUpTooltip';
 import GrammarReportCard from './components/GrammarReportCard';
 import { ChipRack, PokerChip } from './components/ChipStacks';
@@ -439,7 +452,7 @@ export function App() {
   const [openSeatPlayerId, setOpenSeatPlayerId] = useState<number | null>(null);
   const openSeatRef = useRef<HTMLDivElement>(null);
   const [mpStudentPendingTarget, setMpStudentPendingTarget] = useState<Record<number, PowerUpKey | null>>({});
-  const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, boolean>>({});
+  const [mpStudentPendingWheel, setMpStudentPendingWheel] = useState<Record<number, string>>({});
   const [mpStudentNotifications, setMpStudentNotifications] = useState<
     Record<number, { id: string; title: string; message: string; icon?: string } | null>
   >({});
@@ -462,6 +475,8 @@ export function App() {
   const [teacherPinInput, setTeacherPinInput] = useState<string>('');
   const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
   const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
+  // A yes/no question before an action that cannot be undone (F4 fix 10)
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
   const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
   const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
   const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
@@ -1555,7 +1570,7 @@ export function App() {
     setShowAvatarModal({ playerId });
   }, [playSound]);
   const handleUpdatePlayerName = useCallback((playerId: number, newName: string) => {
-    const trimmed = newName.trim();
+    const trimmed = sanitizePlayerName(newName);
     if (!trimmed) return;
     setPlayers(prev => {
       const oldPlayer = prev.find(p => p.id === playerId);
@@ -1950,9 +1965,14 @@ export function App() {
         );
         setHints(h => ({...h, [playerId]: { text: hintText, isLoading: false }}));
       } catch (err: any) {
-        setHints(h => ({...h, [playerId]: { text: 'Hint error. Please try again.', isLoading: false }}));
-        setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: player.money } : p)); 
-        setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) - HINT_COST }));
+        // Clear the hint so the student can try again, and refund against current money (F4 fix 6).
+        setHints(h => {
+          const next = { ...h };
+          delete next[playerId];
+          return next;
+        });
+        setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: refundHint(p.money) } : p));
+        setRoundSpending(s => ({...s, [playerId]: Math.max(0, (s[playerId] || 0) - HINT_COST) }));
         setError({title: "Hint Error", message: "Could not fetch hint from AI."})
       }
   }, [canPlayerAct, players, currentSentence, settings.topic, settings.level, playSound, hints]); 
@@ -2477,7 +2497,8 @@ export function App() {
 
         } else if (powerUpKey === 'THE_WHEEL') {
             if (mpRoomCode && mpSeats[playerId]) {
-              setMpStudentPendingWheel(prev => ({ ...prev, [playerId]: true }));
+              // The host draws the prize now; the phone only animates towards it (F4 fix 1).
+              setMpStudentPendingWheel(prev => ({ ...prev, [playerId]: drawWheelItem().id }));
             } else {
               setShowWheelModal({ playerId });
             }
@@ -3146,11 +3167,25 @@ export function App() {
     });
   }, [players, showTargetModal, activePowerUps, powerUpsUsedThisRound, playSound, mpRoomCode, mpSeats, bets, currentSentence]); 
 
+  // True when the buyer of a targeted power-up has at least one player they can pick
+  const hasSelectableTarget = useCallback((buyerId: number, powerUpKey: PowerUpKey): boolean => {
+    const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
+    const ignoresShield = powerUpKey === 'COPYCAT';
+    return players.some(p => {
+      if (p.id === buyerId || p.money <= 0) return false;
+      const targetActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
+      const hasShield = !ignoresShield && targetActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
+      return !hasShield && !alreadyAttacked;
+    });
+  }, [players, activePowerUps, mpRoomCode, powerUpsUsedThisRound]);
+
   const handleCancelTargetModal = useCallback((overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
     const playerId = overridePlayerId ?? showTargetModal?.playerId;
     const powerUpKey = overridePowerUpKey ?? showTargetModal?.powerUp;
     if (playerId === undefined || !powerUpKey) return;
-    if (powerUpKey === 'SWAP') return; // The Swap power-up cannot be refunded
+    // Swap is refundable only when nobody can be targeted, so the dialog always has an exit (F4 fix 11)
+    if (!canCancelPowerUpTarget(powerUpKey, hasSelectableTarget(playerId, powerUpKey))) return;
     setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
     setPowerUpsUsedThisRound(prev => {
       const list = prev[playerId] || [];
@@ -3174,7 +3209,7 @@ export function App() {
       setShowTargetModal(null);
     }
     playSound('click');
-  }, [showTargetModal, playSound, mpRoomCode, mpSeats]);
+  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget]);
 
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
@@ -3254,9 +3289,10 @@ export function App() {
             break;
           }
           case 'SET_FULL_BET': {
+            // Normal lock checks apply; only the LOCK_IN intent itself may push past them (F4 fix 4).
             const entries = Object.entries(intent.bet || {}) as [keyof Bet, any][];
             entries.forEach(([field, val]) => {
-              handleBetChange(playerId, field, val, true);
+              handleBetChange(playerId, field, val);
             });
             break;
           }
@@ -3283,7 +3319,14 @@ export function App() {
               });
             }
 
-            if (intent.bet) {
+            const seatWasLocked = Boolean(mpSeats[playerId]?.lockedIn);
+            const mayLockIn = canSubmitBetWithLock({
+              isLockingIntent: Boolean(intent.locked),
+              seatLocked: seatWasLocked,
+              timeUp: isMpTimeUp,
+              frozen: isPlayerFrozen(playerId),
+            });
+            if (intent.bet && mayLockIn) {
               const entries = Object.entries(intent.bet) as [keyof Bet, any][];
               entries.forEach(([field, val]) => {
                 handleBetChange(playerId, field, val, true);
@@ -3312,30 +3355,34 @@ export function App() {
             break;
           }
           case 'SELECT_POWER_UP_TARGET': {
-            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            // Only a purchase the host recorded can be used; the phone's key is ignored (F4 fix 2).
+            const pendingKey = resolvePendingPowerUp(mpStudentPendingTarget[playerId]);
             if (pendingKey) {
               handleTargetedPowerUp(intent.targetId, playerId, pendingKey);
             }
             break;
           }
           case 'CANCEL_POWER_UP_TARGET': {
-            const pendingKey = mpStudentPendingTarget[playerId] || intent.powerUp;
+            // Refund only a purchase the host recorded (F4 fix 3).
+            const pendingKey = resolvePendingPowerUp(mpStudentPendingTarget[playerId]);
             if (pendingKey) {
               handleCancelTargetModal(playerId, pendingKey);
             }
             break;
           }
           case 'APPLY_WHEEL_RESULT': {
-            if (mpStudentPendingWheel[playerId]) {
-              const matchedItem = WHEEL_ITEMS.find(w => w.id === intent.itemId) || WHEEL_ITEMS[Math.floor(Math.random() * WHEEL_ITEMS.length)];
+            // The prize is the one the host drew at purchase; intent.itemId is ignored (F4 fix 1).
+            const drawnItem = resolveWheelResult(mpStudentPendingWheel[playerId]);
+            if (drawnItem) {
               playSound('powerUp');
-              handleApplyWheelResult(playerId, matchedItem);
+              handleApplyWheelResult(playerId, drawnItem);
             }
             break;
           }
           case 'UPDATE_PROFILE': {
-            if (intent.name?.trim()) handleUpdatePlayerName(playerId, intent.name.trim());
-            if (intent.avatar) handleUpdateAvatar(playerId, intent.avatar);
+            const cleanName = sanitizePlayerName(intent.name);
+            if (cleanName) handleUpdatePlayerName(playerId, cleanName);
+            if (isKnownAvatar(intent.avatar)) handleUpdateAvatar(playerId, intent.avatar.trim());
             break;
           }
         }
@@ -3358,6 +3405,8 @@ export function App() {
     mpStudentPendingWheel,
     handleApplyWheelResult,
     handleUpdatePlayerName,
+    mpSeats,
+    isPlayerFrozen,
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
@@ -3559,7 +3608,7 @@ export function App() {
     return verifications;
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
-  const handleRevealResults = useCallback(async () => {
+  const revealResultsCore = useCallback(async () => {
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
@@ -3700,6 +3749,7 @@ export function App() {
 
     playSound('drumroll');
     setIsProcessing(true);
+    let aiGradingFailed = false;
 
     // 1. Binary mode correction verification
     const verifications = await verifyPlayerCorrections();
@@ -3760,6 +3810,7 @@ export function App() {
           });
         } catch (err) {
           console.error("Failed batched cloze verification:", err);
+          aiGradingFailed = true;
         }
       }
     } else if (qType === 'keyWordTransformation') {
@@ -3827,6 +3878,7 @@ export function App() {
           });
         } catch (err) {
           console.error("Failed batched Key Word Transformation verification:", err);
+          aiGradingFailed = true;
         }
       }
     }
@@ -3904,9 +3956,32 @@ export function App() {
     setIsProcessing(false);
     setProcessingStatus('');
     setStep('RESULTS');
+    if (aiGradingFailed) {
+      setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
+    }
   }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+
+  // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
+  const handleRevealResults = useCallback(async () => {
+    const failure = await runAlwaysClearing(revealResultsCore, () => {
+      setIsProcessing(false);
+      setProcessingStatus('');
+    });
+    if (failure) {
+      console.error('Reveal failed:', failure);
+      setError({ title: 'Reveal failed', message: 'Something went wrong while marking this hand. Try revealing again.' });
+    }
+  }, [revealResultsCore]);
   
+  // A double click on "Deal the next hand" must not skip a hand (F4 fix 9).
+  // The guard is released once the screen moves on or the new sentence arrives.
+  const nextRoundGuardRef = useRef(createReentryGuard());
+  useEffect(() => {
+    nextRoundGuardRef.current.release();
+  }, [step, currentSentence]);
+
   const handleNextRound = useCallback(() => {
+    if (!nextRoundGuardRef.current.tryEnter()) return;
     const stillActivePlayers = players.filter(p => p.money > 0);
     const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
@@ -5382,21 +5457,6 @@ export function App() {
               ? unfrozenActivePlayers.find(p => (turnTimers[p.id]?.status ?? 'idle') === 'idle')
               : undefined;
 
-            let sentenceHtml = highlightedPhrase && currentSentence ? 
-              currentSentence.text.replace(new RegExp(`(${highlightedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), `<span class="bg-gc-gold/20 text-gc-ink border-b-2 border-gc-gold px-1 rounded-sm">$1</span>`) 
-              : currentSentence?.text || '';
-
-            if (isClozeRound && sentenceHtml) {
-              const inlineBaseWordBadge =
-                currentQuestionType === 'wordFormation' && currentSentence?.baseWord
-                  ? ` <span class="inline-block mx-1 px-3 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.55em] align-middle select-none">(${currentSentence.baseWord.toUpperCase()})</span>`
-                  : '';
-              sentenceHtml = sentenceHtml.replace(
-                /_{3,}([,.;:!?)]*)/g,
-                `<span class="whitespace-nowrap"><span class="inline-block min-w-[4.5em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.6em] align-baseline select-none">_____</span>${inlineBaseWordBadge}$1</span>`
-              );
-            }
-
             const renderPlayerSeat = (player: Player) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
@@ -5835,8 +5895,14 @@ export function App() {
 
                                 <p 
                                   className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
-                                  dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
-                                />
+                                >
+                                  <SentenceText
+                                    text={currentSentence?.text || ''}
+                                    highlight={highlightedPhrase}
+                                    showGaps={isClozeRound}
+                                    baseWord={currentQuestionType === 'wordFormation' ? currentSentence?.baseWord : null}
+                                  />
+                                </p>
                             </div> 
                             
                             {/* Settings chips under the sentence; hidden when compact sticky unless the settings drawer is open */}
@@ -6468,7 +6534,8 @@ export function App() {
                     </ActionButton>
                   </div>
 
-                  {(mpRoomCode ? !allMpPlayersLocked : (isTurnTimerEnabled && !allActivePlayersLocked)) && (
+                  {/* Always offer an early reveal, so one player who never bets cannot block the hand (F4 fix 12) */}
+                  {(mpRoomCode ? !allMpPlayersLocked : isTurnTimerEnabled ? !allActivePlayersLocked : !allValidBetsFinalized) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -6911,7 +6978,12 @@ export function App() {
                   <div className="flex-1 flex justify-end">
                     {!isGameOver && (
                       <ActionButton 
-                        onClick={handleEndGameEarly} 
+                        onClick={() => setConfirmAction({
+                          title: 'End the game now?',
+                          message: 'The game stops here and the final results are shown. You cannot go back to this hand.',
+                          confirmLabel: 'End the game',
+                          onConfirm: handleEndGameEarly,
+                        })}
                         variant="ghost"
                         className="h-10 px-4 text-gc-small font-semibold text-gc-loss"
                         title="End the game now and go to the final results"
@@ -7094,7 +7166,17 @@ export function App() {
           <div className="fixed top-4 left-4 z-50">
              <button
                 type="button"
-                onClick={() => { playSound('click'); handleRestartGame(); }}
+                onClick={() => {
+                  playSound('click');
+                  setConfirmAction({
+                    title: 'Leave this game?',
+                    message: step === 'GAME_OVER'
+                      ? 'You go back to the lobby and these final results close.'
+                      : 'You go back to the lobby. This game ends, its scores are cleared and any open room is closed.',
+                    confirmLabel: 'Leave the game',
+                    onConfirm: handleRestartGame,
+                  });
+                }}
                 className="h-11 px-3.5 inline-flex items-center gap-2 rounded-full bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer text-gc-small font-semibold"
                 title="Leave the table and go back to the lobby"
              >
@@ -7296,6 +7378,27 @@ export function App() {
             </div> 
         </Modal>
       }
+      {confirmAction && (
+        <Modal title={confirmAction.title} onClose={() => setConfirmAction(null)} playSound={playSound} hideOkButton>
+          <p className="text-gc-body text-gc-ink mb-5">{confirmAction.message}</p>
+          <div className="flex flex-col-reverse sm:flex-row gap-3 sm:justify-end">
+            <ActionButton onClick={() => setConfirmAction(null)} variant="secondary" className="min-h-[44px] px-5">
+              Stay
+            </ActionButton>
+            <ActionButton
+              onClick={() => {
+                const action = confirmAction.onConfirm;
+                setConfirmAction(null);
+                action();
+              }}
+              variant="danger"
+              className="min-h-[44px] px-5"
+            >
+              {confirmAction.confirmLabel}
+            </ActionButton>
+          </div>
+        </Modal>
+      )}
       {showTargetModal && (() => {
         const isSwap = showTargetModal.powerUp === 'SWAP';
         const buyerPlayer = players.find(p => p.id === showTargetModal.playerId);
@@ -7378,7 +7481,7 @@ export function App() {
                   )})) : <p className="text-center text-slate-500 py-4">No available targets.</p>}
                   </div>
 
-                  {!isSwap && (
+                  {canCancelPowerUpTarget(showTargetModal.powerUp, hasSelectableTarget(showTargetModal.playerId, showTargetModal.powerUp)) && (
                     <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
                       <ActionButton
                         onClick={() => handleCancelTargetModal()}

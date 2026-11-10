@@ -10,6 +10,8 @@ interface WheelModalProps {
   onClose: () => void;
   onApplyResult: (item: WheelItem) => void;
   playSound: (sound: SoundEffect) => void;
+  /** When set (phones in a room), the wheel lands on this prize, which the host already drew. */
+  forcedItemId?: string | null;
 }
 
 export const WheelModal: React.FC<WheelModalProps> = ({
@@ -17,6 +19,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
   onClose,
   onApplyResult,
   playSound,
+  forcedItemId,
 }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [hasSpun, setHasSpun] = useState(false);
@@ -49,7 +52,8 @@ export const WheelModal: React.FC<WheelModalProps> = ({
     setSelectedItem(null);
 
     // Pick random target slice (0 to 9)
-    const targetIndex = Math.floor(Math.random() * numSlices);
+    const forcedIndex = forcedItemId ? WHEEL_ITEMS.findIndex(w => w.id === forcedItemId) : -1;
+    const targetIndex = forcedIndex >= 0 ? forcedIndex : Math.floor(Math.random() * numSlices);
     const targetItem = WHEEL_ITEMS[targetIndex];
 
     // Jitter inside slice (avoid landing right on the divider)

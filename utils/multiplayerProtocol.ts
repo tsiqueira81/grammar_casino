@@ -125,6 +125,8 @@ export interface PlayerViewPayload {
   lockedIn: boolean;
   pendingTarget?: StudentPendingTarget | null;
   pendingWheelSpin?: boolean;
+  /** The wheel prize the host already drew; the phone only animates towards it. */
+  pendingWheelItemId?: string | null;
   lastNotification?: {
     id: string;
     title: string;
@@ -350,7 +352,8 @@ export interface BuildPlayerViewsParams {
   roundHistory?: RoundHistoryRecord[];
   winner: Player | null;
   studentPendingTarget: Record<number, PowerUpKey | null>;
-  studentPendingWheel: Record<number, boolean>;
+  /** Wheel prize id drawn by the host for each player with a pending spin. */
+  studentPendingWheel: Record<number, string>;
   studentNotifications: Record<number, { id: string; title: string; message: string; icon?: string } | null>;
   roundTimer?: PlayerTurnTimer;
   turnDurationMs?: number;
@@ -766,6 +769,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       lockedIn: Boolean(seats[player.id]?.lockedIn),
       pendingTarget,
       pendingWheelSpin: Boolean(studentPendingWheel[player.id]),
+      pendingWheelItemId: studentPendingWheel[player.id] || null,
       lastNotification: studentNotifications[player.id] || null,
       sentence: filteredSentence,
       peers,

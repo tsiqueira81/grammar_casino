@@ -15,6 +15,7 @@ import {
 } from '../utils/multiplayerProtocol';
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
+import SentenceText from './SentenceText';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
@@ -642,26 +643,6 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     ? Math.min(view.me.money, view.betCapAmount)
     : view.me.money;
 
-  // Format sentence HTML with optional Grammar Goggles highlight and Cloze gap
-  let sentenceHtml = view.sentence?.text || '';
-  if (view.sentence?.grammarPhrase && sentenceHtml) {
-    const escaped = view.sentence.grammarPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    sentenceHtml = sentenceHtml.replace(
-      new RegExp(`(${escaped})`, 'gi'),
-      `<span class="bg-gc-gold/20 text-gc-ink border-b-2 border-gc-gold px-1 rounded-sm">$1</span>`
-    );
-  }
-  if (isClozeRound && sentenceHtml) {
-    const inlineBaseBadge =
-      qType === 'wordFormation' && view.sentence?.baseWord
-        ? ` <span class="inline-block mx-0.5 px-2.5 py-0.5 leading-[1.2] rounded-full bg-gc-gold text-gc-on-gold font-sans not-italic font-extrabold tracking-wider text-[0.6em] align-middle select-none">(${view.sentence.baseWord.toUpperCase()})</span>`
-        : '';
-    sentenceHtml = sentenceHtml.replace(
-      /_{3,}([,.;:!?)]*)/g,
-      `<span class="whitespace-nowrap"><span class="inline-block min-w-[4em] mx-1 px-2 leading-[1.25] rounded-md bg-gc-gold/15 border-b-[3px] border-gc-gold text-gc-money/60 font-sans not-italic font-bold tracking-widest text-center text-[0.65em] align-baseline select-none">_____</span>${inlineBaseBadge}$1</span>`
-    );
-  }
-
   // Plain names for the answer types, as on the projector.
   const formatLabel =
     qType === 'multipleChoice'
@@ -932,8 +913,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       )}
                       <p
                         className="m-0 font-sentence italic font-medium text-[23px] leading-[1.3] text-gc-ink text-balance"
-                        dangerouslySetInnerHTML={{ __html: `&ldquo;${sentenceHtml}&rdquo;` }}
-                      />
+                      >
+                        <SentenceText
+                          text={view.sentence?.text || ''}
+                          highlight={view.sentence?.grammarPhrase}
+                          showGaps={isClozeRound}
+                          baseWord={qType === 'wordFormation' ? view.sentence?.baseWord : null}
+                          size="phone"
+                        />
+                      </p>
                     </div>
                   )}
 
@@ -1877,7 +1865,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               })}
             </div>
 
-            {view.pendingTarget.powerUp !== 'SWAP' && (
+            {(view.pendingTarget.powerUp !== 'SWAP' ||
+              view.pendingTarget.eligibleTargets.every((t) => t.isShielded || t.targetedThisRound)) && (
               <button
                 type="button"
                 onClick={() =>
@@ -1899,6 +1888,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {view.pendingWheelSpin && (
         <WheelModal
           player={view.me}
+          forcedItemId={view.pendingWheelItemId}
           onClose={() => {}}
           onApplyResult={(item: WheelItem) => {
             sendIntent({ type: 'APPLY_WHEEL_RESULT', itemId: item.id });
