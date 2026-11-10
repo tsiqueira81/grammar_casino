@@ -251,7 +251,7 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
 
 async function requestDealerAction<T>(action: string, payload: Record<string, any>): Promise<T> {
   // Browser tests (?e2e=1 on the dev server) never call an AI provider; callers fall back offline.
-  if (isE2eMode()) {
+  if ((import.meta as any).env.DEV && isE2eMode()) {
     throw new Error('AI calls are disabled in browser-test mode.');
   }
   // If running inside Electron desktop, execute strictly via IPC in the main process
@@ -288,7 +288,7 @@ export const generateSentence = async (
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
   // Browser tests get a fixed, known sentence for each question type.
-  if (isE2eMode()) {
+  if ((import.meta as any).env.DEV && isE2eMode()) {
     return getE2eSentence(questionType, forceCorrect);
   }
   try {

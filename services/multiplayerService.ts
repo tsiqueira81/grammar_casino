@@ -344,7 +344,7 @@ export class HostRoomController {
 
     // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore
     // Browser tests (?e2e=1 on the dev server) always use the local relay, never Firestore.
-    if ((savedPin && savedPin !== 'google_verified') || isE2eMode()) {
+    if ((savedPin && savedPin !== 'google_verified') || ((import.meta as any).env.DEV && isE2eMode())) {
       const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
         method: 'POST',
         headers: {
