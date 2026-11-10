@@ -69,6 +69,10 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - **Seat by name.** A phone from another device asking for a seated name needs the teacher's yes (`SEAT_TAKEOVER_REQUEST`).
 - **Never render sentence text as HTML.** Use `components/SentenceText.tsx`.
 
+### Phone screens
+- Every field where a student types an answer spreads `ANSWER_INPUT_PROPS` (`utils/answerInputProps.ts`), so a phone never capitalises or autocorrects the answer.
+- Every control on the student screens is at least 44 by 44 CSS pixels and nothing scrolls sideways at 320 pixels wide. `e2e/phone-inputs.spec.ts` checks both.
+
 ### Game modes and elimination
 - `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer'`).
 - `rounds` and `targetAmount`: in a live room, a bankrupt player gets the $150 House Bailout at the start of the next hand.

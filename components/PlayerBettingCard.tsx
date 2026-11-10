@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { ANSWER_INPUT_PROPS } from '../utils/answerInputProps';
 import { AlertTriangle, Check, Lock, Pencil, Snowflake, X } from 'lucide-react';
 import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
 import ActionButton from './ActionButton';
@@ -1307,6 +1308,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         <input
                           ref={splitWord1InputRef}
                           type="text"
+                          {...ANSWER_INPUT_PROPS}
                           value={bet?.splitClozeAnswers?.[0] || ''}
                           onChange={(e) => {
                             if (isBlocked) return;
@@ -1340,6 +1342,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         <input
                           ref={splitWord2InputRef}
                           type="text"
+                          {...ANSWER_INPUT_PROPS}
                           value={bet?.splitClozeAnswers?.[1] || ''}
                           onChange={(e) => {
                             if (isBlocked) return;
@@ -1389,6 +1392,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   <input
                     ref={clozeWordInputRef}
                     type="text"
+                    {...ANSWER_INPUT_PROPS}
                     value={bet?.clozeAnswer || ''}
                     onChange={(e) => {
                       if (isBlocked) return;
@@ -1610,6 +1614,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     </label>
                     <textarea 
                       value={bet?.userCorrection || ''}
+                      {...ANSWER_INPUT_PROPS}
                       onChange={handleCorrectionChange}
                       onDoubleClick={() => {
                         if (!isBlocked && currentSentenceText) {
@@ -1777,6 +1782,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     </div>
                     <textarea 
                       value={bet?.userCorrection || ''}
+                      {...ANSWER_INPUT_PROPS}
                       onChange={handleCorrectionChange}
                       onDoubleClick={() => {
                         if (!isBlocked && currentSentenceText) {

@@ -592,7 +592,7 @@ export const CharacterPickerPanel: React.FC<CharacterPickerPanelProps> = ({
         <button
           type="button"
           onClick={handleSurpriseMe}
-          className="h-10 px-3.5 rounded-full bg-gc-gold/15 hover:bg-gc-gold/25 border border-gc-gold/50 text-gc-small font-bold text-gc-ink inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          className="h-11 px-3.5 rounded-full bg-gc-gold/15 hover:bg-gc-gold/25 border border-gc-gold/50 text-gc-small font-bold text-gc-ink inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
           title="Randomize character, aura, and headgear flair"
         >
           <Dices className="w-4 h-4 text-gc-gold" aria-hidden="true" />
@@ -619,7 +619,7 @@ export const CharacterPickerPanel: React.FC<CharacterPickerPanelProps> = ({
                   aria-label={`Aura ${aura.name}`}
                   aria-pressed={isSelected}
                   title={aura.name}
-                  className={`w-7 h-7 rounded-full cursor-pointer transition-transform grid place-items-center ${
+                  className={`w-11 h-11 rounded-full cursor-pointer transition-transform grid place-items-center ${
                     isSelected ? 'scale-110 ring-2 ring-white shadow-md' : 'opacity-80 hover:opacity-100'
                   }`}
                   style={{
@@ -640,7 +640,7 @@ export const CharacterPickerPanel: React.FC<CharacterPickerPanelProps> = ({
             <span className="text-gc-cap font-bold text-gc-quiet">Headgear Flair</span>
             <span className="text-gc-cap font-semibold text-gc-ink">{parsed.flair.name}</span>
           </div>
-          <div className="grid grid-cols-8 gap-1">
+          <div className="grid grid-cols-4 gap-1">
             {AVATAR_FLAIRS.map((flair) => {
               const isSelected = flair.id === currentFlairId;
               return (
@@ -651,7 +651,7 @@ export const CharacterPickerPanel: React.FC<CharacterPickerPanelProps> = ({
                   aria-label={`Flair ${flair.name}`}
                   aria-pressed={isSelected}
                   title={flair.name}
-                  className={`h-7 rounded-md text-sm grid place-items-center cursor-pointer transition-colors border ${
+                  className={`h-11 rounded-md text-base grid place-items-center cursor-pointer transition-colors border ${
                     isSelected
                       ? 'bg-gc-gold/20 border-gc-gold text-gc-ink font-bold'
                       : 'bg-gc-line/[0.05] border-transparent text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.12]'
@@ -679,7 +679,7 @@ export const CharacterPickerPanel: React.FC<CharacterPickerPanelProps> = ({
                 playSound?.('click');
                 setActiveCategory(cat.id);
               }}
-              className={`h-8 px-3 rounded-full text-gc-cap font-bold whitespace-nowrap inline-flex items-center gap-1.5 cursor-pointer transition-colors border ${
+              className={`h-11 px-3.5 rounded-full text-gc-cap font-bold whitespace-nowrap inline-flex items-center gap-1.5 cursor-pointer transition-colors border ${
                 isActive
                   ? 'bg-gc-gold/20 border-gc-gold text-gc-ink'
                   : 'bg-gc-line/[0.05] border-transparent text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.1]'
