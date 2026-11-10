@@ -486,7 +486,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const highlightWagerMissing = lockWarning?.missingField === 'wager' || lockWarning?.missingField === 'both';
 
   return (
-    <div className={`${cardBaseClasses} ${glowClasses} ${bankruptClasses} ${frozenClasses} ${timerClasses}`}>
+    <div data-testid="betting-card" data-player-name={player.name} className={`${cardBaseClasses} ${glowClasses} ${bankruptClasses} ${frozenClasses} ${timerClasses}`}>
       {isEliminated && <div className="bankrupt-stamp">BANKRUPT</div>}
       {isFrozen && (
         <div
