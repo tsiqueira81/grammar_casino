@@ -17,11 +17,13 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `npm run lint` | TypeScript check (`tsc --noEmit`) |
 | `npm test` | Unit tests (vitest, `tests/`) |
 | `npm run build` | Production bundle in `dist/` |
+| `npm run test:e2e` | Browser tests (Playwright, `e2e/`): a whole local game and a live room with three phones. Starts the dev server itself |
+| `npm run bots -- <ROOM> [count]` | Joins simulated students to a room on the dev server, for load checks and demos |
 
 ## How production really works
 
 - **Web app:** static files on Cloudflare Pages at `https://grammarcasino.pages.dev/`. Every push to `main` deploys there, but only after lint, tests and build pass (`.github/workflows/deploy-cloudflare.yml`).
-- **Pull requests:** `.github/workflows/ci.yml` runs lint, tests and build on every pull request and every non-`main` branch push. When those pass, it publishes a preview of the branch on Cloudflare Pages and puts the address in the job summary.
+- **Pull requests:** `.github/workflows/ci.yml` runs lint, unit tests, build, the Firestore rules checks and the browser tests on every pull request and every non-`main` branch push. When those pass, it publishes a preview of the branch on Cloudflare Pages and puts the address in the job summary.
 - **AI and teacher endpoints:** `functions/api/[[route]].ts` (a Cloudflare Pages Function) calls `dispatchServerlessApi` in `server.ts`. This covers `/api/gemini`, `/api/health` and `/api/teacher-auth/*`. Provider order: Groq first, then Gemini, then the offline sentence bank.
 - **Live rooms:** phones and the projector talk through Firestore documents: `rooms/{code}` (the shared table), `rooms/{code}/seats/{clientId}` (each phone's private view) and `rooms/{code}/intents/{clientId}` (what each phone asks for). The WebSocket relay in `server.ts` runs only in local development.
 - **Game authority:** the teacher's browser tab. Phones only send intents, and the host must check every one (see `game/intents.ts`).
@@ -41,6 +43,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
 | `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators) |
 | `tests/` | vitest unit tests |
+| `e2e/` | Playwright browser tests. They open the dev server with `?e2e=1`, which serves the six fixed sentences in `utils/e2eContent.ts`, skips every AI call and keeps rooms on the local relay. Add `data-testid` only where a role or label selector is not stable |
 | `firestore.rules` | Firestore security rules. They take effect only when pasted into the Firebase console |
 
 ## Rules for every change

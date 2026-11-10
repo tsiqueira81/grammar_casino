@@ -13,7 +13,9 @@
     "deploy:cloudflare": "vite build && wrangler pages deploy dist --project-name grammarcasino --branch main",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test --trace off",
+    "bots": "tsx scripts/bots.ts"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",
@@ -36,6 +38,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@types/qrcode": "^1.5.6",

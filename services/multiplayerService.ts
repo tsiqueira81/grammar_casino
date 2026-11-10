@@ -18,6 +18,7 @@ import {
   FirestoreSeatUpdate,
   FirestoreSeatWrite,
 } from './firebaseService';
+import { isE2eMode } from '../utils/e2eContent';
 
 // How phones and the teacher's screen talk:
 // - Local server (npm run dev, AI Studio): WebSocket /ws plus HTTP /api/mp/*. The server sends
@@ -342,7 +343,8 @@ export class HostRoomController {
     }
 
     // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore
-    if (savedPin && savedPin !== 'google_verified') {
+    // Browser tests (?e2e=1 on the dev server) always use the local relay, never Firestore.
+    if ((savedPin && savedPin !== 'google_verified') || ((import.meta as any).env.DEV && isE2eMode())) {
       const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
         method: 'POST',
         headers: {

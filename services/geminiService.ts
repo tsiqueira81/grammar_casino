@@ -1,4 +1,5 @@
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
+import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { getCuratedSentence } from './fallbackSentences';
 import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
 import {
@@ -249,6 +250,10 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
 
 
 async function requestDealerAction<T>(action: string, payload: Record<string, any>): Promise<T> {
+  // Browser tests (?e2e=1 on the dev server) never call an AI provider; callers fall back offline.
+  if ((import.meta as any).env.DEV && isE2eMode()) {
+    throw new Error('AI calls are disabled in browser-test mode.');
+  }
   // If running inside Electron desktop, execute strictly via IPC in the main process
   if (typeof window !== 'undefined' && window.electronDesktop?.gemini) {
     const desktopApi = window.electronDesktop.gemini;
@@ -282,6 +287,10 @@ export const generateSentence = async (
   pastMistakes: string[] = [],
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
+  // Browser tests get a fixed, known sentence for each question type.
+  if ((import.meta as any).env.DEV && isE2eMode()) {
+    return getE2eSentence(questionType, forceCorrect);
+  }
   try {
     const data = await requestDealerAction<GeneratedSentence>('generateSentence', {
       settings,
