@@ -1,3 +1,4 @@
+import { isBetComplete, isValidKeyWordTransformationPhrase } from '../game/betValidity';
 import { hasShieldProtection, isFrozenBySubZero, isSilencedThisHand } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
@@ -392,23 +393,11 @@ export function isPlayerTargetedThisRound(
   return false;
 }
 
-export function isValidKeyWordTransformationPhrase(
-  phrase: string | undefined,
-  baseWord?: string
-): boolean {
-  const trimmed = (phrase || '').trim().replace(/\s+/g, ' ');
-  if (!trimmed) return false;
-  const words = trimmed.split(' ').filter(Boolean);
-  if (words.length < 2 || words.length > 6) return false;
-  const key = (baseWord || '').trim().toLowerCase();
-  if (!key) return true;
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const keyRegex = new RegExp(`(^|[^a-zA-Z])${escapedKey}([^a-zA-Z]|$)`, 'i');
-  return keyRegex.test(trimmed);
-}
+export { isValidKeyWordTransformationPhrase };
 
 /**
  * Checks if a player's current bet is complete and ready to lock in.
+ * Kept under its old name; the rule lives in game/betValidity.ts.
  */
 export function isBetCompleteForQuestionType(
   bet: Bet | undefined,
@@ -416,40 +405,7 @@ export function isBetCompleteForQuestionType(
   hasSplitBet: boolean,
   baseWord?: string
 ): boolean {
-  if (!bet) return false;
-  const hasValidBetAmount = typeof bet.bet === 'number' && !isNaN(bet.bet) && bet.bet >= 0;
-  if (!hasValidBetAmount) return false;
-
-  if (questionType === 'multipleChoice') {
-    return hasSplitBet
-      ? (bet.splitOptions?.length ?? 0) >= 1
-      : Boolean(bet.selectedOption?.trim());
-  }
-  if (questionType === 'keyWordTransformation') {
-    if (hasSplitBet) {
-      const w1 = (bet.splitClozeAnswers?.[0] || '').trim();
-      const w2 = (bet.splitClozeAnswers?.[1] || '').trim();
-      if (!w1 && !w2) return false;
-      if (w1 && !isValidKeyWordTransformationPhrase(w1, baseWord)) return false;
-      if (w2 && !isValidKeyWordTransformationPhrase(w2, baseWord)) return false;
-      return true;
-    }
-    return isValidKeyWordTransformationPhrase(bet.clozeAnswer, baseWord);
-  }
-  if (questionType === 'openCloze' || questionType === 'wordFormation') {
-    const cleanBase = (baseWord || '').trim().toLowerCase();
-    const isValidWord = (w?: string) => {
-      const trimmed = (w || '').trim().toLowerCase();
-      if (!trimmed) return false;
-      if (questionType === 'wordFormation' && cleanBase && trimmed === cleanBase) return false;
-      return true;
-    };
-    return hasSplitBet
-      ? isValidWord(bet.splitClozeAnswers?.[0]) || isValidWord(bet.splitClozeAnswers?.[1])
-      : isValidWord(bet.clozeAnswer);
-  }
-  if (hasSplitBet) return true;
-  return Boolean(bet.opinion);
+  return isBetComplete(bet, questionType, hasSplitBet, baseWord);
 }
 
 /**

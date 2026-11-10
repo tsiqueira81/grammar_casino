@@ -1,3 +1,4 @@
+import { checkBet, isBetComplete } from './game/betValidity';
 import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
@@ -933,49 +934,13 @@ export function App() {
   }, [activePlayers, activePowerUps, isPlayerFrozen]);
 
   const hasPlayerPlacedBet = useCallback((playerId: number): boolean => {
-    const playerBet = bets[playerId];
-    if (!playerBet) return false;
-    const hasValidBetAmount = typeof playerBet.bet === 'number' && !isNaN(playerBet.bet) && Number(playerBet.bet) > 0;
-    if (!hasValidBetAmount) return false;
     const hasSplitBet = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
     const qType: QuestionType = currentSentence?.questionType || 'binary';
-
-    if (qType === 'multipleChoice') {
-      if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) >= 1;
-      return Boolean(playerBet.selectedOption?.trim());
-    }
-    if (qType === 'openCloze' || qType === 'wordFormation') {
-      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
-      const isValidWord = (w?: string) => {
-        const trimmed = (w || '').trim().toLowerCase();
-        if (!trimmed) return false;
-        if (baseNorm && trimmed === baseNorm) return false;
-        return true;
-      };
-      if (hasSplitBet) {
-        const w1 = playerBet.splitClozeAnswers?.[0];
-        const w2 = playerBet.splitClozeAnswers?.[1];
-        if (baseNorm && ((w1?.trim() && w1.trim().toLowerCase() === baseNorm) || (w2?.trim() && w2.trim().toLowerCase() === baseNorm))) {
-          return false;
-        }
-        return isValidWord(w1) || isValidWord(w2);
-      }
-      return isValidWord(playerBet.clozeAnswer);
-    }
-    if (qType === 'keyWordTransformation') {
-      const keyWord = currentSentence?.baseWord;
-      if (hasSplitBet) {
-        const w1 = (playerBet.splitClozeAnswers?.[0] || '').trim();
-        const w2 = (playerBet.splitClozeAnswers?.[1] || '').trim();
-        if (!w1 && !w2) return false;
-        if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
-        if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
-        return true;
-      }
-      return isValidKeyWordTransformationPhrase(playerBet.clozeAnswer, keyWord);
-    }
-    if (hasSplitBet) return true;
-    return playerBet.opinion === 'correct' || playerBet.opinion === 'incorrect';
+    return isBetComplete(bets[playerId], qType, hasSplitBet, currentSentence?.baseWord, {
+      requirePositiveAmount: true,
+      strictSplitBaseWord: true,
+      strictOpinion: true,
+    });
   }, [bets, activePowerUps, currentSentence]);
 
   // System hold: pause any running timer while a popup/modal is open or a hint is loading
@@ -3631,56 +3596,12 @@ export function App() {
     } else {
       let hasUnchangedBaseWordPlayer: string | null = null;
       let hasInvalidKwtPlayer: string | null = null;
-      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
       const allValidBetsFinalized = unfrozenPlayers.every(p => {
-        const playerBet = bets[p.id];
-        const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
-        if (!hasValidBetAmount) return false;
         const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        if (qType === 'multipleChoice') {
-          return hasSplitBet
-            ? (playerBet?.splitOptions?.length ?? 0) >= 1
-            : Boolean(playerBet?.selectedOption?.trim());
-        }
-        if (qType === 'openCloze' || qType === 'wordFormation') {
-          if (hasSplitBet) {
-            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
-            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
-            if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) {
-              hasUnchangedBaseWordPlayer = p.name;
-              return false;
-            }
-            return Boolean(w1 || w2);
-          }
-          const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
-          if (baseNorm && w && w === baseNorm) {
-            hasUnchangedBaseWordPlayer = p.name;
-            return false;
-          }
-          return Boolean(w);
-        }
-        if (qType === 'keyWordTransformation') {
-          const keyWord = currentSentence?.baseWord;
-          if (hasSplitBet) {
-            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
-            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
-            if (!w1 && !w2) return false;
-            if ((w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) || (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord))) {
-              hasInvalidKwtPlayer = p.name;
-              return false;
-            }
-            return true;
-          }
-          const w = (playerBet?.clozeAnswer || '').trim();
-          if (!w) return false;
-          if (!isValidKeyWordTransformationPhrase(w, keyWord)) {
-            hasInvalidKwtPlayer = p.name;
-            return false;
-          }
-          return true;
-        }
-        if (hasSplitBet) return true;
-        return Boolean(playerBet?.opinion);
+        const problem = checkBet(bets[p.id], qType, hasSplitBet, currentSentence?.baseWord, { strictSplitBaseWord: true });
+        if (problem === 'unchangedBaseWord') hasUnchangedBaseWordPlayer = p.name;
+        if (problem === 'invalidKeyWord') hasInvalidKwtPlayer = p.name;
+        return problem === null;
       });
 
       if (!allValidBetsFinalized && !teacherRevealOverride) { 
@@ -5374,43 +5295,8 @@ export function App() {
             const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
 
             const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
-                const playerBet = bets[p.id];
-                const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
-                if (!hasValidBetAmount) return false;
                 const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-                if (currentQuestionType === 'multipleChoice') {
-                    return hasSplitBet
-                      ? (playerBet?.splitOptions?.length ?? 0) >= 1
-                      : Boolean(playerBet?.selectedOption?.trim());
-                }
-                if (currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation') {
-                    const baseNorm = currentQuestionType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
-                    if (hasSplitBet) {
-                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
-                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
-                      if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) return false;
-                      return Boolean(w1 || w2);
-                    }
-                    const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
-                    if (baseNorm && w && w === baseNorm) return false;
-                    return Boolean(w);
-                }
-                if (currentQuestionType === 'keyWordTransformation') {
-                    const keyWord = currentSentence?.baseWord;
-                    if (hasSplitBet) {
-                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
-                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
-                      if (!w1 && !w2) return false;
-                      if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
-                      if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
-                      return true;
-                    }
-                    return isValidKeyWordTransformationPhrase(playerBet?.clozeAnswer, keyWord);
-                }
-                if (hasSplitBet) {
-                     return true;
-                }
-                return Boolean(playerBet?.opinion);
+                return isBetComplete(bets[p.id], currentQuestionType, hasSplitBet, currentSentence?.baseWord, { strictSplitBaseWord: true });
             });
 
             const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
