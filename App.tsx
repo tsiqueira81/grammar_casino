@@ -1,3 +1,4 @@
+import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
 import { checkBet, isBetComplete } from './game/betValidity';
@@ -225,36 +226,7 @@ const loadInitialState = () => {
   try { 
     const s = localStorage.getItem(LOCAL_STORAGE_KEY); 
     if (s) {
-      const parsed = JSON.parse(s);
-      // Migration: Add avatar, streak, effects to players if missing
-      if (parsed.players) {
-        parsed.players = parsed.players.map((p: any) => ({
-            ...p,
-            avatar: p.avatar || getRandomCharacterAvatar(),
-            winStreak: p.winStreak || 0,
-            effects: p.effects || []
-        }));
-      }
-      // Migration: powerUpsUsedThisRound to UsedPowerUp[]
-      if (parsed.powerUpsUsedThisRound) {
-        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
-        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
-            const key = Number(k);
-            const val = parsed.powerUpsUsedThisRound[key];
-            if (Array.isArray(val)) {
-                 if (val.length > 0 && typeof val[0] === 'string') {
-                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
-                 } else {
-                     fixedPowerUps[key] = val; 
-                 }
-            } else if (typeof val === 'number') {
-                fixedPowerUps[key] = []; 
-            } else {
-                 fixedPowerUps[key] = [];
-            }
-        });
-        parsed.powerUpsUsedThisRound = fixedPowerUps;
-      }
+      const parsed = migrateSavedGame(JSON.parse(s), () => getRandomCharacterAvatar());
       if (parsed && typeof parsed.step === 'string') return parsed;
     }
     return null;
@@ -4084,32 +4056,7 @@ export function App() {
   const handleConfirmLoadGame = useCallback(() => {
     if (!pendingLoadGame) return;
     try {
-      const parsed = pendingLoadGame;
-      if (parsed.players) {
-        parsed.players = parsed.players.map((p: any) => ({
-            ...p,
-            avatar: p.avatar || getRandomCharacterAvatar(),
-            winStreak: p.winStreak || 0,
-            effects: p.effects || []
-        }));
-      }
-      if (parsed.powerUpsUsedThisRound) {
-        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
-        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
-            const key = Number(k);
-            const val = parsed.powerUpsUsedThisRound[key];
-            if (Array.isArray(val)) {
-                 if (val.length > 0 && typeof val[0] === 'string') {
-                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
-                 } else {
-                     fixedPowerUps[key] = val; 
-                 }
-            } else {
-                 fixedPowerUps[key] = [];
-            }
-        });
-        parsed.powerUpsUsedThisRound = fixedPowerUps;
-      }
+      const parsed = migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
       
       setStep(parsed.step || 'PLAYER_SETUP');
       setPlayers(parsed.players || []);
