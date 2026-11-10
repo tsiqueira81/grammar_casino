@@ -39,8 +39,10 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
-  const isNetlifyHost =
-    typeof window !== 'undefined' && window.location.hostname.includes('netlify.app');
+  // The public production site; on it the "Public website" choice is pointless.
+  const PUBLIC_SITE_URL = 'https://grammarcasino.pages.dev/';
+  const isPublicHost =
+    typeof window !== 'undefined' && window.location.hostname === 'grammarcasino.pages.dev';
   const isFileProtocol =
     typeof window !== 'undefined' && window.location.protocol === 'file:';
   const isAiStudioHost =
@@ -49,9 +51,9 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
       window.location.hostname.startsWith('ais-pre-') ||
       window.location.hostname.endsWith('.run.app'));
 
-  // Default to the public Netlify URL when running inside Electron (file:) or AI Studio private preview (ais-dev-)
+  // Default to the public website when running inside Electron (file:) or AI Studio private preview (ais-dev-)
   // because ais-dev-*.run.app is locked to the owner's Google account and returns 403 on other devices.
-  const [useNetlifyUrl, setUseNetlifyUrl] = useState<boolean>(
+  const [usePublicUrl, setUsePublicUrl] = useState<boolean>(
     () => isFileProtocol || isAiStudioHost
   );
 
@@ -63,8 +65,8 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
       : '';
 
   const baseOrigin =
-    useNetlifyUrl || isFileProtocol
-      ? 'https://siqueiragrammarcasino.netlify.app/'
+    usePublicUrl || isFileProtocol
+      ? PUBLIC_SITE_URL
       : sharedCurrentOrigin;
 
   const joinUrl = roomCode ? `${baseOrigin}?room=${roomCode}` : '';
@@ -211,7 +213,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                     </button>
                   </div>
 
-                  {!isNetlifyHost && !isFileProtocol && (
+                  {!isPublicHost && !isFileProtocol && (
                     <div className="mt-3 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-gc-cap font-semibold text-gc-quiet">Link for students</span>
@@ -223,14 +225,14 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                             <button
                               key={opt.label}
                               type="button"
-                              aria-pressed={useNetlifyUrl === opt.on}
+                              aria-pressed={usePublicUrl === opt.on}
                               onClick={() => {
-                                if (useNetlifyUrl === opt.on) return;
+                                if (usePublicUrl === opt.on) return;
                                 playSound('click');
-                                setUseNetlifyUrl(opt.on);
+                                setUsePublicUrl(opt.on);
                               }}
                               className={`h-8 px-3 rounded-full text-gc-cap font-bold transition-colors cursor-pointer ${
-                                useNetlifyUrl === opt.on ? 'bg-gc-card text-gc-ink shadow-gc-1' : 'text-gc-quiet hover:text-gc-ink'
+                                usePublicUrl === opt.on ? 'bg-gc-card text-gc-ink shadow-gc-1' : 'text-gc-quiet hover:text-gc-ink'
                               }`}
                             >
                               {opt.label}
@@ -240,8 +242,8 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                       </div>
                       {isAiStudioHost && (
                         <p className="text-gc-cap leading-snug px-3 py-2 rounded-gc-sm bg-gc-info/10 text-gc-ink">
-                          {useNetlifyUrl ? (
-                            <>Recommended. Students join at <span className="tabular-nums">siqueiragrammarcasino.netlify.app</span> with no Google sign-in.</>
+                          {usePublicUrl ? (
+                            <>Recommended. Students join at <span className="tabular-nums">grammarcasino.pages.dev</span> with no Google sign-in.</>
                           ) : (
                             <>This uses the shareable <span className="tabular-nums">ais-pre-…</span> link instead of your private <span className="tabular-nums">ais-dev-…</span> one. So phones don't see &ldquo;403 Access denied&rdquo;, first click <strong>Share</strong> at the top right of AI Studio and turn on public sharing.</>
                           )}

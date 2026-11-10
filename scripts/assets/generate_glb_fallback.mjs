@@ -3,7 +3,7 @@
  * ====================================================================
  * Generates the exact 4 PBR `.glb` 3D model packs in `public/models/` when Blender CLI
  * is not installed on PATH, matching all node names, materials, geometry, and animations
- * produced by `antigravity-toolkit/blender_generate_props.py`:
+ * produced by `scripts/assets/blender_generate_props.py`:
  *   1. public/models/poker_chips.glb      (Chip_10, Chip_25, Chip_50, Chip_100, Chip_500)
  *   2. public/models/card_shoe.glb        (DealerCardShoe, ShoeBrassLip, PowerUpCard + CardDrawSlide animation)
  *   3. public/models/wheel_of_fortune.glb (WheelDisc, WheelBrassRim, WheelPeg_00..19, WheelFlapper)

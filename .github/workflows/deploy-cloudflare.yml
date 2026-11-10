@@ -1,5 +1,9 @@
 name: Deploy to Cloudflare Pages
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 on:
   push:
     branches:
@@ -25,6 +29,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The deploy below runs only if every check in this job passes.
+      - name: Type check
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
       - name: Build production bundle
         run: npm run build
 
@@ -32,4 +43,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: "f49491d571ea9dcd9e2bda13cdc59c87"
-        run: npx --yes wrangler@latest pages deploy dist --project-name grammarcasino --branch main
+        run: npx wrangler pages deploy dist --project-name grammarcasino --branch main
