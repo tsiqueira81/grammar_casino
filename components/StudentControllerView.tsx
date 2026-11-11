@@ -1271,7 +1271,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       <p
                         className="m-0 font-sentence italic font-medium text-[23px] leading-[1.3] text-gc-ink text-balance"
                       >
-                        {qType === 'spotError' && view.sentence.options?.length === 4 ? (
+                        {view.specialHand?.hidesSentence ? (
+                          <span data-testid="phone-listening" className="not-italic font-sans text-gc-lead font-bold">
+                            <span aria-hidden="true">🎧 </span>Listen to the sentence on your teacher&rsquo;s screen.
+                          </span>
+                        ) : qType === 'spotError' && view.sentence.options?.length === 4 ? (
                           <SpotErrorSentence parts={view.sentence.options} />
                         ) : qType === 'wordOrder' && view.sentence.options?.length ? (
                           <WordTiles tiles={view.sentence.options} size="md" />

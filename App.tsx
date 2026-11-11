@@ -114,7 +114,7 @@ import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
 import { DEMO_BOT_COUNT } from './game/demoBots';
 import { isE2eMode } from './utils/e2eContent';
 import { classListMatch } from './game/classList';
-import { SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, type SpecialHand } from './game/specialHands';
+import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, type SpecialHand } from './game/specialHands';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -870,10 +870,19 @@ export function App() {
     round: currentRound,
     totalRounds: Number(totalRounds),
     secondLookRound,
+    questionType: currentSentence?.questionType,
   });
-  const specialHandLabel = currentSpecialHand
-    ? `${SPECIAL_HAND_INFO[currentSpecialHand].title} ${SPECIAL_HAND_INFO[currentSpecialHand].multiplier}×`
-    : null;
+  const specialHandLabel = specialHandLabelFor(currentSpecialHand);
+  // Package L9: "Say it" after each reveal, off unless the teacher turns it on.
+  const [sayItOn, setSayItOn] = useState<boolean>(() => safeLocalStorage.getItem(SAY_IT_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(SAY_IT_KEY, sayItOn ? 'on' : 'off');
+  }, [sayItOn]);
+  // Listening hand: the sentence stays hidden on the projector and the phones until the reveal,
+  // unless the teacher shows it (the round number it was shown for).
+  const [listenShownRound, setListenShownRound] = useState<number | null>(null);
+  const isSentenceHiddenForListening =
+    currentSpecialHand === 'listening' && step === 'IN_GAME' && listenShownRound !== currentRound;
   const [specialHandCard, setSpecialHandCard] = useState<{ hand: SpecialHand; round: number } | null>(null);
   useEffect(() => {
     if (step !== 'IN_GAME' || !currentSpecialHand) return;
@@ -1081,6 +1090,17 @@ export function App() {
       fallbackSpeak();
     } 
   }, [isMuted, ttsVoices, isSpeaking, ttsAudioContext, orpheusVoice]);
+
+  // Package G6: a listening hand reads its sentence aloud once, after the title card.
+  const listenSpokenRoundRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isSentenceHiddenForListening || !currentSentence?.text || isLoading) return;
+    if (listenSpokenRoundRef.current === currentRound) return;
+    listenSpokenRoundRef.current = currentRound;
+    const timer = setTimeout(() => speakText(currentSentence.text), isCalmMode ? 1900 : 2600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSentenceHiddenForListening, currentSentence?.text, currentRound, isLoading]);
 
   // --- Betting Turn Timer Helpers, Effects & Controls ---
   const isPlayerFrozen = useCallback((playerId: number): boolean => {
@@ -3774,11 +3794,17 @@ export function App() {
       calmMode: isCalmMode,
       paused: isPaused,
       specialHand: currentSpecialHand
-        ? { title: SPECIAL_HAND_INFO[currentSpecialHand].title, rule: SPECIAL_HAND_INFO[currentSpecialHand].rule, icon: SPECIAL_HAND_INFO[currentSpecialHand].icon }
+        ? {
+            title: SPECIAL_HAND_INFO[currentSpecialHand].title,
+            rule: SPECIAL_HAND_INFO[currentSpecialHand].rule,
+            icon: SPECIAL_HAND_INFO[currentSpecialHand].icon,
+            ...(isSentenceHiddenForListening ? { hidesSentence: true } : {}),
+          }
         : null,
     });
     mpControllerRef.current.pushViews(views);
   }, [
+    isSentenceHiddenForListening,
     isCalmMode,
     isPaused,
     currentSpecialHand,
@@ -5722,7 +5748,7 @@ export function App() {
                                 <span>
                                   <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
                                   <span className="block text-gc-small text-gc-quiet">
-                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times.
+                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times. Halfway through, a Valid-or-flawed sentence is read aloud, not shown, until the reveal.
                                   </span>
                                 </span>
                                 <button
@@ -5825,6 +5851,28 @@ export function App() {
                       </button>
                     </label>
                   )}
+                </section>
+
+                {/* Package L9: speaking after the reveal */}
+                <section className={sectionCls} aria-labelledby="setup-say-it">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-say-it" className={`block ${sectionTitle}`}>Say it</span>
+                      <span className={`block ${sectionHint}`}>
+                        After each reveal, the screen asks students to say the right sentence aloud to a partner. No microphone is used.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={sayItOn}
+                      onClick={() => { playSound('click'); setSayItOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${sayItOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${sayItOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Say it</span>
+                    </button>
+                  </label>
                 </section>
 
                 {/* Power-ups */}
@@ -6399,7 +6447,33 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                 <p 
                                   className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
                                 >
-                                  {currentQuestionType === 'spotError' && currentSentence.options?.length === 4 ? (
+                                  {isSentenceHiddenForListening ? (
+                                    <span data-testid="listening-hidden" className="not-italic font-sans flex flex-col items-center gap-3">
+                                      <span className={isSentenceHeaderStuck ? 'text-gc-lead font-bold' : 'text-3xl sm:text-4xl font-bold'}>
+                                        <span aria-hidden="true">🎧 </span>Listen to the sentence.
+                                      </span>
+                                      {!isSentenceHeaderStuck && (
+                                        <span className="flex flex-wrap justify-center gap-2.5 text-gc-body">
+                                          <button
+                                            type="button"
+                                            onClick={() => speakText(currentSentence.text)}
+                                            disabled={isSpeaking}
+                                            className="h-11 px-5 rounded-full bg-gc-gold text-gc-on-gold font-bold inline-flex items-center gap-2 cursor-pointer disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                          >
+                                            <Volume2 className="w-4 h-4" aria-hidden="true" />
+                                            {isSpeaking ? 'Reading…' : 'Play it again'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setListenShownRound(currentRound)}
+                                            className="h-11 px-5 rounded-full bg-gc-line/[0.08] border border-gc-line/[0.18] text-gc-ink font-semibold cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                          >
+                                            Show the sentence
+                                          </button>
+                                        </span>
+                                      )}
+                                    </span>
+                                  ) : currentQuestionType === 'spotError' && currentSentence.options?.length === 4 ? (
                                     <SpotErrorSentence parts={currentSentence.options} compact={isSentenceHeaderStuck} />
                                   ) : currentQuestionType === 'wordOrder' && currentSentence.options?.length ? (
                                     <WordTiles tiles={currentSentence.options} size={isSentenceHeaderStuck ? 'md' : 'lg'} />
@@ -7258,6 +7332,22 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       )}
                     </p>
                 </section>
+
+                {sayItOn && currentSentence && (() => {
+                  // A gap sentence is said with the answer in the gap; other types say the corrected sentence.
+                  const said = /_{2,}/.test(currentSentence.text) && currentSentence.correctAnswer
+                    ? currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer)
+                    : isResultCloze || !currentSentence.isCorrect ? currentSentence.correction : currentSentence.text;
+                  if (!said) return null;
+                  return (
+                    <div data-testid="say-it" className="mt-4 px-5 py-4 rounded-gc-lg bg-gc-gold/[0.12] border border-gc-gold/40 text-center animate-gc-slide-up">
+                      <div className="text-gc-body font-extrabold text-gc-ink">
+                        <span aria-hidden="true">🗣️ </span>Say it: turn to a partner and say the right sentence aloud.
+                      </div>
+                      <div className={`mt-1.5 font-sentence italic text-gc-ink ${isProjectorMode ? 'text-2xl sm:text-3xl font-semibold' : 'text-gc-lead sm:text-2xl'}`}>&ldquo;{said}&rdquo;</div>
+                    </div>
+                  );
+                })()}
 
                 {isResultCloze && currentSentence?.correction && (
                     <div className="gc-surface rounded-gc-lg mt-4 px-5 sm:px-8 py-5 animate-gc-slide-up [animation-delay:0.75s]">

@@ -383,6 +383,8 @@ export interface SpecialHandBanner {
   title: string;
   rule: string;
   icon: string;
+  /** Listening hand: phones do not get the sentence text until the reveal (or the teacher shows it). */
+  hidesSentence?: boolean;
 }
 
 /**
@@ -646,6 +648,10 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
             ? { grammarPhrase: currentSentence.grammarPhrase }
             : {}),
         };
+        // Package G6: on a listening hand the words are heard, not read.
+        if (specialHand?.hidesSentence && step === 'IN_GAME') {
+          filteredSentence = { ...filteredSentence, text: '', grammarPhrase: undefined };
+        }
       }
     }
 

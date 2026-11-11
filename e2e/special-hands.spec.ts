@@ -77,3 +77,71 @@ test('a phone in a live room shows the Final Table', async ({ page: host, browse
   await expect(phone.getByTestId('my-review')).toContainText(KNOWN.multipleChoiceAnswer);
   await context.close();
 });
+
+test('a listening hand hides the sentence on the projector and the phones until the reveal', async ({ page: host, browser }) => {
+  await host.goto(E2E_URL);
+  await host.getByRole('button', { name: 'Open a live room' }).click();
+  const roomButton = host.getByRole('button', { name: /^Room [A-Z0-9]{4}/ });
+  const code = ((await roomButton.textContent()) || '').match(/Room\s*([A-Z0-9]{4})/)?.[1];
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const phone = await context.newPage();
+  await phone.goto(`${E2E_URL}&room=${code}`);
+  await phone.getByRole('textbox', { name: 'Your name' }).fill('Dani');
+  await phone.getByRole('button', { name: 'Join the table' }).click();
+  await expect(phone.getByRole('heading', { name: "You're in, Dani!" })).toBeVisible();
+
+  await host.getByRole('button', { name: 'Back to the table' }).click();
+  await host.getByRole('button', { name: 'Set up the game' }).click();
+  await host.getByRole('button', { name: /^Valid or flawed/ }).click();
+  await host.getByRole('button', { name: 'Next: house rules' }).click();
+  await host.getByRole('button', { name: /Set number of hands/ }).click();
+  await host.locator('input[type="number"]:visible').first().fill('4');
+  const special = host.getByRole('switch', { name: 'Special hands' });
+  if ((await special.getAttribute('aria-checked')) !== 'true') await special.click();
+  await host.getByRole('button', { name: 'Deal the first hand' }).click();
+
+  // Hand 1 is ordinary: the sentence is on the phone.
+  await expect(phone.getByRole('region', { name: 'The sentence' })).toContainText(/Lisbon|homework/);
+  await phone.getByRole('button', { name: /^Valid/ }).first().click();
+  await phone.getByRole('textbox', { name: 'Your bet in dollars' }).fill('10');
+  await clickButton(phone, /^Lock in \$10 on/);
+  await clickButton(host, /^Reveal the answer/);
+  await clickButton(host, 'Deal the next hand');
+
+  // Hand 2 of 4 is the listening hand.
+  await expect(host.getByTestId('special-hand-card')).toContainText('Listening hand');
+  await expect(host.getByTestId('listening-hidden')).toContainText('Listen to the sentence.');
+  await expect(host.locator('p.font-sentence').first()).not.toContainText(/Lisbon|homework/);
+  await expect(phone.getByTestId('phone-listening')).toBeVisible();
+  await expect(phone.getByRole('region', { name: 'The sentence' })).not.toContainText(/Lisbon|homework/);
+  await expect(phone.getByTestId('phone-special-hand')).toContainText('Listening hand');
+
+  await phone.getByRole('button', { name: /^Valid/ }).first().click();
+  await phone.getByRole('textbox', { name: 'Your bet in dollars' }).fill('10');
+  await clickButton(phone, /^Lock in \$10 on/);
+  await clickButton(host, /^Reveal the answer/);
+  await expect(phone.getByTestId('phone-listening')).toHaveCount(0);
+  await expect(host.getByTestId('listening-hidden')).toHaveCount(0);
+  await expect(host.getByText(/Lisbon|homework/).first()).toBeVisible();
+  await context.close();
+});
+
+test('"Say it" asks for the right sentence aloud after the reveal (package L9)', async ({ page }) => {
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana']);
+  await page.getByRole('button', { name: 'Set up the game' }).click();
+  await page.getByRole('button', { name: /^Multiple-choice cloze/ }).click();
+  await page.getByRole('button', { name: 'Next: house rules' }).click();
+  const sayIt = page.getByRole('switch', { name: 'Say it' });
+  await expect(sayIt).toHaveAttribute('aria-checked', 'false');
+  await sayIt.click();
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+  const fullCards = page.getByRole('button', { name: 'Full cards' });
+  if (await fullCards.isVisible()) await fullCards.click();
+  const c = card(page, 'Ana');
+  await c.getByRole('button', { name: new RegExp(`(^|\\W)${KNOWN.multipleChoiceAnswer}$`) }).first().click();
+  await c.getByPlaceholder('Your bet').fill('10');
+  await clickButton(page, /^Reveal the answer/);
+  await expect(page.getByTestId('say-it')).toContainText('Say it');
+  await expect(page.getByTestId('say-it')).toContainText('If I had more time, I would learn Japanese.');
+});
