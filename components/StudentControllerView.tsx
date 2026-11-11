@@ -1,4 +1,5 @@
 import { safeLocalStorage } from '../utils/safeStorage';
+import { settlePendingBet, type PendingBet } from '../game/presence';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
@@ -494,6 +495,24 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const isLockSending = lockSentAt !== null && !confirmedLock;
   const isOffline = !isOnline || (hasSeat && !isConnected);
 
+  // Package R2: a bet changed while offline is sent again when the phone is back, if the hand
+  // is still open; otherwise the student is told plainly that it did not reach the table.
+  const pendingBetRef = useRef<PendingBet | null>(null);
+  const [betLostRound, setBetLostRound] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isOffline || !view || view.step !== 'IN_GAME') return;
+    pendingBetRef.current = { round: view.round, sentence: view.sentence?.text || '', bet: localBet, resent: false };
+  }, [isOffline, localBet, view?.round, view?.step, view?.sentence?.text]);
+  useEffect(() => {
+    if (!view) return;
+    const { pending, action } = settlePendingBet(pendingBetRef.current, view, isOffline);
+    const bet = pendingBetRef.current?.bet;
+    pendingBetRef.current = pending;
+    if (action === 'resend' && bet) sendIntent({ type: 'SET_FULL_BET', bet });
+    if (action === 'lost') setBetLostRound(view.round);
+  }, [view, isOffline, sendIntent]);
+  const betLost = betLostRound !== null && view?.round === betLostRound && view?.step !== 'IN_GAME';
+
   // The round deadline read on this phone's clock (package R3).
   const roundTimer = useMemo(() => toLocalTimer(view?.roundTimer, clockOffsetMs), [view?.roundTimer, clockOffsetMs]);
   const { remainingMs: roundTimerRemainingMs } = useTurnCountdown(
@@ -947,6 +966,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {isOffline && (
         <div role="status" className="sticky top-0 z-40 w-full px-4 py-3 bg-gc-loss text-white text-gc-body font-bold text-center">
           You're offline. Reconnecting… Your bet stays on this phone.
+        </div>
+      )}
+      {!isOffline && betLost && (
+        <div role="status" data-testid="bet-lost" className="w-full px-4 py-3 bg-gc-loss/15 text-gc-loss text-gc-body font-bold text-center">
+          That bet did not reach the table. It does not count this hand.
         </div>
       )}
       {/* Package R8: the teacher paused the hand. Nothing can be changed until it resumes. */}

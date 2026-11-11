@@ -116,6 +116,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 
 ### Presence (package R2)
 - A phone sends a `HEARTBEAT` intent every 20 s while on screen (only the newest is kept in its intent document) and at once when it comes back to the foreground or online; it also keeps the screen awake. The host keeps "last heard" in a ref, not in `mpSeats`, so presence never rebroadcasts the table. A seat silent for 45 s or disconnected is away (`game/presence.ts`): greyed on the projector, counted in the room bar, and it never holds up the reveal (it sits the hand out).
+- A bet changed while the phone is offline is kept (`PendingBet`); when the phone is back it is sent again once if the same hand and sentence are still open, forgotten once the host's `myBet` matches (`sameBet`), and otherwise the phone says "That bet did not reach the table." (`bet-lost`, `settlePendingBet`). e2e: `e2e/offline-bet.spec.ts` drops the phone's intents with `routeWebSocket`.
 - A phone shows "Locked in" only after the host's view confirms it, shows "Sending…" until then and resends every 3 s. Offline, it shows a full-width banner and cannot lock in.
 
 ### One clock for the room (package R3)
