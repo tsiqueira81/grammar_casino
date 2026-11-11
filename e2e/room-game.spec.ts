@@ -119,6 +119,11 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await expect(phone.getByTestId('my-answer')).toContainText(players[i].option);
   }
 
+  // Package S4: each phone says where it stands and how far it is to the next place.
+  await expect(phones[2].getByTestId('my-place')).toHaveText('You are 1st of 3. You are in the lead.');
+  await expect(phones[0].getByTestId('my-place')).toHaveText('You are 2nd of 3. $101 more to pass Fabio.');
+  await expect(phones[1].getByTestId('my-place')).toHaveText('You are 3rd of 3. $151 more to pass Dani.');
+
   // Package L5: "Got it" / "Still confused" reach the teacher, beside what the class answered.
   await phones[0].getByRole('button', { name: 'Got it' }).click();
   await phones[1].getByRole('button', { name: 'Still confused' }).click();

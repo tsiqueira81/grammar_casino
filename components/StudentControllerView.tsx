@@ -21,6 +21,8 @@ import SentenceText from './SentenceText';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
+import { canVibrate, haptic, hapticsEnabled, setHapticsEnabled } from '../utils/haptics';
+import CountUp from './CountUp';
 import { generateFriendlyName } from '../utils/nameFilter';
 import { addClockSample, clockOffset, toLocalTimer } from '../utils/clockSync';
 import {
@@ -37,7 +39,12 @@ import {
   Sparkles,
   Sun,
   X,
+  Vibrate,
+  VibrateOff,
 } from 'lucide-react';
+
+/** Package S4: the short build before the phone shows the ruling. */
+const REVEAL_BUILD_MS = 1200;
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
 /** Package R2: a phone tells the teacher it is still there this often, while on screen. */
@@ -129,6 +136,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const lastSentenceTextRef = useRef<string>('');
   const lastStepRef = useRef<string>('');
+  const [revealBuilding, setRevealBuilding] = useState(false);
 
   // Focus & scroll refs for incomplete lock-in warnings
   const answerSectionRef = useRef<HTMLDivElement>(null);
@@ -238,18 +246,26 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         });
       }
 
-      // Haptic feedback when transitioning to RESULTS
+      // Package S4: the phone's own reveal. A short build, then the ruling with sound and a
+      // vibration. Calm mode and reduced motion skip the build.
       if (lastStepRef.current !== nextView.step) {
-        if (nextView.step === 'RESULTS' && 'vibrate' in navigator) {
-          try {
-            const won = (nextView.myRoundResult?.amountChanged ?? 0) > 0;
-            navigator.vibrate(won ? [80, 50, 120] : [180]);
-          } catch {}
-        }
         if (nextView.step === 'RESULTS') {
           const delta = nextView.myRoundResult?.amountChanged ?? 0;
-          if (delta > 0) playSound('roundWin');
-          else if (delta < 0) playSound(nextView.me && nextView.me.money <= 0 ? 'bankrupt' : 'roundLose');
+          const land = () => {
+            setRevealBuilding(false);
+            if (delta > 0) { playSound('roundWin'); haptic('win'); }
+            else if (delta < 0) { playSound(nextView.me && nextView.me.money <= 0 ? 'bankrupt' : 'roundLose'); haptic('lose'); }
+          };
+          const calm =
+            Boolean(nextView.calmMode) ||
+            (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          if (calm || !nextView.myRoundResult) land();
+          else {
+            setRevealBuilding(true);
+            window.setTimeout(land, REVEAL_BUILD_MS);
+          }
+        } else {
+          setRevealBuilding(false);
         }
         lastStepRef.current = nextView.step;
       }
@@ -410,6 +426,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // "Locked in" shows only once the teacher's screen confirms it; until then "Sending…",
   // and the lock-in is sent again every 3 seconds.
   const confirmedLock = Boolean(view?.lockedIn);
+  // Package S4: a short buzz when the teacher's screen confirms the lock-in.
+  const wasLockedRef = useRef(false);
+  useEffect(() => {
+    if (confirmedLock && !wasLockedRef.current && view?.step === 'IN_GAME') haptic('lock');
+    wasLockedRef.current = confirmedLock;
+  }, [confirmedLock, view?.step]);
   useEffect(() => {
     if (lockSentAt === null) return;
     if (confirmedLock || view?.step !== 'IN_GAME') {
@@ -431,6 +453,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     roundTimer,
     view?.turnDurationMs || 0
   );
+  // Package S4: a tick each second in the last 5 seconds, while this phone has not locked in.
+  const secondsLeft = roundTimer?.status === 'running' ? Math.ceil(roundTimerRemainingMs / 1000) : 0;
+  useEffect(() => {
+    if (view?.step === 'IN_GAME' && !view?.lockedIn && secondsLeft >= 1 && secondsLeft <= 5) haptic('tick');
+  }, [secondsLeft, view?.step, view?.lockedIn]);
+  const [vibrationOn, setVibrationOn] = useState(() => hapticsEnabled());
 
   // The teacher's Calm mode turns this phone's motion off too.
   const calmFromTeacher = Boolean(view?.calmMode);
@@ -565,11 +593,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       !isBetCompleteForQuestionType(localBet, qType, hasSplitBet, view.sentence?.baseWord)
     ) {
       playSound('error');
-      if ('vibrate' in navigator) {
-        try {
-          navigator.vibrate([100, 50, 100]);
-        } catch {}
-      }
+      haptic('error');
 
       let message = '';
       let missingField: 'answer' | 'wager' | 'both' = 'both';
@@ -935,6 +959,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <div className="h-9 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] inline-flex items-center text-gc-body font-extrabold text-gc-money tabular-nums">
             {money(view.me.money)}
           </div>
+          {canVibrate() && (
+            <button
+              type="button"
+              onClick={() => { setHapticsEnabled(!vibrationOn); setVibrationOn(!vibrationOn); }}
+              className="w-11 h-11 rounded-full grid place-items-center text-gc-quiet cursor-pointer"
+              aria-label={vibrationOn ? 'Turn vibration off' : 'Turn vibration on'}
+              aria-pressed={vibrationOn}
+              title={vibrationOn ? 'Vibration is on' : 'Vibration is off'}
+            >
+              {vibrationOn ? <Vibrate className="w-[18px] h-[18px]" aria-hidden="true" /> : <VibrateOff className="w-[18px] h-[18px]" aria-hidden="true" />}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleLeaveRoom}
@@ -1756,6 +1792,28 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             ? [...new Map((s.acceptedAnswers || []).filter(a => a && gapKey(a) !== gapKey(s.correctAnswer || '')).map(a => [gapKey(a), a.trim()])).values()]
             : [];
           const reacted = myReaction && myReaction.round === view.round ? myReaction.value : null;
+          // Package S4: place before and after this hand, and the gap to the next place.
+          const standings = [...view.peers].sort((a, b) => b.money - a.money);
+          const changeByName = new Map(view.allRoundResults.map(r => [r.name, r.amountChanged]));
+          // Places count ties as shared ("joint 2nd" is just 2nd): one more than the players ahead.
+          const myMoneyBefore = view.me.money - change;
+          const placeNow = 1 + view.peers.filter(p => p.money > view.me.money).length;
+          const placeBefore = 1 + view.peers.filter(p => p.id !== view.me.id && p.money - (changeByName.get(p.name) ?? 0) > myMoneyBefore).length;
+          const ahead = [...standings].reverse().find(p => p.money > view.me.money) ?? null;
+          const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
+          const moved = view.round > 1 ? placeBefore - placeNow : 0;
+          const placeText = standings.length > 1
+            ? `${moved > 0 ? `Up ${moved} place${moved === 1 ? '' : 's'}, now` : moved < 0 ? `Down ${-moved} place${moved === -1 ? '' : 's'}, now` : 'You are'} ${ordinal(placeNow)} of ${standings.length}.`
+              + (ahead ? ` ${money(ahead.money - view.me.money + 1)} more to pass ${ahead.name}.` : ' You are in the lead.')
+            : null;
+          if (revealBuilding) {
+            return (
+              <div className="pt-16 flex flex-col items-center text-center animate-gc-fade" role="status" aria-live="polite" data-testid="reveal-build">
+                <div className="w-[120px] h-[120px] rounded-full grid place-items-center bg-gc-gold/15 text-gc-money animate-gc-ring text-[44px]" aria-hidden="true">🂠</div>
+                <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">And the answer is…</h1>
+              </div>
+            );
+          }
           return (
             <div className="space-y-4 animate-gc-fade">
               {/* Gold coins rain down on a win (reduced motion and calm mode skip it via index.css). */}
@@ -1802,8 +1860,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {money(change)}
                   </p>
                   <p className="m-0 mt-3 text-[17px] text-gc-quiet">
-                    Balance <b className="text-gc-money tabular-nums">{money(view.me.money)}</b>
+                    Balance <b className="text-gc-money tabular-nums"><CountUp from={view.me.money - change} to={view.me.money} delayMs={300} format={money} /></b>
                   </p>
+                  {placeText && <p className="m-0 mt-1 text-[15px] font-semibold text-gc-ink" data-testid="my-place">{placeText}</p>}
                   <div className="mt-2 flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
                     {view.myRoundResult.outcomeText && !/^(win|lose)$/i.test(view.myRoundResult.outcomeText.trim()) && (
                       <span className="px-2.5 py-1 rounded-full bg-gc-line/[0.07] text-gc-quiet">{view.myRoundResult.outcomeText}</span>
@@ -1892,10 +1951,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <div className="gc-surface rounded-[20px] px-[18px] py-4 animate-gc-slide-up [animation-delay:0.6s]">
                 <h2 className="m-0 mb-1 text-gc-small font-bold text-gc-quiet">Standings</h2>
                 <ol className="m-0 p-0 list-none divide-y divide-gc-line/[0.1]">
-                  {[...view.peers]
-                    .sort((a, b) => b.money - a.money)
+                  {standings
                     .map((p, idx) => (
-                      <li key={p.id} className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold' : 'font-semibold'}`}>
+                      <li
+                        key={p.id}
+                        ref={p.id === view.me.id && standings.length > 8 ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                        aria-current={p.id === view.me.id ? 'true' : undefined}
+                        className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold bg-gc-gold/10 -mx-2 px-2 rounded-lg' : 'font-semibold'}`}
+                      >
                         <span className="flex items-center gap-2.5 min-w-0">
                           <span className="w-6 text-gc-cap text-gc-quiet tabular-nums">{idx + 1}</span>
                           <PlayerAvatar value={p.avatar} size="xs" />
