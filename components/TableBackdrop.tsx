@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { TIER_SETTINGS, type QualityTier } from '../show/quality';
 import { TABLE_CAMERA } from '../show/tableView';
+import { CLASSIC_LOOK, recolorPixels, type StageLook } from '../show/looks';
 import { isSoftwareRenderer } from './Tabletop3DOverlay';
 
 // Package V2 step 2: Table view. The Blender table and room, drawn behind the game screens with
@@ -17,6 +18,34 @@ export interface TableBackdropProps {
   redrawKey?: string;
   /** Called when the table cannot be drawn here, so the game falls back to Classic view. */
   onUnavailable?: (reason: string) => void;
+  /** Package V8: the theme's felt and lamp colours. */
+  look?: StageLook;
+}
+
+/** A recoloured copy of the felt texture (package V8), drawn once per colour. */
+function recoloredFelt(original: THREE.Texture, rgb: [number, number, number]): THREE.Texture | null {
+  const img = original.image as CanvasImageSource & { width: number; height: number };
+  if (!img || !img.width || typeof document === 'undefined') return null;
+  const scale = Math.min(1, 512 / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  const g = canvas.getContext('2d');
+  if (!g) return null;
+  g.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const pixels = g.getImageData(0, 0, canvas.width, canvas.height);
+  recolorPixels(pixels.data, rgb);
+  g.putImageData(pixels, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = original.colorSpace;
+  tex.flipY = original.flipY;
+  tex.wrapS = original.wrapS;
+  tex.wrapT = original.wrapT;
+  tex.repeat.copy(original.repeat);
+  tex.offset.copy(original.offset);
+  tex.channel = original.channel;
+  tex.anisotropy = original.anisotropy;
+  return tex;
 }
 
 /** Development only: `?force3d=1` draws the table on software WebGL, for screenshots. */
@@ -28,9 +57,12 @@ const forced = () => {
   }
 };
 
-export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey, onUnavailable }) => {
+export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey, onUnavailable, look = CLASSIC_LOOK }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const drawRef = useRef<(() => void) | null>(null);
+  const lookRef = useRef(look);
+  lookRef.current = look;
+  const applyLookRef = useRef<((l: StageLook) => void) | null>(null);
   const unavailableRef = useRef(onUnavailable);
   unavailableRef.current = onUnavailable;
 
@@ -94,11 +126,39 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
     const loader = new GLTFLoader();
     const load = (file: string) =>
       new Promise<THREE.Object3D>((resolve, reject) => loader.load(`/models/${file}`, (g) => resolve(g.scene), undefined, reject));
+    // Package V8: the felt and the lamp take the theme's colours.
+    let feltMaterial: THREE.MeshStandardMaterial | null = null;
+    let feltOriginal: THREE.Texture | null = null;
+    const feltCopies = new Map<string, THREE.Texture>();
+    const applyLook = (l: StageLook) => {
+      key.color.setHex(l.lamp);
+      if (feltMaterial && feltOriginal) {
+        let map: THREE.Texture | null = feltOriginal;
+        if (l.felt) {
+          const id = l.felt.join(',');
+          map = feltCopies.get(id) ?? recoloredFelt(feltOriginal, l.felt);
+          if (map) feltCopies.set(id, map);
+        }
+        if (map && feltMaterial.map !== map) {
+          feltMaterial.map = map;
+          feltMaterial.needsUpdate = true;
+        }
+      }
+      draw();
+    };
+    applyLookRef.current = applyLook;
     Promise.all([load('room.glb'), load('table.glb')])
       .then(([room, table]) => {
         if (disposed) return;
+        table.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+          if (m && !Array.isArray(m) && m.name === 'Felt' && m.map) {
+            feltMaterial = m;
+            feltOriginal = m.map;
+          }
+        });
         scene.add(room, table);
-        draw();
+        applyLook(lookRef.current);
         container.dataset.ready = 'true';
       })
       .catch(() => unavailableRef.current?.('models did not load'));
@@ -115,6 +175,9 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
     return () => {
       disposed = true;
       drawRef.current = null;
+      applyLookRef.current = null;
+      if (feltMaterial && feltOriginal) feltMaterial.map = feltOriginal;
+      feltCopies.forEach((t) => t.dispose());
       window.clearInterval(keepAlive);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('resize', draw);
@@ -135,6 +198,10 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
       container.innerHTML = '';
     };
   }, [quality]);
+
+  useEffect(() => {
+    applyLookRef.current?.(look);
+  }, [look]);
 
   useEffect(() => {
     const id = window.setTimeout(() => drawRef.current?.(), 60);

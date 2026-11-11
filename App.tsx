@@ -100,6 +100,7 @@ import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHos
 import * as GeminiService from './services/geminiService';
 import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
+import { lookForTheme } from './show/looks';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
@@ -769,6 +770,12 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // Package V8: the theme sets the felt, the lamp, the sparks and the music key.
+  const stageLook = lookForTheme(settings.theme);
+  useEffect(() => {
+    musicEngine.setKey(stageLook.musicKey);
+  }, [stageLook]);
+
   // Package V3: the pot plaque counts up from the last total it showed.
   const potNow = potTotal(bets);
   const lastPotShown = useRef(potNow);
@@ -7579,7 +7586,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
         {isTableView && (
           <React.Suspense fallback={null}>
-            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} />
+            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} look={stageLook} />
           </React.Suspense>
         )}
         <React.Suspense fallback={null}>
@@ -7597,6 +7604,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           jackpotEvent={jackpotEvent}
           potTotal={step === 'IN_GAME' || step === 'RESULTS' ? potNow : 0}
           behindInterface={isTableView}
+          sparkPalette={stageLook.sparks}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
         </React.Suspense>

@@ -81,6 +81,8 @@ export interface Tabletop3DOverlayProps {
   onChipImpactSound?: (denomination: number) => void;
   /** Package V3: every bet still on the table this hand. 0 clears the pot. */
   potTotal?: number;
+  /** Package V8: the theme's spark colours (gold by default). */
+  sparkPalette?: number[];
   /** Table view: the chips are drawn on the felt under the game screens (which let the felt show through). */
   behindInterface?: boolean;
 }
@@ -150,6 +152,7 @@ interface ActiveBoomerangFlight {
 }
 
 const MAX_SPARKS = 420;
+const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
 // Package V4: the card shoe on the far rail, right of the dealer tray, and the deal timing.
 const SHOE_POSITION = { x: 1.25, y: 0.02, z: -2.35, turn: -0.35 };
 const SHOE_SCALE = 0.42;
@@ -273,7 +276,10 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   onChipImpactSound,
   potTotal = 0,
   behindInterface = false,
+  sparkPalette,
 }) => {
+  const sparkPaletteRef = useRef<number[]>(GOLD_PALETTE);
+  sparkPaletteRef.current = sparkPalette && sparkPalette.length ? sparkPalette : GOLD_PALETTE;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const impactCallbackRef = useRef(onChipImpactSound);
   impactCallbackRef.current = onChipImpactSound;
@@ -512,8 +518,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     scene.add(sparkPoints);
     type Spark = { p: THREE.Vector3; v: THREE.Vector3; life: number; max: number; c: THREE.Color };
     const sparks: Spark[] = [];
-    const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
-    stateObj.spawnSparks = (at, count, palette = GOLD_PALETTE, speed = 1) => {
+    stateObj.spawnSparks = (at, count, palette = sparkPaletteRef.current, speed = 1) => {
       for (let i = 0; i < count && sparks.length < Math.min(MAX_SPARKS, tierRef.current.maxSparks); i++) {
         const theta = Math.random() * Math.PI * 2;
         const up = 0.6 + Math.random() * 1.6;
