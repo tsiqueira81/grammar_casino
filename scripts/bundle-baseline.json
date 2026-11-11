@@ -1,14 +1,14 @@
 {
-  "App.js": 144150,
-  "StudentApp.js": 600,
-  "StudentControllerView.js": 300961,
-  "TableBackdrop.js": 2009,
-  "Tabletop3DOverlay.js": 168211,
-  "fallbackSentences.js": 45431,
+  "App.js": 148873,
+  "StudentApp.js": 599,
+  "StudentControllerView.js": 301039,
+  "TableBackdrop.js": 6816,
+  "Tabletop3DOverlay.js": 168586,
+  "fallbackSentences.js": 45429,
   "html2canvas.esm.js": 47797,
-  "index.css": 24637,
-  "index.js": 72065,
+  "index.css": 24929,
+  "index.js": 72074,
   "index.es.js": 53423,
-  "pdfGenerator.js": 161501,
+  "pdfGenerator.js": 161846,
   "purify.es.js": 11716
 }

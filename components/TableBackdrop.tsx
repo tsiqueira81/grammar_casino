@@ -2,6 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { VignetteShader } from 'three/examples/jsm/shaders/VignetteShader.js';
 import { TIER_SETTINGS, type QualityTier } from '../show/quality';
 import { TABLE_CAMERA } from '../show/tableView';
 import { CLASSIC_LOOK, recolorPixels, type StageLook } from '../show/looks';
@@ -112,6 +118,36 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
     camera.position.set(...TABLE_CAMERA.position);
     camera.lookAt(...TABLE_CAMERA.lookAt);
 
+    // Package V7: finishing light, High only. The frame is still, so it costs one draw.
+    if (tier.shadowMapSize > 0) {
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      key.castShadow = true;
+      key.shadow.mapSize.set(tier.shadowMapSize, tier.shadowMapSize);
+      const cam = key.shadow.camera;
+      cam.left = -4.5;
+      cam.right = 4.5;
+      cam.top = 4.5;
+      cam.bottom = -4.5;
+      cam.near = 1;
+      cam.far = 20;
+      key.shadow.bias = -0.0004;
+      key.shadow.normalBias = 0.03;
+      key.shadow.radius = 3;
+    }
+    let composer: EffectComposer | null = null;
+    if (tier.bloom) {
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      // Only the brightest highlights (gold, the lamp's glints) glow, at low resolution.
+      composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.32, 0.5, 0.9));
+      const vignette = new ShaderPass(VignetteShader);
+      vignette.uniforms.offset.value = 1.05;
+      vignette.uniforms.darkness.value = 1.15;
+      composer.addPass(vignette);
+      composer.addPass(new OutputPass());
+    }
+
     const draw = () => {
       if (disposed) return;
       const w = container.clientWidth || window.innerWidth;
@@ -119,7 +155,13 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      renderer.render(scene, camera);
+      if (composer) {
+        composer.setPixelRatio(renderer.getPixelRatio());
+        composer.setSize(w, h);
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
     };
     draw();
 
@@ -157,6 +199,17 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
             feltOriginal = m.map;
           }
         });
+        if (tier.shadowMapSize > 0) {
+          table.traverse((o) => {
+            if ((o as THREE.Mesh).isMesh) {
+              o.castShadow = true;
+              o.receiveShadow = true;
+            }
+          });
+          room.traverse((o) => {
+            if ((o as THREE.Mesh).isMesh) o.receiveShadow = true;
+          });
+        }
         scene.add(room, table);
         applyLook(lookRef.current);
         container.dataset.ready = 'true';
@@ -194,6 +247,7 @@ export const TableBackdrop: React.FC<TableBackdropProps> = ({ quality, redrawKey
         });
       });
       envTexture.dispose();
+      composer?.dispose();
       renderer.dispose();
       container.innerHTML = '';
     };
