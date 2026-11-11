@@ -9,6 +9,7 @@ import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { APP_VERSION, logEvent } from './utils/debugLog';
+import { QUALITY_KEY, parseStoredQuality, resolveTier, type QualityChoice, type QualityTier } from './show/quality';
 import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
@@ -622,6 +623,29 @@ export function App() {
 
   // Calm mode: one switch that turns the table's motion off (the deal, pulses, count-ups,
   // confetti). Phones in a live room follow it too.
+  // Package V1: quality of the 3D table. The teacher picks it, or Automatic learns it per computer.
+  const [qualityStored, setQualityStored] = useState(() => parseStoredQuality(safeLocalStorage.getItem(QUALITY_KEY)));
+  const [sessionQuality, setSessionQuality] = useState<QualityTier | null>(null);
+  const qualityTier: QualityTier = sessionQuality ?? resolveTier(qualityStored, {
+    hardwareConcurrency: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined,
+    deviceMemory: typeof navigator !== 'undefined' ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory : undefined,
+  });
+  useEffect(() => {
+    document.documentElement.dataset.quality3d = qualityTier;
+  }, [qualityTier]);
+  useEffect(() => {
+    safeLocalStorage.setItem(QUALITY_KEY, JSON.stringify(qualityStored));
+  }, [qualityStored]);
+  const handleQualityChange = useCallback((tier: QualityTier, reason: string) => {
+    logEvent('perf', `3D table quality ${tier} (${reason})`);
+    setSessionQuality(tier);
+    // Only a slow-frame step down is remembered for next time; a lost context is a one-off.
+    if (reason === 'slow frames') setQualityStored(prev => (prev.choice === 'auto' ? { ...prev, learned: tier } : prev));
+  }, []);
+  const chooseQuality = useCallback((choice: QualityChoice) => {
+    setSessionQuality(null);
+    setQualityStored({ choice });
+  }, []);
   const [isCalmMode, setIsCalmMode] = useState<boolean>(() => {
     try {
       return safeLocalStorage.getItem('grammar_casino_calm_mode') === 'on';
@@ -5429,9 +5453,24 @@ export function App() {
               </div>
             )}
 
-            <p className="mt-6 text-center text-gc-cap text-gc-quiet" data-testid="settings-version">
-              Grammar Casino {APP_VERSION} · Shift+L shows the debug log
-            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-gc-cap text-gc-quiet">
+              <label className="inline-flex items-center gap-2">
+                3D table
+                <select
+                  value={qualityStored.choice}
+                  onChange={e => chooseQuality(e.target.value as QualityChoice)}
+                  data-testid="quality-choice"
+                  className="min-h-[44px] rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] px-2 text-gc-ink"
+                >
+                  <option value="auto">Automatic{qualityStored.choice === 'auto' ? ` (${qualityTier === 'off' ? 'off' : qualityTier})` : ''}</option>
+                  <option value="off">Off</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <span data-testid="settings-version">Grammar Casino {APP_VERSION} · Shift+L shows the debug log</span>
+            </div>
 
             {/* Summary and the next step, always in reach */}
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gc-line/[0.12] bg-gc-bg/90 backdrop-blur-md">
@@ -7353,6 +7392,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         <Tabletop3DOverlay
           active={step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER'}
           calmMode={isCalmMode}
+          quality={qualityTier}
+          onQualityChange={handleQualityChange}
           projectorMode={isProjectorMode}
           seatStates={seat3DStates}
           tossEvent={chipTossEvent}

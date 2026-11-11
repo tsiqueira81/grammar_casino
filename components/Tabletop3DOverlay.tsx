@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { BUDGET, FrameGuard, TIER_SETTINGS, type QualityTier } from '../show/quality';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -54,6 +55,10 @@ export interface JackpotEvent {
 export interface Tabletop3DOverlayProps {
   active: boolean;
   calmMode: boolean;
+  /** Package V1: how much the table draws. 'off' draws nothing. */
+  quality?: QualityTier;
+  /** Called when the frame-rate guard steps down, or the graphics card drops the table. */
+  onQualityChange?: (tier: QualityTier, reason: string) => void;
   projectorMode?: boolean;
   seatStates?: Seat3DState[];
   tossEvent: ChipTossEvent | null;
@@ -185,6 +190,8 @@ const CHIP_FALLBACK_COLORS: Record<number, number> = {
 export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   active,
   calmMode,
+  quality = 'medium',
+  onQualityChange,
   tossEvent,
   sweepEvent,
   boomerangEvent,
@@ -194,6 +201,25 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const impactCallbackRef = useRef(onChipImpactSound);
   impactCallbackRef.current = onChipImpactSound;
+  const qualityCallbackRef = useRef(onQualityChange);
+  qualityCallbackRef.current = onQualityChange;
+  const off = !active || calmMode || quality === 'off';
+  const tier = TIER_SETTINGS[quality === 'off' ? 'low' : quality];
+  const tierRef = useRef(tier);
+  tierRef.current = tier;
+  // Shift+D: draw calls, triangles and texture memory against the budget (development overlay).
+  const [budgetText, setBudgetText] = useState<string | null>(null);
+  const showBudgetRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName || '';
+      if (!e.shiftKey || e.key.toLowerCase() !== 'd' || /INPUT|TEXTAREA|SELECT/.test(tag)) return;
+      showBudgetRef.current = !showBudgetRef.current;
+      setBudgetText(showBudgetRef.current ? 'Waiting for the next animation' : null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const sceneRef = useRef<{
     scene: THREE.Scene;
@@ -215,7 +241,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
   // Initialize Three.js WebGL scene & load `.glb` chip/boomerang models
   useEffect(() => {
-    if (!active || calmMode) return;
+    if (off) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -231,7 +257,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     try {
       renderer = new THREE.WebGLRenderer({
         alpha: true,
-        antialias: true,
+        antialias: tier.antialias,
         powerPreference: 'high-performance',
       });
     } catch {
@@ -242,11 +268,20 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     // reload. The table is decoration only, so the game goes on without it.
     if (isSoftwareRenderer(renderer)) {
       renderer.dispose();
+      qualityCallbackRef.current?.('off', 'software graphics');
       return;
     }
+    // A lost graphics context (driver reset, too many tabs) turns the table off, never a blank screen.
+    const onContextLost = (e: Event) => {
+      e.preventDefault();
+      qualityCallbackRef.current?.('off', 'graphics context lost');
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    const guard = new FrameGuard(quality);
+    let lastBudgetAt = 0;
 
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -384,7 +419,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const sparks: Spark[] = [];
     const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
     stateObj.spawnSparks = (at, count, palette = GOLD_PALETTE, speed = 1) => {
-      for (let i = 0; i < count && sparks.length < MAX_SPARKS; i++) {
+      for (let i = 0; i < count && sparks.length < Math.min(MAX_SPARKS, tierRef.current.maxSparks); i++) {
         const theta = Math.random() * Math.PI * 2;
         const up = 0.6 + Math.random() * 1.6;
         const out = (0.4 + Math.random() * 1.3) * speed;
@@ -465,7 +500,13 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     };
 
     const animate = () => {
-      const dt = Math.min(clock.getDelta(), 0.05);
+      const rawDt = clock.getDelta();
+      const dt = Math.min(rawDt, 0.05);
+      const stepped = guard.push(rawDt * 1000);
+      if (stepped) {
+        console.info(`[3D] Frame rate too low; table quality now ${stepped}.`);
+        qualityCallbackRef.current?.(stepped, 'slow frames');
+      }
 
       for (let i = stateObj.chips.length - 1; i >= 0; i--) {
         const chip = stateObj.chips[i];
@@ -637,7 +678,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
           stateObj.coins.splice(i, 1);
         }
       }
-      for (let i = 0; i < stateObj.coins.length && coinCount < MAX_COINS; i++) {
+      for (let i = 0; i < stateObj.coins.length && coinCount < Math.min(MAX_COINS, tierRef.current.maxCoins); i++) {
         const coin = stateObj.coins[i];
         if (coin.delay > 0) continue;
         const fade = coin.life > 2.1 ? Math.max(0.001, 1 - (coin.life - 2.1) / 0.5) : 1;
@@ -651,6 +692,13 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       coinMesh.instanceMatrix.needsUpdate = true;
 
       renderer.render(scene, camera);
+      if (showBudgetRef.current && performance.now() - lastBudgetAt > 250) {
+        lastBudgetAt = performance.now();
+        const info = renderer.info;
+        setBudgetText(
+          `${guard.tier} · ${info.render.calls}/${BUDGET.drawCalls} draws · ${Math.round(info.render.triangles / 1000)}k/${BUDGET.triangles / 1000}k tris · ${info.memory.textures} textures`
+        );
+      }
 
       if (hasWork()) {
         rafId = requestAnimationFrame(animate);
@@ -675,6 +723,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       running = false;
       envTexture.dispose();
       shadowTexture.dispose();
@@ -688,7 +737,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       renderer.dispose();
       sceneRef.current = null;
     };
-  }, [active, calmMode]);
+  }, [off, quality]);
 
   // Handle transient 3D Chip Toss when a player adds chips to their wager
   useEffect(() => {
@@ -697,7 +746,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     if (ctx && ctx.lastProcessedTossId === tossEvent.id) return;
     if (ctx) ctx.lastProcessedTossId = tossEvent.id;
 
-    const chipsToSpawn = decomposeBetIntoChips(tossEvent.amountDelta);
+    const chipsToSpawn = decomposeBetIntoChips(tossEvent.amountDelta).slice(0, tierRef.current.maxChipsPerToss);
 
 
     if (!ctx) return;
@@ -855,7 +904,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     const intensity = Math.max(0.1, Math.min(1, jackpotEvent.intensity));
     const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 700;
-    const count = Math.round((isSmallScreen ? 36 : MAX_COINS) * intensity);
+    const count = Math.round(Math.min(isSmallScreen ? 36 : MAX_COINS, tierRef.current.maxCoins) * intensity);
     for (let i = 0; i < count; i++) {
       ctx.coins.push({
         position: new THREE.Vector3((Math.random() - 0.5) * 7, 3.6 + Math.random() * 1.2, -1.8 + Math.random() * 3.2),
@@ -871,16 +920,23 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     ctx.wake();
   }, [jackpotEvent, calmMode]);
 
-  if (!active || calmMode) {
+  if (off) {
     return null;
   }
 
   return (
-    <div
-      ref={containerRef}
-      aria-hidden="true"
-      className="fixed inset-0 pointer-events-none z-[12] overflow-hidden"
-    />
+    <>
+      <div
+        ref={containerRef}
+        aria-hidden="true"
+        className="fixed inset-0 pointer-events-none z-[12] overflow-hidden"
+      />
+      {budgetText && (
+        <div className="fixed left-2 bottom-2 z-[90] px-2 py-1 rounded bg-black/75 text-white font-mono text-[11px] pointer-events-none" data-testid="budget-overlay">
+          {budgetText}
+        </div>
+      )}
+    </>
   );
 };
 
