@@ -102,6 +102,9 @@ export interface AiMeta {
   tokens?: number;
   /** Why the first choice was not used, when it was not. */
   fallbackReason?: string;
+  /** Package L3: the model that checked the item cold, and whether it passed. */
+  verifiedBy?: string;
+  verified?: boolean;
 }
 
 /** The header value: short and safe (no sentence text, no answers). */
@@ -111,6 +114,8 @@ export function formatAiMeta(meta: AiMeta): string {
   if (meta.model) parts.model = clean(meta.model);
   if (typeof meta.tokens === 'number') parts.tokens = meta.tokens;
   if (meta.fallbackReason) parts.fallbackReason = clean(meta.fallbackReason);
+  if (meta.verifiedBy) parts.verifiedBy = clean(meta.verifiedBy);
+  if (typeof meta.verified === 'boolean') parts.verified = meta.verified ? 'yes' : 'no';
   return JSON.stringify(parts);
 }
 

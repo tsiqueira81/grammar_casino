@@ -82,6 +82,8 @@ export interface Settings {
 }
 
 export interface GeneratedSentence {
+  /** Package L3: how an AI item was checked ("two models" or "rules"); absent for bank items. */
+  checkedBy?: 'two models' | 'rules';
   text: string;
   isCorrect: boolean;
   correction: string;

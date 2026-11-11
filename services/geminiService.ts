@@ -217,6 +217,32 @@ async function requestDealerAction<T>(action: string, payload: Record<string, an
   return postToGeminiApi<T>(action, payload);
 }
 
+const pendingArchive = new Map<string, { sentence: GeneratedSentence; settings: Settings; subtype: string | null }>();
+const PENDING_ARCHIVE_LIMIT = 30;
+
+function rememberForArchive(sentence: GeneratedSentence, settings: Settings, subtype: string | null) {
+  pendingArchive.set(sentence.text, { sentence, settings, subtype });
+  while (pendingArchive.size > PENDING_ARCHIVE_LIMIT) {
+    const oldest = pendingArchive.keys().next().value;
+    if (oldest === undefined) break;
+    pendingArchive.delete(oldest);
+  }
+}
+
+/** Saves an AI item to the cloud bank after it was played (not voided). Bank items are ignored. */
+export function archivePlayedSentence(text: string | undefined): void {
+  if (!text) return;
+  const entry = pendingArchive.get(text);
+  if (!entry) return;
+  pendingArchive.delete(text);
+  void archiveSentenceToCloudBank(entry.sentence, entry.settings, entry.subtype);
+}
+
+/** Forgets an item that will not be played (swapped or voided). */
+export function forgetUnplayedSentence(text: string | undefined): void {
+  if (text) pendingArchive.delete(text);
+}
+
 export const generateSentence = async (
   settings: Settings,
   pastSentences: string[] = [],
@@ -250,8 +276,9 @@ export const generateSentence = async (
       // archived); the class gets a bank item instead, without a message.
       const check = validateItem(data, data.questionType);
       if (!check.ok) throw new Error(`AI sentence failed the content check: ${check.errors.join('; ')}`);
-      // Automatically archive verified AI-generated sentences to the Cloud Sentence Bank in the background
-      void archiveSentenceToCloudBank(data, settings, subtype);
+      // Package L3: no silent archiving. The item is saved to the cloud bank only once it has been
+      // played and not voided (archivePlayedSentence, called by the game when the hand is over).
+      rememberForArchive(data, settings, subtype);
       return data;
     }
     throw new Error("Invalid sentence structure returned from service.");

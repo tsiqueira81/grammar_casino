@@ -4021,9 +4021,10 @@ export function App() {
   const handleVoidHand = useCallback(() => {
     if (!revealSnapshot) return;
     secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, revealSnapshot.round);
+    GeminiService.forgetUnplayedSentence(currentSentence?.text);
     applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
     setShowRulingModal(false);
-  }, [revealSnapshot, applyCorrectedRuling]);
+  }, [revealSnapshot, applyCorrectedRuling, currentSentence]);
 
   const handleAcceptAnswer = useCallback((answer: string) => {
     if (!revealSnapshot) return;
@@ -4040,6 +4041,8 @@ export function App() {
 
   const handleNextRound = useCallback(() => {
     if (!nextRoundGuardRef.current.tryEnter()) return;
+    // Package L3: an AI item joins the cloud bank only once it was played (a voided one was forgotten).
+    GeminiService.archivePlayedSentence(currentSentence?.text);
     const stillActivePlayers = players.filter(p => p.money > 0);
     // In a live room, bankrupt players get the $150 House Bailout, except in last player standing.
     const gameEndInput = { players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) };
@@ -4110,7 +4113,7 @@ export function App() {
         fetchNewSentence(activeSettings, pastSentences, undefined, pastMistakes);
         setStep('IN_GAME');
     }
-  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats]);
+  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats, currentSentence]);
 
   const handleEndGameEarly = useCallback(() => {
     playSound('gameOver');

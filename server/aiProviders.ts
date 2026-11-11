@@ -1,5 +1,6 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqChatCompletion, callGroqOrpheusTts } from '../utils/groqUtils';
+import { verifierSchema } from './verifyItem';
 import { AI_TIMEOUT_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider } from './providers';
 
 // --- Groq & Gemini Client Setup ---
@@ -327,4 +328,28 @@ export function deepHealthAllowed(authorization: string | null | undefined): boo
   const token = String(process.env.HEALTH_CHECK_TOKEN || '').trim();
   if (!token) return false;
   return String(authorization || '') === `Bearer ${token}`;
+}
+
+/**
+ * Package L3: the second model for the cold check. Groq writes with one of its models and checks
+ * with the other (no new key). When Groq is down and Gemini wrote the item, only the rules check
+ * it, because a second Gemini call would make the class wait.
+ */
+export function checkWithSecondModel(meta: AiMeta, timeoutMs: number): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
+  const groqKey = resolveGroqApiKey();
+  if (meta.provider !== 'groq' || !groqKey) return { model: '', ask: null };
+  const list = aiModels().groqText;
+  const other = list.find((m) => m !== meta.model);
+  if (!other) return { model: '', ask: null };
+  return {
+    model: other,
+    ask: async (prompt: string) => {
+      const out = await withTimeout(
+        callGroqChatCompletion({ apiKey: groqKey, prompt, responseSchema: verifierSchema, schemaName: 'cold_check', maxCompletionTokens: 300, temperature: 0, models: [other] }),
+        timeoutMs,
+        'groq'
+      );
+      return out.text;
+    },
+  };
 }

@@ -3,6 +3,8 @@ import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CACHE_TTL_MS, checkDailyIpLimit, checkRateLimit, cleanupCache, persistentAiCache, responseCache } from './limits';
 import { formatAiMeta } from './providers';
+import { checkWithSecondModel } from './aiProviders';
+import { verifyItem } from './verifyItem';
 import { generateAiSpeechBase64, generateAiText, hasConfiguredAiKey, isHighTrafficOrOverload } from './aiProviders';
 import { CEFR_PROFILES, batchClozeVerificationSchema, getSentenceSchema, verificationSchema } from './sentenceSchemas';
 import { enforceKeyWordTransformationIntegrity, enforceMultipleChoiceIntegrity, enforceOpenClozeIntegrity, enforceWordFormationIntegrity } from './sentenceIntegrity';
@@ -484,6 +486,7 @@ Respond ONLY with valid JSON matching the schema.`;
         }
 
         const activeSchema = getSentenceSchema(resolvedQuestionType);
+        const generationStarted = Date.now();
         const response = await generateAiText({
           prompt,
           responseSchema: activeSchema,
@@ -491,7 +494,6 @@ Respond ONLY with valid JSON matching the schema.`;
           maxCompletionTokens: 900,
           kind: 'generate',
         });
-        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const jsonText = response.text ? response.text.trim() : "";
         const generatedData = JSON.parse(jsonText);
@@ -514,6 +516,32 @@ Respond ONLY with valid JSON matching the schema.`;
           generatedData.isCorrect = true;
           enforceKeyWordTransformationIntegrity(generatedData);
         }
+
+        // Package L3: a second model answers the item cold before any student sees it. The game
+        // must have its sentence within 8 s, so the check gets what is left of 7.5 s (at least 1.5 s).
+        const checkMs = Math.max(1_500, Math.min(4_000, 7_500 - (Date.now() - generationStarted)));
+        const checker = checkWithSecondModel(response.meta, checkMs);
+        const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
+        const verdict = await verifyItem(generatedData, resolvedQuestionType, level, checker.ask, pastTexts);
+        res.setHeader(
+          'X-AI-Meta',
+          formatAiMeta({
+            ...response.meta,
+            latencyMs: Date.now() - generationStarted,
+            verifiedBy: checker.ask ? checker.model : 'rules only',
+            verified: verdict.ok,
+            fallbackReason: verdict.ok ? response.meta.fallbackReason : `rejected: ${verdict.reasons[0]}`,
+          })
+        );
+        if (!verdict.ok) {
+          console.warn('[L3] AI sentence rejected:', verdict.reasons.join('; '));
+          // fallback: true sends the game to its built-in bank, without a word to the class.
+          return res.status(422).json({ fallback: true, error: `Checked and replaced: ${verdict.reasons[0]}` });
+        }
+        if (verdict.extraAnswers.length) {
+          generatedData.acceptedAnswers = Array.from(new Set([...(generatedData.acceptedAnswers || []), ...verdict.extraAnswers]));
+        }
+        generatedData.checkedBy = checker.ask ? 'two models' : 'rules';
 
         return res.status(200).json(generatedData);
       }
