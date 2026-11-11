@@ -147,6 +147,8 @@ export interface PlayerViewPayload {
   calmMode?: boolean;
   /** The teacher paused the hand (package R8): the phone shows a pause card and takes no input. */
   paused?: boolean;
+  /** Package G6: the special hand being played, shown on the phone. */
+  specialHand?: SpecialHandBanner | null;
   /** The teacher's clock when this update was sent (package R3); added by the transport. */
   serverNow?: number;
 }
@@ -371,6 +373,15 @@ export interface BuildPlayerViewsParams {
   calmMode?: boolean;
   /** The teacher paused the hand (package R8). */
   paused?: boolean;
+  /** Package G6: the special hand being played, or null. */
+  specialHand?: SpecialHandBanner | null;
+}
+
+/** Package G6: what a phone shows for a special hand. */
+export interface SpecialHandBanner {
+  title: string;
+  rule: string;
+  icon: string;
 }
 
 /**
@@ -454,6 +465,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     turnDurationMs,
     calmMode,
     paused,
+    specialHand,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -724,6 +736,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       turnDurationMs,
       calmMode: Boolean(calmMode),
       paused: Boolean(paused) && step === 'IN_GAME',
+      specialHand: specialHand && (step === 'IN_GAME' || step === 'RESULTS') ? specialHand : null,
     };
   }
 
@@ -762,6 +775,7 @@ export const SHARED_VIEW_KEYS = [
   'turnDurationMs',
   'calmMode',
   'paused',
+  'specialHand',
 ] as const satisfies readonly (keyof PlayerViewPayload)[];
 
 export interface SplitPlayerViews {

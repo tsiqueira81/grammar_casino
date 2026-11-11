@@ -3753,11 +3753,15 @@ export function App() {
       turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
       calmMode: isCalmMode,
       paused: isPaused,
+      specialHand: currentSpecialHand
+        ? { title: SPECIAL_HAND_INFO[currentSpecialHand].title, rule: SPECIAL_HAND_INFO[currentSpecialHand].rule, icon: SPECIAL_HAND_INFO[currentSpecialHand].icon }
+        : null,
     });
     mpControllerRef.current.pushViews(views);
   }, [
     isCalmMode,
     isPaused,
+    currentSpecialHand,
     mpRoomCode,
     mpRoomLocked,
     step,

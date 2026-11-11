@@ -1227,6 +1227,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               </div>
             ) : (
               <>
+                {/* Package G6: a special hand says so before the sentence */}
+                {view.specialHand && (
+                  <div
+                    role="status"
+                    data-testid="phone-special-hand"
+                    className="rounded-[16px] px-4 py-2.5 flex items-center gap-3 bg-gc-gold/[0.12] border border-gc-gold/40"
+                  >
+                    <span className="text-[24px] leading-none" aria-hidden="true">{view.specialHand.icon}</span>
+                    <span className="min-w-0 text-left">
+                      <span className="block text-gc-body font-extrabold text-gc-gold">{view.specialHand.title}</span>
+                      <span className="block text-gc-small text-gc-ink">{view.specialHand.rule}</span>
+                    </span>
+                  </div>
+                )}
                 {/* The sentence */}
                 <section className="gc-surface rounded-[20px] px-[18px] py-4 text-center animate-gc-deal" aria-label="The sentence">
                   <span className="inline-flex items-center h-[26px] px-[11px] rounded-full bg-gc-gold text-gc-on-gold text-[12.5px] font-bold">
