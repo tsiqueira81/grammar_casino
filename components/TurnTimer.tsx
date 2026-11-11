@@ -370,7 +370,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 ml-auto">
           <div className="flex items-baseline gap-2">
             <span className="text-gc-cap font-semibold text-gc-quiet">Time left</span>
-            <span className={`text-gc-display tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
+            <span data-testid="host-round-clock" className={`text-gc-display tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
               {formatClock(remainingMs)}
             </span>
           </div>

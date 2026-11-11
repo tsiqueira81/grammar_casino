@@ -147,6 +147,8 @@ export interface PlayerViewPayload {
   calmMode?: boolean;
   /** The teacher paused the hand (package R8): the phone shows a pause card and takes no input. */
   paused?: boolean;
+  /** The teacher's clock when this update was sent (package R3); added by the transport. */
+  serverNow?: number;
 }
 
 export interface AudiencePollBreakdownItem {

@@ -1,5 +1,5 @@
 import { safeLocalStorage } from '../utils/safeStorage';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
   HINT_COST,
@@ -22,6 +22,7 @@ import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
 import { generateFriendlyName } from '../utils/nameFilter';
+import { addClockSample, clockOffset, toLocalTimer } from '../utils/clockSync';
 import {
   AlertTriangle,
   ArrowRight,
@@ -115,6 +116,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const controllerRef = useRef<StudentRoomController | null>(null);
   const seenNotificationIdRef = useRef<string | null>(null);
   const lastRoundRef = useRef<number>(-1);
+  const clockSamplesRef = useRef<number[]>([]);
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const lastSentenceTextRef = useRef<string>('');
   const lastStepRef = useRef<string>('');
 
@@ -157,6 +160,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const handleViewUpdate = useCallback(
     (nextView: PlayerViewPayload) => {
       setView(nextView);
+      // Package R3: learn how far the teacher's clock is from this phone's.
+      if (typeof nextView.serverNow === 'number') {
+        clockSamplesRef.current = addClockSample(clockSamplesRef.current, nextView.serverNow, Date.now());
+        setClockOffsetMs(clockOffset(clockSamplesRef.current));
+      }
 
       const nextSentenceText = nextView.sentence?.text || '';
       const isNewRound = nextView.round !== lastRoundRef.current;
@@ -337,8 +345,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     controllerRef.current?.sendIntent(intent);
   }, []);
 
+  // The round deadline read on this phone's clock (package R3).
+  const roundTimer = useMemo(() => toLocalTimer(view?.roundTimer, clockOffsetMs), [view?.roundTimer, clockOffsetMs]);
   const { remainingMs: roundTimerRemainingMs } = useTurnCountdown(
-    view?.roundTimer,
+    roundTimer,
     view?.turnDurationMs || 0
   );
 
@@ -915,7 +925,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {/* Shared round timer, when the teacher turned it on */}
             {(view.turnDurationMs ?? 0) > 0 && (
               <StudentRoundTimerBar
-                timer={view.roundTimer}
+                timer={roundTimer}
                 turnDurationMs={view.turnDurationMs || 0}
                 lockedIn={isPlayerLocked}
               />

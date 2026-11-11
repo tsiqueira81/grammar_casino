@@ -3,6 +3,7 @@ import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
+import { LATE_BET_GRACE_MS } from './utils/clockSync';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
@@ -1129,7 +1130,9 @@ export function App() {
   useEffect(() => {
     if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
     if (mpRoundTimer.status !== 'running' || mpRoundTimer.held || mpRoundTimer.endsAt === undefined) return;
-    const endsAt = mpRoundTimer.endsAt;
+    // Package R3: the teacher's screen decides when time is up, and bets that arrive up to
+    // 1.5 s after the deadline (slow Wi-Fi) still count.
+    const endsAt = mpRoundTimer.endsAt + LATE_BET_GRACE_MS;
 
     const checkExpiry = () => {
       if (Date.now() >= endsAt) {

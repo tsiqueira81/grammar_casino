@@ -361,7 +361,8 @@ export class HostRoomController {
       code: this.code,
       locked: this.roomLocked,
       rev,
-      table,
+      // The teacher's clock at send time, so phones can match their countdown to it (R3).
+      table: { ...table, serverNow: Date.now() },
       seatRevs,
       kickedPlayerIds: this.kickedPlayerIds,
       seats: seatWrites,
@@ -774,6 +775,8 @@ export class HostRoomController {
 
     // 2. Also push to local server if available (it sends each phone only its own view)
     if (!this.localServerAvailable) return;
+    const sentAt = Date.now();
+    views = Object.fromEntries(Object.entries(views).map(([id, v]) => [id, { ...v, serverNow: sentAt }]));
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {

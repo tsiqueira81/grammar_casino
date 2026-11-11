@@ -80,6 +80,9 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
 - Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
+### One clock for the room (package R3)
+- The host stamps every update with `serverNow` when it sends it (Firestore table, local relay views). A phone keeps the last five `serverNow - Date.now()` samples, trusts the largest (`utils/clockSync.ts`) and reads the round deadline on its own clock through it. The host locks the round `LATE_BET_GRACE_MS` (1.5 s) after the deadline, so bets on slow Wi-Fi still count; the phone's own clock decides nothing.
+
 ### Saved games (package T5)
 - Every save goes through `game/persistence.ts`: `stampSave` writes `saveVersion: 2` and `savedAt`, `readSave` reads versions 1 and 2. Opening an unfinished game saved more than 10 minutes ago offers "Resume" or "Start fresh" (not while a live room reopens by itself).
 
