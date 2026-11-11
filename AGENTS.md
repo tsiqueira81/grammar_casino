@@ -43,6 +43,8 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `server.ts` | Dev server (Vite, the WebSocket relay) and the entry the Pages Function imports (`dispatchServerlessApi`) |
 | `server/` | The server's parts (package A1): `runtime.ts` (where it runs, `.env`), `limits.ts` (rate and daily limits, AI cache), `aiProviders.ts` (Groq and Gemini calls), `sentenceSchemas.ts` and `sentenceIntegrity.ts` (what an AI sentence must look like), `aiHandler.ts` (`/api/gemini`), `relay.ts` (the dev-only live-room relay), `serverless.ts` (the Pages Function dispatcher). `tests/serverRoutes.test.ts` checks the routes |
 | `functions/api/` | Cloudflare Pages Function entry |
+| `public/privacy.html` | The short privacy notice for students and teachers (package A5), linked from the phone join screen. Keep it true: change it when what the game sends or keeps changes |
+| `utils/debugLog.ts` | The host's debug log (package A4): last 500 events (screens, hands, rooms, seats dropping, intents ignored, AI fallbacks), Shift+L shows it, Download saves it, a crash offers "Copy details". `APP_VERSION` is the commit and build date from `vite.config.ts` (`__APP_VERSION__`), "dev" in tests. Never log what a student typed |
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
 | `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators) |
 | `tests/` | vitest unit tests |
@@ -136,6 +138,9 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 ### Firestore
 - `firestore.rules` only takes effect once published in the Firebase console. Rosters and reports are readable only by the teacher's Google account named in that file.
 - To test rule changes, run `scripts/check-firestore-rules.mjs` against the emulator (needs Java; instructions at the top of the file).
+
+- AI requests carry the sentence and typed answers only, never a nickname, seat or other identifier (`tests/privacy.test.ts`).
+- `.github/workflows/morning-check.yml` checks the live site every weekday at 06:30 Sao Paulo time and opens an issue if it fails. It runs from `main` only.
 
 ## Browser storage keys
 

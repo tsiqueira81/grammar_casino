@@ -12,7 +12,8 @@ export type HotkeyAction =
   | 'mute'
   | 'room'
   | 'fullscreen'
-  | 'help';
+  | 'help'
+  | 'debug-log';
 
 /** The shortcut list, as shown in the help overlay. */
 export const HOTKEY_HELP: { keys: string; action: string }[] = [
@@ -26,6 +27,7 @@ export const HOTKEY_HELP: { keys: string; action: string }[] = [
   { keys: 'Q', action: 'Show the room and its join code' },
   { keys: 'F', action: 'Full screen (turns on projector mode)' },
   { keys: '?', action: 'Show or hide this list' },
+  { keys: 'Shift+L', action: 'Show the debug log (to report a problem)' },
   { keys: 'Esc', action: 'Close the top window' },
 ];
 
@@ -34,6 +36,7 @@ export interface HotkeyEventLike {
   ctrlKey?: boolean;
   metaKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
   /** Tag name of the focused element (upper or lower case). */
   targetTag?: string;
   targetEditable?: boolean;
@@ -57,6 +60,7 @@ export function hotkeyAction(e: HotkeyEventLike): HotkeyAction | null {
   // Never steal keys from typing.
   if (e.targetEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return null;
   if (e.key === '?') return 'help';
+  if (e.shiftKey && e.key.toLowerCase() === 'l') return 'debug-log';
   if (e.key === 'PageDown') return 'primary';
   if (e.key === 'PageUp') return 'undo-reveal';
   if (e.key === ' ' || e.key === 'Enter') {

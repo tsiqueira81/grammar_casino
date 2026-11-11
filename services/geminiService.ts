@@ -2,6 +2,7 @@ import { getAiCallKind, getBrowserDailyStorage, tryUseAiCall } from '../utils/ai
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { validateItem } from '../content/schema';
+import { logEvent } from '../utils/debugLog';
 import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
 import {
   evaluateBinaryCorrectionOffline,
@@ -254,6 +255,7 @@ export const generateSentence = async (
     throw new Error("Invalid sentence structure returned from service.");
   } catch (err) {
     console.warn("Using curated fallback challenge due to service notice:", err);
+    logEvent('ai', `Sentence from the built-in bank instead of AI: ${err instanceof Error ? err.message : String(err)}`);
     // Package L1: the offline bank loads only when it is needed.
     const { getCuratedSentence } = await import('./fallbackSentences');
     return getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
@@ -367,6 +369,7 @@ export const verifyCorrection = async (
     }
   } catch (err) {
     console.warn("Using deterministic offline grammar engine fallback:", err);
+    logEvent('ai', 'Correction marked offline instead of by AI');
   }
 
   return offlineEval;
@@ -441,6 +444,7 @@ export const verifyOpenClozeBatch = async (
     }
   } catch (err) {
     console.warn('Using offline Cloze/Transformation batch verification fallback:', err);
+    logEvent('ai', 'Typed answers marked offline instead of by AI');
   }
 
   const fallbackResults: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> = {};
@@ -499,6 +503,7 @@ export const simplifyExplanation = async (
     if (text) return text.trim();
   } catch (err) {
     console.warn("Using fallback detailed explanation:", err);
+    logEvent('ai', 'Explanation from the built-in text instead of AI');
   }
 
   return `Grammatical Focus (${topic}): ${originalExplanation}${correction ? ` Standard target structure: "${correction}".` : ''}`;

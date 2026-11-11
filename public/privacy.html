@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grammar Casino privacy</title>
+<style>
+  :root { color-scheme: light dark; --bg: #faf7f0; --ink: #1d1a14; --quiet: #5c564a; --line: #e2dccd; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14120e; --ink: #f1ece0; --quiet: #b3ab99; --line: #34302a; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 19px; margin: 28px 0 6px; }
+  p, li { margin: 0 0 8px; }
+  ul { padding-left: 20px; }
+  .quiet { color: var(--quiet); font-size: 15px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 32px; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy in Grammar Casino</h1>
+  <p>Grammar Casino is a classroom grammar game. The money in it is pretend. This page says what the game keeps and where it goes.</p>
+
+  <h2>Students</h2>
+  <ul>
+    <li>No account and no email. You join with a room code and a nickname.</li>
+    <li>Use a nickname or first name only. Do not type personal information in any answer.</li>
+    <li>Your phone keeps a random identifier in its own storage, so you can get your seat back after a reload. It is not linked to who you are.</li>
+    <li>While a room is open, your nickname, character, bets and answers are shared with the teacher's screen through the game's database.</li>
+  </ul>
+
+  <h2>Marking and speech</h2>
+  <ul>
+    <li>To mark typed answers and write new sentences, the game sends the sentence and the typed answers to an AI service (Groq, or Google Gemini as a backup). Nicknames are never sent.</li>
+    <li>To read a sentence aloud, only the sentence text is sent to the speech service.</li>
+  </ul>
+
+  <h2>Teachers</h2>
+  <ul>
+    <li>A teacher can sign in with Google to save games and reports in the cloud. Those reports hold nicknames and results, and only that teacher can open them.</li>
+    <li>The game's debug log stays on the teacher's computer. Nothing is sent anywhere unless the teacher downloads the file and shares it.</li>
+  </ul>
+
+  <h2>How long things are kept</h2>
+  <ul>
+    <li>A game saved on a computer stays there until the teacher starts a new class or clears the browser.</li>
+    <li>Room data is not yet deleted automatically. Deleting rooms 24 hours after the last activity is being added.</li>
+  </ul>
+
+  <p class="quiet">Questions about your data? Ask your teacher. This notice describes how the game works; it is not legal advice.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,41 @@
+# Package A4: learn the game is broken before first period, not during it.
+# Every weekday at 06:30 in Sao Paulo (09:30 UTC) this checks the live site and opens an issue
+# if something does not answer. It reads only; it creates no rooms and uses no AI credits.
+name: Morning check
+
+on:
+  schedule:
+    - cron: '30 9 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SITE: https://grammarcasino.pages.dev
+    steps:
+      - name: The game page loads
+        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/" | grep -q '<div id="root"'
+      - name: The game server answers
+        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/api/health" | grep -q '"status":"ok"'
+      - name: The privacy notice is there
+        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/privacy.html" | grep -q 'Privacy in Grammar Casino'
+      - name: Open an issue when something failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Morning check failed: the live game may be down';
+            const open = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open' });
+            if (open.data.some((i) => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: `The weekday check of ${process.env.SITE} failed. See ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId} for which step.`,
+            });

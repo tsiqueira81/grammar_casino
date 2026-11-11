@@ -807,6 +807,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 </>
               )}
             </button>
+            <p className="m-0 text-center text-gc-cap text-gc-quiet" data-testid="join-privacy">
+              No account, no email: just a nickname, kept on this phone.{' '}
+              <a href="/privacy.html" target="_blank" rel="noopener" className="inline-flex items-center min-h-[44px] min-w-[44px] px-2 underline underline-offset-4 text-gc-quiet hover:text-gc-ink">
+                Privacy
+              </a>
+            </p>
             <button
               type="button"
               onClick={onExitStudentMode}
@@ -1423,7 +1429,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                         ? 'border-amber-500/70 bg-amber-500/[0.04]'
                                         : fieldOk
                                     } min-h-[52px] px-4 font-sentence italic text-gc-lead`}
+                                    aria-describedby="gc-phone-correction-privacy"
                                   />
+                                  <p id="gc-phone-correction-privacy" className="mt-1 mb-0 text-gc-cap text-gc-quiet">
+                                    Do not type personal information.
+                                  </p>
                                   {hasDoubleOrNothing && !localBet.userCorrection?.trim() && (
                                     <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
                                       ⚠️ Heads up: With Double or Nothing active, locking in Flawed without a valid correction results in a −1.5× loss.

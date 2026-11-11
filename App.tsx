@@ -8,6 +8,8 @@ import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected,
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { APP_VERSION, logEvent } from './utils/debugLog';
+import { DebugLogModal } from './components/DebugLogModal';
 import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
@@ -445,6 +447,7 @@ export function App() {
   const [pastReport, setPastReport] = useState<FinishedGame | null>(null);
   // Package T2: shortcut list and full screen for presenting.
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
+  const [showDebugLog, setShowDebugLog] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
   isPausedRef.current = isPaused;
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
@@ -1427,6 +1430,16 @@ export function App() {
     }
   };
   const [settingsPart, setSettingsPart] = useState<1 | 2>(1);
+  // Package A4: screen changes go to the debug log.
+  useEffect(() => {
+    logEvent('step', step === 'SETTINGS' ? `Screen: SETTINGS part ${settingsPart}` : `Screen: ${step}`);
+  }, [step, settingsPart]);
+  useEffect(() => {
+    logEvent('room', mpRoomCode ? `Live room ${mpRoomCode} open` : 'No live room');
+  }, [mpRoomCode]);
+  useEffect(() => {
+    logEvent('step', `Hand ${currentRound}`);
+  }, [currentRound]);
 
   const handleStartGame = () => { 
     if (players.length > 0) { 
@@ -3092,6 +3105,7 @@ export function App() {
         setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== closedClientId));
       } else if (event.type === 'STUDENT_DISCONNECTED' && event.playerId !== undefined) {
         const playerId = event.playerId;
+        logEvent('room', `Seat ${playerId} disconnected`);
         setMpSeats(prev => {
           if (!prev[playerId]) return prev;
           return {
@@ -3107,7 +3121,10 @@ export function App() {
         setMpAwayIds(prev => (prev.includes(playerId) ? prev.filter(id => id !== playerId) : prev));
 
         // While the teacher has paused the hand, phones cannot bet, lock in or buy (package R8).
-        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE' && intent.type !== 'HEARTBEAT') return;
+        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE' && intent.type !== 'HEARTBEAT') {
+          logEvent('intent', `Seat ${playerId}: ${intent.type} ignored because the hand is paused`);
+          return;
+        }
 
         switch (intent.type) {
           case 'SET_BET': {
@@ -3843,6 +3860,7 @@ export function App() {
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
         altKey: e.altKey,
+        shiftKey: e.shiftKey,
         targetTag: target?.tagName,
         targetEditable: Boolean(target?.isContentEditable),
       });
@@ -3850,6 +3868,11 @@ export function App() {
       if (action === 'help') {
         e.preventDefault();
         setShowHotkeyHelp(v => !v);
+        return;
+      }
+      if (action === 'debug-log') {
+        e.preventDefault();
+        setShowDebugLog(v => !v);
         return;
       }
       const button = findHotkeyButton(document, action);
@@ -5355,6 +5378,10 @@ export function App() {
                 </section>
               </div>
             )}
+
+            <p className="mt-6 text-center text-gc-cap text-gc-quiet" data-testid="settings-version">
+              Grammar Casino {APP_VERSION} · Shift+L shows the debug log
+            </p>
 
             {/* Summary and the next step, always in reach */}
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gc-line/[0.12] bg-gc-bg/90 backdrop-blur-md">
@@ -7585,9 +7612,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           </div>
         </Modal>
       )}
+      {showDebugLog && <DebugLogModal onClose={() => setShowDebugLog(false)} playSound={playSound} />}
       {showHotkeyHelp && (
         <Modal title="Keyboard shortcuts" onClose={() => setShowHotkeyHelp(false)} playSound={playSound}>
           <p className="text-gc-body text-gc-ink mb-4">A presenter clicker works too: its buttons send Page Down and Page Up.</p>
+          <p className="text-gc-small text-gc-quiet -mt-2 mb-4">Version {APP_VERSION}</p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-gc-body text-gc-ink">
             {HOTKEY_HELP.map(h => (
               <React.Fragment key={h.keys}>
