@@ -22,7 +22,7 @@ import { CEFR_LEVELS, GRAMMAR_TOPICS } from '../constants';
 import ActionButton from './ActionButton';
 import GrammarReportCard from './GrammarReportCard';
 import { PlayerAvatar } from './PlayerAvatar';
-import { getStaticBankCounts } from '../services/fallbackSentences';
+import { getBuiltInCuratedSentencesForCloudSeed, getStaticBankCounts } from '../services/fallbackSentences';
 import { generateSentence } from '../services/geminiService';
 import {
   archiveSentenceToCloudBank,
@@ -140,7 +140,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
 
   const staticCounts = useMemo(() => getStaticBankCounts(), []);
   const missingBuiltInSeedCount = useMemo(
-    () => getMissingBuiltInCloudSeedCount(sentences),
+    () => getMissingBuiltInCloudSeedCount(sentences, getBuiltInCuratedSentencesForCloudSeed()),
     [sentences]
   );
 
@@ -331,7 +331,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
     setNotice(null);
     setSeedProgress({ done: 0, total: Math.max(1, missingBuiltInSeedCount) });
     try {
-      const res = await seedBuiltInBankToCloud(sentences, (done, total) => {
+      const res = await seedBuiltInBankToCloud(sentences, getBuiltInCuratedSentencesForCloudSeed(), (done, total) => {
         setSeedProgress({ done, total });
       });
       setSentences(res.updatedList);

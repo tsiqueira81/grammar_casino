@@ -20,7 +20,6 @@ import WheelModal from './WheelModal';
 import SentenceText from './SentenceText';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
-import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { diffWords } from '../utils/errorHighlight';
 import {
   AlertTriangle,
@@ -1752,8 +1751,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             setIsGeneratingPdf(true);
             setPdfStatusToast(null);
 
-            setTimeout(() => {
+            setTimeout(async () => {
               try {
+                // The PDF library is large, so a phone downloads it only when asked for a report card.
+                const { generateGrammarReportPDF } = await import('../utils/pdfGenerator');
                 const reportPlayers: Player[] = view.peers.map(p => ({
                   id: p.id,
                   name: p.name,

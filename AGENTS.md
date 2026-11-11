@@ -35,6 +35,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | Path | What lives there |
 | --- | --- |
 | `App.tsx` | The host screen and almost all game flow (very large; being split up in a later phase) |
+| `index.tsx`, `student/StudentApp.tsx` | Entry point. A link with `?room=CODE` loads only `StudentApp` (the phone app); everything else loads `App`. Keep teacher-only code (the offline bank, PDFs, the 3D table, the cloud vault) out of what `StudentApp` imports; `e2e/phone-inputs.spec.ts` checks it |
 | `components/` | Screens and widgets. `StudentControllerView.tsx` is the phone app, `PlayerBettingCard.tsx` the single-screen seat card, `Tabletop3DOverlay.tsx` the lazy-loaded three.js table |
 | `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner), `revealGate.ts` (who is in, may the answer be revealed), `persistence.ts` (bringing old saved games up to date). Change a rule here, not in `App.tsx` |
 | `utils/` | Pure helpers: `roundSettlement.ts` (payouts), `multiplayerProtocol.ts` (per-phone views), `soundEngine.ts` (Web Audio synthesis), `sentenceSegments.ts`, and others |

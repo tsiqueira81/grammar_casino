@@ -36,7 +36,8 @@ import {
   RoundHistoryRecord,
   Settings,
 } from '../types';
-import { getBuiltInCuratedSentencesForCloudSeed } from './fallbackSentences';
+// Only the type: the offline bank itself stays out of this file, so phones do not download it (S1).
+import type { BuiltInSeedItem } from './fallbackSentences';
 import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
 
 // Initialize Firebase App singleton
@@ -1004,10 +1005,10 @@ export async function syncCloudSentenceBank(options?: {
 }
 
 export function getMissingBuiltInCloudSeedCount(
-  currentCloudSentences: CloudCuratedSentence[]
+  currentCloudSentences: CloudCuratedSentence[],
+  builtIn: BuiltInSeedItem[]
 ): number {
   const existingIds = new Set(currentCloudSentences.map((s) => s.id));
-  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
   let missing = 0;
   for (const item of builtIn) {
     const id = computeSentenceFingerprintId(item.text, item.questionType);
@@ -1018,6 +1019,7 @@ export function getMissingBuiltInCloudSeedCount(
 
 export async function seedBuiltInBankToCloud(
   currentCloudSentences: CloudCuratedSentence[],
+  builtIn: BuiltInSeedItem[],
   onProgress?: (seededCount: number, totalToSeed: number) => void
 ): Promise<{
   ok: boolean;
@@ -1037,7 +1039,6 @@ export async function seedBuiltInBankToCloud(
   }
 
   const existingIds = new Set(currentCloudSentences.map((s) => s.id));
-  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
   const baseNow = Date.now();
 
   const toWrite: { id: string; payload: Record<string, any>; entry: CloudCuratedSentence }[] = [];

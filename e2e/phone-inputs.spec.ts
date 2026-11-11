@@ -66,6 +66,13 @@ test('a phone keeps exactly what the student typed, and every control fits a thu
     if (req.method() === 'POST' && req.url().includes('/api/mp/')) sent.push(req.postData() || '');
   });
 
+  // Package S1: a phone opening a room link loads only the phone app.
+  const teacherOnlyFiles = /\/App\.tsx|Tabletop3DOverlay|expandedCuratedBank|fallbackSentences|pdfGenerator|CloudManagerModal/;
+  const teacherFilesLoaded: string[] = [];
+  phone.on('request', (req) => {
+    if (teacherOnlyFiles.test(req.url())) teacherFilesLoaded.push(new URL(req.url()).pathname);
+  });
+
   await phone.goto(`${E2E_URL}&room=${code}`);
   await checkAtWidths(phone, 'join form');
   await phone.getByRole('textbox', { name: 'Your name' }).fill('Gil');
@@ -116,6 +123,7 @@ test('a phone keeps exactly what the student typed, and every control fits a thu
   await expect(phone.getByText(/^Balance/)).toBeVisible();
   await checkAtWidths(phone, 'results screen');
 
+  expect(teacherFilesLoaded, 'teacher-only files the phone downloaded').toEqual([]);
   expect(errors).toEqual([]);
   await context.close();
 });
