@@ -19,6 +19,9 @@ async function joinPhone(browser: Browser, code: string, name: string): Promise<
   framesReceived.set(phone, frames);
   phone.on('websocket', ws => ws.on('framereceived', f => frames.push(String(f.payload))));
   await phone.goto(`${E2E_URL}&room=${code}`);
+  // Package S9: the link holds the code, so the phone asks only for a name.
+  await expect(phone.getByTestId('joining-room')).toContainText(code);
+  await expect(phone.getByRole('textbox', { name: 'Room code' })).toHaveCount(0);
   await phone.getByRole('textbox', { name: 'Your name' }).fill(name);
   await phone.getByRole('button', { name: 'Join the table' }).click();
   await expect(phone.getByRole('heading', { name: `You're in, ${name}!` })).toBeVisible();

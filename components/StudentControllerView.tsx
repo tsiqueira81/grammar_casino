@@ -141,6 +141,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   useEffect(() => () => applyStudentPrefs({ textSize: 'normal', plainFont: false, lessMotion: false }), []);
   const [roomCodeInput, setRoomCodeInput] = useState(() => initialRoomCode.toUpperCase());
   const [playerNameInput, setPlayerNameInput] = useState('');
+  // Package S9: a QR scan or join link already holds the code, so the form asks only for a name.
+  const [codeFromLink, setCodeFromLink] = useState(() => /^[A-Z0-9]{4}$/i.test(initialRoomCode));
+  const [welcomeName, setWelcomeName] = useState<string | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState(() => getRandomCharacterAvatar());
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -197,7 +200,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       const raw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
       if (!raw) return;
       const saved: SavedStudentSession = JSON.parse(raw);
-      if (saved.name) setPlayerNameInput(saved.name);
+      if (saved.name) {
+        setPlayerNameInput(saved.name);
+        setWelcomeName(saved.name);
+      }
       if (saved.avatar) setSelectedAvatar(saved.avatar);
       const targetCode = (initialRoomCode || saved.code || '').toUpperCase();
       if (targetCode) setRoomCodeInput(targetCode);
@@ -752,8 +758,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </button>
           </div>
 
-          <h1 className="text-[30px] leading-tight font-extrabold tracking-tight m-0">Join the table</h1>
-          <p className="mt-1.5 mb-5 text-gc-body text-gc-quiet">Type the code shown on the projector.</p>
+          <h1 className="text-[30px] leading-tight font-extrabold tracking-tight m-0">
+            {welcomeName ? `Welcome back, ${welcomeName}` : 'Join the table'}
+          </h1>
+          <p className="mt-1.5 mb-5 text-gc-body text-gc-quiet">
+            {codeFromLink ? 'Type your name and join.' : 'Type the code shown on the projector.'}
+          </p>
 
           {joinError && (
             <div role="alert" className="mb-4 px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/40 text-gc-small font-semibold text-gc-ink">
@@ -766,6 +776,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
           )}
 
+          {codeFromLink ? (
+            <div className="mb-5 h-14 px-4 rounded-gc flex items-center justify-between gap-3 bg-gc-line/[0.06] border border-gc-line/[0.14]" data-testid="joining-room">
+              <span className="text-gc-body font-semibold text-gc-ink">
+                Joining room <span className="font-extrabold tracking-[0.18em] text-gc-gold tabular-nums">{roomCodeInput}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCodeFromLink(false)}
+                className="min-h-[44px] px-2 text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer hover:text-gc-ink"
+              >
+                Change
+              </button>
+            </div>
+          ) : (<>
           <label htmlFor="gc-join-code" className="block mb-2 text-gc-small font-bold text-gc-quiet">Room code</label>
           <input
             id="gc-join-code"
@@ -780,6 +804,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             aria-label="Room code"
             className={`${fieldClass} h-[68px] mb-5 text-center text-[30px] font-extrabold tracking-[0.5em] pl-[0.5em] uppercase tabular-nums`}
           />
+          </>)}
 
           <label htmlFor="gc-join-name" className="block mb-2 text-gc-small font-bold text-gc-quiet">Your name</label>
           <input
@@ -803,16 +828,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             Give me a name
           </button>
 
-          <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Choose & customize your character</span>
-          <div role="group" aria-labelledby="gc-join-avatar">
-            <CharacterPickerPanel
-              value={selectedAvatar}
-              onChange={setSelectedAvatar}
-              playerName={playerNameInput || 'VIP Guest'}
-              playSound={playSound}
-              compact
-            />
-          </div>
+          <p className="m-0 text-gc-small text-gc-quiet">You choose your character after you join.</p>
 
           <div className="mt-auto pt-6 space-y-2">
             <button
@@ -1102,6 +1118,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <PlayerAvatar value={view.me.avatar} size="2xl" className="w-full h-full" animated />
             </div>
             <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">You're in, {view.me.name}!</h1>
+            {!showAvatarPicker && (
+              <button
+                type="button"
+                onClick={() => setShowAvatarPicker(true)}
+                className="mb-3 min-h-[44px] px-4 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
+              >
+                Choose your character
+              </button>
+            )}
             <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">
               Watch the projector. Your betting card opens here when the teacher deals the first hand.
             </p>
