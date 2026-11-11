@@ -20,6 +20,7 @@ import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs 
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
 const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
+import { tableViewOn } from './show/tableView';
 import { CEREMONY_DONE, ceremonyTimes, cueForStage, drawMoment, placeShown, type CeremonyStage } from './game/ceremony';
 import { buildReport, classResultLine } from './game/report';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
@@ -84,6 +85,7 @@ import type {
 } from './components/Tabletop3DOverlay';
 // three.js is only needed on the teacher's table, so phones never download it.
 const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
+const TableBackdrop = React.lazy(() => import('./components/TableBackdrop'));
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -687,6 +689,24 @@ export function App() {
       // Storage can be blocked (private window); the mode still works for this visit.
     }
   }, [isProjectorMode]);
+
+  // Package V2 step 2: Table view (the Blender table behind the game screens) where the 3D table
+  // is on, outside Calm mode, on screens at least 1100 px wide; Classic view everywhere else.
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 0));
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const [tableViewFailed, setTableViewFailed] = useState(false);
+  const isTableView = !tableViewFailed && tableViewOn({ step, quality: qualityTier, calmMode: isCalmMode, width: viewportWidth });
+  useEffect(() => {
+    document.documentElement.dataset.view = isTableView ? 'table' : 'classic';
+  }, [isTableView]);
+  const handleTableUnavailable = useCallback((reason: string) => {
+    logEvent('perf', `Table view off (${reason}); using Classic view`);
+    setTableViewFailed(true);
+  }, []);
 
   // Package V10: projector text grows on the screens the class reads from afar (see index.css).
   useEffect(() => {
@@ -7507,6 +7527,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-gc-base relative">
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
+        {isTableView && (
+          <React.Suspense fallback={null}>
+            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} />
+          </React.Suspense>
+        )}
         <React.Suspense fallback={null}>
         <Tabletop3DOverlay
           active={step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER'}

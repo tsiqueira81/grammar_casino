@@ -154,6 +154,26 @@ html.dark body {
   box-shadow: inset 0 0 80px rgba(22, 35, 63, 0.07);
 }
 
+/* Package V2 step 2: in Table view the 3D table is the background, so the page lets it show. */
+html[data-view='table'] .game-container,
+html[data-view='table'].dark .game-container {
+  background: transparent;
+  box-shadow: none;
+}
+html[data-view='table'] {
+  background-color: #14100f;
+}
+html[data-view='table'] body {
+  background: transparent;
+}
+/* A veil in the page colour over the table: the table shows as the room, the text stays AAA. */
+.gc-table-veil {
+  background: radial-gradient(ellipse 70% 75% at 50% 45%, rgb(var(--gc-bg) / 0.8) 0%, rgb(var(--gc-bg) / 0.66) 60%, rgb(var(--gc-bg) / 0.35) 100%);
+}
+html.dark .gc-table-veil {
+  background: radial-gradient(ellipse 70% 75% at 50% 45%, rgb(var(--gc-bg) / 0.8) 0%, rgb(var(--gc-bg) / 0.55) 60%, rgb(var(--gc-bg) / 0.2) 100%);
+}
+
 /* Dark theme: style A's green felt, lit from the top centre, no heavy vignette */
 html.dark .game-container {
   background-color: rgb(var(--gc-bg));

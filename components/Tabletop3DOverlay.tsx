@@ -266,7 +266,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     // No 3D table on a computer that draws WebGL in software (no graphics acceleration, as
     // on some school PCs): building the scene there froze the whole screen for seconds after a
     // reload. The table is decoration only, so the game goes on without it.
-    if (isSoftwareRenderer(renderer)) {
+    const force3d = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV) && new URLSearchParams(window.location.search).get('force3d') === '1';
+    if (isSoftwareRenderer(renderer) && !force3d) {
       renderer.dispose();
       qualityCallbackRef.current?.('off', 'software graphics');
       return;
