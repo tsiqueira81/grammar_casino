@@ -89,3 +89,17 @@ export function pickWinnerWhenEndedEarly(input: Pick<GameEndInput, 'players' | '
   if (solvent.length > 1) return richestOrTie(solvent);
   return null;
 }
+
+/**
+ * Swap this sentence (package R8): the teacher deals a different sentence for the same hand, and
+ * everyone gets back what they spent on hints and power-ups during it.
+ */
+export function refundHandSpending<P extends { id: number; money: number }>(
+  players: P[],
+  spending: Record<number, number>
+): P[] {
+  return players.map((p) => {
+    const spent = spending[p.id] || 0;
+    return spent > 0 ? { ...p, money: p.money + spent } : p;
+  });
+}

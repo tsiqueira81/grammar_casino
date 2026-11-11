@@ -1,7 +1,7 @@
 import { safeLocalStorage } from './utils/safeStorage';
 import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
-import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
+import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { checkBet, isBetComplete } from './game/betValidity';
 import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -2510,10 +2510,8 @@ export function App() {
     setShowSettingsModal(false);
   }, []);
 
-  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
-    setSettings(newSettings);
-    setNextRoundSettings(null);
-    setShowSettingsModal(false);
+  // Deals a new sentence for the hand in play: bets, hints and power-ups of the hand are cleared.
+  const redealCurrentHand = useCallback((newSettings: Settings) => {
     setBets({});
     setHints({});
     setPowerUpsUsedThisRound({});
@@ -2542,6 +2540,20 @@ export function App() {
     prefetchRef.current = null;
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
+
+  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
+    setSettings(newSettings);
+    setNextRoundSettings(null);
+    setShowSettingsModal(false);
+    redealCurrentHand(newSettings);
+  }, [redealCurrentHand]);
+
+  // Swap this sentence (package R8): a different sentence for the same hand, with what everyone
+  // spent on hints and power-ups during it given back. Settings chosen for the next hand stay.
+  const handleSwapSentence = useCallback(() => {
+    setPlayers(ps => refundHandSpending(ps, roundSpending));
+    redealCurrentHand(settings);
+  }, [roundSpending, settings, redealCurrentHand]);
 
   const handleTargetedPowerUp = useCallback((targetId: number, overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
     const playerId = overridePlayerId ?? showTargetModal?.playerId;
@@ -6159,6 +6171,26 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       {teacherRevealOverride ? 'Early reveal is on. Turn it off' : 'Let me reveal before everyone is in'}
                     </button>
                   )}
+
+                  {/* Teacher control (package R8): a sentence that does not work for the class can be swapped. */}
+                  <button
+                    type="button"
+                    disabled={isLoading || isProcessing}
+                    onClick={() => {
+                      playSound('click');
+                      setConfirmAction({
+                        title: 'Swap this sentence?',
+                        message: 'A different sentence is dealt for this hand. Bets are cleared, and everyone gets back what they spent on hints and power-ups this hand.',
+                        confirmLabel: 'Swap the sentence',
+                        onConfirm: handleSwapSentence,
+                      });
+                    }}
+                    className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Teacher only: deal a different sentence for this hand"
+                  >
+                    <RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    Swap this sentence
+                  </button>
                 </div> 
               </div> 
             ); 
