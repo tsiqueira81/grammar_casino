@@ -8,6 +8,7 @@ import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected,
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
@@ -86,7 +87,7 @@ import {
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
-import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
+import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
@@ -489,6 +490,8 @@ export function App() {
   // A yes/no question before an action that cannot be undone (F4 fix 10)
   // Package R8: the table just before the last reveal, for Undo reveal and Correct the ruling.
   const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
+  // Package L5: "Got it" / "Still confused" from the phones, per hand.
+  const [handReactions, setHandReactions] = useState<HandReactions>({});
   const [undoClock, setUndoClock] = useState(() => Date.now());
   const [showRulingModal, setShowRulingModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -3181,6 +3184,12 @@ export function App() {
             }
             break;
           }
+          case 'FEEDBACK_REACTION': {
+            if (step !== 'RESULTS' || intent.round !== currentRound) break;
+            if (intent.value !== 'gotIt' && intent.value !== 'confused') break;
+            setHandReactions(prev => recordReaction(prev, intent.round, playerId, intent.value));
+            break;
+          }
           case 'UPDATE_PROFILE': {
             const cleanName = sanitizePlayerName(intent.name);
             // Names are set before the game; once hands are dealt a phone may only change its avatar (R6).
@@ -3210,6 +3219,7 @@ export function App() {
     handleUpdatePlayerName,
     mpSeats,
     isPlayerFrozen,
+    currentRound,
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
@@ -3576,7 +3586,7 @@ export function App() {
           : [b.clozeAnswer];
 
         candidateWords.forEach(rawWord => {
-          const norm = (rawWord || '').trim().toLowerCase();
+          const norm = normalizeGapAnswer(rawWord);
           if (!norm) return;
           if (baseWordNorm && norm === baseWordNorm) {
             clozeWordVerifications[norm] = {
@@ -3613,7 +3623,7 @@ export function App() {
             currentSentence.baseWord
           );
           Object.entries(batchResults).forEach(([wordKey, res]) => {
-            clozeWordVerifications[wordKey.trim().toLowerCase()] = res;
+            clozeWordVerifications[normalizeGapAnswer(wordKey)] = res;
           });
         } catch (err) {
           console.error("Failed batched cloze verification:", err);
@@ -3631,7 +3641,7 @@ export function App() {
           : [b.clozeAnswer];
 
         candidatePhrases.forEach(rawPhrase => {
-          const norm = (rawPhrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          const norm = normalizeGapAnswer(rawPhrase);
           if (!norm) return;
           const detResult = GeminiService.evaluateKeyWordTransformationDeterministic(
             rawPhrase || '',
@@ -3671,7 +3681,7 @@ export function App() {
             currentSentence.mark2Parts
           );
           Object.entries(batchResults).forEach(([phraseKey, aiRes]) => {
-            const normKey = phraseKey.trim().toLowerCase().replace(/\s+/g, ' ');
+            const normKey = normalizeGapAnswer(phraseKey);
             const existing = clozeWordVerifications[normKey];
             const aiMarks: 0 | 1 | 2 = aiRes.marks === 2 ? 2 : aiRes.marks === 1 ? 1 : (aiRes.isCorrect ? 2 : 0);
             const existingMarks: 0 | 1 | 2 = existing?.marks ?? 0;
@@ -4069,6 +4079,7 @@ export function App() {
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
+    setHandReactions({});
     const prefs = loadSetupPrefs();
     setSettings(prefs.settings ?? {
       topic: GRAMMAR_TOPICS[0],
@@ -4147,6 +4158,7 @@ export function App() {
     setMpStudentPendingWheel({});
     setMpStudentNotifications({});
     setSentenceBatch([]);
+    setHandReactions({});
     setSettingsPart(2);
     setStep('SETTINGS');
   }, [playSound, startingCash]);
@@ -6796,6 +6808,56 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       )}
                     </div>
                 </div>
+
+                {/* Package L5: what the class answered, and how many are still confused. */}
+                {(() => {
+                  const snap = isRevealSnapshotCurrent ? revealSnapshot : null;
+                  const qt = (currentSentence.questionType || 'binary') as QuestionType;
+                  const accepted = snap?.input.acceptedSet ?? buildAcceptedAnswerSet(currentSentence, qt).acceptedSet;
+                  const verdicts = snap?.input.clozeWordVerifications ?? {};
+                  const rows = answerSplit({
+                    qType: qt,
+                    bets,
+                    playerIds: (snap?.input.validPlayers ?? players).map(p => p.id),
+                    sentenceIsCorrect: currentSentence.isCorrect,
+                    options: currentSentence.options,
+                    isRightAnswer: (a) => {
+                      const k = normalizeGapAnswer(a);
+                      if (qt === 'multipleChoice') return k === normalizeGapAnswer(currentSentence.correctAnswer);
+                      if (qt === 'keyWordTransformation') return verdicts[k]?.marks === 2;
+                      return accepted.has(k) || Boolean(verdicts[k]?.isCorrect);
+                    },
+                  });
+                  const counts = reactionCounts(handReactions, currentRound);
+                  if (rows.length === 0 && counts.gotIt + counts.confused === 0) return null;
+                  const shown = rows.slice(0, 6);
+                  const top = Math.max(1, ...shown.map(r => r.count));
+                  return (
+                    <div className="gc-surface rounded-gc-lg p-6 mt-6 animate-gc-slide-up [animation-delay:1.1s]" data-testid="answer-split">
+                      <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+                        <h3 className="text-gc-title font-bold text-gc-ink">What the class answered</h3>
+                        {counts.gotIt + counts.confused > 0 && (
+                          <p className="text-gc-body font-semibold" data-testid="reaction-counts">
+                            <span className="text-gc-win">{counts.gotIt} got it</span>
+                            <span className="text-gc-quiet"> · </span>
+                            <span className={counts.confused > 0 ? 'text-gc-danger' : 'text-gc-quiet'}>{counts.confused} still confused</span>
+                          </p>
+                        )}
+                      </div>
+                      <ul className="space-y-2">
+                        {shown.map(r => (
+                          <li key={r.label} className="flex items-center gap-3">
+                            <span className={`w-48 shrink-0 truncate text-gc-lead font-semibold ${r.isRight ? 'text-gc-win' : 'text-gc-ink'}`}>{r.isRight ? '✓ ' : ''}{r.label}</span>
+                            <span className="flex-1 h-4 rounded-full bg-gc-line/[0.08] overflow-hidden" aria-hidden="true">
+                              <span className={`block h-full rounded-full ${r.isRight ? 'bg-gc-win/70' : 'bg-gc-quiet/50'}`} style={{ width: `${(r.count / top) * 100}%` }} />
+                            </span>
+                            <span className="w-16 text-right tabular-nums text-gc-lead font-bold">{r.count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
 
                 {/* Payouts */}
                 <div className="flex flex-wrap items-end justify-between gap-4 mt-10 mb-4 animate-gc-slide-up [animation-delay:1.25s]">

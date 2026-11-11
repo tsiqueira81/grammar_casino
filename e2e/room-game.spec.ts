@@ -115,7 +115,18 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await expect(phone.getByRole('status').filter({ hasText: '$' }).first()).toHaveText(players[i].delta);
     await expect(phone.getByText(/^Balance/)).toContainText(players[i].balance);
     await expect(phone.getByText('Second conditional: if + past simple, would + base form.')).toBeVisible();
+    // Package L5: the phone shows the student's own answer beside the right one.
+    await expect(phone.getByTestId('my-answer')).toContainText(players[i].option);
   }
+
+  // Package L5: "Got it" / "Still confused" reach the teacher, beside what the class answered.
+  await phones[0].getByRole('button', { name: 'Got it' }).click();
+  await phones[1].getByRole('button', { name: 'Still confused' }).click();
+  await expect(phones[1].getByRole('button', { name: 'Still confused' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(host.getByTestId('reaction-counts')).toHaveText('1 got it · 1 still confused');
+  const split = host.getByTestId('answer-split');
+  await expect(split.getByRole('listitem').first()).toContainText(KNOWN.multipleChoiceAnswer);
+  await expect(split.getByRole('listitem').first()).toContainText('2');
 
   expect(errors).toEqual([]);
 });

@@ -1,7 +1,7 @@
 // Teacher fixes after a reveal (package R8): undo a reveal started by mistake, void a hand,
 // or accept a further answer and settle the hand again. All of them work from a snapshot of
 // the table taken just before the bets were settled.
-import { settleRound, type SettleRoundInput, type SettleRoundOutput } from '../utils/roundSettlement';
+import { normalizeGapAnswer, settleRound, type SettleRoundInput, type SettleRoundOutput } from '../utils/roundSettlement';
 import type { Bet, Player, PlayerTurnTimer } from '../types';
 import type { MultiplayerSeat } from '../utils/multiplayerProtocol';
 
@@ -63,7 +63,7 @@ export function voidHand(snapshot: RevealSnapshot): SettleRoundOutput {
   };
 }
 
-const norm = (s: string | undefined) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const norm = normalizeGapAnswer;
 
 /** Can a teacher accept another answer for this kind of item? (Multiple choice can only be voided.) */
 export function canAcceptOtherAnswers(input: SettleRoundInput): boolean {

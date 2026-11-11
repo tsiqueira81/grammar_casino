@@ -333,7 +333,9 @@ export type StudentIntent =
   | { type: 'APPLY_WHEEL_RESULT'; itemId: string }
   | { type: 'UPDATE_PROFILE'; name?: string; avatar?: string }
   /** Package R2: "still here", sent every 20 s while the phone is on screen. */
-  | { type: 'HEARTBEAT' };
+  | { type: 'HEARTBEAT' }
+  /** Package L5: after the reveal, "Got it" or "Still confused" for this hand. */
+  | { type: 'FEEDBACK_REACTION'; round: number; value: 'gotIt' | 'confused' };
 
 export interface BuildPlayerViewsParams {
   roomCode: string;

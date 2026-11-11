@@ -354,6 +354,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     controllerRef.current?.sendIntent(intent);
   }, []);
 
+  // Package L5: "Got it" / "Still confused" after the reveal, remembered for the hand.
+  const [myReaction, setMyReaction] = useState<{ round: number; value: 'gotIt' | 'confused' } | null>(null);
+  const sendReaction = useCallback((round: number, value: 'gotIt' | 'confused') => {
+    setMyReaction({ round, value });
+    sendIntent({ type: 'FEEDBACK_REACTION', round, value });
+  }, [sendIntent]);
+
   // --- Package R2: presence, waking up, and lock-ins the teacher confirmed ---
   const hasSeat = Boolean(view);
   useEffect(() => {
@@ -1742,6 +1749,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           const s = view.sentence;
           const correctionSegments =
             s && !isClozeRound && !s.isCorrect && s.correction ? diffWords(s.text, s.correction).corrected : null;
+          // Package L5: the student's own answer beside the right one, and other accepted answers.
+          const myAnswer = view.myRoundResult?.playerAnswerDisplay?.trim();
+          const gapKey = (a: string) => a.replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+          const alsoAccepted = isClozeRound && s
+            ? [...new Map((s.acceptedAnswers || []).filter(a => a && gapKey(a) !== gapKey(s.correctAnswer || '')).map(a => [gapKey(a), a.trim()])).values()]
+            : [];
+          const reacted = myReaction && myReaction.round === view.round ? myReaction.value : null;
           return (
             <div className="space-y-4 animate-gc-fade">
               {/* Gold coins rain down on a win (reduced motion and calm mode skip it via index.css). */}
@@ -1833,12 +1847,44 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       &rdquo;
                     </p>
                   )}
+                  {alsoAccepted.length > 0 && (
+                    <p className="m-0 text-gc-small text-gc-quiet">Also right: {alsoAccepted.join(', ')}</p>
+                  )}
+                  {!isClozeRound && !s.isCorrect && s.errorPhrase && (
+                    <p className="m-0 text-gc-small text-gc-quiet">
+                      The mistake: <b className="text-gc-ink">{s.errorPhrase}</b>
+                      {s.mistakeType ? ` (${s.mistakeType})` : ''}
+                    </p>
+                  )}
+                  {myAnswer && (
+                    <p className="m-0 text-[15px] text-gc-ink" data-testid="my-answer">
+                      <span className="font-bold">Your answer: </span>
+                      {myAnswer}
+                    </p>
+                  )}
                   {s.explanation && (
                     <p className="m-0 pt-2 border-t border-gc-line/[0.1] text-[15px] leading-relaxed text-gc-ink">
                       <span className="font-bold">Why: </span>
                       {s.explanation}
                     </p>
                   )}
+                  <div className="pt-2 flex gap-2" role="group" aria-label="Did this make sense?">
+                    {([['gotIt', 'Got it'], ['confused', 'Still confused']] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={reacted === value}
+                        onClick={() => sendReaction(view.round, value)}
+                        className={`flex-1 min-h-[48px] rounded-full text-[16px] font-bold border transition-colors ${
+                          reacted === value
+                            ? value === 'gotIt' ? 'bg-gc-win/20 border-gc-win text-gc-win' : 'bg-gc-danger/15 border-gc-danger text-gc-danger'
+                            : 'border-gc-line/[0.2] text-gc-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
