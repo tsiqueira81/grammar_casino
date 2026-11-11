@@ -39,3 +39,15 @@ export function handsLeftNote(currentRound: number, totalRounds: number): string
   if (left === 1) return '2 hands left';
   return null;
 }
+
+/**
+ * The teacher's game clock: "Playing for 12 min", plus "about 8 min left" once a hand has been
+ * played in a game with a set number of hands (the average hand so far times the hands left).
+ */
+export function gameClockText(opts: { elapsedMs: number; handsDone: number; handsLeft: number | null }): string {
+  const minutes = Math.max(0, Math.floor(opts.elapsedMs / 60000));
+  const playing = minutes < 1 ? 'Playing for under a minute' : `Playing for ${minutes} min`;
+  if (opts.handsLeft === null || opts.handsLeft <= 0 || opts.handsDone <= 0) return playing;
+  const left = Math.max(1, Math.round((opts.elapsedMs / opts.handsDone) * opts.handsLeft / 60000));
+  return `${playing} · about ${left} min left`;
+}

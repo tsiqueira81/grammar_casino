@@ -26,6 +26,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
 
   // Hand 1: valid or flawed. The deck decides which; the test reads it.
   await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  // Package G7: the teacher's game clock.
+  await expect(page.getByTestId('game-clock')).toHaveText('Playing for under a minute');
   const isValid = (await sentence(page).innerText()).includes('Lisbon');
   const right = isValid ? /^Valid/ : /^Flawed/;
   const wrong = isValid ? /^Flawed/ : /^Valid/;

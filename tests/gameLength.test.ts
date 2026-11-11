@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LENGTH_PRESETS, estimateMinutes, handsLeftNote } from '../game/gameLength';
+import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from '../game/gameLength';
 
 describe('game lengths (package G7)', () => {
   it('names the presets the setup screen offers', () => {
@@ -23,5 +23,16 @@ describe('game lengths (package G7)', () => {
     expect(handsLeftNote(9, 10)).toBe('2 hands left');
     expect(handsLeftNote(10, 10)).toBe('Last hand');
     expect(handsLeftNote(3, Number.NaN)).toBeNull();
+  });
+});
+
+describe('game clock (package G7)', () => {
+  it('says how long the game has run', () => {
+    expect(gameClockText({ elapsedMs: 20_000, handsDone: 0, handsLeft: 10 })).toBe('Playing for under a minute');
+    expect(gameClockText({ elapsedMs: 12 * 60_000, handsDone: 3, handsLeft: null })).toBe('Playing for 12 min');
+  });
+  it('estimates the time left from the average hand so far', () => {
+    expect(gameClockText({ elapsedMs: 12 * 60_000, handsDone: 3, handsLeft: 2 })).toBe('Playing for 12 min · about 8 min left');
+    expect(gameClockText({ elapsedMs: 12 * 60_000, handsDone: 3, handsLeft: 0 })).toBe('Playing for 12 min');
   });
 });

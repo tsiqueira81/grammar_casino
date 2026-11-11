@@ -41,7 +41,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag, Bot, CircleHelp } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag, Bot, CircleHelp, Clock } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -105,7 +105,7 @@ import * as GeminiService from './services/geminiService';
 import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
-import { LENGTH_PRESETS, estimateMinutes, handsLeftNote } from './game/gameLength';
+import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from './game/gameLength';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
 import FirstRunCoach from './components/FirstRunCoach';
@@ -818,6 +818,29 @@ export function App() {
 
   // Package G7: "2 hands left" and "Last hand" on the hand badge.
   const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
+  // Package G7: the teacher's game clock, from the first deal.
+  const [gameStartedAt, setGameStartedAt] = useState<number | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (step === 'PLAYER_SETUP') setGameStartedAt(null);
+    else if (step === 'IN_GAME' && currentRound === 1) setGameStartedAt(prev => prev ?? Date.now());
+  }, [step, currentRound]);
+  useEffect(() => {
+    if (step !== 'IN_GAME' && step !== 'RESULTS') return;
+    setClockNow(Date.now());
+    const timer = setInterval(() => setClockNow(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, [step]);
+  const clockStart = gameStartedAt ?? roundHistory[0]?.timestamp ?? null;
+  const handsDone = step === 'RESULTS' ? currentRound : currentRound - 1;
+  const gameClock = clockStart
+    ? gameClockText({
+        elapsedMs: clockNow - clockStart,
+        handsDone,
+        handsLeft: gameMode === 'rounds' ? Number(totalRounds) - handsDone : null,
+      })
+    : null;
+
   // Package G6: special hands, off unless the teacher turns them on.
   const [specialHandsOn, setSpecialHandsOn] = useState<boolean>(() => safeLocalStorage.getItem(SPECIAL_HANDS_KEY) === 'on');
   useEffect(() => {
@@ -7103,6 +7126,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       <Flag className="w-4 h-4 shrink-0" aria-hidden="true" />
                       Finish after this hand
                     </button>
+                  )}
+                  {gameClock && (
+                    <span className="inline-flex items-center gap-1.5 min-h-[44px] px-3 text-gc-small font-semibold text-gc-quiet tabular-nums" data-testid="game-clock">
+                      <Clock className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      {gameClock}
+                    </span>
                   )}
                 </div> 
               </div> 
