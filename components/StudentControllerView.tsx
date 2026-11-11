@@ -1283,7 +1283,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {view.isLoadingSentence || !view.sentence ? (
                     <div className="py-7 space-y-2">
                       <div className="text-3xl animate-pulse" aria-hidden="true">♠</div>
-                      <div className="text-gc-body font-semibold text-gc-quiet">Dealing the next sentence…</div>
+                      <div className="text-gc-body font-semibold text-gc-quiet">Next hand coming…</div>
+                      {/* Package S4: not a blank wait: the student's money (power-ups and effects show below). */}
+                      <div className="text-gc-lead font-extrabold text-gc-money tabular-nums" data-testid="between-hands-money">
+                        You have {money(view.me.money)}
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-2">
