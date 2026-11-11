@@ -8,6 +8,7 @@ import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected,
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
@@ -300,6 +301,14 @@ export function App() {
   const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || initialPrefs.totalRounds || 10);
   const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT);
   const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
+  const currentRoundRef = useRef(currentRound);
+  currentRoundRef.current = currentRound;
+  // Package L6: missed grammar points come back two hands later ("a second look").
+  const secondLookQueueRef = useRef<SecondLook[]>([]);
+  const handSubtypeRef = useRef<string | null>(null);
+  /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
+  const fetchTargetRoundRef = useRef<number | null>(null);
+  const [secondLookRound, setSecondLookRound] = useState<number | null>(null);
   
   const [currentSentence, setCurrentSentence] = useState<GeneratedSentence | null>(initialGameState?.currentSentence || null);
   const [pastSentences, setPastSentences] = useState<string[]>(initialGameState?.pastSentences || []);
@@ -1527,7 +1536,8 @@ export function App() {
       const activeUsedSubtypes = isSettingsPart2 ? [] : usedSubtypes;
       const available = allSubtypes.filter(s => !activeUsedSubtypes.includes(s));
       const pool = available.length > 0 ? available : allSubtypes;
-      const subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+      const dueLook = isSettingsPart2 ? undefined : secondLookFor(secondLookQueueRef.current, currentRoundRef.current + 1);
+      const subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
       const promise = GeminiService.generateSentence(
         targetSettings,
@@ -1568,6 +1578,8 @@ export function App() {
     setHighlightedPhrase(null);
     setIsCopied(false);
     setIsSentenceRevealed(false);
+    const targetRound = fetchTargetRoundRef.current ?? currentRoundRef.current + 1;
+    fetchTargetRoundRef.current = null;
     try {
         if (!currentSettings || !currentSettings.theme || !currentSettings.level || !currentSettings.topic) {
             throw new Error("Invalid settings provided to fetch a new sentence.");
@@ -1622,7 +1634,8 @@ export function App() {
           allSubtypesLen = allSubtypes.length;
           const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
           const pool = available.length > 0 ? available : allSubtypes;
-          subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+          const dueLook = secondLookFor(secondLookQueueRef.current, targetRound);
+          subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
           const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
           generated = await GeminiService.generateSentence(
@@ -1635,6 +1648,11 @@ export function App() {
           );
         }
         
+        handSubtypeRef.current = subtype;
+        {
+          const due = secondLookFor(secondLookQueueRef.current, targetRound);
+          setSecondLookRound(due && subtype === due.subtype ? targetRound : null);
+        }
         if (subtype) {
           setUsedSubtypes(prev => {
             const next = [...prev, subtype!];
@@ -1734,6 +1752,8 @@ export function App() {
       mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
     };
     mixedFormatIndexRef.current = 0;
+    secondLookQueueRef.current = [];
+    setSecondLookRound(null);
     safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
       settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
       customTopic,
@@ -2602,6 +2622,7 @@ export function App() {
     });
     // Clear any in-flight next-round prefetch so redealing the current hand generates a fresh sentence
     prefetchRef.current = null;
+    fetchTargetRoundRef.current = currentRoundRef.current;
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
 
@@ -3770,6 +3791,16 @@ export function App() {
       corrected: false,
     });
     setUndoClock(Date.now());
+    {
+      const numRounds = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+      secondLookQueueRef.current = scheduleSecondLook(secondLookQueueRef.current, {
+        round: currentRound,
+        subtype: handSubtypeRef.current,
+        bets: newRoundPlayerResults.length,
+        misses: newRoundPlayerResults.filter(r => !r.isWin).length,
+        handsLeft: gameMode === 'rounds' && !isNaN(numRounds) ? numRounds - currentRound : Infinity,
+      });
+    }
     if (currentSentence) {
       const historyRecord: RoundHistoryRecord = {
         round: currentRound,
@@ -3953,11 +3984,13 @@ export function App() {
     setTurnTimers(snap.turnTimersBefore);
     setTeacherRevealOverride(snap.teacherRevealOverrideBefore);
     setRevealSnapshot(null);
+    secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, snap.round);
     setStep('IN_GAME');
   }, [revealSnapshot, currentRound, playSound, mpRoomCode]);
 
   const handleVoidHand = useCallback(() => {
     if (!revealSnapshot) return;
+    secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, revealSnapshot.round);
     applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
     setShowRulingModal(false);
   }, [revealSnapshot, applyCorrectedRuling]);
@@ -5691,7 +5724,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
-                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
                                   </span>
                                   {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
                                     <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
@@ -5761,7 +5794,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             ) : (
                               <div className="flex justify-center">
                                 <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
                                 </span>
                               </div>
                             )}
