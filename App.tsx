@@ -99,6 +99,7 @@ import {
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { potTotal } from './show/pot';
+import { playCues, revealCueSheet } from './show/director';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
@@ -3955,9 +3956,6 @@ export function App() {
     const someoneWentBust = updatedPlayers.some(p =>
       p.money <= 0 && (players.find(o => o.id === p.id)?.money ?? 0) > 0
     );
-    if (someoneWentBust) {
-      later(() => playSound('bankrupt'), 950);
-    }
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
 
@@ -3971,21 +3969,33 @@ export function App() {
         winnerSeatIndices.push(idx);
       }
     });
-    playSound('potSweep', winnerSeatIndices.length);
-    setPotSweepEvent({
+    const sweepEvent: PotSweepEvent = {
       id: `round-${currentRound}-${Date.now()}`,
       winnerSeatIndices,
       winnerPlayerIds: activePlayers.filter(p => winnerIds.has(p.id)).map(p => p.id),
       totalSeats: Math.max(1, activePlayers.length),
-    });
+    };
     // A small coin shower when someone at least doubles their stack this round
     const bigWin = newRoundPlayerResults.some(r => {
       const before = players.find(p => p.id === r.playerId)?.money ?? 0;
       return r.amountChanged > 0 && before > 0 && r.amountChanged >= before;
     });
-    if (bigWin) {
-      later(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
-    }
+    // Package V5: the director spaces the beats: verdict now, then the pot sweep, then the extras.
+    const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    playCues(
+      revealCueSheet({ bigWin, bust: someoneWentBust, calm: isCalmMode || reduceMotion }),
+      {
+        sound: (name) => {
+          if (name === 'potSweep') playSound('potSweep', winnerSeatIndices.length);
+          else if (name === 'bankrupt') playSound('bankrupt');
+        },
+        table: (name) => {
+          if (name === 'potSweep') setPotSweepEvent(sweepEvent);
+          else if (name === 'jackpot') setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 });
+        },
+      },
+      later,
+    );
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
@@ -4028,7 +4038,7 @@ export function App() {
     if (aiGradingFailed) {
       setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
     }
-  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme, isCalmMode, later]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
   const handleRevealResults = useCallback(async (force?: unknown) => {
@@ -7585,7 +7595,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           boomerangEvent={boomerangArcEvent}
           shoeEvent={shoeDealEvent}
           jackpotEvent={jackpotEvent}
-          potTotal={step === 'IN_GAME' ? potNow : 0}
+          potTotal={step === 'IN_GAME' || step === 'RESULTS' ? potNow : 0}
           behindInterface={isTableView}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
