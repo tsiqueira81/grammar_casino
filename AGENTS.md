@@ -14,7 +14,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | --- | --- |
 | `npm ci` | Install exactly what `package-lock.json` pins |
 | `npm run dev` | Express dev server with Vite and the local WebSocket relay, on http://localhost:3000 |
-| `npm run lint` | TypeScript check (`tsc --noEmit`) |
+| `npm run lint` | TypeScript check (`tsc --noEmit`), plus strict mode for `game/`, `utils/`, `types.ts` and `constants.ts` (`tsconfig.strict.json`). Keep new code there strict-clean |
 | `npm test` | Unit tests (vitest, `tests/`) |
 | `npm run build` | Production bundle in `dist/` |
 | `npm run size` | After a build, compares gzipped file sizes with `scripts/bundle-baseline.json` and fails past +10% (CI runs it). Run `node scripts/check-bundle-size.mjs --update` when growth is intended, and say why in the pull request |

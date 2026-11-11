@@ -11,7 +11,7 @@
     "start": "node server.ts",
     "build": "vite build",
     "deploy:cloudflare": "vite build && wrangler pages deploy dist --project-name grammarcasino --branch main",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test --trace off",
