@@ -145,6 +145,8 @@ export interface PlayerViewPayload {
   turnDurationMs?: number;
   /** The teacher turned Calm mode on: this phone keeps its motion off too. */
   calmMode?: boolean;
+  /** The teacher paused the hand (package R8): the phone shows a pause card and takes no input. */
+  paused?: boolean;
 }
 
 export interface AudiencePollBreakdownItem {
@@ -361,6 +363,8 @@ export interface BuildPlayerViewsParams {
   turnDurationMs?: number;
   /** The teacher's Calm mode: phones turn their motion off too. */
   calmMode?: boolean;
+  /** The teacher paused the hand (package R8). */
+  paused?: boolean;
 }
 
 /**
@@ -443,6 +447,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     roundTimer,
     turnDurationMs,
     calmMode,
+    paused,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -711,6 +716,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       roundTimer,
       turnDurationMs,
       calmMode: Boolean(calmMode),
+      paused: Boolean(paused) && step === 'IN_GAME',
     };
   }
 
@@ -748,6 +754,7 @@ export const SHARED_VIEW_KEYS = [
   'roundTimer',
   'turnDurationMs',
   'calmMode',
+  'paused',
 ] as const satisfies readonly (keyof PlayerViewPayload)[];
 
 export interface SplitPlayerViews {

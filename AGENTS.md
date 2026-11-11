@@ -37,7 +37,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `App.tsx` | The host screen and almost all game flow (very large; being split up in a later phase) |
 | `index.tsx`, `student/StudentApp.tsx` | Entry point. A link with `?room=CODE` loads only `StudentApp` (the phone app); everything else loads `App`. Keep teacher-only code (the offline bank, PDFs, the 3D table, the cloud vault) out of what `StudentApp` imports; `e2e/phone-inputs.spec.ts` checks it |
 | `components/` | Screens and widgets. `StudentControllerView.tsx` is the phone app, `PlayerBettingCard.tsx` the single-screen seat card, `Tabletop3DOverlay.tsx` the lazy-loaded three.js table |
-| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner), `revealGate.ts` (who is in, may the answer be revealed), `persistence.ts` (bringing old saved games up to date). Change a rule here, not in `App.tsx` |
+| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner), `revealGate.ts` (who is in, may the answer be revealed), `persistence.ts` (bringing old saved games up to date), `ruling.ts` (Undo reveal, Void the hand, Accept this answer too; all re-settle from a snapshot taken just before the reveal). Change a rule here, not in `App.tsx` |
 | `utils/` | Pure helpers: `roundSettlement.ts` (payouts), `multiplayerProtocol.ts` (per-phone views), `soundEngine.ts` (Web Audio synthesis), `sentenceSegments.ts`, and others |
 | `services/` | AI client (`geminiService.ts`), offline banks (`fallbackSentences.ts`, `expandedCuratedBank*.ts`), Firebase, room transport (`multiplayerService.ts`) |
 | `server.ts` | Dev server (Vite, the WebSocket relay) and the entry the Pages Function imports (`dispatchServerlessApi`) |
@@ -75,6 +75,10 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 ### Phone screens
 - Every field where a student types an answer spreads `ANSWER_INPUT_PROPS` (`utils/answerInputProps.ts`), so a phone never capitalises or autocorrects the answer.
 - Every control on the student screens is at least 44 by 44 CSS pixels and nothing scrolls sideways at 320 pixels wide. `e2e/phone-inputs.spec.ts` checks both.
+
+### Teacher controls during a hand (package R8)
+- Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
+- Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
 ### Game modes and elimination
 - `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled` in `game/flow.ts`). When the game ends and who wins is decided only in `game/flow.ts`.

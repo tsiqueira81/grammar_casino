@@ -73,6 +73,16 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await expect(phone.getByRole('region', { name: 'The sentence' })).toContainText('more time');
   }
 
+  // The teacher pauses the hand (package R8): every phone shows the pause card until it resumes.
+  await host.getByRole('button', { name: 'Pause', exact: true }).click();
+  for (const phone of phones) {
+    await expect(phone.getByRole('alert').filter({ hasText: 'Your teacher paused the game' })).toBeVisible();
+  }
+  await host.getByRole('button', { name: 'Resume the hand' }).click();
+  for (const phone of phones) {
+    await expect(phone.getByRole('alert').filter({ hasText: 'Your teacher paused the game' })).toHaveCount(0);
+  }
+
   // Everyone bets; Eva's phone is reloaded before she locks in.
   for (let i = 0; i < players.length; i++) {
     await placeBet(phones[i], players[i].option, players[i].bet);

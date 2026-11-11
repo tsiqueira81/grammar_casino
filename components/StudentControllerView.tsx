@@ -755,6 +755,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   return (
     <div className="game-container min-h-[100dvh] text-gc-ink flex flex-col pb-28">
+      {/* Package R8: the teacher paused the hand. Nothing can be changed until it resumes. */}
+      {view.paused && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm" role="alert" aria-live="assertive">
+          <div className="w-full max-w-sm rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-6 text-center space-y-3">
+            <p className="text-gc-h2 font-bold">Paused</p>
+            <p className="text-gc-body">Your teacher paused the game. Your bet is safe. Wait a moment.</p>
+          </div>
+        </div>
+      )}
       {/* Top bar: who you are, the room and hand, your balance */}
       <header className="sticky top-0 z-30 min-h-16 pt-[env(safe-area-inset-top)] px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-gc-bg/85 backdrop-blur-md border-b border-gc-line/[0.1] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">

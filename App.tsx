@@ -2,6 +2,7 @@ import { safeLocalStorage } from './utils/safeStorage';
 import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
+import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
 import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -18,7 +19,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -399,6 +400,10 @@ export function App() {
   const mpAutoStartedRoundRef = useRef<number>(0);
   const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
   const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
+  // Package R8: the teacher paused the hand. Timers stop, phones show a pause card and take no input.
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
   const turnDurationMs = turnTimerSeconds * 1000;
   const isTurnTimerEnabled = turnTimerSeconds > 0;
@@ -447,6 +452,10 @@ export function App() {
   // Google sign-in is only needed for cloud saves (decision D3). AI sentences and live rooms are open to everyone.
   const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
   // A yes/no question before an action that cannot be undone (F4 fix 10)
+  // Package R8: the table just before the last reveal, for Undo reveal and Correct the ruling.
+  const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
+  const [undoClock, setUndoClock] = useState(() => Date.now());
+  const [showRulingModal, setShowRulingModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
   // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
@@ -766,8 +775,9 @@ export function App() {
       isProcessing
     );
     const anyHintLoading = (Object.values(hints) as Hint[]).some(h => Boolean(h?.isLoading));
-    return anyModalOpen || anyHintLoading;
+    return anyModalOpen || anyHintLoading || isPaused;
   }, [
+    isPaused,
     error, historyPlayer, mpRoomCode, showPowerUpModal, showTargetModal, showAvatarModal,
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
     showDeckConfigModal, showCloudModal, isLoading, isProcessing, hints
@@ -3026,6 +3036,9 @@ export function App() {
           };
         });
 
+        // While the teacher has paused the hand, phones cannot bet, lock in or buy (package R8).
+        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE') return;
+
         switch (intent.type) {
           case 'SET_BET': {
             handleBetChange(playerId, intent.field, intent.value);
@@ -3276,10 +3289,12 @@ export function App() {
       roundTimer: isTurnTimerEnabled ? mpRoundTimer : undefined,
       turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
       calmMode: isCalmMode,
+      paused: isPaused,
     });
     mpControllerRef.current.pushViews(views);
   }, [
     isCalmMode,
+    isPaused,
     mpRoomCode,
     mpRoomLocked,
     step,
@@ -3389,7 +3404,9 @@ export function App() {
     return verifications;
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
-  const revealResultsCore = useCallback(async () => {
+  const revealResultsCore = useCallback(async (force = false) => {
+    // "Reveal now" (package R8) reveals even when not everyone is in, like the early-reveal switch.
+    const revealOverride = teacherRevealOverride || force;
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
@@ -3402,7 +3419,7 @@ export function App() {
         baseWord: currentSentence?.baseWord,
         seats: mpSeats,
       });
-      if (!allMpReady && !teacherRevealOverride) {
+      if (!allMpReady && !revealOverride) {
         setError({
           title: "Bets Not Locked In",
           message: "Every active player must lock in their wager before revealing results (or use Teacher Override)."
@@ -3411,7 +3428,7 @@ export function App() {
       }
     } else if (isTurnTimerEnabled) {
       const allLocked = unfrozenPlayers.every(p => turnTimers[p.id]?.status === 'locked');
-      if (!allLocked && !teacherRevealOverride) {
+      if (!allLocked && !revealOverride) {
         setError({ title: "Turns Still Active", message: "Every active player's turn must be locked before revealing results (or use Teacher Override)." });
         return;
       }
@@ -3426,7 +3443,7 @@ export function App() {
         return problem === null;
       });
 
-      if (!allValidBetsFinalized && !teacherRevealOverride) { 
+      if (!allValidBetsFinalized && !revealOverride) { 
         const promptMsg = hasUnchangedBaseWordPlayer
           ? `${hasUnchangedBaseWordPlayer} typed the unchanged base word "(${(currentSentence?.baseWord || '').toUpperCase()})". Players must transform the base word into a new grammatical form before revealing results!`
           : hasInvalidKwtPlayer
@@ -3457,6 +3474,8 @@ export function App() {
       return;
     }
 
+    const seatsBeforeReveal = mpSeats;
+    const turnTimersBeforeReveal = turnTimers;
     // Lock all active players' timers or multiplayer seats when results are revealed
     if (mpRoomCode) {
       setMpSeats(prev => {
@@ -3484,7 +3503,7 @@ export function App() {
 
     // Active participating players (excluding frozen players and players who sat out without placing a bet)
     const validPlayers = unfrozenPlayers.filter(p =>
-      (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !teacherRevealOverride
+      (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !revealOverride
     );
 
     playSound('drumroll');
@@ -3624,7 +3643,7 @@ export function App() {
     }
 
     setProcessingStatus('Calculating results...');
-    const settlement = settleRound({
+    const settleInput: Parameters<typeof settleRound>[0] = {
       currentSentence,
       qType,
       players,
@@ -3638,11 +3657,12 @@ export function App() {
       acceptedSet,
       isTurnTimerEnabled,
       isMultiplayer: Boolean(mpRoomCode),
-      teacherRevealOverride,
+      teacherRevealOverride: revealOverride,
       hasPlayerPlacedBet,
       currentRound,
       roundSpending,
-    });
+    };
+    const settlement = settleRound(settleInput);
     settlement.sounds.forEach(({ sound, index }) => playSound(sound, index));
     const updatedPlayers = settlement.updatedPlayers;
     const someoneWentBust = updatedPlayers.some(p =>
@@ -3681,6 +3701,17 @@ export function App() {
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
+    setRevealSnapshot({
+      input: settleInput,
+      output: settlement,
+      revealedAt: Date.now(),
+      round: currentRound,
+      seatsBefore: seatsBeforeReveal,
+      turnTimersBefore: turnTimersBeforeReveal,
+      teacherRevealOverrideBefore: teacherRevealOverride,
+      corrected: false,
+    });
+    setUndoClock(Date.now());
     if (currentSentence) {
       const historyRecord: RoundHistoryRecord = {
         round: currentRound,
@@ -3702,8 +3733,8 @@ export function App() {
   }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
-  const handleRevealResults = useCallback(async () => {
-    const failure = await runAlwaysClearing(revealResultsCore, () => {
+  const handleRevealResults = useCallback(async (force?: unknown) => {
+    const failure = await runAlwaysClearing(() => revealResultsCore(force === true), () => {
       setIsProcessing(false);
       setProcessingStatus('');
     });
@@ -3713,6 +3744,59 @@ export function App() {
     }
   }, [revealResultsCore]);
   
+  // A pause belongs to one hand: leaving the hand ends it.
+  useEffect(() => {
+    if (step !== 'IN_GAME') setIsPaused(false);
+  }, [step]);
+
+  // --- Package R8: fixing a reveal ---
+  const isRevealSnapshotCurrent = Boolean(revealSnapshot && revealSnapshot.round === currentRound && step === 'RESULTS');
+  const isUndoRevealOpen = isRevealSnapshotCurrent && canUndoReveal(revealSnapshot, undoClock, currentRound);
+  useEffect(() => {
+    if (!isUndoRevealOpen) return;
+    const id = window.setInterval(() => setUndoClock(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [isUndoRevealOpen]);
+
+  /** Shows a corrected ruling: new bankrolls, result rows and the hand's report-card entry. */
+  const applyCorrectedRuling = useCallback((next: RevealSnapshot) => {
+    setPlayers(next.output.updatedPlayers);
+    setRoundResults(next.output.roundResults);
+    setRoundHistory(prev => {
+      const last = prev[prev.length - 1];
+      if (!last || last.round !== next.round) return prev;
+      return [...prev.slice(0, -1), { ...last, playerResults: next.output.playerResults }];
+    });
+    setRevealSnapshot(next);
+  }, []);
+
+  // Undo reveal: back to the hand as it was before the reveal (bets, seats and timers included).
+  const handleUndoReveal = useCallback(() => {
+    const snap = revealSnapshot;
+    if (!snap || !canUndoReveal(snap, Date.now(), currentRound)) return;
+    playSound('click');
+    setPlayers(snap.input.players);
+    setRoundResults([]);
+    setRoundHistory(prev => (prev.length && prev[prev.length - 1].round === snap.round ? prev.slice(0, -1) : prev));
+    if (mpRoomCode) setMpSeats(snap.seatsBefore);
+    setTurnTimers(snap.turnTimersBefore);
+    setTeacherRevealOverride(snap.teacherRevealOverrideBefore);
+    setRevealSnapshot(null);
+    setStep('IN_GAME');
+  }, [revealSnapshot, currentRound, playSound, mpRoomCode]);
+
+  const handleVoidHand = useCallback(() => {
+    if (!revealSnapshot) return;
+    applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
+    setShowRulingModal(false);
+  }, [revealSnapshot, applyCorrectedRuling]);
+
+  const handleAcceptAnswer = useCallback((answer: string) => {
+    if (!revealSnapshot) return;
+    applyCorrectedRuling(resettleWithAcceptedAnswer(revealSnapshot, answer));
+    setShowRulingModal(false);
+  }, [revealSnapshot, applyCorrectedRuling]);
+
   // A double click on "Deal the next hand" must not skip a hand (F4 fix 9).
   // The guard is released once the screen moves on or the new sentence arrives.
   const nextRoundGuardRef = useRef(createReentryGuard());
@@ -6172,7 +6256,37 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     </button>
                   )}
 
-                  {/* Teacher control (package R8): a sentence that does not work for the class can be swapped. */}
+                  {/* Teacher controls (package R8): reveal now, pause, swap the sentence. */}
+                  {(mpRoomCode ? !allMpPlayersLocked : isTurnTimerEnabled ? !allActivePlayersLocked : !allValidBetsFinalized) && (
+                    <button
+                      type="button"
+                      disabled={isLoading || isProcessing || !currentSentence}
+                      onClick={() => {
+                        playSound('click');
+                        setConfirmAction({
+                          title: 'Reveal now?',
+                          message: 'The answer is revealed straight away. Players who have not placed a bet sit this hand out.',
+                          confirmLabel: 'Reveal now',
+                          onConfirm: () => { void handleRevealResults(true); },
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Teacher only: reveal the answer without waiting for everyone"
+                    >
+                      <Eye className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      Reveal now
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={isLoading || isProcessing}
+                    onClick={() => { playSound('click'); setIsPaused(true); }}
+                    className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Teacher only: stop the timers and the phones for a moment"
+                  >
+                    <Pause className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    Pause
+                  </button>
                   <button
                     type="button"
                     disabled={isLoading || isProcessing}
@@ -6591,6 +6705,26 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 
                 <div className="mt-8 flex flex-wrap justify-between items-center gap-4 pb-10 relative w-full">
                   <div className="flex-1 flex justify-start gap-2 flex-wrap">
+                    {isUndoRevealOpen && (
+                      <ActionButton
+                        onClick={handleUndoReveal}
+                        variant="secondary"
+                        className="h-10 px-4 text-gc-small font-semibold"
+                        title="Teacher only: go back to the hand as it was before the reveal"
+                      >
+                        <span className="inline-flex items-center gap-2"><RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />Undo reveal ({undoRevealSecondsLeft(revealSnapshot, undoClock)} s)</span>
+                      </ActionButton>
+                    )}
+                    {isRevealSnapshotCurrent && (
+                      <ActionButton
+                        onClick={() => { playSound('click'); setShowRulingModal(true); }}
+                        variant="ghost"
+                        className="h-10 px-4 text-gc-small font-semibold"
+                        title="Teacher only: void this hand or accept another answer"
+                      >
+                        Correct the ruling
+                      </ActionButton>
+                    )}
                     {roundHistory.length > 0 && (
                       <ActionButton
                         onClick={() => { playSound('click'); setShowReportCardModal(true); }}
@@ -7019,6 +7153,58 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             </div> 
         </Modal>
       }
+      {isPaused && step === 'IN_GAME' && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
+          <div className="w-full max-w-md rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-8 text-center space-y-5 text-gc-ink">
+            <Pause className="w-12 h-12 mx-auto text-gc-gold" aria-hidden="true" />
+            <h2 id="gc-pause-title" className="text-gc-h2 font-bold">Paused</h2>
+            <p className="text-gc-body">Timers are stopped{mpRoomCode ? ' and phones are on hold' : ''}. Nothing is lost.</p>
+            <ActionButton onClick={() => setIsPaused(false)} playSound={playSound} variant="primary" className="min-h-[52px] w-full text-gc-lead">
+              <span className="inline-flex items-center gap-2"><Play className="w-5 h-5 shrink-0" aria-hidden="true" />Resume the hand</span>
+            </ActionButton>
+          </div>
+        </div>
+      )}
+      {showRulingModal && revealSnapshot && (() => {
+        const answers = listAnswersToAccept(revealSnapshot);
+        const acceptable = canAcceptOtherAnswers(revealSnapshot.input);
+        return (
+          <Modal title="Correct the ruling" onClose={() => setShowRulingModal(false)} playSound={playSound} hideOkButton>
+            <div className="space-y-5 text-gc-ink">
+              <p className="text-gc-body">If this item was judged wrongly, fix it here. Bankrolls are worked out again from the moment before the reveal.</p>
+              {acceptable && (
+                <section aria-labelledby="gc-accept-heading" className="space-y-2">
+                  <h3 id="gc-accept-heading" className="text-gc-body font-bold">Accept this answer too</h3>
+                  {answers.length === 0 ? (
+                    <p className="text-gc-small text-gc-quiet">No other answer was given this hand.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {answers.map(a => (
+                        <li key={a.answer} className="flex items-center justify-between gap-3 rounded-gc-sm border border-gc-line/[0.14] px-3 py-2">
+                          <span className="min-w-0 break-words">
+                            <span className="font-semibold">“{a.answer}”</span>
+                            <span className="text-gc-small text-gc-quiet"> · {a.players === 1 ? '1 player' : `${a.players} players`}</span>
+                          </span>
+                          <ActionButton onClick={() => handleAcceptAnswer(a.answer)} playSound={playSound} variant="secondary" className="min-h-[44px] px-4 shrink-0">
+                            Accept
+                          </ActionButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+              <section aria-labelledby="gc-void-heading" className="space-y-2">
+                <h3 id="gc-void-heading" className="text-gc-body font-bold">Void the hand</h3>
+                <p className="text-gc-small text-gc-quiet">Every stake is returned. Money spent on hints and power-ups stays spent.</p>
+                <ActionButton onClick={handleVoidHand} playSound={playSound} variant="danger" className="min-h-[44px] px-5">
+                  Void the hand
+                </ActionButton>
+              </section>
+            </div>
+          </Modal>
+        );
+      })()}
       {confirmAction && (
         <Modal title={confirmAction.title} onClose={() => setConfirmAction(null)} playSound={playSound} hideOkButton>
           <p className="text-gc-body text-gc-ink mb-5">{confirmAction.message}</p>
