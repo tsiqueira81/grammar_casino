@@ -4,6 +4,7 @@ import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Print
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { getAlternativeAcceptedAnswers } from '../utils/roundSettlement';
 import { PlayerAvatar } from './PlayerAvatar';
+import { buildReport, filterHistory, reportToCsv, type ReportFilter } from '../game/report';
 import { getAvatarPlainText } from '../utils/characterAvatars';
 
 interface GrammarReportCardProps {
@@ -18,7 +19,7 @@ interface GrammarReportCardProps {
   targetAmount?: number | string;
 }
 
-type FilterTab = 'all' | 'errors' | 'missed' | 'perfect';
+type FilterTab = ReportFilter;
 
 export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
   history,
@@ -59,135 +60,41 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     setExpandedRounds({});
   };
 
-  // --- Analytical Metrics ---
-  const stats = useMemo(() => {
-    if (!history || history.length === 0) {
-      return {
-        totalRounds: 0,
-        totalVotes: 0,
-        correctVotes: 0,
-        accuracyPct: 0,
-        errorSentencesCount: 0,
-        cleanSentencesCount: 0,
-        missedSentencesCount: 0,
-        playerStats: {},
-        topGrammarian: null as { name: string; avatar: string; accuracy: number; wins: number } | null,
-      };
-    }
-
-    let totalVotes = 0;
-    let correctVotes = 0;
-    let errorSentencesCount = 0;
-    let cleanSentencesCount = 0;
-    let missedSentencesCount = 0;
-
-    const playerStatsMap: Record<number, { name: string; avatar: string; totalBets: number; wins: number; totalWon: number; correctionsAttempted: number; correctionsAccepted: number }> = {};
-
-    players.forEach(p => {
-      playerStatsMap[p.id] = {
-        name: p.name,
-        avatar: p.avatar,
-        totalBets: 0,
-        wins: 0,
-        totalWon: 0,
-        correctionsAttempted: 0,
-        correctionsAccepted: 0,
-      };
-    });
-
-    history.forEach(round => {
-      if (round.sentence.isCorrect) {
-        cleanSentencesCount++;
-      } else {
-        errorSentencesCount++;
-      }
-
-      let anyPlayerMissed = false;
-
-      round.playerResults.forEach(res => {
-        totalVotes++;
-        if (res.isWin) {
-          correctVotes++;
-        } else {
-          anyPlayerMissed = true;
-        }
-
-        if (!playerStatsMap[res.playerId]) {
-          playerStatsMap[res.playerId] = {
-            name: res.playerName,
-            avatar: res.playerAvatar,
-            totalBets: 0,
-            wins: 0,
-            totalWon: 0,
-            correctionsAttempted: 0,
-            correctionsAccepted: 0,
-          };
-        }
-
-        const ps = playerStatsMap[res.playerId];
-        ps.totalBets++;
-        if (res.isWin) ps.wins++;
-        ps.totalWon += res.amountChanged;
-        if (res.userCorrection?.trim()) {
-          ps.correctionsAttempted++;
-          if (res.correctionFeedback?.includes('Accepted')) {
-            ps.correctionsAccepted++;
-          }
-        }
-      });
-
-      if (anyPlayerMissed) {
-        missedSentencesCount++;
-      }
-    });
-
-    const accuracyPct = totalVotes > 0 ? Math.round((correctVotes / totalVotes) * 100) : 0;
-
-    // Find top grammarian (highest win accuracy)
-    let topGrammarian: { name: string; avatar: string; accuracy: number; wins: number } | null = null;
-    let highestAcc = -1;
-
-    Object.values(playerStatsMap).forEach(ps => {
-      if (ps.totalBets > 0) {
-        const acc = Math.round((ps.wins / ps.totalBets) * 100);
-        if (acc > highestAcc) {
-          highestAcc = acc;
-          topGrammarian = {
-            name: ps.name,
-            avatar: ps.avatar,
-            accuracy: acc,
-            wins: ps.wins,
-          };
-        }
-      }
-    });
-
-    return {
-      totalRounds: history.length,
-      totalVotes,
-      correctVotes,
-      accuracyPct,
-      errorSentencesCount,
-      cleanSentencesCount,
-      missedSentencesCount,
-      playerStats: playerStatsMap,
-      topGrammarian,
-    };
-  }, [history, players]);
+  // --- Analytical Metrics (package L7: one report for the screen, the PDF and the CSV) ---
+  const report = useMemo(() => buildReport(history || [], players), [history, players]);
+  const stats = useMemo(() => ({
+    totalRounds: report.hands,
+    totalVotes: report.bets,
+    correctVotes: report.rightBets,
+    accuracyPct: report.accuracy,
+    errorSentencesCount: report.flawedSentences,
+    cleanSentencesCount: report.validSentences,
+    missedSentencesCount: report.handsWithAMiss,
+    playerStats: Object.fromEntries(report.players.map(p => [p.id, {
+      name: p.name, avatar: p.avatar, totalBets: p.bets, wins: p.wins, totalWon: p.net,
+      correctionsAttempted: p.correctionsTried, correctionsAccepted: p.correctionsAccepted,
+    }])) as Record<number, { name: string; avatar: string; totalBets: number; wins: number; totalWon: number; correctionsAttempted: number; correctionsAccepted: number }>,
+    topGrammarian: report.topPlayer
+      ? { name: report.topPlayer.name, avatar: report.topPlayer.avatar, accuracy: report.topPlayer.winRate, wins: report.topPlayer.wins }
+      : null,
+  }), [report]);
 
   // Filtered sentences
-  const filteredHistory = useMemo(() => {
-    if (activeTab === 'errors') {
-      return history.filter(r => !r.sentence.isCorrect);
-    }
-    if (activeTab === 'missed') {
-      return history.filter(r => r.playerResults.some(pr => !pr.isWin));
-    }
-    if (activeTab === 'perfect') {
-      return history.filter(r => r.playerResults.every(pr => pr.isWin));
-    }
-    return history;
-  }, [history, activeTab]);
+  const filteredHistory = useMemo(() => filterHistory(history, activeTab), [history, activeTab]);
+
+  // Package L7: one row per student, for a gradebook.
+  const downloadCsv = () => {
+    playSound?.('click');
+    const blob = new Blob([reportToCsv(report)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Grammar_Casino_Grades_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   // Generate plain text report card for clipboard export
   const copyReportToClipboard = () => {
@@ -355,6 +262,10 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
               {copiedToast ? <Check className="w-4 h-4 text-gc-win" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
               {copiedToast ? 'Copied' : 'Copy summary'}
             </button>
+            <button type="button" onClick={downloadCsv} className={toolBtn} title="One row per student, for a gradebook or spreadsheet">
+              <FileText className="w-4 h-4" aria-hidden="true" />
+              Download CSV
+            </button>
 
             <div className="relative inline-flex items-center">
               <button
@@ -452,6 +363,51 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             )}
           </div>
         </div>
+
+        {/* Package L7: what to teach next, where the class struggled, the most missed sentences */}
+        {(report.teachNext.length > 0 || report.mostMissed.length > 0) && (
+          <div className="grid md:grid-cols-2 gap-2.5 mb-5" data-testid="report-teach-next">
+            <div className="p-4 rounded-gc bg-gc-gold/10 border border-gc-gold/30">
+              <div className={label}>What to teach next</div>
+              {report.teachNext.length > 0 ? (
+                <ul className="m-0 mt-1 pl-5 list-disc text-gc-body text-gc-ink space-y-0.5">
+                  {report.teachNext.map(t => <li key={t}>{t}</li>)}
+                </ul>
+              ) : (
+                <p className="m-0 mt-1 text-gc-body text-gc-ink">Every topic was at least 75% right. Well done!</p>
+              )}
+              {report.byTopic.length > 1 && (
+                <ul className="m-0 mt-3 p-0 list-none space-y-1" aria-label="Percent right by topic">
+                  {report.byTopic.map(a => (
+                    <li key={a.label} className="flex items-center gap-2 text-gc-small">
+                      <span className="w-40 shrink-0 truncate text-gc-ink">{a.label}</span>
+                      <span className="flex-1 h-2.5 rounded-full bg-gc-line/[0.08] overflow-hidden" aria-hidden="true">
+                        <span className={`block h-full rounded-full ${a.accuracy >= 75 ? 'bg-gc-win/70' : a.accuracy >= 50 ? 'bg-gc-gold/70' : 'bg-gc-loss/70'}`} style={{ width: `${a.accuracy}%` }} />
+                      </span>
+                      <span className="w-12 text-right tabular-nums text-gc-quiet">{a.accuracy}%</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {report.mostMissed.length > 0 && (
+              <div className="p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.1]">
+                <div className={label}>Most missed</div>
+                <ol className="m-0 mt-1 pl-5 text-gc-small text-gc-ink space-y-1.5">
+                  {report.mostMissed.map(m => (
+                    <li key={m.round}>
+                      <span className="font-sentence italic">{m.text}</span>
+                      <span className="block text-gc-quiet">
+                        Hand {m.round}: {m.missed} of {m.bets} missed
+                        {m.popularWrongAnswer ? ` · most common wrong answer: ${m.popularWrongAnswer}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Which hands to show */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-gc-line/[0.12] print:hidden">

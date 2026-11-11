@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { RoundHistoryRecord, Player, Settings, GameMode } from '../types';
 import { getAlternativeAcceptedAnswers } from './roundSettlement';
+import { buildReport } from '../game/report';
 
 export interface GeneratePDFOptions {
   history: RoundHistoryRecord[];
@@ -267,26 +268,14 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
   // ==========================================
   // 3. ANALYTICAL METRICS (KPI BOXES)
   // ==========================================
-  let totalVotes = 0;
-  let correctVotes = 0;
-  let errorSentences = 0;
-  let cleanSentences = 0;
-  let missedRounds = 0;
-
-  history.forEach(r => {
-    if (r.sentence.isCorrect) cleanSentences++;
-    else errorSentences++;
-
-    let roundMissed = false;
-    r.playerResults.forEach(pr => {
-      totalVotes++;
-      if (pr.isWin) correctVotes++;
-      else roundMissed = true;
-    });
-    if (roundMissed) missedRounds++;
-  });
-
-  const accuracyPct = totalVotes > 0 ? Math.round((correctVotes / totalVotes) * 100) : 0;
+  // Package L7: the same numbers as the on-screen report card.
+  const report = buildReport(history, players);
+  const totalVotes = report.bets;
+  const correctVotes = report.rightBets;
+  const errorSentences = report.flawedSentences;
+  const cleanSentences = report.validSentences;
+  const missedRounds = report.handsWithAMiss;
+  const accuracyPct = report.accuracy;
 
   // Render 4 KPI Cards
   const kpiCount = 4;
@@ -361,40 +350,15 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
   currentY += 2;
 
   // Calculate per-player aggregates
-  const playerStatsList = players.map(player => {
-    let totalBetsPlaced = 0;
-    let winsCount = 0;
-    let netGain = 0;
-    let correctionsSubmitted = 0;
-    let correctionsAccepted = 0;
-
-    history.forEach(r => {
-      const res = r.playerResults.find(pr => pr.playerId === player.id);
-      if (res) {
-        totalBetsPlaced++;
-        if (res.isWin) winsCount++;
-        netGain += res.amountChanged;
-        if (res.userCorrection?.trim()) {
-          correctionsSubmitted++;
-          if (res.correctionFeedback?.toLowerCase().includes('accepted') || res.correctionFeedback?.toLowerCase().includes('bonus')) {
-            correctionsAccepted++;
-          }
-        }
-      }
-    });
-
-    const winRate = totalBetsPlaced > 0 ? `${Math.round((winsCount / totalBetsPlaced) * 100)}%` : '0%';
-
-    return {
-      id: player.id,
-      name: cleanText(player.name),
-      finalMoney: player.money,
-      winRate,
-      record: `${winsCount}W - ${totalBetsPlaced - winsCount}L`,
-      corrections: `${correctionsAccepted}/${correctionsSubmitted}`,
-      isWinner: winner?.id === player.id,
-    };
-  }).sort((a, b) => b.finalMoney - a.finalMoney);
+  const playerStatsList = report.players.map(p => ({
+    id: p.id,
+    name: cleanText(p.name),
+    finalMoney: p.finalMoney,
+    winRate: `${p.winRate}%`,
+    record: `${p.wins}W - ${p.bets - p.wins}L`,
+    corrections: `${p.correctionsAccepted}/${p.correctionsTried}`,
+    isWinner: winner?.id === p.id,
+  }));
 
   const tableBody = playerStatsList.map((p, idx) => [
     `#${idx + 1}${p.isWinner ? ' [Champion]' : ''}`,
