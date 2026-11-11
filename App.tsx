@@ -41,7 +41,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -101,6 +101,7 @@ import * as GeminiService from './services/geminiService';
 import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
+import { LENGTH_PRESETS, estimateMinutes, handsLeftNote } from './game/gameLength';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
@@ -770,6 +771,9 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // Package G7: "2 hands left" and "Last hand" on the hand badge.
+  const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
+
   // Package V8: the theme sets the felt, the lamp, the sparks and the music key.
   const stageLook = lookForTheme(settings.theme);
   useEffect(() => {
@@ -5477,17 +5481,22 @@ export function App() {
                                 }}
                                 className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
                               />
-                              {[5, 10, 15, 20].map((r) => (
+                              {LENGTH_PRESETS.map(({ hands: r, name }) => (
                                 <button
                                   key={r}
                                   type="button"
                                   aria-pressed={totalRounds === r}
                                   onClick={() => { playSound('click'); setTotalRounds(r); }}
-                                  className={`h-9 min-w-[2.5rem] px-2.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
+                                  className={`h-9 min-w-[2.5rem] px-3 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
                                 >
-                                  {r}
+                                  <span className="tabular-nums">{r}</span> · {name}
                                 </button>
                               ))}
+                              {Number(totalRounds) > 0 && (
+                                <p className="w-full text-gc-small text-gc-quiet" data-testid="length-estimate">
+                                  About {estimateMinutes({ hands: Number(totalRounds), players: players.length, timerSeconds: turnTimerSeconds, room: Boolean(mpRoomCode) })} minutes with {mpRoomCode ? 'this room' : `${players.length} player${players.length === 1 ? '' : 's'}`}.
+                                </p>
+                              )}
                             </div>
                           )}
                           {isSelected && opt.mode === 'targetAmount' && (
@@ -6000,7 +6009,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
-                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                   </span>
                                   {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
                                     <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
@@ -6070,7 +6079,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             ) : (
                               <div className="flex justify-center">
                                 <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                 </span>
                               </div>
                             )}
@@ -6883,6 +6892,25 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     <RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />
                     Swap this sentence
                   </button>
+                  {gameMode === 'rounds' && currentRound < Number(totalRounds) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound('click');
+                        setConfirmAction({
+                          title: 'Finish after this hand?',
+                          message: `This becomes the last hand (hand ${currentRound} of ${currentRound}). The most money after it wins.`,
+                          confirmLabel: 'Make it the last hand',
+                          onConfirm: () => setTotalRounds(currentRound),
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer"
+                      title="Teacher only: end the game after this hand"
+                    >
+                      <Flag className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      Finish after this hand
+                    </button>
+                  )}
                 </div> 
               </div> 
             ); 

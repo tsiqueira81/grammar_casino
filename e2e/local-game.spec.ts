@@ -46,6 +46,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
   // Hand 2: multiple choice. "had" is right.
   await clickButton(page, 'Deal the next hand');
   await expect(sentence(page)).toContainText('more time');
+  // Package G7: the badge says this is the last hand.
+  await expect(page.getByText(/Hand 2 of 2 · .* · Last hand/).first()).toBeVisible();
   const fullCards = page.getByRole('button', { name: 'Full cards' });
   if (await fullCards.isVisible()) await fullCards.click();
   const hand2 = [
