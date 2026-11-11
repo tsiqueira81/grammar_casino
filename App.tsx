@@ -6728,6 +6728,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           }}
                           outLabel="Bankrupt"
                           projectorMode={isProjectorMode}
+                          arc={isTableView}
                         />
                       )
                     ) : (
