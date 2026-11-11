@@ -19,6 +19,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `npm run build` | Production bundle in `dist/` |
 | `npm run size` | After a build, compares gzipped file sizes with `scripts/bundle-baseline.json` and fails past +10% (CI runs it). Run `node scripts/check-bundle-size.mjs --update` when growth is intended, and say why in the pull request |
 | `npm run test:e2e` | Browser tests (Playwright, `e2e/`): a whole local game and a live room with three phones. Starts the dev server itself |
+| `npm run assets` | Rebuilds `public/models/table.glb` and `room.glb` with Blender's Python module (`pip install bpy`, `scripts/assets/build_table.py`) and renders previews of them with three.js into `docs/previews/` (`scripts/assets/preview.mjs`) |
 | `npm run bots -- <ROOM> [count]` | Joins simulated students to a room on the dev server, for load checks and demos |
 
 ## How production really works
@@ -50,7 +51,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `utils/firestoreUsage.ts` | Firestore reads and writes made by this device today (package A3), counted in `firebaseService.ts`; the debug log gets each live game's count and a note past 60% of the free daily quota |
 | `utils/debugLog.ts` | The host's debug log (package A4): last 500 events (screens, hands, rooms, seats dropping, intents ignored, AI fallbacks), Shift+L shows it, Download saves it, a crash offers "Copy details". `APP_VERSION` is the commit and build date from `vite.config.ts` (`__APP_VERSION__`), "dev" in tests. Never log what a student typed |
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
-| `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators) |
+| `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators; `build_table.py` makes the table and room of package V2, which the game does not load yet) |
 | `tests/` | vitest unit tests |
 | `e2e/` | Playwright browser tests. They open the dev server with `?e2e=1`, which serves the six fixed sentences in `utils/e2eContent.ts`, skips every AI call and keeps rooms on the local relay. Add `data-testid` only where a role or label selector is not stable |
 | `firestore.rules` | Firestore security rules. They take effect only when pasted into the Firebase console |
