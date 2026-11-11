@@ -21,6 +21,17 @@ interface PlayerTileGridProps {
   onOpen: (playerId: number) => void;
   outLabel: string;
   projectorMode?: boolean;
+  /** Package V2 step 3: in Table view, up to 8 players sit in one curved row, like seats at the rail. */
+  arc?: boolean;
+}
+
+export const ARC_MAX_PLAYERS = 8;
+
+/** How far down a seat in the curved row sits, in pixels: the ends high, the middle lowest. */
+export function arcOffset(index: number, count: number, depth = 56): number {
+  if (count < 3) return 0;
+  const t = (index / (count - 1)) * 2 - 1; // -1 .. 1
+  return Math.round(depth * (1 - t * t));
 }
 
 const STATUS_TEXT: Record<SeatStatus, string> = {
@@ -68,12 +79,17 @@ const StatusIcon: React.FC<{ status: SeatStatus; projectorMode?: boolean }> = ({
   }
 };
 
-const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel, projectorMode = false }) => {
+const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel, projectorMode = false, arc = false }) => {
+  const curved = arc && tiles.length >= 2 && tiles.length <= ARC_MAX_PLAYERS;
   return (
     <div
-      className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${
-        projectorMode ? 'lg:grid-cols-5 xl:grid-cols-6 gap-4' : 'lg:grid-cols-6 gap-3.5'
-      }`}
+      className={
+        curved
+          ? `grid ${projectorMode ? 'gap-4' : 'gap-3.5'} items-start`
+          : `grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${projectorMode ? 'lg:grid-cols-5 xl:grid-cols-6 gap-4' : 'lg:grid-cols-6 gap-3.5'}`
+      }
+      style={curved ? { gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`, paddingBottom: arcOffset(Math.floor(tiles.length / 2), tiles.length) } : undefined}
+      data-layout={curved ? 'arc' : 'grid'}
       role="list"
       aria-label="Players at the table"
     >
@@ -88,9 +104,10 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
         return (
           // The wrapper slides in when the hand is dealt; the button inside lifts on hover
           // (one element can't do both, the animation would pin its transform).
-          <div key={player.id} role="listitem" className="animate-gc-slide-up" style={{ animationDelay: `${Math.min(i, 11) * 40}ms` }}>
+          <div key={player.id} role="listitem" className="animate-gc-slide-up" style={{ animationDelay: `${Math.min(i, 11) * 40}ms`, ...(curved ? { marginTop: arcOffset(i, tiles.length) } : {}) }}>
           <button
             type="button"
+            data-seat-player={player.id}
             onClick={() => onOpen(player.id)}
             aria-pressed={isOpen}
             aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}

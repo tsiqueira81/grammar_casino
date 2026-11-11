@@ -151,6 +151,30 @@ function getSeatWorldPosition(seatIndex: number, totalSeats: number): THREE.Vect
 }
 
 /**
+ * Package V2 step 3: where a player's tile or betting card is on screen, as a point on the table
+ * plane, so a tossed chip leaves from that player. Null when the element is not on screen.
+ */
+export function seatPointFromScreen(
+  rect: { left: number; top: number; width: number; height: number },
+  viewport: { width: number; height: number },
+  camera: THREE.Camera,
+  planeY = 0.15,
+): THREE.Vector3 | null {
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  if (rect.width <= 0 || cx < 0 || cy < 0 || cx > viewport.width || cy > viewport.height) return null;
+  const ndc = new THREE.Vector2((cx / viewport.width) * 2 - 1, -(cy / viewport.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  if (!ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY), hit)) return null;
+  // Keep it on the table: a tile high on the screen still throws from the far rail, not the horizon.
+  hit.x = THREE.MathUtils.clamp(hit.x, -4.2, 4.2);
+  hit.z = THREE.MathUtils.clamp(hit.z, -2.6, 3.2);
+  return hit;
+}
+
+/**
  * Breaks a wager amount into up to 5 transient 3D casino chips ($500, $100, $50, $25, $10).
  */
 function decomposeBetIntoChips(amount: number): number[] {
@@ -752,7 +776,11 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     if (!ctx) return;
 
-    const origin = getSeatWorldPosition(tossEvent.seatIndex, tossEvent.totalSeats);
+    const seatEl = typeof document !== 'undefined' ? document.querySelector(`[data-seat-player="${tossEvent.playerId}"]`) : null;
+    const fromScreen = seatEl
+      ? seatPointFromScreen(seatEl.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, ctx.camera)
+      : null;
+    const origin = fromScreen ?? getSeatWorldPosition(tossEvent.seatIndex, tossEvent.totalSeats);
     const potTarget = new THREE.Vector3(0, 0.04, -0.35);
 
     chipsToSpawn.forEach((denom, idx) => {
