@@ -1,4 +1,5 @@
 import { safeLocalStorage } from '../utils/safeStorage';
+import { plainDescriptionOf } from '../game/powerUpCatalog';
 import { settlePendingBet, type PendingBet } from '../game/presence';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
@@ -2370,7 +2371,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <h3 id="gc-target-title" className="m-0 text-gc-title font-extrabold">
                 {POWER_UPS[view.pendingTarget.powerUp]?.name}: choose a player
               </h3>
-              <p className="m-0 text-gc-small text-gc-quiet">{POWER_UPS[view.pendingTarget.powerUp]?.description}</p>
+              <p className="m-0 text-gc-small text-gc-quiet">{plainDescriptionOf(view.pendingTarget.powerUp)}</p>
             </div>
 
             <div className="space-y-2 max-h-64 overflow-y-auto">

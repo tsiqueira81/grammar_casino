@@ -4,6 +4,7 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { plainDescriptionOf } from './game/powerUpCatalog';
 import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected, isProtectedFromWheelBounty, mayBuyPowerUps } from './game/powerUpRules';
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
@@ -1853,6 +1854,15 @@ export function App() {
     logEvent('step', `Hand ${currentRound}`);
   }, [currentRound]);
 
+  // Package T1: the last game's settings are on this computer, so "Quick start" can deal at once.
+  const hasSetupPrefs = useMemo(() => step === 'PLAYER_SETUP' && Boolean(safeLocalStorage.getItem(SETUP_PREFS_KEY)), [step]);
+  const quickStartSummary = [
+    settings.level,
+    settings.challengeFormat === 'mixed' ? 'Mixed' : questionTypeLabel(settings.challengeFormat),
+    gameMode === 'rounds' ? `${totalRounds} hand${Number(totalRounds) === 1 ? '' : 's'}` : gameMode === 'targetAmount' ? `first to $${Number(targetAmount).toLocaleString()}` : 'last player standing',
+    `$${Number(startingCash).toLocaleString()} each`,
+  ].filter(Boolean).join(' · ');
+
   const handleStartGame = () => { 
     if (players.length > 0) { 
       playSound('startGame'); 
@@ -2465,7 +2475,8 @@ export function App() {
         }
     } else {
         // Immediate effect logic
-        let modalMessage = `${powerUp.icon} ${powerUp.description}`;
+        // Package S5: the same short, plain description as the card itself.
+        let modalMessage = `${powerUp.icon} ${plainDescriptionOf(powerUpKey)}`;
         
         if (powerUpKey === 'GRAMMAR_GOGGLES' && currentSentence) {
             if (!mpRoomCode || !mpSeats[playerId]) {
@@ -2781,14 +2792,14 @@ export function App() {
             const updatedPlayersPreview = players.map(p => p.id === playerId ? { ...p, money: newMoney } : p);
             const qualifiesNow = isPlayerUnderdog(playerId, updatedPlayersPreview);
             modalMessage = qualifiesNow
-              ? `${powerUp.icon} Underdog Surge active! You are currently in underdog position — a winning bet this hand will award a 2.5× comeback payout (+150% winnings)!`
-              : `${powerUp.icon} ${powerUp.description} (Note: You currently lead the table; Underdog Surge triggers if you are trailing or in the bottom half when bets settle.)`;
+              ? `${powerUp.icon} Underdog Surge is on. You are behind, so a win this hand pays 2.5 times.`
+              : `${powerUp.icon} ${plainDescriptionOf(powerUpKey)} You are ahead now, so it pays only if you drop to the bottom half by the end of the hand.`;
         } else if (powerUpKey === 'SCAVENGER') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SCAVENGER' }] }));
-            modalMessage = `${powerUp.icon} Dead Pool Scavenger armed! You will scoop up 25% of every losing bet lost by other players to the House this round (up to +$500).`;
+            modalMessage = `${powerUp.icon} Scavenger is on. You get 25% of what others lose this hand (up to $500).`;
         } else if (powerUpKey === 'CORRECTION_BOUNTY' || powerUpKey === 'LONE_WOLF' || powerUpKey === 'CROWD_SURFER' || powerUpKey === 'DOUBLE_OR_NOTHING') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-            modalMessage = `${powerUp.icon} ${powerUp.description}`;
+            modalMessage = `${powerUp.icon} ${plainDescriptionOf(powerUpKey)}`;
         } else {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         }
@@ -3395,7 +3406,7 @@ export function App() {
         totalSeats: Math.max(1, activePlayers.length),
       });
     }
-    const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${powerUpInfo.description}`;
+    const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${plainDescriptionOf(powerUpKey)}`;
     if (isRemoteBuyer) {
       setMpStudentPendingTarget(prev => {
         const next = { ...prev };
@@ -5347,6 +5358,19 @@ export function App() {
                   <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
                 </span>
               </ActionButton>
+              {/* Package T1: deal at once with the settings of the last game on this computer. */}
+              {hasSetupPrefs && players.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleFinalizeSettings}
+                  data-testid="quick-start"
+                  title="Deal the first hand now with the settings of your last game"
+                  className="min-h-[60px] px-5 inline-flex flex-col items-start justify-center rounded-full bg-gc-line/[0.06] border border-gc-gold/50 hover:border-gc-gold text-gc-ink cursor-pointer transition-colors text-left"
+                >
+                  <span className="text-gc-body font-bold">Quick start</span>
+                  <span className="text-gc-cap text-gc-quiet" data-testid="quick-start-summary">{quickStartSummary}</span>
+                </button>
+              )}
               <div className="relative">
                 <button
                   type="button"
@@ -8606,7 +8630,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     </PowerUpTooltip>
                   </div>
                   <p className="text-center mb-4 text-lg text-slate-600 dark:text-slate-400 font-editorial italic border-b border-slate-200 dark:border-slate-700 pb-3">
-                    "{powerUpInfo.description}"
+                    "{plainDescriptionOf(showTargetModal.powerUp)}"
                   </p> 
 
                   {isSwap && buyerPlayer && (
