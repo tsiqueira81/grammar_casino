@@ -22,7 +22,7 @@ import { CEFR_LEVELS, GRAMMAR_TOPICS } from '../constants';
 import ActionButton from './ActionButton';
 import GrammarReportCard from './GrammarReportCard';
 import { PlayerAvatar } from './PlayerAvatar';
-import { getBuiltInCuratedSentencesForCloudSeed, getStaticBankCounts } from '../services/fallbackSentences';
+import type { BuiltInSeedItem } from '../services/fallbackSentences';
 import { generateSentence } from '../services/geminiService';
 import {
   archiveSentenceToCloudBank,
@@ -138,10 +138,21 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   const [isBatchGenerating, setIsBatchGenerating] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const staticCounts = useMemo(() => getStaticBankCounts(), []);
+  // Package L1: the built-in bank loads only when this window opens, not with the game.
+  const [bank, setBank] = useState<{ counts: ReturnType<typeof import('../services/fallbackSentences')['getStaticBankCounts']>; seed: BuiltInSeedItem[] } | null>(null);
+  useEffect(() => {
+    if (!isOpen || bank) return;
+    let alive = true;
+    void import('../services/fallbackSentences').then(m => {
+      if (alive) setBank({ counts: m.getStaticBankCounts(), seed: m.getBuiltInCuratedSentencesForCloudSeed() });
+    });
+    return () => { alive = false; };
+  }, [isOpen, bank]);
+  const staticCounts = bank?.counts ?? { totalCount: 0, binaryCount: 0, clozeCount: 0, wordFormationCount: 0, keyWordTransformationCount: 0 };
+  const builtInSeed = useMemo(() => bank?.seed ?? [], [bank]);
   const missingBuiltInSeedCount = useMemo(
-    () => getMissingBuiltInCloudSeedCount(sentences, getBuiltInCuratedSentencesForCloudSeed()),
-    [sentences]
+    () => getMissingBuiltInCloudSeedCount(sentences, builtInSeed),
+    [sentences, bank]
   );
 
   useEffect(() => {
@@ -331,7 +342,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
     setNotice(null);
     setSeedProgress({ done: 0, total: Math.max(1, missingBuiltInSeedCount) });
     try {
-      const res = await seedBuiltInBankToCloud(sentences, getBuiltInCuratedSentencesForCloudSeed(), (done, total) => {
+      const res = await seedBuiltInBankToCloud(sentences, builtInSeed, (done, total) => {
         setSeedProgress({ done, total });
       });
       setSentences(res.updatedList);

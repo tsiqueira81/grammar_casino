@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { JACKPOT_MULTIPLIER } from '../constants';
 import { isPlayerUnderdog } from './multiplayerProtocol';
-import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
+import { evaluateKeyWordTransformationDeterministic } from './kwtMarking';
 import { normalizeUkUsSpelling } from './offlineGrammarEngine';
 
 const GeminiService = { evaluateKeyWordTransformationDeterministic };

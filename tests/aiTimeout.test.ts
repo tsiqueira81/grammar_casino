@@ -56,7 +56,7 @@ describe('AI calls that take too long', () => {
             setTimeout(() => {
               answered = true;
               resolve(
-                new Response(JSON.stringify({ text: 'She has lived here since 2019.', isCorrect: true, questionType: 'binary' }), {
+                new Response(JSON.stringify({ text: 'She has lived here since 2019.', isCorrect: true, correction: 'She has lived here since 2019.', explanation: 'Since with a point in time takes the present perfect.', questionType: 'binary' }), {
                   status: 200,
                   headers: { 'content-type': 'application/json' },
                 })
@@ -81,5 +81,18 @@ describe('AI calls that take too long', () => {
     const res = await pending;
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(typeof res.isCorrect).toBe('boolean');
+  });
+});
+
+describe('AI sentences get the content check (package L1)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('replaces a broken AI item with a bank item, silently', async () => {
+    const broken = { text: 'She has lived here since 2019.', correctAnswer: 'has lived', options: ['has lived', 'lives'], explanation: 'x', questionType: 'multipleChoice' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(broken), { status: 200, headers: { 'content-type': 'application/json' } })));
+    const sentence = await generateSentence(settings, [], null, null, [], 'multipleChoice');
+    expect(sentence.text).not.toBe(broken.text);
+    expect(sentence.text).toContain('_____');
+    expect(sentence.options).toHaveLength(4);
   });
 });

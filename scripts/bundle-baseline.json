@@ -1,12 +1,13 @@
 {
-  "App.js": 117607,
-  "StudentApp.js": 595,
-  "Tabletop3DOverlay.js": 164533,
+  "App.js": 130409,
+  "StudentApp.js": 594,
+  "Tabletop3DOverlay.js": 164684,
+  "fallbackSentences.js": 45413,
   "html2canvas.esm.js": 47797,
-  "index.css": 23805,
-  "index.js": 70433,
-  "index.es.js": 53414,
-  "pdfGenerator.js": 208176,
+  "index.js": 71186,
+  "index.css": 23951,
+  "index.es.js": 53417,
+  "pdfGenerator.js": 160413,
   "purify.es.js": 11716,
-  "soundEngine.js": 291609
+  "soundEngine.js": 297997
 }
