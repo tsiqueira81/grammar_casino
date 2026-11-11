@@ -4,6 +4,7 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected, isProtectedFromWheelBounty, mayBuyPowerUps } from './game/powerUpRules';
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
@@ -13,7 +14,7 @@ const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
-import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
+import { hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
 import { 
@@ -1918,6 +1919,7 @@ export function App() {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return;
+    if (!mayBuyPowerUps(player)) return;
     
     const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
@@ -2090,7 +2092,7 @@ export function App() {
               const idx = arr.findIndex(
                 pu =>
                   pu.target === playerId &&
-                  ['HALF_BAKED', 'SUB_ZERO', 'BET_CAP', 'HIGH_ROLLER'].includes(pu.type)
+                  BOOMERANG_REFLECTED_PLACED.includes(pu.type)
               );
               if (idx !== -1) {
                 reflectedCasterId = sId;
@@ -2192,7 +2194,7 @@ export function App() {
             setActivePowerUps(newActivePowerUps);
             setPlayers(ps => ps.map(p => {
                 if (p.id === playerId) {
-                    return { ...p, effects: p.effects.filter(e => e.type !== 'CRUCIO' && e.type !== 'SILENCED') };
+                    return { ...p, effects: clearNegativeEffects(p.effects) };
                 }
                 return p;
             }));
@@ -2373,7 +2375,7 @@ export function App() {
           const updated = ps.map(p => {
             if (p.id !== playerId && p.money > 0) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = hasPlainShield(pActive);
+              const isShielded = isProtectedFromWheelBounty(pActive);
               if (!isShielded) {
                 const take = Math.min(100, p.money);
                 stolen += take;
@@ -2390,7 +2392,7 @@ export function App() {
           players.forEach(p => {
             if (p.id !== playerId && nextBets[p.id]?.bet) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = hasPlainShield(pActive);
+              const isShielded = isProtectedFromWheelBounty(pActive);
               if (!isShielded) {
                 const remainingMoney = Math.max(0, p.money - 100);
                 if (Number(nextBets[p.id].bet) > remainingMoney) {
@@ -2471,6 +2473,8 @@ export function App() {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return; 
+    // A silenced player cannot buy, even if a phone sends the request anyway (G5 fix).
+    if (!mayBuyPowerUps(player)) return;
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
     const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
@@ -2624,17 +2628,7 @@ export function App() {
     if (!targetPlayer || !sourcePlayer) return;
 
     // Check if target has a concealed BOOMERANG trap active (reflects offensive power-ups)
-    const isOffensiveAttack = [
-      'THE_PUNISHER',
-      'PICKPOCKET',
-      'SUB_ZERO',
-      'BET_CAP',
-      'HIGH_ROLLER',
-      'HALF_BAKED',
-      'SWAP',
-      'CRUCIO',
-      'SILENCER',
-    ].includes(powerUpKey);
+    const isOffensiveAttack = isBoomerangReflected(powerUpKey);
     const targetHasBoomerang = isOffensiveAttack && targetActivePowerUps.some(pu => pu.type === 'BOOMERANG');
     const effectiveTargetId = targetHasBoomerang ? playerId : targetId;
     const effectiveTargetPlayer = targetHasBoomerang ? sourcePlayer : targetPlayer;
@@ -7724,6 +7718,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             setSelectedPowerUps([]);
             if (step === 'IN_GAME') {
               setAvailablePowerUps([]);
+            }
+          }}
+          onSetDeck={(keys) => {
+            setSelectedPowerUps(keys);
+            if (step === 'IN_GAME') {
+              setAvailablePowerUps(keys);
             }
           }}
           playSound={playSound}
