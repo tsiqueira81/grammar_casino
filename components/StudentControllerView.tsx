@@ -522,8 +522,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   );
   // Package S4: a tick each second in the last 5 seconds, while this phone has not locked in.
   const secondsLeft = roundTimer?.status === 'running' ? Math.ceil(roundTimerRemainingMs / 1000) : 0;
+  // Package V6: and a soft tick sound with it (not in Calm mode; the phone's own sound switch applies).
   useEffect(() => {
-    if (view?.step === 'IN_GAME' && !view?.lockedIn && secondsLeft >= 1 && secondsLeft <= 5) haptic('tick');
+    if (view?.step === 'IN_GAME' && !view?.lockedIn && !view?.paused && secondsLeft >= 1 && secondsLeft <= 5) {
+      haptic('tick');
+      if (!view?.calmMode) playSound('tick');
+    }
+    // playSound changes identity with the sound settings; the tick should not repeat for that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, view?.step, view?.lockedIn]);
   const [vibrationOn, setVibrationOn] = useState(() => hapticsEnabled());
 
