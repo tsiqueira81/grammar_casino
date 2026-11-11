@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BUDGET, FrameGuard, TIER_SETTINGS, type QualityTier } from '../show/quality';
+import { POT_CENTER, POT_CHIP_CAP, potSlot } from '../show/pot';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -37,6 +38,8 @@ export interface PotSweepEvent {
   id: string;
   winnerSeatIndices: number[];
   totalSeats: number;
+  /** The winners' player ids, so the pot can fly to their own cards on screen. */
+  winnerPlayerIds?: number[];
 }
 
 export interface BoomerangArcEvent {
@@ -66,6 +69,10 @@ export interface Tabletop3DOverlayProps {
   boomerangEvent: BoomerangArcEvent | null;
   jackpotEvent?: JackpotEvent | null;
   onChipImpactSound?: (denomination: number) => void;
+  /** Package V3: every bet still on the table this hand. 0 clears the pot. */
+  potTotal?: number;
+  /** Table view: the chips are drawn on the felt under the game screens (which let the felt show through). */
+  behindInterface?: boolean;
 }
 
 interface RigidChipBody {
@@ -87,6 +94,11 @@ interface RigidChipBody {
   wobble: number;
   wobblePhase: number;
   shadow?: THREE.Mesh;
+  /** Package V3: rests on a pot pile until the payout, instead of fading away. */
+  inPot?: boolean;
+  /** The pile's slot on the felt and the height this chip rests at. */
+  slot?: { x: number; z: number };
+  floorY?: number;
 }
 
 interface FallingCoin {
@@ -221,6 +233,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   boomerangEvent,
   jackpotEvent,
   onChipImpactSound,
+  potTotal = 0,
+  behindInterface = false,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const impactCallbackRef = useRef(onChipImpactSound);
@@ -283,6 +297,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         alpha: true,
         antialias: tier.antialias,
         powerPreference: 'high-performance',
+        // The pot rests between animations, so the browser must keep the last frame.
+        preserveDrawingBuffer: true,
       });
     } catch {
       return;
@@ -404,6 +420,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     };
     const updateShadow = (chip: RigidChipBody, visibility = 1) => {
       if (!chip.shadow) return;
+      // Only the bottom chip of a pile casts the pile's shadow, or a tall pile would draw a black blot.
+      if (chip.inPot && chip.settled && (chip.floorY ?? 0) > 0.03) visibility = 0;
       const h = Math.max(0, chip.position.y - 0.02);
       chip.shadow.position.set(chip.position.x, 0.005, chip.position.z);
       const spread = 1 + h * 0.9;
@@ -513,8 +531,10 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const SETTLED_FADE_SEC = 0.28;
 
     let running = false;
+    // A chip resting on a pot pile is not work: the loop stops and the still frame stays.
+    const resting = (c: RigidChipBody) => Boolean(c.inPot && c.settled && !c.sweeping && c.wobble <= 0.002);
     const hasWork = () =>
-      stateObj.chips.length > 0 || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
+      stateObj.chips.some((c) => !resting(c)) || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
 
     // Render only while something is moving; an idle overlay costs nothing on the projector laptop.
     stateObj.wake = () => {
@@ -527,7 +547,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const animate = () => {
       const rawDt = clock.getDelta();
       const dt = Math.min(rawDt, 0.05);
-      const stepped = guard.push(rawDt * 1000);
+      // ?force3d=1 (development screenshots on software WebGL) keeps the chosen tier.
+      const stepped = force3d ? null : guard.push(rawDt * 1000);
       if (stepped) {
         console.info(`[3D] Frame rate too low; table quality now ${stepped}.`);
         qualityCallbackRef.current?.(stepped, 'slow frames');
@@ -575,7 +596,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
             chip.mesh.rotation.x = 0;
             chip.mesh.rotation.z = 0;
           }
-          if (chip.settledTime > SETTLED_HOLD_SEC) {
+          if (chip.settledTime > SETTLED_HOLD_SEC && !chip.inPot) {
             const fadeT = (chip.settledTime - SETTLED_HOLD_SEC) / SETTLED_FADE_SEC;
             if (fadeT >= 1) {
               removeChip(i);
@@ -596,8 +617,16 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         chip.mesh.rotation.y += chip.angularVelocity.y * dt;
         chip.mesh.rotation.z += chip.angularVelocity.z * dt;
 
-        if (chip.position.y <= TABLE_Y) {
-          chip.position.y = TABLE_Y;
+        const floorY = chip.floorY ?? TABLE_Y;
+        if (chip.position.y <= floorY && chip.velocity.y < 0) {
+          chip.position.y = floorY;
+          if (chip.slot) {
+            // A pot chip drops onto its pile: no sliding, only a small hop.
+            chip.position.x = chip.slot.x;
+            chip.position.z = chip.slot.z;
+            chip.velocity.x = 0;
+            chip.velocity.z = 0;
+          }
           if (Math.abs(chip.velocity.y) > 0.75 && chip.bounces < 2) {
             chip.velocity.y = -chip.velocity.y * RESTITUTION;
             chip.velocity.x *= FRICTION;
@@ -734,6 +763,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     renderer.render(scene, camera);
 
+
     const handleResize = () => {
       if (!container) return;
       const w = container.clientWidth || window.innerWidth;
@@ -781,13 +811,19 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       ? seatPointFromScreen(seatEl.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, ctx.camera)
       : null;
     const origin = fromScreen ?? getSeatWorldPosition(tossEvent.seatIndex, tossEvent.totalSeats);
-    const potTarget = new THREE.Vector3(0, 0.04, -0.35);
+    const potTarget = new THREE.Vector3(POT_CENTER.x, 0.04, POT_CENTER.z);
+    const potCap = POT_CHIP_CAP[quality === 'off' ? 'low' : quality];
+    let potCount = ctx.chips.filter((c) => c.inPot).length;
 
     chipsToSpawn.forEach((denom, idx) => {
       const template = ctx.chipTemplates[denom] || ctx.chipTemplates[25];
       if (!template) return;
       const mesh = template.clone(true);
       const baseScale = mesh.scale.x || 0.32;
+      // Package V3: the chip joins a pot pile while there is room; past the cap it lands and fades.
+      const keep = potCount < potCap;
+      const slot = keep ? potSlot(potCount++) : null;
+      const chipHeight = Math.max(0.02, new THREE.Box3().setFromObject(template).getSize(new THREE.Vector3()).y);
 
       const startPos = new THREE.Vector3(
         origin.x + (Math.random() - 0.5) * 0.2,
@@ -796,11 +832,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       );
       mesh.position.copy(startPos);
 
-      const landingSpot = new THREE.Vector3(
-        potTarget.x + (Math.random() - 0.5) * 0.55,
-        0.03,
-        potTarget.z + (Math.random() - 0.5) * 0.4
-      );
+      const landingSpot = slot
+        ? new THREE.Vector3(slot.x, 0.03, slot.z)
+        : new THREE.Vector3(potTarget.x + (Math.random() - 0.5) * 0.55, 0.03, potTarget.z + (Math.random() - 0.5) * 0.4);
       const flightTime = 0.42 + Math.random() * 0.1;
       const vx = (landingSpot.x - startPos.x) / flightTime;
       const vz = (landingSpot.z - startPos.z) / flightTime;
@@ -827,10 +861,13 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         wobble: 0,
         wobblePhase: 0,
         shadow: ctx.makeShadow(),
+        inPot: keep,
+        slot: slot ? { x: slot.x, z: slot.z } : undefined,
+        floorY: slot ? 0.024 + slot.level * chipHeight * 0.92 : undefined,
       });
     });
     ctx.wake();
-  }, [tossEvent, calmMode]);
+  }, [tossEvent, calmMode, quality]);
 
   // Handle celebratory 3D Pot Sweep on Round Settlement (spawns transient payout chips that arc to winners and vanish)
   useEffect(() => {
@@ -844,8 +881,31 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     const hasWinners = sweepEvent.winnerSeatIndices.length > 0;
     const houseVaultPos = new THREE.Vector3(0, 0.3, -2.6);
-    const potCenter = new THREE.Vector3(0, 0.08, -0.35);
-    const sweepDenoms = [100, 50, 25, 100, 500, 50, 25, 100];
+    const potCenter = new THREE.Vector3(POT_CENTER.x, 0.08, POT_CENTER.z);
+    // Each winner's own card on screen when it can be found, else their seat on the rail.
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const winnerTargets = sweepEvent.winnerSeatIndices.map((seat, i) => {
+      const id = sweepEvent.winnerPlayerIds?.[i];
+      const el = id !== undefined ? document.querySelector(`[data-seat-player="${id}"]`) : null;
+      const fromScreen = el ? seatPointFromScreen(el.getBoundingClientRect(), viewport, ctx.camera) : null;
+      return fromScreen ?? getSeatWorldPosition(seat, sweepEvent.totalSeats);
+    });
+    const targetFor = (idx: number) => (hasWinners ? winnerTargets[idx % winnerTargets.length].clone() : houseVaultPos.clone());
+
+    // Package V3: the chips that sat in the pot all hand are the ones that fly to the winners.
+    const potChips = ctx.chips.filter((c) => c.inPot && !c.sweeping);
+    potChips.forEach((chip, idx) => {
+      chip.inPot = false;
+      chip.slot = undefined;
+      chip.settled = true;
+      chip.velocity.set(0, 0, 0);
+      chip.sweeping = true;
+      chip.sweepStart = chip.position.clone();
+      chip.sweepTarget = targetFor(idx);
+      chip.sweepProgress = 0;
+      chip.sweepDelay = Math.min(0.6, idx * 0.02);
+    });
+    const sweepDenoms = potChips.length >= 4 ? [] : [100, 50, 25, 100, 500, 50, 25, 100];
 
     sweepDenoms.forEach((denom, idx) => {
       const template = ctx.chipTemplates[denom] || ctx.chipTemplates[100];
@@ -860,12 +920,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       );
       mesh.position.copy(startPos);
 
-      const targetPos = hasWinners
-        ? getSeatWorldPosition(
-            sweepEvent.winnerSeatIndices[idx % sweepEvent.winnerSeatIndices.length],
-            sweepEvent.totalSeats
-          )
-        : houseVaultPos.clone();
+      const targetPos = targetFor(idx);
 
       ctx.scene.add(mesh);
       ctx.chips.push({
@@ -892,6 +947,22 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     ctx.spawnSparks(potCenter, hasWinners ? 36 : 14, hasWinners ? undefined : [0xff6b6b, 0xffb347, 0x8b1e1e], hasWinners ? 1.1 : 0.6);
     ctx.wake();
   }, [sweepEvent, calmMode]);
+
+  // Package V3: when the bets leave the table without a payout (a void hand, a new hand), the pot
+  // chips fade where they lie.
+  useEffect(() => {
+    if (potTotal > 0) return;
+    const ctx = sceneRef.current;
+    if (!ctx) return;
+    let any = false;
+    for (const chip of ctx.chips) {
+      if (!chip.inPot || chip.sweeping) continue;
+      chip.inPot = false;
+      chip.slot = undefined;
+      any = true;
+    }
+    if (any) ctx.wake();
+  }, [potTotal]);
 
   // Handle 3D Boomerang Parabolic Reflection Flight
   useEffect(() => {
@@ -958,7 +1029,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       <div
         ref={containerRef}
         aria-hidden="true"
-        className="fixed inset-0 pointer-events-none z-[12] overflow-hidden"
+        className="fixed inset-0 pointer-events-none overflow-hidden"
+        style={{ zIndex: behindInterface ? -1 : 12 }}
       />
       {budgetText && (
         <div className="fixed left-2 bottom-2 z-[90] px-2 py-1 rounded bg-black/75 text-white font-mono text-[11px] pointer-events-none" data-testid="budget-overlay">

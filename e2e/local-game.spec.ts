@@ -35,6 +35,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
     await c.getByRole('button', { name: h.pick }).click();
     await c.getByPlaceholder('Your bet').fill(String(h.bet));
   }
+  // Package V3: the pot plaque shows every bet on the table.
+  await expect(page.getByTestId('pot-plaque')).toContainText('$350');
   await clickButton(page, /^Reveal the answer/);
 
   for (const [name, amount] of Object.entries({ Ana: 1100, Bruno: 950, Caio: 1200 })) {

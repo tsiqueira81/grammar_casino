@@ -97,6 +97,7 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+import { potTotal } from './show/pot';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
@@ -765,6 +766,13 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // Package V3: the pot plaque counts up from the last total it showed.
+  const potNow = potTotal(bets);
+  const lastPotShown = useRef(potNow);
+  useEffect(() => {
+    lastPotShown.current = potNow;
+  }, [potNow]);
+
   // The music turns tense in the last 5 seconds of a turn timer, and drops while a sentence is read aloud.
   const [musicSecondsLeft, setMusicSecondsLeft] = useState<number | null>(null);
   useEffect(() => {
@@ -3958,6 +3966,7 @@ export function App() {
     setPotSweepEvent({
       id: `round-${currentRound}-${Date.now()}`,
       winnerSeatIndices,
+      winnerPlayerIds: activePlayers.filter(p => winnerIds.has(p.id)).map(p => p.id),
       totalSeats: Math.max(1, activePlayers.length),
     });
     // A small coin shower when someone at least doubles their stack this round
@@ -6632,6 +6641,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         </div>
                         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                           <div className="flex items-center gap-3 text-gc-small text-gc-quiet">
+                            {potNow > 0 && (
+                              <span className="gc-pot-plaque text-gc-small" data-testid="pot-plaque">
+                                <span className="gc-pot-plaque-label">Pot</span>
+                                <span className="gc-pot-plaque-amount">$<CountUp from={lastPotShown.current} to={potNow} durationMs={500} /></span>
+                              </span>
+                            )}
                             <span className="tabular-nums whitespace-nowrap">{betsReadyCount} of {unfrozenActivePlayers.length} {betsReadyWord}</span>
                             <span
                               className="block h-2 w-40 sm:w-56 rounded-full bg-gc-line/[0.08] border border-gc-line/[0.12] overflow-hidden"
@@ -7560,6 +7575,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
           jackpotEvent={jackpotEvent}
+          potTotal={step === 'IN_GAME' ? potNow : 0}
+          behindInterface={isTableView}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
         </React.Suspense>
