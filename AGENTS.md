@@ -80,6 +80,9 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
 - Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
+### Keyboard shortcuts (package T2)
+- A shortcut presses the on-screen button marked `data-hotkey="<action>"` (`utils/hotkeys.ts`), so a new control gets its shortcut by adding that attribute, and a shortcut can only do what the screen offers. Keys typed in fields are never taken. While a window is open, only its own buttons count.
+
 ### Player names and room order (package R6)
 - Every name goes through `utils/nameFilter.ts` (`safePlayerName`): printable, at most 20 characters, English blocklist (a blocked name becomes a friendly one like "Lucky Fox"), unique at the table ("Ana 2"). Phones may change their name only before the first hand.
 - A room holds at most 40 seats. A phone the teacher removes cannot join that room again: the host bans its client id and Firebase id, and the phone remembers the room for 12 hours (`grammar_casino_removed_rooms_v1`).

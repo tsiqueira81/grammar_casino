@@ -80,3 +80,52 @@ test('the teacher can pause, reveal now, undo the reveal and void the hand', asy
 
   expect(errors).toEqual([]);
 });
+
+/** Package T2: keyboard shortcuts press the same buttons. */
+test('shortcuts pause, swap, reveal now and undo with the keyboard', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno']);
+  await setUpMixedGame(page, { drop: ['Open cloze', 'Word formation', 'Key word'], hands: 3 });
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+  await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+
+  // ? shows the list, Esc closes it.
+  await page.keyboard.press('?');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0);
+
+  // P pauses and P resumes.
+  await page.keyboard.press('p');
+  await expect(page.getByRole('dialog', { name: 'Paused' })).toBeVisible();
+  await page.keyboard.press('p');
+  await expect(page.getByRole('dialog', { name: 'Paused' })).toHaveCount(0);
+
+  // S asks to swap the sentence.
+  await page.keyboard.press('s');
+  await expect(page.getByRole('dialog', { name: 'Swap this sentence?' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Swap this sentence?' })).toHaveCount(0);
+
+  // R asks to reveal now; then Z undoes the reveal.
+  await page.keyboard.press('r');
+  await page.getByRole('dialog').getByRole('button', { name: 'Reveal now' }).click();
+  await expect(page.getByRole('button', { name: /^Undo reveal/ })).toBeVisible();
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await page.keyboard.press('z');
+  await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  await expect(page.getByRole('button', { name: /^Undo reveal/ })).toHaveCount(0);
+
+  // Typing in a field never triggers a shortcut.
+  const fullCards = page.getByRole('button', { name: 'Full cards' });
+  if (await fullCards.isVisible()) await fullCards.click();
+  await card(page, 'Ana').getByPlaceholder('Your bet').fill('');
+  await card(page, 'Ana').getByPlaceholder('Your bet').press('p');
+  await expect(page.getByRole('dialog', { name: 'Paused' })).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});

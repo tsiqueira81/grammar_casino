@@ -3,6 +3,7 @@ import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
+import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
@@ -21,7 +22,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -406,6 +407,9 @@ export function App() {
   const later = useLaterTimers();
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
+  // Package T2: shortcut list and full screen for presenting.
+  const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
   isPausedRef.current = isPaused;
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
   const turnDurationMs = turnTimerSeconds * 1000;
@@ -3752,6 +3756,78 @@ export function App() {
     }
   }, [revealResultsCore]);
   
+  // Package T2: keyboard shortcuts press the matching button on screen (utils/hotkeys.ts).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      const action = hotkeyAction({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        targetTag: target?.tagName,
+        targetEditable: Boolean(target?.isContentEditable),
+      });
+      if (!action) return;
+      if (action === 'help') {
+        e.preventDefault();
+        setShowHotkeyHelp(v => !v);
+        return;
+      }
+      const button = findHotkeyButton(document, action);
+      if (!button) return;
+      e.preventDefault();
+      button.click();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Full screen: entering it also turns on projector mode.
+  useEffect(() => {
+    const onChange = () => {
+      const on = Boolean(document.fullscreenElement);
+      setIsFullscreen(on);
+      if (on) setIsProjectorMode(true);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  const handleToggleFullscreen = useCallback(() => {
+    playSound('click');
+    try {
+      if (document.fullscreenElement) void document.exitFullscreen?.();
+      else void document.documentElement.requestFullscreen?.();
+    } catch {
+      // Some browsers refuse full screen; nothing else changes.
+    }
+  }, [playSound]);
+
+  // Keep the teacher's screen awake for the whole game (Screen Wake Lock, where supported).
+  const isGameRunning = step === 'IN_GAME' || step === 'RESULTS';
+  useEffect(() => {
+    if (!isGameRunning) return;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+    if (!nav.wakeLock) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const request = () => {
+      if (document.visibilityState !== 'visible') return;
+      nav.wakeLock!.request('screen').then(l => {
+        if (cancelled) void l.release().catch(() => {});
+        else lock = l;
+      }).catch(() => {});
+    };
+    request();
+    document.addEventListener('visibilitychange', request);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', request);
+      if (lock) void lock.release().catch(() => {});
+    };
+  }, [isGameRunning]);
+
   // A pause belongs to one hand: leaving the hand ends it.
   useEffect(() => {
     if (step !== 'IN_GAME') setIsPaused(false);
@@ -4308,6 +4384,7 @@ export function App() {
                         <span className="text-gc-small font-semibold text-gc-quiet">· {phonesConnected} connected</span>
                       </span>
                       <ActionButton
+                        data-hotkey="room"
                         onClick={() => setShowMpLobbyModal(true)}
                         playSound={playSound}
                         variant="ghost"
@@ -5480,6 +5557,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     <span>{isCopied ? 'Copied' : 'Copy'}</span>
                                   </button>
                                   <button 
+                                    data-hotkey="read"
                                     onClick={() =>
                                       speakText(
                                         currentQuestionType === 'keyWordTransformation'
@@ -5741,8 +5819,15 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                                 onClick={() => {
                                                   playSound('click');
                                                   setTurnTimerSeconds(secs);
-                                                  setTurnTimers({});
-                                                  setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                                                  // Package T2: a new timer length never unlocks a player who is already locked in.
+                                                  setTurnTimers(prev => {
+                                                    const kept: typeof prev = {};
+                                                    (Object.entries(prev) as [string, PlayerTurnTimer][]).forEach(([k, t]) => {
+                                                      if (t?.status === 'locked') kept[Number(k)] = t;
+                                                    });
+                                                    return kept;
+                                                  });
+                                                  setMpRoundTimer(prev => (prev.status === 'locked' ? prev : { status: 'idle', remainingMs: secs * 1000 }));
                                                   mpAutoStartedRoundRef.current = 0;
                                                 }}
                                                 className={`h-8 rounded-gc-sm border text-gc-small font-bold tabular-nums transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
@@ -5931,6 +6016,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     <div className="flex items-center gap-3 flex-wrap">
                       <button
                         type="button"
+                        data-hotkey="room"
                         onClick={() => {
                           playSound('click');
                           setShowMpLobbyModal(true);
@@ -6231,6 +6317,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
                   <div className={`rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
                     <ActionButton 
+                      data-hotkey="primary"
                       onClick={handleRevealResults} 
                       playSound={playSound} 
                       variant="primary"
@@ -6278,6 +6365,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           onConfirm: () => { void handleRevealResults(true); },
                         });
                       }}
+                      data-hotkey="reveal-now"
                       className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Teacher only: reveal the answer without waiting for everyone"
                     >
@@ -6289,6 +6377,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     type="button"
                     disabled={isLoading || isProcessing}
                     onClick={() => { playSound('click'); setIsPaused(true); }}
+                    data-hotkey="pause"
                     className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Teacher only: stop the timers and the phones for a moment"
                   >
@@ -6307,6 +6396,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         onConfirm: handleSwapSentence,
                       });
                     }}
+                    data-hotkey="swap"
                     className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Teacher only: deal a different sentence for this hand"
                   >
@@ -6715,6 +6805,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                   <div className="flex-1 flex justify-start gap-2 flex-wrap">
                     {isUndoRevealOpen && (
                       <ActionButton
+                        data-hotkey="undo-reveal"
                         onClick={handleUndoReveal}
                         variant="secondary"
                         className="h-10 px-4 text-gc-small font-semibold"
@@ -6752,7 +6843,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to cloud</span>
                     </ActionButton>
                   </div>
-                  <ActionButton onClick={handleNextRound} playSound={playSound} variant="primary" className="min-h-[60px] text-gc-lead py-3 px-10">
+                  <ActionButton data-hotkey="primary" onClick={handleNextRound} playSound={playSound} variant="primary" className="min-h-[60px] text-gc-lead py-3 px-10">
                       <span className="inline-flex items-center gap-2.5">
                         {isGameOver ? 'See the final results' : 'Deal the next hand'}
                         <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
@@ -7033,6 +7124,28 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
           <button
             type="button"
+            data-hotkey="fullscreen"
+            onClick={handleToggleFullscreen}
+            className="!hidden sm:!inline-flex w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer"
+            aria-pressed={isFullscreen}
+            aria-label={isFullscreen ? 'Leave full screen' : 'Full screen'}
+            title={isFullscreen ? 'Leave full screen (F)' : 'Full screen (F)'}
+          >
+            {isFullscreen ? <Minimize className="w-5 h-5" aria-hidden="true" /> : <Maximize className="w-5 h-5" aria-hidden="true" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { playSound('click'); setShowHotkeyHelp(true); }}
+            className="!hidden sm:!inline-flex w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="w-5 h-5" aria-hidden="true" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               playSound('click');
               setIsProjectorMode(prev => !prev);
@@ -7050,6 +7163,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           {audioReady && (
             <div className="group relative inline-flex items-center">
               <button
+                data-hotkey="mute"
                 onClick={() => {
                   const newMutedState = !isMuted;
                   setIsMuted(newMutedState);
@@ -7161,13 +7275,26 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             </div> 
         </Modal>
       }
+      {showHotkeyHelp && (
+        <Modal title="Keyboard shortcuts" onClose={() => setShowHotkeyHelp(false)} playSound={playSound}>
+          <p className="text-gc-body text-gc-ink mb-4">A presenter clicker works too: its buttons send Page Down and Page Up.</p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-gc-body text-gc-ink">
+            {HOTKEY_HELP.map(h => (
+              <React.Fragment key={h.keys}>
+                <dt className="font-bold whitespace-nowrap">{h.keys}</dt>
+                <dd>{h.action}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        </Modal>
+      )}
       {isPaused && step === 'IN_GAME' && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
           <div className="w-full max-w-md rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-8 text-center space-y-5 text-gc-ink">
             <Pause className="w-12 h-12 mx-auto text-gc-gold" aria-hidden="true" />
             <h2 id="gc-pause-title" className="text-gc-h2 font-bold">Paused</h2>
             <p className="text-gc-body">Timers are stopped{mpRoomCode ? ' and phones are on hold' : ''}. Nothing is lost.</p>
-            <ActionButton onClick={() => setIsPaused(false)} playSound={playSound} variant="primary" className="min-h-[52px] w-full text-gc-lead">
+            <ActionButton data-hotkey="pause" onClick={() => setIsPaused(false)} playSound={playSound} variant="primary" className="min-h-[52px] w-full text-gc-lead">
               <span className="inline-flex items-center gap-2"><Play className="w-5 h-5 shrink-0" aria-hidden="true" />Resume the hand</span>
             </ActionButton>
           </div>
