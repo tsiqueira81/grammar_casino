@@ -101,6 +101,8 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - A room holds at most 40 seats. A phone the teacher removes cannot join that room again: the host bans its client id and Firebase id, and the phone remembers the room for 12 hours (`grammar_casino_removed_rooms_v1`).
 
 ### Game modes and elimination
+- A new game starts in `rounds` ("Most money after N hands", package G3); saved games keep their own mode.
+- Single-screen play: a player at $0 is bankrupt and out for good in every mode (package G9). They stay visible with a "Bankrupt" tag. The Second Chance power-up gives $300 at settlement when a balance would hit $0; it never rescues a player already at $0. Bets of $0 stay valid; there is no ante.
 - `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled` in `game/flow.ts`). When the game ends and who wins is decided only in `game/flow.ts`.
 - `rounds` and `targetAmount`: in a live room, a bankrupt player gets the $150 House Bailout at the start of the next hand.
 

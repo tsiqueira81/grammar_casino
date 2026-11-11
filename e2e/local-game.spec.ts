@@ -72,3 +72,44 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+/** Package G3: a new game starts in "Most money after N hands"; the other modes stay selectable. */
+test('a new game starts in the set-number-of-hands mode', async ({ page }) => {
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno']);
+  await page.getByRole('button', { name: 'Set up the game' }).click();
+  await page.getByRole('button', { name: /Mixed/ }).first().click();
+  await page.getByRole('button', { name: 'Next: house rules' }).click();
+  await expect(page.getByRole('button', { name: /Set number of hands/ })).toHaveAttribute('aria-pressed', 'true');
+  const last = page.getByRole('button', { name: /Last player standing/ });
+  await last.click();
+  await expect(last).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /Target amount/ })).toBeVisible();
+});
+
+/** Package G9: in single-screen play a player at $0 is bankrupt for good, and the game goes on. */
+test('a player who loses everything is shown as bankrupt and the others play on', async ({ page }) => {
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno', 'Caio']);
+  await setUpMixedGame(page, { drop: ['Open cloze', 'Word formation', 'Key word'], hands: 3 });
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+  await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  const isValid = (await sentence(page).innerText()).includes('Lisbon');
+  const right = isValid ? /^Valid/ : /^Flawed/;
+  const wrong = isValid ? /^Flawed/ : /^Valid/;
+
+  await page.getByRole('button', { name: 'Full cards' }).click();
+  await card(page, 'Ana').getByRole('button', { name: wrong }).click();
+  await card(page, 'Ana').getByPlaceholder('Your bet').fill('1000');
+  for (const name of ['Bruno', 'Caio']) {
+    await card(page, name).getByRole('button', { name: right }).click();
+    await card(page, name).getByPlaceholder('Your bet').fill('100');
+  }
+  await clickButton(page, /^Reveal the answer/);
+  await expectResultBalance(page, 'Ana', 0);
+
+  await clickButton(page, 'Deal the next hand');
+  await expect(sentence(page)).toBeVisible();
+  await expect(page.getByText(/bankrupt/i).first()).toBeVisible();
+  await expect(page.getByText('Out until the next hand')).toHaveCount(0);
+});

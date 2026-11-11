@@ -280,7 +280,8 @@ export function App() {
   const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
   const mixedFormatIndexRef = useRef(0);
   
-  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'lastPlayer');
+  // Package G3: a new game starts in "Most money after N hands", the gentlest start for a class.
+  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'rounds');
   const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || 10);
   const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || DEFAULT_TARGET_AMOUNT);
   const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
@@ -4061,7 +4062,7 @@ export function App() {
     mixedFormatIndexRef.current = 0;
     setCustomTopic('');
     setCustomTheme('');
-    setGameMode('lastPlayer');
+    setGameMode('rounds');
     setTotalRounds(10);
     setTargetAmount(DEFAULT_TARGET_AMOUNT);
     setCurrentRound(1);
@@ -5066,11 +5067,11 @@ export function App() {
                 {/* How to win */}
                 <section className={sectionCls} aria-labelledby="setup-win">
                   <h2 id="setup-win" className={sectionTitle}>How to win</h2>
-                  <p className={sectionHint}>When the game ends and who is the winner.</p>
+                  <p className={sectionHint}>When the game ends and who is the winner. A player who reaches $0 is bankrupt and out for good{mpRoomCode && gameMode !== 'lastPlayer' ? ', except in a live room, where they get a $150 House Bailout at the next hand' : ''}.</p>
                   <div className="mt-4 grid md:grid-cols-3 gap-2.5">
                     {([
-                      { mode: 'lastPlayer' as const, icon: '👑', title: 'Last player standing', text: 'Play until only one player has money left.' },
                       { mode: 'rounds' as const, icon: '⏳', title: 'Set number of hands', text: 'The most money after the last hand wins.' },
+                      { mode: 'lastPlayer' as const, icon: '👑', title: 'Last player standing', text: 'Play until only one player has money left.' },
                       { mode: 'targetAmount' as const, icon: '🎯', title: 'Target amount', text: 'The first player to reach the target wins.' },
                     ]).map(opt => {
                       const isSelected = gameMode === opt.mode;
@@ -6226,7 +6227,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               }`}
                             >
                               {isBankrupt ? (
-                                <span>{gameMode === 'lastPlayer' ? 'Out of money' : 'Out until the next hand'}</span>
+                                <span>{gameMode === 'lastPlayer' ? 'Bankrupt' : 'Out until the next hand'}</span>
                               ) : isFrozen ? (
                                 <span>Frozen this hand</span>
                               ) : isBetReady ? (
@@ -6384,7 +6385,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             setIsSentenceHeaderStuck(true);
                             setOpenSeatPlayerId(id);
                           }}
-                          outLabel="Eliminated"
+                          outLabel="Bankrupt"
                           projectorMode={isProjectorMode}
                         />
                       )
