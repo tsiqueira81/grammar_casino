@@ -41,7 +41,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag, Bot, CircleHelp } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -104,6 +104,11 @@ import { lookForTheme } from './show/looks';
 import { LENGTH_PRESETS, estimateMinutes, handsLeftNote } from './game/gameLength';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
+import FirstRunCoach from './components/FirstRunCoach';
+import { DemoRoomController, type HostRoomLike } from './services/demoRoom';
+import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
+import { DEMO_BOT_COUNT } from './game/demoBots';
+import { isE2eMode } from './utils/e2eContent';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -529,7 +534,12 @@ export function App() {
   const [mpStudentNotifications, setMpStudentNotifications] = useState<
     Record<number, { id: string; title: string; message: string; icon?: string } | null>
   >({});
-  const mpControllerRef = useRef<HostRoomController | null>(null);
+  const mpControllerRef = useRef<HostRoomLike | null>(null);
+  // Package T7: a demo room with bots. While it runs nothing is saved, so ending it (a page
+  // reload) brings back exactly what was there before.
+  const [isDemoRoom, setIsDemoRoom] = useState(false);
+  const [showCoach, setShowCoach] = useState(false);
+  const isDemoRef = useRef(false);
   const mpEventHandlerRef = useRef<(ev: HostEventPayload) => void>(() => {});
 
   // Desktop AI Engine and DPAPI Encryption status
@@ -583,6 +593,28 @@ export function App() {
 
   // The vault asks for the teacher's Google sign-in itself (the Firestore rules require it),
   // so it opens straight away.
+  const startDemoRoom = () => {
+    if (mpControllerRef.current) return;
+    playSound('startGame');
+    isDemoRef.current = true;
+    setIsDemoRoom(true);
+    const controller = new DemoRoomController((ev) => mpEventHandlerRef.current(ev));
+    mpControllerRef.current = controller;
+    setMpRoomCode(controller.code);
+    setMpRoomLocked(false);
+    setMpHostConnected(true);
+  };
+  const endDemoRoom = () => {
+    mpControllerRef.current?.destroy();
+    mpControllerRef.current = null;
+    window.location.reload();
+  };
+
+  const closeCoach = () => {
+    setShowCoach(false);
+    safeLocalStorage.setItem(COACH_SEEN_KEY, 'seen');
+  };
+
   const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
     playSound('click');
     setCloudModalTab(tab);
@@ -1508,6 +1540,7 @@ export function App() {
 
   // Save game state
   useEffect(() => { 
+    if (isDemoRef.current) return;
     try { 
       const gameState = { 
         step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
@@ -3476,6 +3509,10 @@ export function App() {
 
   const handleCloseMpRoom = useCallback(() => {
     playSound('click');
+    if (isDemoRef.current) {
+      endDemoRoom();
+      return;
+    }
     if (mpControllerRef.current) {
       mpControllerRef.current.destroy();
       mpControllerRef.current = null;
@@ -3552,6 +3589,21 @@ export function App() {
       }
     };
     // Runs once on load; the phone view never hosts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Package T7: the coach opens by itself on this computer's first visit to the lobby.
+  useEffect(() => {
+    let forced = false;
+    try {
+      forced = new URLSearchParams(window.location.search).get('coach') === '1';
+    } catch {
+      forced = false;
+    }
+    if (shouldShowCoach({ seen: safeLocalStorage.getItem(COACH_SEEN_KEY), step, studentPhone: isStudentControllerMode, testMode: isE2eMode(), forced })) {
+      setShowCoach(true);
+    }
+    // Only on load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -4169,7 +4221,7 @@ export function App() {
     });
   }, [roundHistory, winner, players, settings, gameMode, totalRounds, targetAmount]);
   useEffect(() => {
-    if (step === 'GAME_OVER') archiveGame(Date.now());
+    if (step === 'GAME_OVER' && !isDemoRef.current) archiveGame(Date.now());
     // Only when the game ends; archiveGame changes with every state change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -4335,6 +4387,10 @@ export function App() {
   }, [players, gameMode, targetAmount, playSound]);
 
   const handleRestartGame = useCallback(() => {
+    if (isDemoRef.current) {
+      endDemoRoom();
+      return;
+    }
     safeLocalStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     // Automatically close any open multiplayer room on restart / returning to lobby
@@ -4784,6 +4840,7 @@ export function App() {
                         Room {mpRoomCode}
                         <span className="text-gc-small font-semibold text-gc-quiet">· {phonesConnected} connected</span>
                       </span>
+                      {!isDemoRoom && (
                       <ActionButton
                         data-hotkey="room"
                         onClick={() => setShowMpLobbyModal(true)}
@@ -4793,19 +4850,31 @@ export function App() {
                       >
                         <span className="inline-flex items-center gap-1.5"><QrCode className="w-4 h-4 shrink-0" aria-hidden="true" />Show the QR code</span>
                       </ActionButton>
+                      )}
                     </>
                   ) : (
-                    <ActionButton
-                      onClick={handleCreateMpRoom}
-                      variant="ghost"
-                      className="h-12 px-5 text-gc-body font-bold"
-                      title="Open a live room with a QR code"
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
-                        Open a live room
-                      </span>
-                    </ActionButton>
+                    <>
+                      <ActionButton
+                        onClick={handleCreateMpRoom}
+                        variant="ghost"
+                        className="h-12 px-5 text-gc-body font-bold"
+                        title="Open a live room with a QR code"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          Open a live room
+                        </span>
+                      </ActionButton>
+                      <button
+                        type="button"
+                        onClick={startDemoRoom}
+                        className="h-12 px-4 inline-flex items-center gap-1.5 rounded-gc-sm text-gc-body font-semibold text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.06] cursor-pointer"
+                        title={`Try a room alone: ${DEMO_BOT_COUNT} bots join and bet. Nothing is saved.`}
+                      >
+                        <Bot className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        Demo with bots
+                      </button>
+                    </>
                   )}
                   <button
                     type="button"
@@ -4817,6 +4886,17 @@ export function App() {
                     title="Use this device as a student phone and join a room"
                   >
                     Join a room as a student
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setShowCoach(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-gc-small font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 decoration-gc-line/30 cursor-pointer"
+                  >
+                    <CircleHelp className="w-3.5 h-3.5" aria-hidden="true" />
+                    How it works
                   </button>
                 </div>
               </section>
@@ -7652,6 +7732,31 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             winnerName: winner?.name ?? null,
           })}
         />
+        {showCoach && (
+          <FirstRunCoach
+            onClose={closeCoach}
+            onDemo={mpRoomCode ? null : () => {
+              closeCoach();
+              startDemoRoom();
+            }}
+          />
+        )}
+        {isDemoRoom && (
+          <div
+            data-testid="demo-banner"
+            className="fixed bottom-4 left-4 z-40 max-w-[calc(100vw-2rem)] h-11 pl-3 pr-1.5 inline-flex items-center gap-2 rounded-full gc-panel shadow-gc-2 text-gc-small font-semibold text-gc-ink"
+          >
+            <Bot className="w-4 h-4 text-gc-gold shrink-0" aria-hidden="true" />
+            <span className="truncate">Demo with {DEMO_BOT_COUNT} bots. Nothing is saved.</span>
+            <button
+              type="button"
+              onClick={endDemoRoom}
+              className="h-8 px-3 rounded-full bg-gc-line/[0.08] hover:bg-gc-line/[0.16] font-bold cursor-pointer"
+            >
+              End demo
+            </button>
+          </div>
+        )}
         <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
