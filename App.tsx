@@ -563,6 +563,21 @@ export function App() {
   const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
   // Package L5: "Got it" / "Still confused" from the phones, per hand.
   const [handReactions, setHandReactions] = useState<HandReactions>({});
+  // Package L7: the phones' "Got it" / "Still confused" counts go into each hand's record, so the
+  // report and past reports keep them.
+  useEffect(() => {
+    setRoundHistory(prev => {
+      let changed = false;
+      const next = prev.map(r => {
+        if (!handReactions[r.round]) return r;
+        const c = reactionCounts(handReactions, r.round);
+        if (r.feedback && r.feedback.gotIt === c.gotIt && r.feedback.confused === c.confused) return r;
+        changed = true;
+        return { ...r, feedback: c };
+      });
+      return changed ? next : prev;
+    });
+  }, [handReactions]);
   const [undoClock, setUndoClock] = useState(() => Date.now());
   const [showRulingModal, setShowRulingModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -2119,6 +2134,7 @@ export function App() {
     setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
     setStep('IN_GAME');
     setRoundHistory([]);
+    setHandReactions({});
     setBets({});
     setHints({});
     setRoundResults([]);
@@ -8676,6 +8692,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 onConfirm: () => {
                   archiveGame(Date.now());
                   setRoundHistory([]);
+                  setHandReactions({});
                   setRoundResults([]);
                   setCurrentRound(1);
                   setCurrentSentence(null);

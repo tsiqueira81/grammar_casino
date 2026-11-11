@@ -39,6 +39,14 @@ export interface MissedItem {
   popularWrongAnswer: string | null;
 }
 
+/** Package L7: a hand where students said "Still confused" on their phones. */
+export interface ConfusedItem {
+  round: number;
+  text: string;
+  confused: number;
+  gotIt: number;
+}
+
 export interface GameReport {
   hands: number;
   bets: number;
@@ -53,6 +61,8 @@ export interface GameReport {
   byType: ReportArea[];
   mostMissed: MissedItem[];
   teachNext: string[];
+  /** Hands with at least one "Still confused", most confused first. */
+  stillConfused: ConfusedItem[];
 }
 
 const TYPE_LABEL: Record<QuestionType, string> = {
@@ -164,6 +174,11 @@ export function buildReport(history: RoundHistoryRecord[], players: Player[]): G
     byType,
     mostMissed: mostMissed.sort((a, b) => b.missed / b.bets - a.missed / a.bets || b.missed - a.missed).slice(0, 5),
     teachNext,
+    stillConfused: history
+      .filter((r) => (r.feedback?.confused ?? 0) > 0)
+      .map((r) => ({ round: r.round, text: r.sentence.text, confused: r.feedback!.confused, gotIt: r.feedback!.gotIt }))
+      .sort((a, b) => b.confused - a.confused || a.round - b.round)
+      .slice(0, 5),
   };
 }
 

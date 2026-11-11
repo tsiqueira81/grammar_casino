@@ -253,4 +253,6 @@ export interface RoundHistoryRecord {
   theme: string;
   playerResults: RoundPlayerResult[];
   timestamp?: number;
+  /** Package L7: "Got it" / "Still confused" answers from phones after the reveal (package L5). */
+  feedback?: { gotIt: number; confused: number };
 }

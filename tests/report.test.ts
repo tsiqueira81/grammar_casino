@@ -68,3 +68,19 @@ describe('classResultLine (package V9)', () => {
     expect(classResultLine(buildReport(even, players))).toBe('Together you got 100% right.');
   });
 });
+
+describe('still confused in the report (package L7)', () => {
+  it('lists hands with "Still confused" answers, most confused first', () => {
+    const withFeedback = [
+      { ...history[0], feedback: { gotIt: 1, confused: 1 } },
+      { ...history[1], feedback: { gotIt: 0, confused: 2 } },
+      { ...history[2], feedback: { gotIt: 3, confused: 0 } },
+    ];
+    const r = buildReport(withFeedback, players);
+    expect(r.stillConfused.map(c => [c.round, c.confused, c.gotIt])).toEqual([[2, 2, 0], [1, 1, 1]]);
+  });
+
+  it('is empty when no phone answered', () => {
+    expect(buildReport(history, players).stillConfused).toEqual([]);
+  });
+});

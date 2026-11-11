@@ -409,6 +409,23 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
           </div>
         )}
 
+        {/* Package L7: hands students said they are still confused about (from their phones) */}
+        {report.stillConfused.length > 0 && (
+          <div className="mb-5 p-4 rounded-gc bg-gc-info/[0.07] border border-gc-info/25" data-testid="report-still-confused">
+            <div className={label}>Still confused</div>
+            <ol className="m-0 mt-1 pl-5 text-gc-small text-gc-ink space-y-1.5">
+              {report.stillConfused.map(c => (
+                <li key={c.round}>
+                  <span className="font-sentence italic">{c.text}</span>
+                  <span className="block text-gc-quiet">
+                    Hand {c.round}: {c.confused} still confused · {c.gotIt} got it
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
         {/* Which hands to show */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-gc-line/[0.12] print:hidden">
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Show">
