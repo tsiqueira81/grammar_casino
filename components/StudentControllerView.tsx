@@ -22,6 +22,7 @@ import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
 import { canVibrate, haptic, hapticsEnabled, setHapticsEnabled } from '../utils/haptics';
 import CountUp from './CountUp';
+import { t } from '../strings/en';
 import PowerUpSheet, { type PowerUpSheetInfo } from './PowerUpSheet';
 import { generateFriendlyName } from '../utils/nameFilter';
 import { addClockSample, clockOffset, toLocalTimer } from '../utils/clockSync';
@@ -613,52 +614,27 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
       let message = '';
       let missingField: 'answer' | 'wager' | 'both' = 'both';
+      // Package S3: plain messages, from strings/en.ts.
+      const word = `"${(view.sentence?.baseWord || '').toUpperCase()}"`;
+      const split = hasSplitBet && (qType === 'multipleChoice' || qType === 'openCloze') ? 'Split' : '';
       if (isUnchangedBaseWord) {
         missingField = 'answer';
-        message = `Hold on! "${(view.sentence?.baseWord || '').toUpperCase()}" is the unchanged base word. Transform its form (e.g. add a prefix or suffix) before locking in!`;
+        message = t('lock.baseWordUnchanged', { word });
       } else if (isInvalidKwtAnswer) {
         missingField = 'answer';
-        message = `Hold on! Use 2 to 6 words and include the exact unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
+        message = t('lock.kwtRule', { word });
       } else if (!hasValidAnswer && !hasValidWager) {
         missingField = 'both';
-        if (qType === 'multipleChoice') {
-          message = hasSplitBet
-            ? 'Hold on! Pick 2 options (50/50) or tap 1 option twice for 100% (2×), and enter a wager amount before locking in.'
-            : 'Hold on! Choose an option (A–D) in Step 1 and enter a wager amount in Step 2 before locking in.';
-        } else if (qType === 'keyWordTransformation') {
-          message = `Hold on! Complete the gap in 2–6 words using "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" unchanged in Step 1 and enter a wager in Step 2.`;
-        } else if (qType === 'wordFormation') {
-          message = `Hold on! Transform (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) in Step 1 and enter a wager amount in Step 2 before locking in.`;
-        } else if (qType === 'openCloze') {
-          message = hasSplitBet
-            ? 'Hold on! Type at least 1 candidate word in Step 1 and enter a wager amount in Step 2 before locking in.'
-            : 'Hold on! Type the missing word in Step 1 and enter a wager amount in Step 2 before locking in.';
-        } else {
-          message = 'Hold on! Choose Valid or Flawed in Step 1 and enter a wager amount in Step 2 before locking in.';
-        }
+        message = t(`lock.needBoth.${qType}${split}` as Parameters<typeof t>[0], { word });
       } else if (!hasValidAnswer) {
         missingField = 'answer';
-        if (qType === 'multipleChoice') {
-          message = hasSplitBet
-            ? 'Step 1 Incomplete: Pick 2 options (50/50) or tap the same option twice for 100% (2×) before locking in!'
-            : 'Step 1 Incomplete: Please choose an option (A, B, C, or D) before locking in!';
-        } else if (qType === 'keyWordTransformation') {
-          message = `Step 1 Incomplete: Type 2 to 6 words including the unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
-        } else if (qType === 'wordFormation') {
-          message = `Step 1 Incomplete: Please transform the base word (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) to fit the gap before locking in!`;
-        } else if (qType === 'openCloze') {
-          message = hasSplitBet
-            ? 'Step 1 Incomplete: Please type at least 1 candidate word before locking in!'
-            : 'Step 1 Incomplete: Please type the missing word before locking in!';
-        } else {
-          message = 'Step 1 Incomplete: Please choose Valid (✓) or Flawed (✕) before locking in!';
-        }
+        message = t(`lock.needAnswer.${qType}${split}` as Parameters<typeof t>[0], { word });
       } else {
         missingField = 'wager';
         message =
           view.isHighRoller && view.minBetAmount > 0
-            ? `🔥 High Roller Fever Active: Your minimum wager this round is $${view.minBetAmount.toLocaleString()} (50% of your bankroll)!`
-            : 'Step 2 Incomplete: Please enter a wager amount ($1 or more, or tap a quick chip) before locking in!';
+            ? t('lock.highRollerMin', { amount: `$${view.minBetAmount.toLocaleString()}` })
+            : t('lock.needBet');
       }
 
       setLockWarning({ message, missingField });
@@ -1843,13 +1819,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           const moved = view.round > 1 ? placeBefore - placeNow : 0;
           const placeText = standings.length > 1
             ? `${moved > 0 ? `Up ${moved} place${moved === 1 ? '' : 's'}, now` : moved < 0 ? `Down ${-moved} place${moved === -1 ? '' : 's'}, now` : 'You are'} ${ordinal(placeNow)} of ${standings.length}.`
-              + (ahead ? ` ${money(ahead.money - view.me.money + 1)} more to pass ${ahead.name}.` : ' You are in the lead.')
+              + (ahead ? ` ${t('results.toPass', { amount: money(ahead.money - view.me.money + 1), name: ahead.name })}` : ` ${t('results.lead')}`)
             : null;
           if (revealBuilding) {
             return (
               <div className="pt-16 flex flex-col items-center text-center animate-gc-fade" role="status" aria-live="polite" data-testid="reveal-build">
                 <div className="w-[120px] h-[120px] rounded-full grid place-items-center bg-gc-gold/15 text-gc-money animate-gc-ring text-[44px]" aria-hidden="true">🂠</div>
-                <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">And the answer is…</h1>
+                <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">{t('results.build')}</h1>
               </div>
             );
           }
@@ -1946,28 +1922,28 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     </p>
                   )}
                   {alsoAccepted.length > 0 && (
-                    <p className="m-0 text-gc-small text-gc-quiet">Also right: {alsoAccepted.join(', ')}</p>
+                    <p className="m-0 text-gc-small text-gc-quiet">{t('results.alsoRight', { answers: alsoAccepted.join(', ') })}</p>
                   )}
                   {!isClozeRound && !s.isCorrect && s.errorPhrase && (
                     <p className="m-0 text-gc-small text-gc-quiet">
-                      The mistake: <b className="text-gc-ink">{s.errorPhrase}</b>
+                      {t('results.mistake')}<b className="text-gc-ink">{s.errorPhrase}</b>
                       {s.mistakeType ? ` (${s.mistakeType})` : ''}
                     </p>
                   )}
                   {myAnswer && (
                     <p className="m-0 text-[15px] text-gc-ink" data-testid="my-answer">
-                      <span className="font-bold">Your answer: </span>
+                      <span className="font-bold">{t('results.yourAnswer')}</span>
                       {myAnswer}
                     </p>
                   )}
                   {s.explanation && (
                     <p className="m-0 pt-2 border-t border-gc-line/[0.1] text-[15px] leading-relaxed text-gc-ink">
-                      <span className="font-bold">Why: </span>
+                      <span className="font-bold">{t('results.why')}</span>
                       {s.explanation}
                     </p>
                   )}
-                  <div className="pt-2 flex gap-2" role="group" aria-label="Did this make sense?">
-                    {([['gotIt', 'Got it'], ['confused', 'Still confused']] as const).map(([value, label]) => (
+                  <div className="pt-2 flex gap-2" role="group" aria-label={t('results.didThisMakeSense')}>
+                    {([['gotIt', t('results.gotIt')], ['confused', t('results.stillConfused')]] as const).map(([value, label]) => (
                       <button
                         key={value}
                         type="button"
@@ -2009,7 +1985,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 </ol>
               </div>
 
-              <p className="text-center text-gc-small text-gc-quiet pt-1 text-balance">The next hand appears here when the teacher deals it.</p>
+              <p className="text-center text-gc-small text-gc-quiet pt-1 text-balance">{t('results.nextHand')}</p>
             </div>
           );
         })()}
@@ -2274,21 +2250,21 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
       {/* Power-up news for this player (package S5): toasts that stack and fade, never blocking */}
       <div className="fixed top-2 inset-x-0 z-40 px-3 flex flex-col items-center gap-2 pointer-events-none" role="status" aria-live="polite" data-testid="toasts">
-        {toasts.map(t => {
-          const key = powerUpInTitle(t.title);
+        {toasts.map(toast => {
+          const key = powerUpInTitle(toast.title);
           return (
-            <div key={t.id} className="pointer-events-auto w-full max-w-md gc-surface rounded-[18px] shadow-lg px-4 py-3 flex items-start gap-3 animate-gc-slide-up" data-testid="toast">
-              <span className="text-[28px] leading-none" aria-hidden="true">{t.icon || '✨'}</span>
+            <div key={toast.id} className="pointer-events-auto w-full max-w-md gc-surface rounded-[18px] shadow-lg px-4 py-3 flex items-start gap-3 animate-gc-slide-up" data-testid="toast">
+              <span className="text-[28px] leading-none" aria-hidden="true">{toast.icon || '✨'}</span>
               <div className="min-w-0 flex-1">
-                <p className="m-0 text-[16px] font-extrabold text-gc-ink">{t.title}</p>
-                <p className="m-0 text-[15px] text-gc-ink whitespace-pre-line">{t.message}</p>
+                <p className="m-0 text-[16px] font-extrabold text-gc-ink">{toast.title}</p>
+                <p className="m-0 text-[15px] text-gc-ink whitespace-pre-line">{toast.message}</p>
                 {key && (
-                  <button type="button" onClick={() => { setSheet({ key }); dismissToast(t.id); }} className="mt-1 min-h-[32px] text-[14px] font-bold text-gc-info underline underline-offset-4 cursor-pointer">
-                    What does it do?
+                  <button type="button" onClick={() => { setSheet({ key }); dismissToast(toast.id); }} className="mt-1 min-h-[32px] text-[14px] font-bold text-gc-info underline underline-offset-4 cursor-pointer">
+                    {t('powerUp.whatDoesItDo')}
                   </button>
                 )}
               </div>
-              <button type="button" onClick={() => dismissToast(t.id)} className="w-9 h-9 shrink-0 grid place-items-center rounded-full text-gc-quiet cursor-pointer" aria-label="Dismiss">
+              <button type="button" onClick={() => dismissToast(toast.id)} className="w-9 h-9 shrink-0 grid place-items-center rounded-full text-gc-quiet cursor-pointer" aria-label={t('powerUp.dismiss')}>
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>

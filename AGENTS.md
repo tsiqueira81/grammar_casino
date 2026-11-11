@@ -103,6 +103,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Typed gap answers (open cloze, word formation, key word) are compared with `normalizeGapAnswer` (`utils/roundSettlement.ts`): case, spaces and curly apostrophes never matter; contractions do. Key every answer lookup with it.
 - Phone vibrations go through `utils/haptics.ts` (`haptic(kind)`): it respects the student's own on/off button and the teacher's Calm mode. At the reveal the phone shows "And the answer is…" for 1.2 s (skipped in Calm mode and with reduced motion), then the result, its place and the gap to the next place.
 - On the phone, every power-up chip opens `components/PowerUpSheet.tsx` (plain description, who it affects, when it ends). Power-up news is a stack of toasts that fade after 7 s; never put a blocking window in front of the betting card.
+- Phone wording lives in `strings/en.ts`, read with `t(key, vars)`: plain A2 English, 12 words or fewer per message (a test checks), no "wager" or "bankroll". English only: never add a second dictionary. Put new phone messages there; older phone text is moved there as it is touched.
 - The phone must not import `utils/roundSettlement.ts` (it pulls in the AI service and grows the phone bundle).
 - A room holds at most 40 seats. A phone the teacher removes cannot join that room again: the host bans its client id and Firebase id, and the phone remembers the room for 12 hours (`grammar_casino_removed_rooms_v1`).
 
