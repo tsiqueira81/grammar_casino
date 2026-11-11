@@ -109,6 +109,7 @@ import { DemoRoomController, type HostRoomLike } from './services/demoRoom';
 import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
 import { DEMO_BOT_COUNT } from './game/demoBots';
 import { isE2eMode } from './utils/e2eContent';
+import { classListMatch } from './game/classList';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -3298,6 +3299,11 @@ export function App() {
         const { playerId, avatar } = seat;
         playSound('addPlayer');
         setPlayers(prev => {
+          // Package T4: with a class loaded, a phone named like a listed student takes that place.
+          if (activeCloudRoster && step === 'PLAYER_SETUP' && !prev.some(p => p.id === playerId)) {
+            const at = classListMatch(prev, Object.keys(mpSeatsRef.current).map(Number), seat.name);
+            if (at !== -1) return prev.map((p, i) => (i === at ? { ...p, id: playerId, avatar: avatar || p.avatar } : p));
+          }
           // Package R6: classroom-safe and unique at the table ("Ana 2").
           const name = safePlayerName(seat.name, prev.filter(p => p.id !== playerId).map(p => p.name));
           if (prev.some(p => p.id === playerId)) {
@@ -3499,6 +3505,7 @@ export function App() {
     handleApplyWheelResult,
     handleUpdatePlayerName,
     mpSeats,
+    activeCloudRoster,
     isPlayerFrozen,
     currentRound,
   ]);
@@ -8474,6 +8481,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           players={players}
           seats={mpSeats}
           onCreateRoom={handleCreateMpRoom}
+          classListName={activeCloudRoster?.className ?? null}
           onToggleLockRoom={handleToggleLockMpRoom}
           onKickPlayer={handleKickMpPlayer}
           onCloseRoom={handleCloseMpRoom}
