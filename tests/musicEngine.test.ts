@@ -114,3 +114,31 @@ describe('the scheduler', () => {
     expect(engine.getLayer()).toBe('tension');
   });
 });
+
+describe('music follows the timer and the voice (package V6)', () => {
+  it('counts down from the soonest running timer only', async () => {
+    const { secondsLeftOnTimers, layerForStep } = await import('../utils/musicEngine');
+    const now = 100_000;
+    const timers = [
+      { status: 'running', endsAt: now + 9_000 },
+      { status: 'running', endsAt: now + 4_200 },
+      { status: 'running', endsAt: now + 1_000, held: true },
+      { status: 'paused', remainingMs: 500 },
+      { status: 'locked' },
+    ];
+    expect(secondsLeftOnTimers(timers, now)).toBe(5);
+    expect(layerForStep('IN_GAME', secondsLeftOnTimers(timers, now))).toBe('tension');
+    expect(secondsLeftOnTimers([{ status: 'running', endsAt: now + 9_000 }], now)).toBe(9);
+    expect(layerForStep('IN_GAME', 9)).toBe('think');
+    expect(secondsLeftOnTimers([{ status: 'idle' }], now)).toBeNull();
+    expect(secondsLeftOnTimers([{ status: 'running', endsAt: now - 3_000 }], now)).toBe(0);
+  });
+
+  it('drops the music while a sentence is read aloud', async () => {
+    const { musicDuckFor } = await import('../utils/musicEngine');
+    expect(musicDuckFor('IN_GAME', false)).toBe(1);
+    expect(musicDuckFor('IN_GAME', true)).toBe(0.35);
+    expect(musicDuckFor('RESULTS', false)).toBe(0.3);
+    expect(musicDuckFor('RESULTS', true)).toBe(0.3);
+  });
+});

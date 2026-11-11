@@ -97,7 +97,7 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
-import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep } from './utils/musicEngine';
+import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
@@ -765,10 +765,25 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // The music turns tense in the last 5 seconds of a turn timer, and drops while a sentence is read aloud.
+  const [musicSecondsLeft, setMusicSecondsLeft] = useState<number | null>(null);
   useEffect(() => {
-    musicEngine.setLayer(layerForStep(step));
-    musicEngine.duck(step === 'RESULTS' ? 0.3 : 1);
-  }, [step]);
+    const timers = mpRoomCode ? [mpRoundTimer] : (Object.values(turnTimers) as PlayerTurnTimer[]);
+    if (step !== 'IN_GAME' || !isTurnTimerEnabled || secondsLeftOnTimers(timers, Date.now()) === null) {
+      setMusicSecondsLeft(null);
+      return;
+    }
+    const tick = () => setMusicSecondsLeft(secondsLeftOnTimers(timers, Date.now()));
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [step, isTurnTimerEnabled, mpRoomCode, mpRoundTimer, turnTimers]);
+  useEffect(() => {
+    musicEngine.setLayer(layerForStep(step, musicSecondsLeft));
+  }, [step, musicSecondsLeft]);
+  useEffect(() => {
+    musicEngine.duck(musicDuckFor(step, isSpeaking));
+  }, [step, isSpeaking]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
