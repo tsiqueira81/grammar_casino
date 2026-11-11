@@ -19,6 +19,10 @@ import {
   FirestoreSeatWrite,
 } from './firebaseService';
 import { isE2eMode } from '../utils/e2eContent';
+import { cleanName as cleanPlayerName, generateFriendlyName, isBlockedName } from '../utils/nameFilter';
+
+/** Package R6: at most this many seats in one room. */
+export const MAX_ROOM_SEATS = 40;
 
 // How phones and the teacher's screen talk:
 // - Local server (npm run dev, AI Studio): WebSocket /ws plus HTTP /api/mp/*. The server sends
@@ -141,6 +145,8 @@ export interface SavedHostRoom {
   joinResponses: Record<string, FirestoreJoinResponseItem>;
   kickedPlayerIds: number[];
   kickedClientIds: string[];
+  /** Phones the teacher removed: they may not join this room again (package R6). */
+  bannedClientIds?: string[];
   intentClientIds: string[];
   writtenSeatIds: string[];
   savedAt: number;
@@ -217,6 +223,8 @@ export class HostRoomController {
   private joinResponses: Record<string, FirestoreJoinResponseItem> = {};
   /** Phones that lost their seat (kicked, or the seat moved to another phone). */
   private kickedClientIds = new Set<string>();
+  /** Phones the teacher removed; they cannot take a seat in this room again (package R6). */
+  private bannedClientIds = new Set<string>();
   private intentClientIds = new Set<string>();
   /** Newest intent sequence number handled per phone, so re-read intents are not applied twice. */
   private lastIntentSeq = new Map<string, number>();
@@ -493,10 +501,19 @@ export class HostRoomController {
   }
 
   private handleJoinRequest(clientId: string, uid: string | null, msg: any) {
-    const cleanName = String(msg.name || '').trim().slice(0, 20);
+    const typedName = cleanPlayerName(msg.name);
     const avatar = String(msg.avatar || '🦊');
     const requestId = String(msg.requestId || Date.now());
-    if (!cleanName) return;
+    if (!typedName) return;
+    if (this.bannedClientIds.has(clientId) || (uid && this.bannedClientIds.has(`uid:${uid}`))) {
+      this.joinResponses[clientId] = { ok: false, code: this.code, requestId, error: 'The teacher removed you from this room.' };
+      this.scheduleFirestoreFlush(30);
+      return;
+    }
+    // A rude name is replaced by a friendly one (package R6); the host makes names unique.
+    const cleanName = isBlockedName(typedName)
+      ? generateFriendlyName(Array.from(this.seatsByPlayerId.values(), (s) => s.name))
+      : typedName;
     // A phone asking to join again is no longer "removed"; its record now carries the answer.
     this.kickedClientIds.delete(clientId);
 
@@ -521,6 +538,12 @@ export class HostRoomController {
         // teacher decides.
         this.requestSeatTakeover(seat, clientId, requestId, cleanName, avatar);
       }
+      return;
+    }
+
+    if (this.seatsByPlayerId.size >= MAX_ROOM_SEATS) {
+      this.joinResponses[clientId] = { ok: false, code: this.code, requestId, error: `This room is full (${MAX_ROOM_SEATS} players).` };
+      this.scheduleFirestoreFlush(30);
       return;
     }
 
@@ -780,6 +803,10 @@ export class HostRoomController {
     const seat = this.seatsByPlayerId.get(playerId);
     if (seat?.reconnectToken) {
       this.kickedClientIds.add(seat.reconnectToken);
+      this.bannedClientIds.add(seat.reconnectToken);
+      // The same browser keeps its Firebase id even after clearing its saved seat.
+      const uid = this.clientUids.get(seat.reconnectToken);
+      if (uid) this.bannedClientIds.add(`uid:${uid}`);
       delete this.joinResponses[seat.reconnectToken];
     }
     this.seatsByPlayerId.delete(playerId);
@@ -874,6 +901,7 @@ export class HostRoomController {
       joinResponses: { ...this.joinResponses },
       kickedPlayerIds: [...this.kickedPlayerIds],
       kickedClientIds: Array.from(this.kickedClientIds),
+      bannedClientIds: Array.from(this.bannedClientIds),
       intentClientIds: Array.from(this.intentClientIds),
       writtenSeatIds: Array.from(this.writtenSeatIds),
       savedAt: Date.now(),
@@ -895,6 +923,7 @@ export class HostRoomController {
     this.joinResponses = { ...(saved.joinResponses || {}) };
     this.kickedPlayerIds = [...(saved.kickedPlayerIds || [])];
     (saved.kickedClientIds || []).forEach((id) => this.kickedClientIds.add(id));
+    (saved.bannedClientIds || []).forEach((id) => this.bannedClientIds.add(id));
     (saved.intentClientIds || []).forEach((id) => this.intentClientIds.add(id));
     (saved.writtenSeatIds || []).forEach((id) => this.writtenSeatIds.add(id));
   }
@@ -975,7 +1004,7 @@ export class StudentRoomController {
   private destroyed = false;
   private localWsConnected = false;
   private onViewUpdate: (view: PlayerViewPayload) => void;
-  private onKicked: () => void;
+  private onKicked: (reason?: 'removed' | 'closed') => void;
   private onConnectionChange?: (connected: boolean) => void;
 
   constructor(
@@ -986,7 +1015,7 @@ export class StudentRoomController {
     localServerAvailable: boolean,
     seatListener: FirestoreSeatListener | null,
     onViewUpdate: (view: PlayerViewPayload) => void,
-    onKicked: () => void,
+    onKicked: (reason?: 'removed' | 'closed') => void,
     onConnectionChange?: (connected: boolean) => void
   ) {
     this.code = code;
@@ -1021,7 +1050,7 @@ export class StudentRoomController {
   private handleSeatUpdate(update: FirestoreSeatUpdate) {
     if (this.destroyed) return;
     if (update.kicked || update.kickedPlayerIds.includes(this.seat.playerId)) {
-      this.onKicked();
+      this.onKicked(update.kickedPlayerIds.includes(this.seat.playerId) ? 'removed' : 'closed');
       this.destroy();
       return;
     }
@@ -1051,7 +1080,8 @@ export class StudentRoomController {
     avatar: string;
     reconnectToken?: string;
     onViewUpdate: (view: PlayerViewPayload) => void;
-    onKicked: () => void;
+    /** 'removed': the teacher removed this phone (package R6). */
+    onKicked: (reason?: 'removed' | 'closed') => void;
     onConnectionChange?: (connected: boolean) => void;
     /** The name is already seated on another phone: the teacher has been asked to approve. */
     onWaitingForTeacher?: (message: string) => void;
@@ -1217,7 +1247,7 @@ export class StudentRoomController {
           if (msg.type === 'PLAYER_VIEW' && msg.view) {
             this.deliverViewUpdate(msg.view);
           } else if (msg.type === 'KICKED') {
-            this.onKicked();
+            this.onKicked('removed');
             this.destroy();
           }
         } catch (err) {

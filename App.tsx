@@ -1,6 +1,8 @@
 import { safeLocalStorage } from './utils/safeStorage';
 import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
+import { useLaterTimers } from './utils/useLaterTimers';
+import { safePlayerName } from './utils/nameFilter';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
@@ -401,6 +403,7 @@ export function App() {
   const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
   const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
   // Package R8: the teacher paused the hand. Timers stop, phones show a pause card and take no input.
+  const later = useLaterTimers();
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
   isPausedRef.current = isPaused;
@@ -1330,7 +1333,7 @@ export function App() {
         const randomAvatar = getRandomCharacterAvatar(prev.map(p => p.avatar));
         return [...prev, { 
           id: Date.now(), 
-          name: newPlayerName.trim(), 
+          name: safePlayerName(newPlayerName, prev.map(p => p.name)), 
           money: startingCash, 
           history: [], 
           avatar: randomAvatar, 
@@ -1354,9 +1357,9 @@ export function App() {
     setShowAvatarModal({ playerId });
   }, [playSound]);
   const handleUpdatePlayerName = useCallback((playerId: number, newName: string) => {
-    const trimmed = sanitizePlayerName(newName);
-    if (!trimmed) return;
+    if (!sanitizePlayerName(newName)) return;
     setPlayers(prev => {
+      const trimmed = safePlayerName(newName, prev.filter(p => p.id !== playerId).map(p => p.name));
       const oldPlayer = prev.find(p => p.id === playerId);
       const oldName = oldPlayer?.name;
       const updated = prev.map(p => p.id === playerId ? { ...p, name: trimmed } : p);
@@ -1643,7 +1646,7 @@ export function App() {
           : generated.text;
         setPastSentences(prev => [...prev, sentenceRecord]);
         // Small delay to allow initial card render before flip
-        setTimeout(() => {
+        later(() => {
             setIsSentenceRevealed(true);
             playSound('flip');
         }, 300);
@@ -2969,9 +2972,11 @@ export function App() {
     mpEventHandlerRef.current = (event: HostEventPayload) => {
       if (event.type === 'STUDENT_JOINED' && event.seat) {
         const seat = event.seat;
-        const { playerId, name, avatar } = seat;
+        const { playerId, avatar } = seat;
         playSound('addPlayer');
         setPlayers(prev => {
+          // Package R6: classroom-safe and unique at the table ("Ana 2").
+          const name = safePlayerName(seat.name, prev.filter(p => p.id !== playerId).map(p => p.name));
           if (prev.some(p => p.id === playerId)) {
             return prev.map(p => p.id === playerId ? { ...p, name, avatar } : p);
           }
@@ -3000,7 +3005,9 @@ export function App() {
       } else if (event.type === 'STUDENT_RECONNECTED' && event.seat) {
         const seat = event.seat;
         const { playerId, name, avatar } = seat;
-        setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, name: name || p.name, avatar: avatar || p.avatar } : p));
+        setPlayers(prev => prev.map(p => p.id === playerId
+          ? { ...p, name: name ? safePlayerName(name, prev.filter(o => o.id !== playerId).map(o => o.name)) : p.name, avatar: avatar || p.avatar }
+          : p));
         setMpSeats(prev => ({
           ...prev,
           [playerId]: {
@@ -3137,7 +3144,8 @@ export function App() {
           }
           case 'UPDATE_PROFILE': {
             const cleanName = sanitizePlayerName(intent.name);
-            if (cleanName) handleUpdatePlayerName(playerId, cleanName);
+            // Names are set before the game; once hands are dealt a phone may only change its avatar (R6).
+            if (cleanName && (step === 'PLAYER_SETUP' || step === 'SETTINGS')) handleUpdatePlayerName(playerId, cleanName);
             if (isKnownAvatar(intent.avatar)) handleUpdateAvatar(playerId, intent.avatar.trim());
             break;
           }
@@ -3669,7 +3677,7 @@ export function App() {
       p.money <= 0 && (players.find(o => o.id === p.id)?.money ?? 0) > 0
     );
     if (someoneWentBust) {
-      window.setTimeout(() => playSound('bankrupt'), 950);
+      later(() => playSound('bankrupt'), 950);
     }
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
@@ -3696,7 +3704,7 @@ export function App() {
       return r.amountChanged > 0 && before > 0 && r.amountChanged >= before;
     });
     if (bigWin) {
-      window.setTimeout(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
+      later(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
     }
 
     setPlayers(updatedPlayers);
@@ -4217,7 +4225,7 @@ export function App() {
     if (!currentSentence) return;
     navigator.clipboard.writeText(currentSentence.text).then(() => {
         setIsCopied(true);
-        setTimeout(() => setIsCopied(false), 2000);
+        later(() => setIsCopied(false), 2000);
         playSound('click');
     }).catch(err => {
         console.error('Failed to copy text: ', err);

@@ -80,6 +80,10 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
 - Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
+### Player names and room order (package R6)
+- Every name goes through `utils/nameFilter.ts` (`safePlayerName`): printable, at most 20 characters, English blocklist (a blocked name becomes a friendly one like "Lucky Fox"), unique at the table ("Ana 2"). Phones may change their name only before the first hand.
+- A room holds at most 40 seats. A phone the teacher removes cannot join that room again: the host bans its client id and Firebase id, and the phone remembers the room for 12 hours (`grammar_casino_removed_rooms_v1`).
+
 ### Game modes and elimination
 - `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled` in `game/flow.ts`). When the game ends and who wins is decided only in `game/flow.ts`.
 - `rounds` and `targetAmount`: in a live room, a bankrupt player gets the $150 House Bailout at the start of the next hand.
@@ -113,6 +117,7 @@ Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/sa
 | --- | --- | --- |
 | `grammarCasinoGameState` | local | The saved single game (players, round, settings) |
 | `grammar_casino_student_session_v1` | local | A phone's room and seat, for reconnecting |
+| `grammar_casino_removed_rooms_v1` | local | Rooms this phone was removed from in the last 12 hours (package R6) |
 | `grammar_casino_host_room_v1` | local | The teacher's open live room (code, seats, handled intents), so a reload reopens it for up to 6 hours |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
 | `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |

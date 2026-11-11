@@ -21,6 +21,7 @@ import SentenceText from './SentenceText';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
+import { generateFriendlyName } from '../utils/nameFilter';
 import {
   AlertTriangle,
   ArrowRight,
@@ -38,6 +39,28 @@ import {
 } from 'lucide-react';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
+/** Rooms this phone was removed from (package R6), with the time, kept for 12 hours. */
+const REMOVED_ROOMS_STORAGE_KEY = 'grammar_casino_removed_rooms_v1';
+const REMOVED_ROOM_MS = 12 * 60 * 60 * 1000;
+const REMOVED_MESSAGE = 'The teacher removed you from this room.';
+
+function readRemovedRooms(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(safeLocalStorage.getItem(REMOVED_ROOMS_STORAGE_KEY) || '{}');
+    const now = Date.now();
+    const fresh: Record<string, number> = {};
+    Object.entries(parsed || {}).forEach(([code, at]) => {
+      if (typeof at === 'number' && now - at < REMOVED_ROOM_MS) fresh[code] = at;
+    });
+    return fresh;
+  } catch {
+    return {};
+  }
+}
+
+function rememberRemovedRoom(code: string) {
+  safeLocalStorage.setItem(REMOVED_ROOMS_STORAGE_KEY, JSON.stringify({ ...readRemovedRooms(), [code]: Date.now() }));
+}
 
 interface SavedStudentSession {
   code: string;
@@ -248,6 +271,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       setJoinError('Please enter your name to claim a seat.');
       return;
     }
+    if (readRemovedRooms()[code]) {
+      setJoinError(REMOVED_MESSAGE);
+      return;
+    }
 
     setIsJoining(true);
     setJoinError(null);
@@ -274,10 +301,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         avatar,
         reconnectToken: tokenToUse,
         onViewUpdate: handleViewUpdate,
-        onKicked: () => {
+        onKicked: (reason?: 'removed' | 'closed') => {
           safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
           setView(null);
-          setJoinError('You were removed from the room or the room was closed.');
+          if (reason === 'removed') {
+            rememberRemovedRoom(code);
+            setJoinError(REMOVED_MESSAGE);
+          } else {
+            setJoinError('You were removed from the room or the room was closed.');
+          }
         },
         onConnectionChange: setIsConnected,
         onWaitingForTeacher: setJoinWaitingMessage,
@@ -633,8 +665,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               if (e.key === 'Enter') handleJoinRoom();
             }}
             placeholder="First name"
-            className={`${fieldClass} h-14 mb-5 px-4 text-lg font-semibold`}
+            className={`${fieldClass} h-14 mb-2 px-4 text-lg font-semibold`}
           />
+          <button
+            type="button"
+            onClick={() => setPlayerNameInput(generateFriendlyName())}
+            className="mb-5 min-h-[44px] px-3 -ml-3 text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer hover:text-gc-ink"
+          >
+            Give me a name
+          </button>
 
           <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Choose & customize your character</span>
           <div role="group" aria-labelledby="gc-join-avatar">
