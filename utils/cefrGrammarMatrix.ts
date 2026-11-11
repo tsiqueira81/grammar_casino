@@ -543,7 +543,7 @@ export const CEFR_GRAMMAR_MATRIX: Record<CanonicalGrammarTopic, Record<CEFRLevel
       classroomSummary: 'Idiomatic & rhetorical modals ("may/might well", "may as well", "try as he might", "would that", concessive "may ... but").',
       allowedStructures: [
         '"may/might well + bare infinitive / have + V3" (strong probability) vs. "may/might as well" (pragmatic resignation)',
-        'Concessivefronted clauses with "might" or "may": "Try as she might...", "Much as I may admire..."',
+        'Concessive fronted clauses with "might" or "may": "Try as she might...", "Much as I may admire..."',
         'Epistemic & deontic subtleties with "dare not + bare infinitive", "need + bare infinitive" in negative/interrogative clauses ("Need we say more?")',
       ],
       forbiddenAboveLevel: [],
@@ -800,7 +800,7 @@ export const CEFR_GRAMMAR_MATRIX: Record<CanonicalGrammarTopic, Record<CEFRLevel
     C1: {
       topic: 'Collocations',
       level: 'C1',
-      classroomSummary: 'Advanced academic & idiomatic collocations (wreak havoc, staunch supporter, lluvia/torrential rain, jump at the chance, foregone conclusion, heated debate).',
+      classroomSummary: 'Advanced academic & idiomatic collocations (wreak havoc, staunch supporter, torrential rain, jump at the chance, foregone conclusion, heated debate).',
       allowedStructures: [
         'High-register C1 collocations: wreak havoc, harbour doubts/grudges, alleviate poverty/pain, bridge the gap, strike a balance, staunch supporter, foregone conclusion, heated debate, slim chance, resounding success',
       ],
