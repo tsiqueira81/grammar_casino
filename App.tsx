@@ -87,6 +87,8 @@ import type {
 // three.js is only needed on the teacher's table, so phones never download it.
 const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
 const TableBackdrop = React.lazy(() => import('./components/TableBackdrop'));
+/** Package F6 (part): how long the game waits after the last change before saving it. */
+const SAVE_DEBOUNCE_MS = 1000;
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -1568,24 +1570,51 @@ export function App() {
     });
   }, [playSound]);
 
-  // Save game state
-  useEffect(() => { 
-    if (isDemoRef.current) return;
-    try { 
-      const gameState = { 
-        step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
-        currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
-        powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
-        sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
-      }; 
+  // Save game state. Package F6 (part): at most one write a second while bets are typed, at once
+  // when the screen changes, and on leaving the page, instead of a full write on every keystroke.
+  const pendingSaveRef = useRef<Record<string, unknown> | null>(null);
+  const lastSavedStepRef = useRef<string | null>(null);
+  const flushSave = useCallback(() => {
+    const gameState = pendingSaveRef.current;
+    if (!gameState) return;
+    pendingSaveRef.current = null;
+    try {
       if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(stampSave(gameState, Date.now())))) {
         console.warn('The browser would not save the game, so it is kept for this tab only.');
       }
-      GeminiService.savePortableGame(gameState); 
-    } catch (e) { 
-      console.error("Failed to save game state:", e); 
-    } 
-  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer]);
+      GeminiService.savePortableGame(gameState);
+    } catch (e) {
+      console.error("Failed to save game state:", e);
+    }
+  }, []);
+  useEffect(() => { 
+    if (isDemoRef.current) return;
+    pendingSaveRef.current = { 
+      step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+      currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+      powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+      sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+    };
+    if (lastSavedStepRef.current !== step) {
+      lastSavedStepRef.current = step;
+      flushSave();
+      return;
+    }
+    const timer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer, flushSave]);
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flushSave();
+    };
+    window.addEventListener('pagehide', flushSave);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushSave);
+      document.removeEventListener('visibilitychange', onHidden);
+      flushSave();
+    };
+  }, [flushSave]);
 
   // Sticky header logic: smoothly compact into an opaque bar when scrolling down
   useEffect(() => {
@@ -4429,6 +4458,7 @@ export function App() {
       endDemoRoom();
       return;
     }
+    pendingSaveRef.current = null;
     safeLocalStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     // Automatically close any open multiplayer room on restart / returning to lobby

@@ -13,8 +13,11 @@ test('an unfinished game offers to resume, and a finished game keeps its report'
   await expect(sentence(page)).toContainText(/Lisbon|homework/);
   const before = await sentence(page).innerText();
 
-  // The teacher comes back two hours later.
-  await page.evaluate(() => {
+  // The teacher comes back two hours later. The save is aged as the page opens again, because
+  // the game also saves while the page closes (package F6: saves wait for a quiet second).
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('gc-test-aged')) return;
+    sessionStorage.setItem('gc-test-aged', '1');
     const raw = localStorage.getItem('grammarCasinoGameState');
     if (!raw) throw new Error('no saved game');
     const save = JSON.parse(raw);
