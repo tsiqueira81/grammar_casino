@@ -1,0 +1,35 @@
+<!doctype html><html><head><style>html,body{margin:0;background:transparent}#t{position:absolute;left:600px;top:0;width:560px;height:630px;display:flex;flex-direction:column;justify-content:center;color:#f5d77a;font-family:Georgia,serif}#t h1{font-size:76px;margin:0;letter-spacing:2px}#t p{font-size:30px;margin:18px 0 0;color:#f3ead2;font-family:system-ui,sans-serif}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script></head>
+<body><script type="module">
+// Package S7: the app icons, drawn from the game's own $500 chip (public/models/poker_chips.glb).
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const q = new URLSearchParams(location.search);
+const w = Number(q.get('w') || 512), h = Number(q.get('h') || w);
+const fill = Number(q.get('fill') || 0.86); // chip diameter as a share of the shorter side
+const og = q.get('og') === '1';
+const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+r.setPixelRatio(1); r.setSize(w, h); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = Number(q.get('exp') || 0.55);
+document.body.appendChild(r.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f3d2e);
+const pm = new THREE.PMREMGenerator(r); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = Number(q.get('env') || 0.35);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+const key = new THREE.DirectionalLight(0xfff3d1, 1.1); key.position.set(-2, 6, 3); scene.add(key);
+const loader = new GLTFLoader();
+const chips = await new Promise((res, rej) => loader.load('/public/models/poker_chips.glb', g => res(g.scene), undefined, rej));
+const chip = chips.getObjectByName(q.get('chip') || 'Chip_500').clone(true);
+chip.position.set(0, 0, 0); chip.rotation.set(0.45, 0, 0.12);
+scene.add(chip);
+const box = new THREE.Box3().setFromObject(chip); const size = box.getSize(new THREE.Vector3()); const center = box.getCenter(new THREE.Vector3());
+const diameter = Math.max(size.x, size.z);
+const aspect = w / h;
+const viewH = (diameter / fill) * (aspect < 1 ? 1 / aspect : 1);
+const cam = new THREE.OrthographicCamera(-viewH * aspect / 2, viewH * aspect / 2, viewH / 2, -viewH / 2, 0.01, 50);
+cam.position.set(center.x + (og ? viewH * aspect * 0.27 : 0), center.y + 10, center.z); cam.up.set(0, 0, -1); cam.lookAt(center.x + (og ? viewH * aspect * 0.27 : 0), center.y, center.z);
+r.render(scene, cam);
+{ const g = document.createElement('div'); const cx = og ? w * 0.5 - viewH * aspect * 0.27 * (h / viewH) : w / 2; const d = Math.min(w, h); g.textContent = 'G'; Object.assign(g.style, { position: 'absolute', left: cx + 'px', top: h / 2 + 'px', transform: 'translate(-50%, -52%)', font: `700 ${d * fill * 0.36}px Georgia, serif`, color: '#3b0d5c' }); document.body.appendChild(g); }
+if (og) { const t = document.createElement('div'); t.id = 't'; t.innerHTML = '<h1>Grammar<br>Casino</h1><p>Bet on grammar. A classroom game for English learners.</p>'; document.body.appendChild(t); }
+document.title = 'done';
+</script></body></html>
