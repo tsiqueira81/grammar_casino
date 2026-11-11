@@ -129,20 +129,46 @@ export const clearPortableGame = async () => {
   return { success: false };
 };
 
-async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
-  const response = await fetch('/api/gemini', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ action, ...payload }),
-  });
+/**
+ * The lesson must never stall (package R8). A sentence that takes longer than this is dealt from the
+ * offline bank instead; every other AI call gives up later, and its caller falls back the same way.
+ */
+export const AI_SENTENCE_TIMEOUT_MS = 8_000;
+export const AI_CALL_TIMEOUT_MS = 20_000;
 
+export function getAiTimeoutMs(action: string): number {
+  return action === 'generateSentence' ? AI_SENTENCE_TIMEOUT_MS : AI_CALL_TIMEOUT_MS;
+}
+
+async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), getAiTimeoutMs(action)) : null;
+  let response: Response;
   let data: any = null;
   try {
-    data = await response.json();
-  } catch {
-    // Non-JSON response
+    response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action, ...payload }),
+      signal: controller?.signal,
+    });
+    try {
+      data = await response.json();
+    } catch {
+      // Non-JSON response (or the time ran out while reading it)
+    }
+    if (controller?.signal.aborted) {
+      throw new Error(`The AI took longer than ${getAiTimeoutMs(action) / 1000} s; using the offline fallback.`);
+    }
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`The AI took longer than ${getAiTimeoutMs(action) / 1000} s; using the offline fallback.`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   if (!response.ok || data?.fallback) {
