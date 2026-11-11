@@ -44,6 +44,8 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `server/` | The server's parts (package A1): `runtime.ts` (where it runs, `.env`), `limits.ts` (rate and daily limits, AI cache), `aiProviders.ts` (Groq and Gemini calls), `sentenceSchemas.ts` and `sentenceIntegrity.ts` (what an AI sentence must look like), `aiHandler.ts` (`/api/gemini`), `relay.ts` (the dev-only live-room relay), `serverless.ts` (the Pages Function dispatcher). `tests/serverRoutes.test.ts` checks the routes |
 | `functions/api/` | Cloudflare Pages Function entry |
 | `public/privacy.html` | The short privacy notice for students and teachers (package A5), linked from the phone join screen. Keep it true: change it when what the game sends or keeps changes |
+| `server/providers.ts` | AI providers, measured (package A2): model lists (override with `GROQ_TEXT_MODELS`, `GEMINI_TEXT_MODELS`, `GEMINI_TTS_MODELS`, comma separated), time limits (new sentence 7 s so it beats the game's own 8 s, checks 8 s, speech 10 s, others 12 s), the circuit breaker (3 failures in a minute rest a provider for 5 minutes) and the `X-AI-Meta` header (provider, model, time, tokens, why it fell back) that the host writes to its debug log. `/api/health?deep=1` checks each provider when the server has `HEALTH_CHECK_TOKEN` and the caller sends it as a Bearer token |
+| `utils/firestoreUsage.ts` | Firestore reads and writes made by this device today (package A3), counted in `firebaseService.ts`; the debug log gets each live game's count and a note past 60% of the free daily quota |
 | `utils/debugLog.ts` | The host's debug log (package A4): last 500 events (screens, hands, rooms, seats dropping, intents ignored, AI fallbacks), Shift+L shows it, Download saves it, a crash offers "Copy details". `APP_VERSION` is the commit and build date from `vite.config.ts` (`__APP_VERSION__`), "dev" in tests. Never log what a student typed |
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
 | `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators) |
@@ -155,6 +157,7 @@ Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/sa
 | `grammar_casino_finished_games_v1` | local | Reports of the last 20 games finished on this computer (package T5) |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
 | `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |
+| `grammar_casino_firestore_usage_v1` | local | Today's Firestore reads and writes from this device (an estimate) |
 | `grammar_casino_theme` | local | Light or dark theme |
 | `grammar_casino_projector_mode` | local | Projector readability mode |
 | `grammar_casino_calm_mode` | local | Calm mode (less motion and sound) |

@@ -1,3 +1,4 @@
+import { countFirestore } from '../utils/firestoreUsage';
 import { safeLocalStorage } from '../utils/safeStorage';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
@@ -289,6 +290,7 @@ export async function writeFirestoreRoom(params: {
       });
     }
     await batch.commit();
+    countFirestore(0, 1 + params.seats.length);
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -310,6 +312,7 @@ export async function isFirestoreRoomCodeFree(code: string): Promise<boolean> {
       getDoc(doc(db, 'rooms', cleanCode)),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
     ]);
+    if (snap) countFirestore(1, 0);
     if (!snap || !snap.exists()) return true;
     const data = snap.data() || {};
     if (!data.hostUid || (user && data.hostUid === user.uid)) return true;
@@ -339,6 +342,7 @@ export async function deleteFirestoreRoom(
       await batch.commit();
     }
     await deleteDoc(doc(db, 'rooms', cleanCode));
+    countFirestore(0, childRefs.length + 1);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }
@@ -370,6 +374,7 @@ export function listenToFirestoreRoomIntents(
       intentsCol,
       (snapshot) => {
         onConnectionState?.(true);
+        countFirestore(Math.max(1, snapshot.docChanges().length), 0);
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added' || change.type === 'modified') {
             const data = change.doc.data();
@@ -410,6 +415,7 @@ export async function sendFirestoreStudentIntent(
       payloadJson: JSON.stringify(payload),
       updatedAt: Date.now(),
     });
+    countFirestore(0, 1);
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -521,6 +527,7 @@ export function listenToFirestoreSeat(code: string, clientId: string): Firestore
       onSnapshot(
         roomRef,
         (snap) => {
+          countFirestore(1, 0);
           room = snap.exists() ? snap.data() : null;
           roomOk = true;
           if (seatOk) setConnected(true);
@@ -537,6 +544,7 @@ export function listenToFirestoreSeat(code: string, clientId: string): Firestore
       onSnapshot(
         seatRef,
         (snap) => {
+          countFirestore(1, 0);
           seat = snap.exists() ? snap.data() : null;
           seatOk = true;
           if (roomOk) setConnected(true);

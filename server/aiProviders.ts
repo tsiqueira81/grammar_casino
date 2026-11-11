@@ -1,5 +1,6 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqChatCompletion, callGroqOrpheusTts } from '../utils/groqUtils';
+import { AI_TIMEOUT_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider } from './providers';
 
 // --- Groq & Gemini Client Setup ---
 export let aiClient: GoogleGenAI | null = null;
@@ -24,13 +25,9 @@ export function getAIClient(): GoogleGenAI {
   return aiClient;
 }
 
-export const TEXT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
-export const TTS_MODELS = [
-  "gemini-3.8-flash-lite-tts",
-  "gemini-3.8-flash-tts",
-  "gemini-3.1-flash-tts-preview",
-  "gemini-2.5-flash-preview-tts",
-];
+// Package A2: model names live in server/providers.ts and can be changed with environment variables.
+export const TEXT_MODELS = DEFAULT_MODELS.geminiText;
+export const TTS_MODELS = DEFAULT_MODELS.geminiTts;
 
 export function mapOrpheusToGeminiVoice(orpheusVoice?: string): string {
   const clean = String(orpheusVoice || "troy").trim().toLowerCase();
@@ -164,32 +161,78 @@ export async function callWithModelRotation<T>(
   throw lastError || new Error("Upstream Gemini API is currently experiencing high load. Please try again.");
 }
 
+function hasGeminiKey(): boolean {
+  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+  return Boolean(geminiKey) && !geminiKey.startsWith('gsk_');
+}
+
 export async function generateAiText(options: {
   prompt: string;
   responseSchema?: any;
   schemaName?: string;
   maxCompletionTokens?: number;
-}): Promise<{ text: string }> {
+  /** Which time limit applies (package A2). */
+  kind?: AiCallKind;
+}): Promise<{ text: string; meta: AiMeta }> {
+  const kind = options.kind || 'other';
+  const timeoutMs = AI_TIMEOUT_MS[kind];
+  const started = Date.now();
+  const models = aiModels();
+  let fallbackReason: string | undefined;
   const groqKey = resolveGroqApiKey();
-  if (groqKey) {
+  if (groqKey && aiBreaker.isOpen('groq')) {
+    fallbackReason = 'groq skipped after repeated failures';
+  }
+  if (groqKey && !fallbackReason) {
     try {
-      return await callGroqChatCompletion({
-        apiKey: groqKey,
-        prompt: options.prompt,
-        responseSchema: options.responseSchema,
-        schemaName: options.schemaName,
-        maxCompletionTokens: options.maxCompletionTokens,
-      });
+      const out = await withTimeout(
+        callGroqChatCompletion({
+          apiKey: groqKey,
+          prompt: options.prompt,
+          responseSchema: options.responseSchema,
+          schemaName: options.schemaName,
+          maxCompletionTokens: options.maxCompletionTokens,
+          models: models.groqText,
+        }),
+        timeoutMs,
+        'groq'
+      );
+      aiBreaker.recordSuccess('groq');
+      return { text: out.text, meta: { provider: 'groq', model: out.model, tokens: out.tokens, latencyMs: Date.now() - started } };
     } catch (groqErr: any) {
-      const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-      if (!geminiKey || geminiKey.startsWith('gsk_')) {
+      aiBreaker.recordFailure('groq');
+      fallbackReason = `groq ${failureReason(groqErr)}`;
+      if (!hasGeminiKey()) {
         throw groqErr;
       }
       console.warn('[AI Router] Groq text generation failed, falling back to Gemini:', groqErr?.message);
     }
   }
+  if (groqKey && !hasGeminiKey()) {
+    // Only Groq is set up and it is resting: let the game use its own bank.
+    const err: any = new Error('The AI is resting after repeated failures.');
+    err.status = 503;
+    throw err;
+  }
 
-  return await callWithModelRotation(TEXT_MODELS, async (ai, model) => {
+  let usedModel = '';
+  try {
+    const out = await withTimeout(geminiText(options, models.geminiText, (m) => (usedModel = m)), timeoutMs, 'gemini');
+    aiBreaker.recordSuccess('gemini');
+    return { text: out.text, meta: { provider: 'gemini', model: usedModel, latencyMs: Date.now() - started, fallbackReason } };
+  } catch (err) {
+    aiBreaker.recordFailure('gemini');
+    throw err;
+  }
+}
+
+function geminiText(
+  options: { prompt: string; responseSchema?: any },
+  models: string[],
+  onModel: (model: string) => void
+): Promise<{ text: string }> {
+  return callWithModelRotation(models, async (ai, model) => {
+    onModel(model);
     const config: Record<string, any> = {
       thinkingConfig: getFastThinkingConfig(model),
     };
@@ -211,7 +254,7 @@ export async function generateAiSpeechBase64(safeText: string, requestedVoice?: 
   const groqKey = resolveGroqApiKey();
   if (groqKey) {
     try {
-      return await callGroqOrpheusTts(groqKey, safeText, targetVoice);
+      return await withTimeout(callGroqOrpheusTts(groqKey, safeText, targetVoice), AI_TIMEOUT_MS.speech, 'groq');
     } catch (groqErr: any) {
       const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
       if (!geminiKey || geminiKey.startsWith('gsk_')) {
@@ -222,7 +265,7 @@ export async function generateAiSpeechBase64(safeText: string, requestedVoice?: 
   }
 
   const geminiVoiceName = mapOrpheusToGeminiVoice(targetVoice);
-  return await callWithModelRotation(TTS_MODELS, async (ai, model) => {
+  return await callWithModelRotation(aiModels().geminiTts, async (ai, model) => {
     const response = await ai.models.generateContent({
       model,
       contents: [
@@ -253,4 +296,35 @@ export async function generateAiSpeechBase64(safeText: string, requestedVoice?: 
     if (!audio) throw new Error("No audio data returned by TTS model.");
     return audio;
   });
+}
+
+/**
+ * Package A2: is each provider reachable with its key? Lists models (costs no tokens) with a
+ * 5-second limit. Answers only names and timings, never keys.
+ */
+export async function deepHealth(): Promise<Record<string, { ok: boolean; ms: number; detail?: string; resting?: boolean }>> {
+  const out: Record<string, { ok: boolean; ms: number; detail?: string; resting?: boolean }> = {};
+  const probe = async (name: AiProvider, url: string, headers: Record<string, string>) => {
+    const started = Date.now();
+    try {
+      const res = await withTimeout(fetch(url, { headers }), 5_000, name);
+      out[name] = { ok: res.ok, ms: Date.now() - started, detail: res.ok ? undefined : `HTTP ${res.status}`, resting: aiBreaker.isOpen(name) };
+    } catch (e) {
+      out[name] = { ok: false, ms: Date.now() - started, detail: failureReason(e), resting: aiBreaker.isOpen(name) };
+    }
+  };
+  const groqKey = resolveGroqApiKey();
+  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+  const jobs: Promise<void>[] = [];
+  if (groqKey) jobs.push(probe('groq', 'https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${groqKey}` }));
+  if (hasGeminiKey()) jobs.push(probe('gemini', 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': geminiKey }));
+  await Promise.all(jobs);
+  return out;
+}
+
+/** Deep health needs HEALTH_CHECK_TOKEN set on the server and sent as a Bearer token. */
+export function deepHealthAllowed(authorization: string | null | undefined): boolean {
+  const token = String(process.env.HEALTH_CHECK_TOKEN || '').trim();
+  if (!token) return false;
+  return String(authorization || '') === `Bearer ${token}`;
 }

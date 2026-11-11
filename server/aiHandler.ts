@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CACHE_TTL_MS, checkDailyIpLimit, checkRateLimit, cleanupCache, persistentAiCache, responseCache } from './limits';
+import { formatAiMeta } from './providers';
 import { generateAiSpeechBase64, generateAiText, hasConfiguredAiKey, isHighTrafficOrOverload } from './aiProviders';
 import { CEFR_PROFILES, batchClozeVerificationSchema, getSentenceSchema, verificationSchema } from './sentenceSchemas';
 import { enforceKeyWordTransformationIntegrity, enforceMultipleChoiceIntegrity, enforceOpenClozeIntegrity, enforceWordFormationIntegrity } from './sentenceIntegrity';
@@ -488,7 +489,9 @@ Respond ONLY with valid JSON matching the schema.`;
           responseSchema: activeSchema,
           schemaName: `sentence_${resolvedQuestionType}`,
           maxCompletionTokens: 900,
+          kind: 'generate',
         });
+        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const jsonText = response.text ? response.text.trim() : "";
         const generatedData = JSON.parse(jsonText);
@@ -561,7 +564,9 @@ Respond ONLY with the hint text.`;
         const response = await generateAiText({
           prompt,
           maxCompletionTokens: 200,
+          kind: 'other',
         });
+        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const hint = (response.text || "").trim();
         return res.status(200).json({ hint });
@@ -595,7 +600,9 @@ Respond ONLY with the JSON object matching the provided schema.`;
           responseSchema: verificationSchema,
           schemaName: "verify_correction_schema",
           maxCompletionTokens: 350,
+          kind: 'verify',
         });
+        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const jsonText = response.text ? response.text.trim() : "";
         const result = JSON.parse(jsonText);
@@ -708,7 +715,9 @@ Respond ONLY with valid JSON matching the schema.`;
           responseSchema: batchClozeVerificationSchema,
           schemaName: "batch_cloze_verification_schema",
           maxCompletionTokens: 1200,
+          kind: 'verify',
         });
+        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const jsonText = response.text ? response.text.trim() : "";
         const parsed = JSON.parse(jsonText);
@@ -772,7 +781,9 @@ Respond ONLY with valid JSON matching the schema.`;
         const response = await generateAiText({
           prompt,
           maxCompletionTokens: 350,
+          kind: 'other',
         });
+        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
 
         const detailed = (response.text || "").trim();
         responseCache.set(cacheKey, { data: detailed, expiresAt: Date.now() + CACHE_TTL_MS });

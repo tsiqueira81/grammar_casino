@@ -9,6 +9,7 @@ import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { APP_VERSION, logEvent } from './utils/debugLog';
+import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
 import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
@@ -1433,6 +1434,12 @@ export function App() {
   // Package A4: screen changes go to the debug log.
   useEffect(() => {
     logEvent('step', step === 'SETTINGS' ? `Screen: SETTINGS part ${settingsPart}` : `Screen: ${step}`);
+    if (step === 'GAME_OVER') {
+      // Package A3: what this game cost in Firestore operations (this device's share).
+      const used = takeGameUsage();
+      const day = firestoreUsageToday();
+      if (used.reads || used.writes) logEvent('perf', `Firestore this game: ${used.reads} reads, ${used.writes} writes (today on this device: ${day.reads} reads, ${day.writes} writes)`);
+    }
   }, [step, settingsPart]);
   useEffect(() => {
     logEvent('room', mpRoomCode ? `Live room ${mpRoomCode} open` : 'No live room');

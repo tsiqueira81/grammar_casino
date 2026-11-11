@@ -406,6 +406,8 @@ export interface GroqChatOptions {
   schemaName?: string;
   maxCompletionTokens?: number;
   temperature?: number;
+  /** Models to try in order (package A2); the built-in list when not given. */
+  models?: string[];
 }
 
 function buildOrderedKeyPool(explicitKey?: string | string[]): string[] {
@@ -453,7 +455,7 @@ function buildOrderedKeyPool(explicitKey?: string | string[]): string[] {
  * free-tier limit), automatic multi-key failover (`GROQ_API_KEY`, `GROQ_API_KEY_2`, etc.),
  * and strict JSON Schema enforcement when `responseSchema` is provided.
  */
-export async function callGroqChatCompletion(options: GroqChatOptions): Promise<{ text: string }> {
+export async function callGroqChatCompletion(options: GroqChatOptions): Promise<{ text: string; model: string; tokens?: number }> {
   const {
     apiKey,
     prompt,
@@ -471,7 +473,7 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
 
   let lastError: any = null;
 
-  for (const model of GROQ_TEXT_FALLBACK_MODELS) {
+  for (const model of options.models && options.models.length ? options.models : GROQ_TEXT_FALLBACK_MODELS) {
     for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
       const currentKey = keys[keyIdx];
       const hasAnotherKey = keyIdx < keys.length - 1;
@@ -548,7 +550,8 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
           if (!text) {
             throw new Error('Empty response content returned by Groq model.');
           }
-          return { text };
+          const tokens = typeof data?.usage?.total_tokens === 'number' ? data.usage.total_tokens : undefined;
+          return { text, model, tokens };
         } catch (e: any) {
           lastError = e;
           if (e?.status === 401 || e?.status === 403) {

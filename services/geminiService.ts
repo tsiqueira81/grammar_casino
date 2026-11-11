@@ -155,6 +155,8 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
       body: JSON.stringify({ action, ...payload }),
       signal: controller?.signal,
     });
+    const meta = response.headers?.get?.('X-AI-Meta');
+    if (meta) logEvent('ai', `${action}: ${meta}`);
     try {
       data = await response.json();
     } catch {

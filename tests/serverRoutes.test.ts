@@ -57,3 +57,10 @@ describe('serverless API routes', () => {
     expect(statuses.slice(40)).toContain(429);
   });
 });
+
+describe('deep health check (package A2)', () => {
+  it('refuses without the health check token', async () => {
+    const res = await call('/api/health?deep=1');
+    expect(res.status).toBe(403);
+  });
+});

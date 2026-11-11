@@ -1,4 +1,5 @@
 import { handleGeminiRequest } from './aiHandler';
+import { deepHealth, deepHealthAllowed } from './aiProviders';
 
 /**
  * Serverless Web Request -> Express API dispatcher for Netlify Functions & Cloudflare Workers (`/api/*`).
@@ -16,6 +17,21 @@ export async function dispatchServerlessApi(
     }
   }
   const url = new URL(webReq.url);
+  // Package A2: /api/health?deep=1 checks each AI provider, for whoever holds HEALTH_CHECK_TOKEN.
+  if (url.pathname === "/api/health" && url.searchParams.get("deep") === "1") {
+    if (!deepHealthAllowed(webReq.headers.get("authorization"))) {
+      return new globalThis.Response(JSON.stringify({ error: "Deep health needs the health check token." }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const providers = await deepHealth();
+    const ok = Object.values(providers).some((p) => p.ok);
+    return new globalThis.Response(JSON.stringify({ status: ok ? "ok" : "degraded", app: "grammar-casino", providers }), {
+      status: ok ? 200 : 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   let parsedBody: any = {};
   if (webReq.method !== "GET" && webReq.method !== "HEAD") {
     try {
