@@ -8,6 +8,7 @@ import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected,
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
 const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
@@ -243,6 +244,18 @@ const loadInitialState = () => {
 
 const initialGameState = loadInitialState();
 
+// Package T1: last game's setup, remembered per browser.
+function loadSetupPrefs(): Partial<SetupPrefs> {
+  return parseSetupPrefs(safeLocalStorage.getItem(SETUP_PREFS_KEY), {
+    levels: CEFR_LEVELS,
+    questionTypes: ALL_QUESTION_TYPES,
+    powerUps: Object.keys(POWER_UPS),
+    timerOptions: TURN_TIMER_OPTIONS,
+    minTargetAmount: MIN_TARGET_AMOUNT,
+  }) ?? {};
+}
+const initialPrefs = initialGameState ? {} : loadSetupPrefs();
+
 const renderTextSegments = (segments: TextSegment[], markClassName: string) =>
   segments.map((seg, i) =>
     seg.mark ? (
@@ -268,7 +281,7 @@ export function App() {
         mixedFormats: getEffectiveMixedFormats(saved.mixedFormats),
       };
     }
-    return {
+    return initialPrefs.settings ?? {
       topic: GRAMMAR_TOPICS[0],
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
@@ -277,14 +290,14 @@ export function App() {
     };
   });
   const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
-  const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || '');
-  const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
+  const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || initialPrefs.customTopic || '');
+  const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || initialPrefs.customTheme || '');
   const mixedFormatIndexRef = useRef(0);
   
   // Package G3: a new game starts in "Most money after N hands", the gentlest start for a class.
-  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'rounds');
-  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || 10);
-  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || DEFAULT_TARGET_AMOUNT);
+  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || initialPrefs.gameMode || 'rounds');
+  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || initialPrefs.totalRounds || 10);
+  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT);
   const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
   
   const [currentSentence, setCurrentSentence] = useState<GeneratedSentence | null>(initialGameState?.currentSentence || null);
@@ -366,7 +379,7 @@ export function App() {
       const missing = allKeys.filter(k => !saved.includes(k));
       return [...saved, ...missing];
     }
-    return allKeys;
+    return initialPrefs.deck ?? allKeys;
   });
   const [roundSpending, setRoundSpending] = useState<Record<number, number>>(initialGameState?.roundSpending || {}); // PlayerId -> amount spent
 
@@ -377,10 +390,10 @@ export function App() {
   const [showAvatarModal, setShowAvatarModal] = useState<{ playerId: number } | null>(null);
   const [editingPlayerIdInSetup, setEditingPlayerIdInSetup] = useState<number | null>(null);
   const [editingPlayerNameInSetup, setEditingPlayerNameInSetup] = useState('');
-  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY);
+  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY);
   const [isEditingStartingCash, setIsEditingStartingCash] = useState(false);
   const [isLobbyMenuOpen, setIsLobbyMenuOpen] = useState(false);
-  const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY));
+  const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY));
   const [showWheelModal, setShowWheelModal] = useState<{ playerId: number } | null>(null);
   const [usedSubtypes, setUsedSubtypes] = useState<string[]>([]);
   const [pendingLoadGame, setPendingLoadGame] = useState<any | null>(null);
@@ -400,7 +413,7 @@ export function App() {
   const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(() => {
     const saved = initialGameState?.turnTimerSeconds;
     if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
-    return 0;
+    return initialPrefs.turnTimerSeconds ?? 0;
   });
   const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
   const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
@@ -1718,6 +1731,17 @@ export function App() {
       mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
     };
     mixedFormatIndexRef.current = 0;
+    safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
+      settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
+      customTopic,
+      customTheme,
+      gameMode,
+      totalRounds: numTotalRounds,
+      targetAmount: numTargetAmount,
+      startingCash,
+      turnTimerSeconds,
+      deck: selectedPowerUps,
+    }));
     setSettings(newSettings);
     setCurrentRound(1);
     setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
@@ -1750,7 +1774,7 @@ export function App() {
     // Pass undefined for forcedBatch so fetchNewSentence consumes the Round 1 sentence pre-fetched on Settings Part 2
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
     playSound('success');
-  }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
+  }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, turnTimerSeconds, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
   
   const handleGetHint = useCallback(async (playerId: number) => {
       if (!canPlayerAct(playerId)) return;
@@ -4045,7 +4069,8 @@ export function App() {
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
-    setSettings({
+    const prefs = loadSetupPrefs();
+    setSettings(prefs.settings ?? {
       topic: GRAMMAR_TOPICS[0],
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
@@ -4054,11 +4079,11 @@ export function App() {
     });
     setMixedFormatSetupWarning(null);
     mixedFormatIndexRef.current = 0;
-    setCustomTopic('');
-    setCustomTheme('');
-    setGameMode('rounds');
-    setTotalRounds(10);
-    setTargetAmount(DEFAULT_TARGET_AMOUNT);
+    setCustomTopic(prefs.customTopic ?? '');
+    setCustomTheme(prefs.customTheme ?? '');
+    setGameMode(prefs.gameMode ?? 'rounds');
+    setTotalRounds(prefs.totalRounds ?? 10);
+    setTargetAmount(prefs.targetAmount ?? DEFAULT_TARGET_AMOUNT);
     setCurrentRound(1);
     setCurrentSentence(null);
     setPastSentences([]); // Clear history on restart
@@ -4078,19 +4103,53 @@ export function App() {
     setIsCopied(false);
     setIsSentenceRevealed(false);
     setAvailablePowerUps(Object.keys(POWER_UPS) as PowerUpKey[]);
-    setSelectedPowerUps(Object.keys(POWER_UPS) as PowerUpKey[]); 
+    setSelectedPowerUps(prefs.deck ?? (Object.keys(POWER_UPS) as PowerUpKey[]));
     setNextRoundSettings(null);
     setRoundSpending({});
     setSimplifiedExplanation({ text: null, loading: false });
-    setStartingCash(INITIAL_PLAYER_MONEY);
+    setStartingCash(prefs.startingCash ?? INITIAL_PLAYER_MONEY);
     setIsEditingStartingCash(false);
-    setTempStartingCash(String(INITIAL_PLAYER_MONEY));
-    setTurnTimerSeconds(0);
+    setTempStartingCash(String(prefs.startingCash ?? INITIAL_PLAYER_MONEY));
+    setTurnTimerSeconds(prefs.turnTimerSeconds ?? 0);
     setTurnTimers({});
     setTeacherRevealOverride(false);
     setAutoStartNextTimer(true);
     if (playerNameInputRef.current) playerNameInputRef.current.focus();
   }, [playSound]);
+
+  // Package T1: "Play again" keeps the class at the table (and the room open, so phones stay
+  // seated), keeps the settings, and goes straight to the house rules: one more click deals.
+  const handlePlayAgainSameClass = useCallback(() => {
+    playSound('startGame');
+    prefetchRef.current = null;
+    setPlayers(prev => prev.map(p => ({ ...p, money: startingCash, history: [], winStreak: 0, effects: [] })));
+    setCurrentRound(1);
+    setCurrentSentence(null);
+    setRoundHistory([]);
+    setUsedSubtypes([]);
+    setBets({});
+    setHints({});
+    setRoundResults([]);
+    setWinner(null);
+    setError(null);
+    setIsProcessing(false);
+    setProcessingStatus('');
+    setPowerUpsUsedThisRound({});
+    setActivePowerUps({});
+    setHighlightedPhrase(null);
+    setIsSentenceRevealed(false);
+    setNextRoundSettings(null);
+    setRoundSpending({});
+    setSimplifiedExplanation({ text: null, loading: false });
+    setTurnTimers({});
+    setTeacherRevealOverride(false);
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setSentenceBatch([]);
+    setSettingsPart(2);
+    setStep('SETTINGS');
+  }, [playSound, startingCash]);
 
   const handleLoadGameClick = useCallback(() => {
     if (fileInputRef.current) {
@@ -4731,6 +4790,18 @@ export function App() {
               : gameMode === 'rounds'
                 ? `${totalRounds || '?'} hands`
                 : `First to $${Number(targetAmount || 0).toLocaleString()}`;
+          // Package T1: say what is missing next to the button, instead of only after a click.
+          const setupProblem = (() => {
+            if (settings.topic === 'My own choice' && !customTopic.trim()) return 'Type your own topic to go on.';
+            if (settings.theme === 'Custom ✍️' && !customTheme.trim()) return 'Type your own theme to go on.';
+            if (settingsPart === 2) {
+              const n = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+              if (gameMode === 'rounds' && (isNaN(n) || n <= 0)) return 'Type a number of hands (1 or more) to deal.';
+              const t = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+              if (gameMode === 'targetAmount' && (isNaN(t) || t < MIN_TARGET_AMOUNT)) return `Type a target of at least $${MIN_TARGET_AMOUNT.toLocaleString()} to deal.`;
+            }
+            return null;
+          })();
           const summaryChips = [
             resolvedTopicPreview,
             settings.level,
@@ -5263,9 +5334,13 @@ export function App() {
                 >
                   <span className="inline-flex items-center gap-1.5"><ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">Back</span></span>
                 </ActionButton>
+                {setupProblem && (
+                  <p id="setup-problem" role="status" className="text-gc-small font-semibold text-gc-danger max-w-[16rem] text-right" data-testid="setup-problem">{setupProblem}</p>
+                )}
                 {settingsPart === 1 ? (
                   <ActionButton
                     onClick={handleAdvanceToSettingsPart2}
+                    aria-describedby={setupProblem ? 'setup-problem' : undefined}
                     variant="primary"
                     className="h-12 px-6 text-gc-body shrink-0"
                   >
@@ -5275,6 +5350,7 @@ export function App() {
                   <ActionButton
                     onClick={handleFinalizeSettings}
                     playSound={playSound}
+                    aria-describedby={setupProblem ? 'setup-problem' : undefined}
                     variant="primary"
                     className="h-12 px-6 text-gc-body shrink-0"
                   >
@@ -7041,8 +7117,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
 
             <div className="mt-8 flex flex-wrap justify-center items-center gap-3">
-              <ActionButton onClick={handleRestartGame} playSound={playSound} variant="primary" className="min-h-[60px] px-10 text-gc-lead">
+              <ActionButton onClick={handlePlayAgainSameClass} variant="primary" className="min-h-[60px] px-10 text-gc-lead" title="Same players and settings; the room stays open">
                 <span className="inline-flex items-center gap-2.5"><RotateCcw className="w-5 h-5 shrink-0" aria-hidden="true" />Play again</span>
+              </ActionButton>
+              <ActionButton onClick={handleRestartGame} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
+                New class
               </ActionButton>
               <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
                 <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to the cloud</span>

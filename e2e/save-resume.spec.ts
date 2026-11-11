@@ -43,7 +43,7 @@ test('an unfinished game offers to resume, and a finished game keeps its report'
   }
   await clickButton(page, /^Reveal the answer/);
   await clickButton(page, /See the final results/);
-  await clickButton(page, /Play again/);
+  await clickButton(page, /^New class/);
   await page.getByRole('button', { name: 'More' }).click();
   await page.getByRole('menuitem', { name: /Past reports \(1\)/ }).click();
   await page.getByRole('dialog', { name: 'Past reports' }).getByRole('button', { name: /2 players · 1 hand/ }).click();
