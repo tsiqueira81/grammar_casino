@@ -49,6 +49,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `server/verifyItem.ts` | Every AI sentence is checked before students see it (package L3): the L1 schema, the CEFR level (`checkCefrLevelViolation`), a school-safety word list, no near copy of a sentence already dealt, then a second Groq model (the one that did not write it) answers the item cold without the key. Disagreement means `422 { fallback: true }` and the game deals from its bank. A cloze word the checker also accepts is added to `acceptedAnswers`. Key word transformation gets the rules only. AI items reach the cloud bank only after they were played and not voided (`archivePlayedSentence`) |
 | `show/quality.ts` | Quality levels of the 3D table (package V1): Off, Low, Medium, High, chosen in setup ("3D table") or Automatic. A frame-rate guard steps down one level when the median frame over 2 s of animation is above 24 ms, never up during a game; Automatic remembers it per computer (`grammar_casino_quality_v1`). Software WebGL and a lost graphics context turn the table off. `Shift+D` shows draw calls and triangles against the budget. `<html data-quality3d>` holds the level in use |
 | `utils/firestoreUsage.ts` | Firestore reads and writes made by this device today (package A3), counted in `firebaseService.ts`; the debug log gets each live game's count and a note past 60% of the free daily quota |
+| `utils/musicEngine.ts` | The music bed on the teacher's screen (package V6): synthesised lounge music at 92 bpm, scheduled 100 ms ahead, with four layers (lobby, think, tension, celebrate) chosen by the screen. It starts after the first click, never with sound off or in Calm mode, drops to 30% on the results screen, and has its own volume (0 turns it off) next to the effects volume. Phones never load it |
 | `utils/debugLog.ts` | The host's debug log (package A4): last 500 events (screens, hands, rooms, seats dropping, intents ignored, AI fallbacks), Shift+L shows it, Download saves it, a crash offers "Copy details". `APP_VERSION` is the commit and build date from `vite.config.ts` (`__APP_VERSION__`), "dev" in tests. Never log what a student typed |
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
 | `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators; `build_table.py` makes the table and room of package V2, which the game does not load yet) |
@@ -164,6 +165,7 @@ Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/sa
 | `grammar_casino_own_deck_v1` | local | The teacher's own sentences in use (L4) |
 | `grammar_casino_decks_v1` | local | Saved decks of the teacher's own sentences (L4) |
 | `grammar_casino_quality_v1` | local | 3D table quality: the teacher's choice and what Automatic learned |
+| `grammar_casino_music_volume_v1` | local | Music volume (0 = off) |
 | `grammar_casino_theme` | local | Light or dark theme |
 | `grammar_casino_projector_mode` | local | Projector readability mode |
 | `grammar_casino_calm_mode` | local | Calm mode (less motion and sound) |

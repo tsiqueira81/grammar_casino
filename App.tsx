@@ -93,6 +93,7 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
@@ -117,6 +118,13 @@ const readStoredSfxVolume = (): number => {
   }
 };
 const soundEngine = createSoundEngine(typeof window !== 'undefined' ? readStoredSfxVolume() : DEFAULT_SFX_VOLUME);
+// Package V6: the music bed. The volume is kept per computer; 0 means no music.
+function readStoredMusicVolume(): number {
+  const raw = safeLocalStorage.getItem(MUSIC_VOLUME_KEY);
+  const v = raw === null ? DEFAULT_MUSIC_VOLUME : Number(raw);
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : DEFAULT_MUSIC_VOLUME;
+}
+const musicEngine = createMusicEngine(typeof window !== 'undefined' ? readStoredMusicVolume() : DEFAULT_MUSIC_VOLUME);
 
 // --- Audio Decoding Helpers for Gemini TTS ---
 function base64ToBytes(base64: string) {
@@ -705,6 +713,33 @@ export function App() {
   useEffect(() => {
     try { safeLocalStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
   }, [isMuted]);
+
+  // Package V6: music plays after the first click, never with sound off or in Calm mode,
+  // fades between layers with the screen, and drops to 30% while the results are read.
+  const [musicVolume, setMusicVolume] = useState(() => readStoredMusicVolume());
+  const musicWanted = !isMuted && !isCalmMode && musicVolume > 0;
+  useEffect(() => {
+    musicEngine.setVolume(musicVolume);
+    try { safeLocalStorage.setItem(MUSIC_VOLUME_KEY, String(musicVolume)); } catch {}
+  }, [musicVolume]);
+  useEffect(() => {
+    if (!musicWanted) {
+      musicEngine.stop();
+      return;
+    }
+    const begin = () => musicEngine.start();
+    begin();
+    window.addEventListener('pointerdown', begin, { once: true });
+    window.addEventListener('keydown', begin, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', begin);
+      window.removeEventListener('keydown', begin);
+    };
+  }, [musicWanted]);
+  useEffect(() => {
+    musicEngine.setLayer(layerForStep(step));
+    musicEngine.duck(step === 'RESULTS' ? 0.3 : 1);
+  }, [step]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
@@ -7560,6 +7595,18 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     onKeyUp={() => soundEngine.play('chipClink', 100)}
                     className="w-28 accent-amber-500 cursor-pointer"
                     aria-label="Sound effects volume"
+                  />
+                  <span className="ml-2">Music</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={musicVolume}
+                    onChange={(e) => setMusicVolume(Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    className="w-24 accent-amber-500 cursor-pointer"
+                    aria-label="Music volume"
+                    title={isCalmMode ? 'Music is off in Calm mode' : 'Music volume (0 turns it off)'}
                   />
                 </label>
               )}
