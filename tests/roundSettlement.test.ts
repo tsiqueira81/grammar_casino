@@ -41,9 +41,10 @@ interface Setup {
   powerUps?: Record<number, ActivePowerUp[]>;
   verifications?: SettleRoundInput['verifications'];
   clozeWordVerifications?: SettleRoundInput['clozeWordVerifications'];
+  payoutMultiplier?: number;
 }
 
-function settle({ sentence = flawed, players, bets, powerUps = {}, verifications = {}, clozeWordVerifications = {} }: Setup) {
+function settle({ sentence = flawed, players, bets, powerUps = {}, verifications = {}, clozeWordVerifications = {}, payoutMultiplier }: Setup) {
   const qType: QuestionType = sentence.questionType || 'binary';
   const { acceptedSet, baseWordNorm } = buildAcceptedAnswerSet(sentence, qType);
   const active = players.filter(p => p.money > 0);
@@ -65,6 +66,8 @@ function settle({ sentence = flawed, players, bets, powerUps = {}, verifications
     hasPlayerPlacedBet: id => typeof bets[id]?.bet === 'number' && Number(bets[id]?.bet) > 0,
     currentRound: 1,
     roundSpending: {},
+    payoutMultiplier,
+    specialHandTitle: payoutMultiplier ? 'Final Table' : undefined,
   });
 }
 
@@ -338,3 +341,12 @@ describe('getAlternativeAcceptedAnswers', () => {
   });
 });
 
+
+describe('special hands (package G6)', () => {
+  it('multiplies wins on a special hand and leaves losses alone', () => {
+    const r = settle({ players: [player(1), player(2)], bets: { 1: flagged(100), 2: validPick(200) }, payoutMultiplier: 2 });
+    expect(money(r, 1)).toBe(1200);
+    expect(money(r, 2)).toBe(800);
+    expect(r.roundResults[0].outcomeText).toContain('Final Table (2×)');
+  });
+});

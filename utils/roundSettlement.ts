@@ -5,6 +5,7 @@
 // unit tested. The asynchronous answer checking (AI judge, correction checks) still
 // happens in App.tsx; its results are passed in as `verifications` and
 // `clozeWordVerifications`. Sounds are returned in order instead of played here.
+import { scaleWin } from '../game/specialHands';
 import { isFrozenBySubZero } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
@@ -45,6 +46,10 @@ export interface SettleRoundInput {
   hasPlayerPlacedBet: (playerId: number) => boolean;
   currentRound: number;
   roundSpending: Record<number, number>;
+  /** Package G6: a special hand multiplies wins (Final Table 2, Second look 1.5). Default 1. */
+  payoutMultiplier?: number;
+  /** Shown in the result line when the multiplier applies, e.g. "Final Table". */
+  specialHandTitle?: string;
 }
 
 export interface SettleRoundOutput {
@@ -971,7 +976,6 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       finalBet,
       isWin,
       marksAwarded,
-      outcomeAmount,
       correctionFeedbackText,
       playerAnswerDisplay,
       syntheticOpinion,
@@ -980,6 +984,11 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       teachersPetAwarded,
     } = draft;
     let { outcomeText } = draft;
+    const handMultiplier = input.payoutMultiplier ?? 1;
+    const outcomeAmount = scaleWin(draft.outcomeAmount, handMultiplier);
+    if (outcomeAmount !== draft.outcomeAmount) {
+      outcomeText += ` + ${input.specialHandTitle || 'Special hand'} (${handMultiplier}×)`;
+    }
 
     let newMoney = Math.max(0, player.money + outcomeAmount);
 

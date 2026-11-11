@@ -110,6 +110,7 @@ import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
 import { DEMO_BOT_COUNT } from './game/demoBots';
 import { isE2eMode } from './utils/e2eContent';
 import { classListMatch } from './game/classList';
+import { SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, type SpecialHand } from './game/specialHands';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -813,6 +814,34 @@ export function App() {
 
   // Package G7: "2 hands left" and "Last hand" on the hand badge.
   const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
+  // Package G6: special hands, off unless the teacher turns them on.
+  const [specialHandsOn, setSpecialHandsOn] = useState<boolean>(() => safeLocalStorage.getItem(SPECIAL_HANDS_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(SPECIAL_HANDS_KEY, specialHandsOn ? 'on' : 'off');
+  }, [specialHandsOn]);
+  const currentSpecialHand: SpecialHand | null = specialHandFor({
+    enabled: specialHandsOn,
+    gameMode,
+    round: currentRound,
+    totalRounds: Number(totalRounds),
+    secondLookRound,
+  });
+  const specialHandLabel = currentSpecialHand
+    ? `${SPECIAL_HAND_INFO[currentSpecialHand].title} ${SPECIAL_HAND_INFO[currentSpecialHand].multiplier}×`
+    : null;
+  const [specialHandCard, setSpecialHandCard] = useState<{ hand: SpecialHand; round: number } | null>(null);
+  useEffect(() => {
+    if (step !== 'IN_GAME' || !currentSpecialHand) return;
+    setSpecialHandCard({ hand: currentSpecialHand, round: currentRound });
+    playSound('success');
+    // A title card when the hand is dealt; not again for the same hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, currentRound, currentSpecialHand]);
+  useEffect(() => {
+    if (!specialHandCard) return;
+    const timer = setTimeout(() => setSpecialHandCard(null), isCalmMode ? 1800 : 2500);
+    return () => clearTimeout(timer);
+  }, [specialHandCard, isCalmMode]);
 
   // Package V8: the theme sets the felt, the lamp, the sparks and the music key.
   const stageLook = lookForTheme(settings.theme);
@@ -4026,6 +4055,8 @@ export function App() {
       hasPlayerPlacedBet,
       currentRound,
       roundSpending,
+      payoutMultiplier: payoutMultiplierFor(currentSpecialHand),
+      specialHandTitle: currentSpecialHand ? SPECIAL_HAND_INFO[currentSpecialHand].title : undefined,
     };
     const settlement = settleRound(settleInput);
     settlement.sounds.forEach(({ sound, index }) => playSound(sound, index));
@@ -4115,7 +4146,7 @@ export function App() {
     if (aiGradingFailed) {
       setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
     }
-  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme, isCalmMode, later]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme, isCalmMode, later, currentSpecialHand]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
   const handleRevealResults = useCallback(async (force?: unknown) => {
@@ -5591,6 +5622,24 @@ export function App() {
                                   About {estimateMinutes({ hands: Number(totalRounds), players: players.length, timerSeconds: turnTimerSeconds, room: Boolean(mpRoomCode) })} minutes with {mpRoomCode ? 'this room' : `${players.length} player${players.length === 1 ? '' : 's'}`}.
                                 </p>
                               )}
+                              <label className="w-full mt-1 flex items-center justify-between gap-4 p-3 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] cursor-pointer">
+                                <span>
+                                  <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
+                                  <span className="block text-gc-small text-gc-quiet">
+                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times.
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={specialHandsOn}
+                                  onClick={() => { playSound('click'); setSpecialHandsOn(v => !v); }}
+                                  className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${specialHandsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                                >
+                                  <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${specialHandsOn ? 'translate-x-5' : ''}`} />
+                                  <span className="sr-only">Special hands</span>
+                                </button>
+                              </label>
                             </div>
                           )}
                           {isSelected && opt.mode === 'targetAmount' && (
@@ -6103,7 +6152,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
-                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{specialHandLabel ? ` · ${specialHandLabel}` : secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                   </span>
                                   {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
                                     <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
@@ -6173,7 +6222,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             ) : (
                               <div className="flex justify-center">
                                 <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{specialHandLabel ? ` · ${specialHandLabel}` : secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                 </span>
                               </div>
                             )}
@@ -7739,6 +7788,19 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             winnerName: winner?.name ?? null,
           })}
         />
+        {specialHandCard && (
+          <div
+            className="fixed inset-0 z-[60] pointer-events-none grid place-items-center p-4"
+            role="status"
+            data-testid="special-hand-card"
+          >
+            <div className="gc-panel gc-special-card rounded-gc-lg px-8 py-6 text-center shadow-gc-2 border border-gc-gold/50">
+              <div className="text-[44px] leading-none" aria-hidden="true">{SPECIAL_HAND_INFO[specialHandCard.hand].icon}</div>
+              <p className="mt-2 font-logo text-[40px] leading-tight font-bold text-gc-gold">{SPECIAL_HAND_INFO[specialHandCard.hand].title}</p>
+              <p className="mt-1 text-gc-lead font-semibold text-gc-ink">{SPECIAL_HAND_INFO[specialHandCard.hand].rule}</p>
+            </div>
+          </div>
+        )}
         {showCoach && (
           <FirstRunCoach
             onClose={closeCoach}
