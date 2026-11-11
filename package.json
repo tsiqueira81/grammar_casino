@@ -15,7 +15,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test --trace off",
-    "bots": "tsx scripts/bots.ts"
+    "bots": "tsx scripts/bots.ts",
+    "size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",

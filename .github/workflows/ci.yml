@@ -40,13 +40,17 @@ jobs:
         run: npm run build
 
       - name: Bundle sizes
+        # Fails when a file grows more than 10% past scripts/bundle-baseline.json (package F8).
         run: |
+          set -o pipefail
           {
-            echo "### Bundle sizes"
-            echo '```'
-            ls -lS dist/assets | awk 'NR>1 {printf "%8.1f KB  %s\n", $5/1024, $9}' | head -15
+            echo "### Bundle sizes (gzipped)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          node scripts/check-bundle-size.mjs 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $status
 
       - name: Keep the build for the preview
         if: github.event_name == 'pull_request'

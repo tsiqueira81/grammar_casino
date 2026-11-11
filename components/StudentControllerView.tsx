@@ -1,3 +1,4 @@
+import { safeLocalStorage } from '../utils/safeStorage';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
@@ -111,7 +112,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // Load saved session on mount and auto-reconnect if matching room code
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
+      const raw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
       if (!raw) return;
       const saved: SavedStudentSession = JSON.parse(raw);
       if (saved.name) setPlayerNameInput(saved.name);
@@ -257,7 +258,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       let tokenToUse = tokenOverride || '';
       if (!tokenToUse) {
         try {
-          const savedRaw = localStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
+          const savedRaw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
           if (savedRaw) {
             const saved: SavedStudentSession = JSON.parse(savedRaw);
             if (saved.code === code && saved.name.toLowerCase() === name.toLowerCase()) {
@@ -275,7 +276,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         reconnectToken: tokenToUse,
         onViewUpdate: handleViewUpdate,
         onKicked: () => {
-          localStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
+          safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
           setView(null);
           setJoinError('You were removed from the room or the room was closed.');
         },
@@ -291,7 +292,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         reconnectToken: ctrl.seat.reconnectToken,
         playerId: ctrl.seat.playerId,
       };
-      localStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(sessionToSave));
+      safeLocalStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(sessionToSave));
       playSound('addPlayer');
     } catch (err: any) {
       setJoinError(err.message || 'Could not connect to room.');
@@ -566,7 +567,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     if (view && !window.confirm('Leave the table? Your seat stays saved, and you can join again with the same name.')) return;
     controllerRef.current?.destroy();
     controllerRef.current = null;
-    localStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
+    safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
     setView(null);
     onExitStudentMode();
   };

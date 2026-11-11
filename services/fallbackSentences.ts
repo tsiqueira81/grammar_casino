@@ -1,3 +1,4 @@
+import { safeLocalStorage } from '../utils/safeStorage';
 import { GeneratedSentence, CEFRLevel, Settings, QuestionType, GrammarTopic } from '../types';
 import {
   EXPANDED_SENTENCE_BANK,
@@ -904,7 +905,7 @@ const CLOUD_SENTENCE_STORAGE_KEY = 'grammar_casino_cloud_sentences_v1';
 function getDynamicCloudEntries(): any[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
+    const raw = safeLocalStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];

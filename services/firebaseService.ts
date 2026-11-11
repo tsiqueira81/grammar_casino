@@ -1,3 +1,4 @@
+import { safeLocalStorage } from '../utils/safeStorage';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   connectAuthEmulator,
@@ -901,7 +902,7 @@ export function computeSentenceFingerprintId(text: string, questionType: Questio
 export function loadCachedCloudSentences(): CloudCuratedSentence[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
+    const raw = safeLocalStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -913,7 +914,7 @@ export function loadCachedCloudSentences(): CloudCuratedSentence[] {
 export function saveCachedCloudSentences(sentences: CloudCuratedSentence[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(
+    safeLocalStorage.setItem(
       CLOUD_SENTENCE_STORAGE_KEY,
       JSON.stringify(sentences.slice(0, MAX_CACHED_CLOUD_SENTENCES))
     );

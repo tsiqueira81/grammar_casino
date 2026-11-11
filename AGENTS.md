@@ -17,6 +17,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `npm run lint` | TypeScript check (`tsc --noEmit`) |
 | `npm test` | Unit tests (vitest, `tests/`) |
 | `npm run build` | Production bundle in `dist/` |
+| `npm run size` | After a build, compares gzipped file sizes with `scripts/bundle-baseline.json` and fails past +10% (CI runs it). Run `node scripts/check-bundle-size.mjs --update` when growth is intended, and say why in the pull request |
 | `npm run test:e2e` | Browser tests (Playwright, `e2e/`): a whole local game and a live room with three phones. Starts the dev server itself |
 | `npm run bots -- <ROOM> [count]` | Joins simulated students to a room on the dev server, for load checks and demos |
 
@@ -52,7 +53,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 2. **One work package per pull request**, small enough to review in ten minutes. A "move code, change nothing" change must not change behaviour.
 3. **Green before and after.** `npm run lint` and `npm test` must pass. Never delete, skip or loosen a test to get green. If a test pins behaviour you deliberately change, update it in the same pull request and say so.
 4. **Search, don't trust line numbers.** Files move.
-5. **Phones come first on weight.** Nothing only the projector needs (three.js, 3D models, large images) may enter the bundle a phone downloads. Compare `npm run build` chunk sizes in the pull request.
+5. **Phones come first on weight.** Nothing only the projector needs (three.js, 3D models, large images) may enter the bundle a phone downloads. `npm run size` compares chunk sizes with the baseline; CI fails past +10%.
 6. **The lesson must never stall.** Anything that uses the network or AI needs an offline fallback, and every screen needs a way out for the teacher.
 7. **Respect Calm mode** and the system's reduced-motion setting for any new animation, flash or sound.
 8. **No real student data.** Nicknames only; no accounts or emails for students.
@@ -99,6 +100,8 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - To test rule changes, run `scripts/check-firestore-rules.mjs` against the emulator (needs Java; instructions at the top of the file).
 
 ## Browser storage keys
+
+Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/safeStorage.ts`), never `localStorage` directly: some browsers refuse storage and throw, and `e2e/blocked-storage.spec.ts` checks the game still runs then.
 
 | Key | Storage | What it holds |
 | --- | --- | --- |

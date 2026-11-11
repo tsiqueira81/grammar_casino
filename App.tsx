@@ -1,3 +1,4 @@
+import { safeLocalStorage } from './utils/safeStorage';
 import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
@@ -90,7 +91,7 @@ const STICKY_TOP_PX = 76;
 // --- Sound engine (Web Audio, no downloads; see utils/soundEngine.ts) ---
 const readStoredSfxVolume = (): number => {
   try {
-    return clampVolume(localStorage.getItem(SFX_VOLUME_STORAGE_KEY), DEFAULT_SFX_VOLUME);
+    return clampVolume(safeLocalStorage.getItem(SFX_VOLUME_STORAGE_KEY), DEFAULT_SFX_VOLUME);
   } catch {
     return DEFAULT_SFX_VOLUME;
   }
@@ -221,7 +222,7 @@ function pcmToAudioBuffer(
 
 const loadInitialState = () => { 
   try { 
-    const s = localStorage.getItem(LOCAL_STORAGE_KEY); 
+    const s = safeLocalStorage.getItem(LOCAL_STORAGE_KEY); 
     if (s) {
       const parsed = migrateSavedGame(JSON.parse(s), () => getRandomCharacterAvatar());
       if (parsed && typeof parsed.step === 'string') return parsed;
@@ -306,7 +307,7 @@ export function App() {
   
   const [isMuted, setIsMuted] = useState(() => {
     try {
-      return localStorage.getItem(SFX_MUTED_STORAGE_KEY) === 'true';
+      return safeLocalStorage.getItem(SFX_MUTED_STORAGE_KEY) === 'true';
     } catch {
       return false;
     }
@@ -316,7 +317,7 @@ export function App() {
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [orpheusVoice, setOrpheusVoice] = useState<GeminiService.OrpheusVoiceId>(() => {
     try {
-      const saved = localStorage.getItem('grammar_casino_orpheus_voice_v2');
+      const saved = safeLocalStorage.getItem('grammar_casino_orpheus_voice_v2');
       if (saved && GeminiService.ORPHEUS_VOICE_OPTIONS.some(v => v.id === saved)) {
         return saved as GeminiService.OrpheusVoiceId;
       }
@@ -326,7 +327,7 @@ export function App() {
   const handleOrpheusVoiceChange = useCallback((nextVoice: GeminiService.OrpheusVoiceId) => {
     setOrpheusVoice(nextVoice);
     try {
-      localStorage.setItem('grammar_casino_orpheus_voice_v2', nextVoice);
+      safeLocalStorage.setItem('grammar_casino_orpheus_voice_v2', nextVoice);
     } catch {}
   }, []);
   const [ttsAudioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 }));
@@ -382,7 +383,7 @@ export function App() {
   const [nextRoundSettings, setNextRoundSettings] = useState<Settings | null>(initialGameState?.nextRoundSettings || null);
   const [isSettingsDeckExpanded, setIsSettingsDeckExpanded] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
+      return safeLocalStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
     }
     return false;
   });
@@ -507,7 +508,7 @@ export function App() {
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('grammar_casino_theme');
+      const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
       if (savedTheme) {
         return savedTheme === 'dark';
       }
@@ -521,10 +522,10 @@ export function App() {
       const next = !prev;
       if (next) {
         document.documentElement.classList.add('dark');
-        localStorage.setItem('grammar_casino_theme', 'dark');
+        safeLocalStorage.setItem('grammar_casino_theme', 'dark');
       } else {
         document.documentElement.classList.remove('dark');
-        localStorage.setItem('grammar_casino_theme', 'light');
+        safeLocalStorage.setItem('grammar_casino_theme', 'light');
       }
       return next;
     });
@@ -533,7 +534,7 @@ export function App() {
   // Projector mode: solid text and bigger small labels for reading from the back of a classroom.
   const [isProjectorMode, setIsProjectorMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('grammar_casino_projector_mode') === 'on';
+      return safeLocalStorage.getItem('grammar_casino_projector_mode') === 'on';
     } catch {
       return false;
     }
@@ -543,7 +544,7 @@ export function App() {
   // confetti). Phones in a live room follow it too.
   const [isCalmMode, setIsCalmMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('grammar_casino_calm_mode') === 'on';
+      return safeLocalStorage.getItem('grammar_casino_calm_mode') === 'on';
     } catch {
       return false;
     }
@@ -557,7 +558,7 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
     try {
-      localStorage.setItem('grammar_casino_calm_mode', isCalmMode ? 'on' : 'off');
+      safeLocalStorage.setItem('grammar_casino_calm_mode', isCalmMode ? 'on' : 'off');
     } catch {
       // Storage can be blocked (private window); the mode still works for this visit.
     }
@@ -566,14 +567,14 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('projector', isProjectorMode);
     try {
-      localStorage.setItem('grammar_casino_projector_mode', isProjectorMode ? 'on' : 'off');
+      safeLocalStorage.setItem('grammar_casino_projector_mode', isProjectorMode ? 'on' : 'off');
     } catch {
       // Storage can be blocked (private window); the mode still works for this visit.
     }
   }, [isProjectorMode]);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('grammar_casino_theme');
+    const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
     if (savedTheme === 'light') {
       document.documentElement.classList.remove('dark');
       setIsDarkMode(false);
@@ -598,14 +599,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
+    try { safeLocalStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
   }, [isMuted]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
     setSfxVolume(v);
     soundEngine.setVolume(v);
-    try { localStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(v)); } catch {}
+    try { safeLocalStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(v)); } catch {}
   }, []);
 
   useEffect(() => { 
@@ -644,7 +645,7 @@ export function App() {
     setIsSettingsDeckExpanded(prev => {
       const next = !prev;
       try {
-        localStorage.setItem('grammar_casino_expand_settings_deck', String(next));
+        safeLocalStorage.setItem('grammar_casino_expand_settings_deck', String(next));
       } catch (e) {}
       return next;
     });
@@ -1251,7 +1252,9 @@ export function App() {
         powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
         sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
       }; 
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState)); 
+      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState))) {
+        console.warn('The browser would not save the game, so it is kept for this tab only.');
+      }
       GeminiService.savePortableGame(gameState); 
     } catch (e) { 
       console.error("Failed to save game state:", e); 
@@ -3788,7 +3791,7 @@ export function App() {
   }, [players, gameMode, targetAmount, playSound]);
 
   const handleRestartGame = useCallback(() => {
-    localStorage.removeItem(LOCAL_STORAGE_KEY); 
+    safeLocalStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     // Automatically close any open multiplayer room on restart / returning to lobby
     if (mpControllerRef.current) {
