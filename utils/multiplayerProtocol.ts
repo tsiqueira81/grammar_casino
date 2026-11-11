@@ -150,6 +150,8 @@ export interface PlayerViewPayload {
   paused?: boolean;
   /** Package G6: the special hand being played, shown on the phone. */
   specialHand?: SpecialHandBanner | null;
+  /** Package G6 Spotlight: this player's next power-up draw is free. */
+  freeDraw?: boolean;
   /** The teacher's clock when this update was sent (package R3); added by the transport. */
   serverNow?: number;
 }
@@ -376,6 +378,8 @@ export interface BuildPlayerViewsParams {
   paused?: boolean;
   /** Package G6: the special hand being played, or null. */
   specialHand?: SpecialHandBanner | null;
+  /** Package G6 Spotlight: free draws each player has earned and not used. */
+  freeDraws?: Record<number, number[]>;
 }
 
 /** Package G6: what a phone shows for a special hand. */
@@ -469,6 +473,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     calmMode,
     paused,
     specialHand,
+    freeDraws,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -716,7 +721,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
         !isFrozen &&
         !isSilenced &&
         !seats[player.id]?.lockedIn &&
-        player.money >= 50 &&
+        (player.money >= POWERUP_COST || Boolean(freeDraws?.[player.id]?.length)) &&
         myUsed.length < powerUpLimit &&
         playerDrawablePool.length > 0,
       availablePowerUpsCount: playerDrawablePool.length,
@@ -744,6 +749,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       calmMode: Boolean(calmMode),
       paused: Boolean(paused) && step === 'IN_GAME',
       specialHand: specialHand && (step === 'IN_GAME' || step === 'RESULTS') ? specialHand : null,
+      freeDraw: Boolean(freeDraws?.[player.id]?.length),
     };
   }
 

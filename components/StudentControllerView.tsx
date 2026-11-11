@@ -1927,7 +1927,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         >
                           <Sparkles className="w-[18px] h-[18px] text-purple-600 dark:text-purple-300" aria-hidden="true" />
                           Draw a power-up
-                          <span className="ml-auto text-gc-money tabular-nums">${POWERUP_COST}</span>
+                          <span data-testid="phone-draw-price" className="ml-auto text-gc-money tabular-nums">{view.freeDraw ? 'Free' : `$${POWERUP_COST}`}</span>
                         </button>
                       </section>
                     </div>

@@ -16,6 +16,8 @@ import { WordTilePicker } from './NewFormatSentence';
 
 interface PlayerBettingCardProps {
   player: Player;
+  /** Package G6 Spotlight: this player's next power-up draw is free. */
+  hasFreeDraw?: boolean;
   players: Player[]; 
   bet?: Bet;
   onBetChange: (playerId: number, field: keyof Bet, value: any) => void;
@@ -84,6 +86,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   onChangeAvatar,
   onUpdateName,
   targetAmount,
+  hasFreeDraw = false,
   questionType = 'binary',
   options = [],
   baseWord,
@@ -1882,7 +1885,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <button
                 type="button"
                 onClick={() => onGetPowerUp(player.id)}
-                disabled={player.money < POWERUP_COST || isBlocked || powerUpUsedThisRound || isSilenced}
+                disabled={(player.money < POWERUP_COST && !hasFreeDraw) || isBlocked || powerUpUsedThisRound || isSilenced}
                 className="w-full flex items-center gap-3 p-3.5 rounded-gc bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-ink text-left transition-colors hover:border-gc-line/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40"
                 title={isSilenced ? "You are silenced this round" : undefined}
               >
@@ -1896,7 +1899,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </span>
                 </span>
                 {!isSilenced && (
-                  <span className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">-${POWERUP_COST}</span>
+                  <span data-testid="draw-price" className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">{hasFreeDraw ? 'Free' : `-$${POWERUP_COST}`}</span>
                 )}
               </button>
             </PowerUpTooltip>

@@ -2,10 +2,12 @@
 // with a set number of hands. The schedule only labels a hand; it adds no new phase to it.
 //   Final Table: the last hand pays double.
 //   Second look: a missed sentence coming back (package L6) pays one and a half times.
+//   Spotlight:      the grammar point the class has missed most; a right answer earns a free
+//                   power-up draw (used on a later hand).
 //   Listening hand: halfway through, a Valid-or-flawed sentence is read aloud, not shown, until
 //                   the reveal. It pays as usual.
 
-export type SpecialHand = 'finalTable' | 'secondLook' | 'listening';
+export type SpecialHand = 'finalTable' | 'secondLook' | 'spotlight' | 'listening';
 
 export const SPECIAL_HANDS_KEY = 'grammar_casino_special_hands';
 /** Package L9: the "Say it" prompt after each reveal. */
@@ -14,8 +16,15 @@ export const SAY_IT_KEY = 'grammar_casino_say_it';
 export const SPECIAL_HAND_INFO: Record<SpecialHand, { title: string; rule: string; multiplier: number; icon: string }> = {
   finalTable: { title: 'Final Table', rule: 'Last hand. Every win pays double.', multiplier: 2, icon: '🏆' },
   secondLook: { title: 'Second look', rule: 'A sentence from earlier is back. Wins pay 1.5 times.', multiplier: 1.5, icon: '🔁' },
+  spotlight: { title: 'Spotlight', rule: 'The grammar point the class missed most. Get it right for a free power-up draw.', multiplier: 1, icon: '🔦' },
   listening: { title: 'Listening hand', rule: 'Listen! The sentence is read aloud, not shown. You see it after the reveal.', multiplier: 1, icon: '🎧' },
 };
+
+/** The Spotlight hand: about 40% of the way through a game of 6 or more hands (hand 4 of 10), or null. */
+export function spotlightRoundFor(totalRounds: number): number | null {
+  if (!Number.isFinite(totalRounds) || totalRounds < 6) return null;
+  return Math.max(2, Math.round(totalRounds * 0.4));
+}
 
 /** The hand halfway through a game of 4 or more hands, or null. */
 export function listeningRoundFor(totalRounds: number): number | null {
@@ -43,6 +52,7 @@ export function specialHandFor(opts: {
   if (opts.round <= 0 || !Number.isFinite(opts.totalRounds) || opts.totalRounds <= 0) return null;
   if (opts.round === opts.totalRounds) return 'finalTable';
   if (opts.secondLookRound === opts.round) return 'secondLook';
+  if (spotlightRoundFor(opts.totalRounds) === opts.round) return 'spotlight';
   if (listeningRoundFor(opts.totalRounds) === opts.round && (opts.questionType || 'binary') === 'binary') return 'listening';
   return null;
 }

@@ -42,3 +42,44 @@ export function secondLookFor(queue: SecondLook[], round: number): SecondLook | 
 export function cancelSecondLook(queue: SecondLook[], fromRound: number): SecondLook[] {
   return queue.filter((e) => e.fromRound !== fromRound);
 }
+
+/** Package G6 Spotlight: how many misses each grammar point has had so far this game. */
+export type MissTally = Record<string, number>;
+
+export function addMisses(tally: MissTally, subtype: string | null, misses: number): MissTally {
+  if (!subtype || misses <= 0) return tally;
+  return { ...tally, [subtype]: (tally[subtype] || 0) + misses };
+}
+
+/** The point missed most so far, among those this topic can still deal (ties: the one missed first). */
+export function mostMissedPoint(tally: MissTally, dealable: string[]): string | null {
+  let best: string | null = null;
+  for (const [subtype, n] of Object.entries(tally)) {
+    if (!dealable.includes(subtype) || n <= 0) continue;
+    if (best === null || n > tally[best]) best = subtype;
+  }
+  return best;
+}
+
+/** Package G6 Spotlight: a free power-up draw per right answer, remembered by the hand that earned it. */
+export type FreeDraws = Record<number, number[]>;
+
+export function grantFreeDraws(draws: FreeDraws, playerIds: number[], round: number): FreeDraws {
+  if (playerIds.length === 0) return draws;
+  const next = { ...draws };
+  for (const id of playerIds) next[id] = [...(next[id] || []), round];
+  return next;
+}
+
+export function spendFreeDraw(draws: FreeDraws, playerId: number): FreeDraws {
+  const list = draws[playerId] || [];
+  if (list.length === 0) return draws;
+  return { ...draws, [playerId]: list.slice(1) };
+}
+
+/** Takes back the draws a hand gave (its reveal was undone or the hand was voided). */
+export function revokeFreeDraws(draws: FreeDraws, round: number): FreeDraws {
+  const next: FreeDraws = {};
+  for (const [id, list] of Object.entries(draws)) next[Number(id)] = list.filter((r) => r !== round);
+  return next;
+}

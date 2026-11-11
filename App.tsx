@@ -14,7 +14,7 @@ import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
 import { deckSummary, parseDeckText, sentenceRecordOf } from './game/teacherDeck';
-import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
+import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type FreeDraws, type MissTally, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
@@ -114,7 +114,7 @@ import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
 import { DEMO_BOT_COUNT } from './game/demoBots';
 import { isE2eMode } from './utils/e2eContent';
 import { classListMatch } from './game/classList';
-import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, type SpecialHand } from './game/specialHands';
+import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, spotlightRoundFor, type SpecialHand } from './game/specialHands';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -347,6 +347,10 @@ export function App() {
   currentRoundRef.current = currentRound;
   // Package L6: missed grammar points come back two hands later ("a second look").
   const secondLookQueueRef = useRef<SecondLook[]>([]);
+  // Package G6 Spotlight: misses per grammar point, the Spotlight hand, and free draws earned there.
+  const missTallyRef = useRef<MissTally>({});
+  const spotlightRoundRef = useRef<number | null>(null);
+  const [freeDraws, setFreeDraws] = useState<FreeDraws>({});
   const handSubtypeRef = useRef<string | null>(null);
   /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
   const fetchTargetRoundRef = useRef<number | null>(null);
@@ -873,6 +877,7 @@ export function App() {
     questionType: currentSentence?.questionType,
   });
   const specialHandLabel = specialHandLabelFor(currentSpecialHand);
+  spotlightRoundRef.current = specialHandsOn && gameMode === 'rounds' ? spotlightRoundFor(Number(totalRounds)) : null;
   // Package L9: "Say it" after each reveal, off unless the teacher turns it on.
   const [sayItOn, setSayItOn] = useState<boolean>(() => safeLocalStorage.getItem(SAY_IT_KEY) === 'on');
   useEffect(() => {
@@ -2026,7 +2031,9 @@ export function App() {
           const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
           const pool = available.length > 0 ? available : allSubtypes;
           const dueLook = secondLookFor(secondLookQueueRef.current, targetRound);
-          subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+          // Package G6 Spotlight: the point the class has missed most so far.
+          const spotlight = spotlightRoundRef.current === targetRound ? mostMissedPoint(missTallyRef.current, allSubtypes) : null;
+          subtype = dueLook ? dueLook.subtype : spotlight ? spotlight : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
           const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
           generated = await GeminiService.generateSentence(
@@ -2141,6 +2148,8 @@ export function App() {
     mixedFormatIndexRef.current = 0;
     secondLookQueueRef.current = [];
     setSecondLookRound(null);
+    missTallyRef.current = {};
+    setFreeDraws({});
     safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
       settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
       customTopic,
@@ -2351,10 +2360,10 @@ export function App() {
     });
   }, [players, activePowerUps]);
 
-  const handleBuyPowerUp = useCallback((playerId: number, powerUpKey: PowerUpKey) => {
+  const handleBuyPowerUp = useCallback((playerId: number, powerUpKey: PowerUpKey, cost: number = POWERUP_COST) => {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
-    if (!player || player.money < POWERUP_COST) return;
+    if (!player || player.money < cost) return;
     if (!mayBuyPowerUps(player)) return;
     
     const isClozeRound = isGapType(currentSentence?.questionType);
@@ -2403,11 +2412,11 @@ export function App() {
     }
 
     playSound('powerUp');
-    const newMoney = player.money - POWERUP_COST;
+    const newMoney = player.money - cost;
 
     setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: newMoney} : p));
-    setPowerUpsUsedThisRound(prev => ({...prev, [playerId]: [...(prev[playerId] || []), { key: powerUpKey }]}));
-    setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + POWERUP_COST }));
+    setPowerUpsUsedThisRound(prev => ({...prev, [playerId]: [...(prev[playerId] || []), cost === POWERUP_COST ? { key: powerUpKey } : { key: powerUpKey, cost }]}));
+    setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + cost }));
 
     if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newMoney) {
         setBets(b => ({...b, [playerId]: {...b[playerId], bet: newMoney }}));
@@ -2908,7 +2917,10 @@ export function App() {
   const handleBuyRandomPowerUp = useCallback((playerId: number) => {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
-    if (!player || player.money < POWERUP_COST) return; 
+    // Package G6 Spotlight: a free draw earned on the Spotlight hand costs nothing.
+    const isFree = (freeDraws[playerId] || []).length > 0;
+    const cost = isFree ? 0 : POWERUP_COST;
+    if (!player || player.money < cost) return; 
     // A silenced player cannot buy, even if a phone sends the request anyway (G5 fix).
     if (!mayBuyPowerUps(player)) return;
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
@@ -2923,7 +2935,7 @@ export function App() {
       if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
       if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(k)) return false;
       if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(k)) return false;
-      if (k === 'GENEROUS' && player.money < POWERUP_COST + activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT) return false;
+      if (k === 'GENEROUS' && player.money < cost + activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT) return false;
       if (k === 'UNDERDOG' && !isPlayerUnderdog(playerId, players)) return false;
       return true;
     });
@@ -2948,8 +2960,9 @@ export function App() {
       seatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
       totalSeats: Math.max(1, activePlayers.length),
     });
-    handleBuyPowerUp(playerId, selectedPowerUp);
-  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats]);
+    handleBuyPowerUp(playerId, selectedPowerUp, cost);
+    if (isFree) setFreeDraws(prev => spendFreeDraw(prev, playerId));
+  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats, freeDraws]);
 
   const handleTogglePowerUpInDeck = useCallback((key: PowerUpKey) => {
     const isCurrentlyActive = selectedPowerUps.includes(key);
@@ -3400,7 +3413,11 @@ export function App() {
     if (playerId === undefined || !powerUpKey) return;
     // Swap is refundable only when nobody can be targeted, so the dialog always has an exit (F4 fix 11)
     if (!canCancelPowerUpTarget(powerUpKey, hasSelectableTarget(playerId, powerUpKey))) return;
-    setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
+    // A free Spotlight draw gives nothing back (package G6).
+    const usedList = powerUpsUsedThisRound[playerId] || [];
+    const usedEntry = usedList[usedList.map(u => u.key).lastIndexOf(powerUpKey)];
+    const refund = usedEntry?.cost ?? POWERUP_COST;
+    setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + refund } : p));
     setPowerUpsUsedThisRound(prev => {
       const list = prev[playerId] || [];
       const idx = list.map(u => u.key).lastIndexOf(powerUpKey);
@@ -3411,7 +3428,7 @@ export function App() {
       }
       return prev;
     });
-    setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - POWERUP_COST) }));
+    setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - refund) }));
     setAvailablePowerUps(avail => avail.includes(powerUpKey) ? avail : [...avail, powerUpKey]);
     if (mpRoomCode && mpSeats[playerId]) {
       setMpStudentPendingTarget(prev => {
@@ -3423,7 +3440,7 @@ export function App() {
       setShowTargetModal(null);
     }
     playSound('click');
-  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget]);
+  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget, powerUpsUsedThisRound]);
 
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
@@ -3801,9 +3818,11 @@ export function App() {
             ...(isSentenceHiddenForListening ? { hidesSentence: true } : {}),
           }
         : null,
+      freeDraws,
     });
     mpControllerRef.current.pushViews(views);
   }, [
+    freeDraws,
     isSentenceHiddenForListening,
     isCalmMode,
     isPaused,
@@ -4248,6 +4267,10 @@ export function App() {
         misses: newRoundPlayerResults.filter(r => !r.isWin).length,
         handsLeft: gameMode === 'rounds' && !isNaN(numRounds) ? numRounds - currentRound : Infinity,
       });
+      missTallyRef.current = addMisses(missTallyRef.current, handSubtypeRef.current, newRoundPlayerResults.filter(r => !r.isWin).length);
+      if (currentSpecialHand === 'spotlight') {
+        setFreeDraws(prev => grantFreeDraws(prev, newRoundPlayerResults.filter(r => r.isWin).map(r => r.playerId), currentRound));
+      }
     }
     if (currentSentence) {
       const historyRecord: RoundHistoryRecord = {
@@ -4439,12 +4462,14 @@ export function App() {
     setTeacherRevealOverride(snap.teacherRevealOverrideBefore);
     setRevealSnapshot(null);
     secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, snap.round);
+    setFreeDraws(prev => revokeFreeDraws(prev, snap.round));
     setStep('IN_GAME');
   }, [revealSnapshot, currentRound, playSound, mpRoomCode]);
 
   const handleVoidHand = useCallback(() => {
     if (!revealSnapshot) return;
     secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, revealSnapshot.round);
+    setFreeDraws(prev => revokeFreeDraws(prev, revealSnapshot.round));
     GeminiService.forgetUnplayedSentence(currentSentence?.text);
     applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
     setShowRulingModal(false);
@@ -6107,6 +6132,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             </div>
                           )}
                           <PlayerBettingCard 
+                            hasFreeDraw={(freeDraws[player.id] || []).length > 0}
                             player={player} 
                             bet={bets[player.id]} 
                             onBetChange={handleBetChange} 

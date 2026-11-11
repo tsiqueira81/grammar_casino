@@ -145,3 +145,49 @@ test('"Say it" asks for the right sentence aloud after the reveal (package L9)',
   await expect(page.getByTestId('say-it')).toContainText('Say it');
   await expect(page.getByTestId('say-it')).toContainText('If I had more time, I would learn Japanese.');
 });
+
+test('a right answer on the Spotlight hand earns a free power-up draw', async ({ page }) => {
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno']);
+  await page.getByRole('button', { name: 'Set up the game' }).click();
+  await page.getByRole('button', { name: /^Multiple-choice cloze/ }).click();
+  await page.getByRole('button', { name: 'Next: house rules' }).click();
+  await page.getByRole('button', { name: /Set number of hands/ }).click();
+  await page.locator('input[type="number"]:visible').first().fill('6');
+  const special = page.getByRole('switch', { name: 'Special hands' });
+  if ((await special.getAttribute('aria-checked')) !== 'true') await special.click();
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+
+  const play = async (picks: { name: string; option: string; bet: number }[]) => {
+    const fullCards = page.getByRole('button', { name: 'Full cards' });
+    if (await fullCards.isVisible()) await fullCards.click();
+    for (const b of picks) {
+      const c = card(page, b.name);
+      await c.getByRole('button', { name: new RegExp(`(^|\\W)${b.option}$`) }).first().click();
+      await c.getByPlaceholder('Your bet').fill(String(b.bet));
+    }
+    await clickButton(page, /^Reveal the answer/);
+  };
+
+  // Hand 1: both miss, so the point is the class's most missed.
+  await play([
+    { name: 'Ana', option: KNOWN.multipleChoiceWrong, bet: 10 },
+    { name: 'Bruno', option: KNOWN.multipleChoiceWrong, bet: 10 },
+  ]);
+  await clickButton(page, 'Deal the next hand');
+
+  // Hand 2 of 6 is the Spotlight. Ana is right, Bruno is not.
+  await expect(page.getByTestId('special-hand-card')).toContainText('Spotlight');
+  await play([
+    { name: 'Ana', option: KNOWN.multipleChoiceAnswer, bet: 10 },
+    { name: 'Bruno', option: KNOWN.multipleChoiceWrong, bet: 10 },
+  ]);
+  await expectResultBalance(page, 'Ana', 1000);
+  await clickButton(page, 'Deal the next hand');
+
+  // Hand 3: Ana's draw is free, Bruno's is not.
+  const fullCards = page.getByRole('button', { name: 'Full cards' });
+  if (await fullCards.isVisible()) await fullCards.click();
+  await expect(card(page, 'Ana').getByTestId('draw-price')).toHaveText('Free');
+  await expect(card(page, 'Bruno').getByTestId('draw-price')).toHaveText('-$50');
+});

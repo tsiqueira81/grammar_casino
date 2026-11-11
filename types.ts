@@ -210,6 +210,8 @@ export interface ActivePowerUp {
 export interface UsedPowerUp {
   key: PowerUpKey;
   targetId?: number;
+  /** What it cost; 0 for a free Spotlight draw (package G6). Missing means the usual price. */
+  cost?: number;
 }
 
 export interface ShowPowerUpModalPayload {
