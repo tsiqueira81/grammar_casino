@@ -102,6 +102,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - At game over, "Play again" keeps the players and the room (phones stay seated), resets money and goes to the house rules; "New class" is the old full reset (`handleRestartGame`).
 - Typed gap answers (open cloze, word formation, key word) are compared with `normalizeGapAnswer` (`utils/roundSettlement.ts`): case, spaces and curly apostrophes never matter; contractions do. Key every answer lookup with it.
 - Phone vibrations go through `utils/haptics.ts` (`haptic(kind)`): it respects the student's own on/off button and the teacher's Calm mode. At the reveal the phone shows "And the answer is…" for 1.2 s (skipped in Calm mode and with reduced motion), then the result, its place and the gap to the next place.
+- On the phone, every power-up chip opens `components/PowerUpSheet.tsx` (plain description, who it affects, when it ends). Power-up news is a stack of toasts that fade after 7 s; never put a blocking window in front of the betting card.
 - The phone must not import `utils/roundSettlement.ts` (it pulls in the AI service and grows the phone bundle).
 - A room holds at most 40 seats. A phone the teacher removes cannot join that room again: the host bans its client id and Firebase id, and the phone remembers the room for 12 hours (`grammar_casino_removed_rooms_v1`).
 

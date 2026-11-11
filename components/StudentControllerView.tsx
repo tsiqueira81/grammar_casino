@@ -18,11 +18,11 @@ import {
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
 import SentenceText from './SentenceText';
-import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
 import { canVibrate, haptic, hapticsEnabled, setHapticsEnabled } from '../utils/haptics';
 import CountUp from './CountUp';
+import PowerUpSheet, { type PowerUpSheetInfo } from './PowerUpSheet';
 import { generateFriendlyName } from '../utils/nameFilter';
 import { addClockSample, clockOffset, toLocalTimer } from '../utils/clockSync';
 import {
@@ -42,6 +42,21 @@ import {
   Vibrate,
   VibrateOff,
 } from 'lucide-react';
+
+/** Package S5: how long a toast stays, and how many stack at once. */
+const TOAST_MS = 7000;
+const TOAST_LIMIT = 3;
+/** Effects on a player, shown as the power-up that caused them. */
+const EFFECT_CARD: Partial<Record<string, PowerUpKey>> = {
+  BLESSING: 'BLESSING',
+  CRUCIO: 'CRUCIO',
+  SILENCED: 'SILENCER',
+  SECOND_CHANCE: 'SECOND_CHANCE',
+  TEACHERS_PET: 'TEACHERS_PET',
+};
+/** The power-up a toast is about, found by its name in the title. */
+const powerUpInTitle = (title: string): PowerUpKey | undefined =>
+  (Object.keys(POWER_UPS) as PowerUpKey[]).find(k => title.toLowerCase().includes(POWER_UPS[k].name.toLowerCase()));
 
 /** Package S4: the short build before the phone shows the ruling. */
 const REVEAL_BUILD_MS = 1200;
@@ -117,7 +132,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [localBet, setLocalBet] = useState<Bet>({});
   const localBetRef = useRef<Bet>({});
   localBetRef.current = localBet;
-  const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
+  // Package S5: power-up news arrives as toasts that stack and fade, never blocking a bet.
+  const [toasts, setToasts] = useState<{ id: string; title: string; message: string; icon?: string }[]>([]);
+  const dismissToast = useCallback((id: string) => setToasts(prev => prev.filter(t => t.id !== id)), []);
+  const [sheet, setSheet] = useState<PowerUpSheetInfo | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatusToast, setPdfStatusToast] = useState<string | null>(null);
@@ -275,11 +293,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         nextView.lastNotification.id !== seenNotificationIdRef.current
       ) {
         seenNotificationIdRef.current = nextView.lastNotification.id;
-        setActiveToast({
-          title: nextView.lastNotification.title,
-          message: nextView.lastNotification.message,
-          icon: nextView.lastNotification.icon,
-        });
+        const note = nextView.lastNotification;
+        setToasts(prev => [...prev, { id: note.id, title: note.title, message: note.message, icon: note.icon }].slice(-TOAST_LIMIT));
+        window.setTimeout(() => setToasts(prev => prev.filter(t => t.id !== note.id)), TOAST_MS);
         playSound('powerUp');
       }
     },
@@ -1166,13 +1182,36 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   )}
 
                   {/* Power-ups and effects on this player */}
-                  {(view.myActivePowerUps.length > 0 || view.isBetCapped || view.isHighRoller) && (
+                  {(view.myActivePowerUps.length > 0 || view.isBetCapped || view.isHighRoller || (view.me.effects || []).some(e => EFFECT_CARD[e.type])) && (
                     <div className="mt-3 pt-3 border-t border-gc-line/[0.1] flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
                       {view.myActivePowerUps.map((pu, idx) => (
-                        <span key={idx} className="px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-800 dark:text-purple-200">
+                        <button
+                          type="button"
+                          key={idx}
+                          onClick={() => setSheet({ key: pu.type })}
+                          className="min-h-[32px] px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-800 dark:text-purple-200 cursor-pointer"
+                          aria-label={`${POWER_UPS[pu.type]?.name}: what does it do?`}
+                        >
                           {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
-                        </span>
+                        </button>
                       ))}
+                      {(view.me.effects || []).map((e, idx) => {
+                        const key = EFFECT_CARD[e.type];
+                        if (!key || view.myActivePowerUps.some(pu => pu.type === key)) return null;
+                        const harmful = e.type === 'CRUCIO' || e.type === 'SILENCED';
+                        return (
+                          <button
+                            type="button"
+                            key={`effect-${idx}`}
+                            onClick={() => setSheet({ key, handsLeft: e.roundsLeft })}
+                            className={`min-h-[32px] px-2.5 py-1 rounded-full cursor-pointer ${harmful ? 'bg-gc-loss/15 text-gc-loss' : 'bg-gc-win/15 text-gc-win'}`}
+                            aria-label={`${POWER_UPS[key].name}: what does it do?`}
+                          >
+                            {POWER_UPS[key].icon} {POWER_UPS[key].name}
+                            {e.roundsLeft > 0 ? ` · ${e.roundsLeft}` : ''}
+                          </button>
+                        );
+                      })}
                       {view.isBetCapped && (
                         <span className="px-2.5 py-1 rounded-full bg-gc-loss/15 text-gc-loss">
                           🧢 Bets up to ${view.betCapAmount}
@@ -2233,24 +2272,30 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         />
       )}
 
-      {/* Power-up news for this player */}
-      {activeToast && (
-        <Modal
-          title={activeToast.title}
-          onClose={() => setActiveToast(null)}
-          playSound={playSound}
-          hideCloseButton
-        >
-          <div className="text-center py-4">
-            <div className="text-7xl mb-5 flex justify-center" aria-hidden="true">
-              <span>{activeToast.icon || '✨'}</span>
+      {/* Power-up news for this player (package S5): toasts that stack and fade, never blocking */}
+      <div className="fixed top-2 inset-x-0 z-40 px-3 flex flex-col items-center gap-2 pointer-events-none" role="status" aria-live="polite" data-testid="toasts">
+        {toasts.map(t => {
+          const key = powerUpInTitle(t.title);
+          return (
+            <div key={t.id} className="pointer-events-auto w-full max-w-md gc-surface rounded-[18px] shadow-lg px-4 py-3 flex items-start gap-3 animate-gc-slide-up" data-testid="toast">
+              <span className="text-[28px] leading-none" aria-hidden="true">{t.icon || '✨'}</span>
+              <div className="min-w-0 flex-1">
+                <p className="m-0 text-[16px] font-extrabold text-gc-ink">{t.title}</p>
+                <p className="m-0 text-[15px] text-gc-ink whitespace-pre-line">{t.message}</p>
+                {key && (
+                  <button type="button" onClick={() => { setSheet({ key }); dismissToast(t.id); }} className="mt-1 min-h-[32px] text-[14px] font-bold text-gc-info underline underline-offset-4 cursor-pointer">
+                    What does it do?
+                  </button>
+                )}
+              </div>
+              <button type="button" onClick={() => dismissToast(t.id)} className="w-9 h-9 shrink-0 grid place-items-center rounded-full text-gc-quiet cursor-pointer" aria-label="Dismiss">
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
             </div>
-            <p className="text-lg sm:text-xl text-gc-ink font-medium leading-relaxed whitespace-pre-line">
-              {activeToast.message}
-            </p>
-          </div>
-        </Modal>
-      )}
+          );
+        })}
+      </div>
+      {sheet && <PowerUpSheet info={sheet} onClose={() => setSheet(null)} />}
     </div>
   );
 };
