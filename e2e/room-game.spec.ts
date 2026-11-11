@@ -9,9 +9,15 @@ import { E2E_URL, KNOWN, clickButton } from './helpers';
  */
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
 
+// What each phone has heard back from the teacher's screen, to know when a bet has arrived there.
+const framesReceived = new WeakMap<Page, string[]>();
+
 async function joinPhone(browser: Browser, code: string, name: string): Promise<Page> {
   const context = await browser.newContext(PHONE);
   const phone = await context.newPage();
+  const frames: string[] = [];
+  framesReceived.set(phone, frames);
+  phone.on('websocket', ws => ws.on('framereceived', f => frames.push(String(f.payload))));
   await phone.goto(`${E2E_URL}&room=${code}`);
   await phone.getByRole('textbox', { name: 'Your name' }).fill(name);
   await phone.getByRole('button', { name: 'Join the table' }).click();
@@ -22,6 +28,14 @@ async function joinPhone(browser: Browser, code: string, name: string): Promise<
 async function placeBet(phone: Page, option: string, amount: number) {
   await phone.getByRole('button', { name: new RegExp(`^[A-D] ${option}$`) }).click();
   await phone.getByRole('textbox', { name: 'Your bet in dollars' }).fill(String(amount));
+}
+
+/** Waits until the teacher's screen has sent this phone a view that holds its stake. */
+async function waitForHostToHoldBet(phone: Page, amount: number) {
+  const holdsBet = new RegExp(`"myBet":\\{[^}]*"bet":${amount}[,}]`);
+  await expect
+    .poll(() => (framesReceived.get(phone) || []).some(f => holdsBet.test(f)), { message: `host holds the $${amount} bet` })
+    .toBe(true);
 }
 
 test('three phones play a hand in a live room, surviving a phone reload and a teacher reload', async ({ page: host, browser }) => {
@@ -63,6 +77,8 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
   for (let i = 0; i < players.length; i++) {
     await placeBet(phones[i], players[i].option, players[i].bet);
   }
+  // A reload right after typing could cut off the bet before it reaches the teacher's screen.
+  await waitForHostToHoldBet(phones[1], players[1].bet);
   await phones[1].reload();
   await expect(phones[1].getByRole('banner')).toContainText('Eva');
   await expect(phones[1].getByRole('region', { name: 'The sentence' })).toContainText('more time');
