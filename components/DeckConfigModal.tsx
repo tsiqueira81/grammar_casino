@@ -228,7 +228,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
                     <div
                       key={key}
                       onClick={() => handleCardClick(key)}
-                      className={`relative p-3 rounded-xl border text-left transition-all duration-150 cursor-pointer select-none group flex flex-col justify-between ${
+                      className={`relative p-3 rounded-xl border text-left transition-all duration-gc-fast cursor-pointer select-none group flex flex-col justify-between ${
                         isSelected
                           ? 'bg-gradient-to-br from-purple-50 to-amber-50/50 dark:from-[#1b1535] dark:to-[#0a1f14] border-purple-400 dark:border-purple-500/80 shadow-sm hover:shadow-md hover:border-purple-500'
                           : 'bg-white/60 dark:bg-[#071910]/60 border-slate-200 dark:border-[#14532d]/60 opacity-55 grayscale hover:opacity-85 hover:grayscale-0'

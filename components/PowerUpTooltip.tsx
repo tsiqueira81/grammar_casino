@@ -67,7 +67,7 @@ export const PowerUpTooltip: React.FC<PowerUpTooltipProps> = ({
 
       {/* Hover Tooltip Popup */}
       <div
-        className={`absolute left-1/2 -translate-x-1/2 ${positionClasses} z-50 pointer-events-none transition-all duration-200 ${
+        className={`absolute left-1/2 -translate-x-1/2 ${positionClasses} z-50 pointer-events-none transition-all duration-gc-fast ${
           isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         style={{ display: isVisible ? 'block' : 'none' }}

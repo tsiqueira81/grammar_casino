@@ -687,6 +687,12 @@ export function App() {
     }
   }, [isProjectorMode]);
 
+  // Package V10: projector text grows on the screens the class reads from afar (see index.css).
+  useEffect(() => {
+    const table = step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER';
+    document.documentElement.dataset.screen = table ? 'table' : 'setup';
+  }, [step]);
+
   useEffect(() => {
     const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
     if (savedTheme === 'light') {
@@ -5907,7 +5913,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
                     {/* Back of the card: the sentence */}
                     <div className="card-reveal-back">
-                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-8 transition-[padding,background-color,box-shadow] duration-200 ${
+                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-8 transition-[padding,background-color,box-shadow] duration-gc-fast ${
                         isSentenceHeaderStuck
                           ? 'stuck py-2.5 sm:py-3'
                           : 'gc-panel shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
@@ -6600,7 +6606,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               aria-valuenow={betsReadyCount}
                             >
                               <span
-                                className="block h-full rounded-full bg-emerald-700 dark:bg-emerald-400 transition-[width] duration-500 ease-out"
+                                className="block h-full rounded-full bg-emerald-700 dark:bg-emerald-400 transition-[width] duration-gc-slow ease-gc-out"
                                 style={{ width: `${unfrozenActivePlayers.length ? Math.round((betsReadyCount / unfrozenActivePlayers.length) * 100) : 0}%` }}
                               />
                             </span>
@@ -7331,13 +7337,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             { place: 1, block: 'h-36 sm:h-44', avatar: 'w-20 h-20 sm:w-28 sm:h-28 text-[44px] sm:text-[60px]', delay: '0s' },
             { place: 3, block: 'h-16 sm:h-20', avatar: 'w-14 h-14 sm:w-16 sm:h-16 text-[30px] sm:text-[34px]', delay: '0.45s' },
           ];
-          const confettiColours = ['#f1cf72', '#e2b04a', '#86efac', '#fda4af', '#a5e3ff', '#fffdf7'];
           // Package V9: the ceremony reveals each part in turn; everything stays in the page
           // (only faded), so screen readers and the buttons below never wait for it.
           const stage = ceremonyStage;
           const ceremonyOn = stage < CEREMONY_DONE;
           const winnerShown = stage >= 3;
-          const reveal = (shown: boolean) => `transition-[opacity,transform] duration-500 ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`;
+          const reveal = (shown: boolean) => `transition-[opacity,transform] duration-gc-slow ease-gc-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`;
           const classLine = classResultLine(buildReport(roundHistory, players));
           const saveMoment = () => {
             playSound('click');
@@ -7356,28 +7361,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           };
           return (
           <div className="relative w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-12 text-center animate-gc-fade">
-            {/* Confetti, once, on the winner's beat, only when the 3D table (and its coin shower)
-                is off. Calm mode and reduced motion skip it. */}
-            {winner && winnerShown && !isCalmMode && qualityTier === 'off' && (
-              <div className="gc-confetti pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
-                {Array.from({ length: 70 }, (_, i) => (
-                  <span
-                    key={i}
-                    className="absolute -top-4 block rounded-[2px] animate-gc-confetti"
-                    style={{
-                      left: `${(i * 37 + 11) % 100}%`,
-                      width: i % 3 === 0 ? 8 : 6,
-                      height: i % 3 === 0 ? 12 : 10,
-                      background: confettiColours[i % confettiColours.length],
-                      animationDelay: `${(i % 9) * 0.06}s`,
-                      animationDuration: `${1.6 + ((i * 13) % 9) / 10}s`,
-                      ['--gc-drift' as string]: `${((i * 53) % 120) - 60}px`,
-                    } as React.CSSProperties}
-                  />
-                ))}
-              </div>
-            )}
-
+            {/* Package V10: no HTML confetti here any more; the 3D coin shower and sparks celebrate
+                the winner (nothing on table Off, Calm mode or reduced motion). */}
             <p className="text-gc-small font-semibold text-gc-quiet">Final results</p>
             <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">
               {ceremonyOn && !winnerShown ? 'The vault opens…' : 'Table closed'}
@@ -7519,7 +7504,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
   return (
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
-      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300 relative">
+      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-gc-base relative">
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
         <React.Suspense fallback={null}>
         <Tabletop3DOverlay

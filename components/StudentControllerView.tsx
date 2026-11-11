@@ -1262,7 +1262,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                               <span className="tabular-nums text-gc-info shrink-0">{item.percent}%</span>
                             </div>
                             <div className="w-full h-1.5 rounded-full bg-gc-line/[0.1] overflow-hidden">
-                              <div className="h-full bg-gc-info rounded-full transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} />
+                              <div className="h-full bg-gc-info rounded-full transition-all duration-gc-base" style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} />
                             </div>
                           </div>
                         ))}

@@ -451,7 +451,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
       {/* The time left, as a bar */}
       <div className="w-full h-2 rounded-full bg-gc-line/[0.1] overflow-hidden" aria-hidden="true">
         <div
-          className={`h-full rounded-full ${barColor} transition-all duration-200`}
+          className={`h-full rounded-full ${barColor} transition-all duration-gc-fast`}
           style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}
         />
       </div>
@@ -525,7 +525,7 @@ export const StudentRoundTimerBar: React.FC<{
       </div>
       <div className="w-full h-1.5 rounded-full bg-gc-line/60 overflow-hidden">
         <div
-          className={`h-full rounded-full transition-[width] duration-200 ${
+          className={`h-full rounded-full transition-[width] duration-gc-fast ${
             hurry ? 'bg-gc-loss' : done ? 'bg-gc-win' : 'bg-gc-gold'
           }`}
           style={{ width: `${Math.max(0, Math.min(100, Math.round(fraction * 100)))}%` }}

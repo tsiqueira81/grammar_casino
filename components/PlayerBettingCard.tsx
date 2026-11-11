@@ -287,7 +287,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const betAmount = typeof bet?.bet === 'number' ? bet.bet : '';
 
   // Class logic
-  const cardBaseClasses = "gc-panel rounded-gc-lg p-5 sm:p-7 transition-[opacity,border-color,box-shadow] duration-300 relative group overflow-hidden";
+  const cardBaseClasses = "gc-panel rounded-gc-lg p-5 sm:p-7 transition-[opacity,border-color,box-shadow] duration-gc-base relative group overflow-hidden";
   const glowClasses = powerUpUsedThisRound ? "ring-2 ring-inset ring-purple-400/70" : "";
   const bankruptClasses = isEliminated ? "opacity-55 grayscale" : "";
   const frozenClasses = isFrozen
@@ -607,7 +607,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               type="button"
               onClick={() => onChangeAvatar?.(player.id)}
               disabled={!onChangeAvatar}
-              className={`w-14 h-14 rounded-full border-2 border-gc-turn/70 p-0.5 relative bg-gc-line/[0.08] flex items-center justify-center group/avatar transition-transform duration-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/50 ${
+              className={`w-14 h-14 rounded-full border-2 border-gc-turn/70 p-0.5 relative bg-gc-line/[0.08] flex items-center justify-center group/avatar transition-transform duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/50 ${
                 onChangeAvatar ? 'cursor-pointer hover:scale-105 active:scale-95' : ''
               }`}
               title={onChangeAvatar ? `Click to customize ${player.name}'s character` : undefined}
@@ -1012,7 +1012,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </div>
                   <div className="w-full h-1.5 rounded-full bg-gc-line/[0.1] overflow-hidden">
                     <div
-                      className="h-full bg-gc-info rounded-full transition-all duration-300"
+                      className="h-full bg-gc-info rounded-full transition-all duration-gc-base"
                       style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }}
                     />
                   </div>
@@ -1112,7 +1112,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             onBetChange(player.id, 'selectedOption', opt);
                           }
                         }}
-                        className={`relative overflow-hidden min-h-[64px] py-3 px-4 rounded-gc font-sans transition-colors duration-150 border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40 ${
+                        className={`relative overflow-hidden min-h-[64px] py-3 px-4 rounded-gc font-sans transition-colors duration-gc-fast border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40 ${
                           isEliminatedOpt
                             ? 'opacity-50 cursor-not-allowed bg-gc-line/[0.04] border-gc-loss/30 text-gc-quiet line-through'
                             : isPicked
@@ -1665,7 +1665,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   onClick={() => handleOpinionClick('correct')}
                   disabled={isBlocked}
                   aria-pressed={bet?.opinion === 'correct'}
-                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-150 focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/40 disabled:cursor-not-allowed ${
+                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/40 disabled:cursor-not-allowed ${
                     bet?.opinion === 'correct'
                       ? 'bg-gc-win/15 border-emerald-700 dark:border-emerald-400 text-gc-win animate-gc-pulse'
                       : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink hover:border-emerald-600/60 dark:hover:border-emerald-400/60'
@@ -1683,7 +1683,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   onClick={() => handleOpinionClick('incorrect')}
                   disabled={isBlocked}
                   aria-pressed={bet?.opinion === 'incorrect'}
-                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-150 focus:outline-none focus-visible:ring-4 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed ${
+                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed ${
                     bet?.opinion === 'incorrect'
                       ? 'bg-gc-loss/15 border-rose-700 dark:border-rose-400 text-gc-loss animate-gc-pulse'
                       : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink hover:border-rose-600/60 dark:hover:border-rose-400/60'

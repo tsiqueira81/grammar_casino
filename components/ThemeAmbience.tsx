@@ -25,7 +25,7 @@ export const ThemeAmbience: React.FC<ThemeAmbienceProps> = ({ theme, calmMode = 
 
   return (
     <div
-      className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none opacity-65 dark:opacity-85 transition-opacity duration-700"
+      className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none opacity-65 dark:opacity-85 transition-opacity duration-gc-slow"
       aria-hidden="true"
     >
       {mood === 'popculture' && (

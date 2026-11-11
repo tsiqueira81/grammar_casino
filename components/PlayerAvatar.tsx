@@ -460,7 +460,7 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
   return (
     <span
       className={`relative inline-flex items-center justify-center rounded-full shrink-0 overflow-hidden select-none ${sz.box} ${
-        animated ? 'transition-transform duration-300 hover:scale-105' : ''
+        animated ? 'transition-transform duration-gc-base hover:scale-105' : ''
       } ${className}`}
       style={{
         background: parsed.aura.bgGradient,

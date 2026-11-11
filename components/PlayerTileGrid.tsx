@@ -96,7 +96,7 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}
             className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 ${
               projectorMode ? 'px-4 pt-5 pb-4 gap-2.5' : 'px-3 pt-4 pb-3.5 gap-2'
-            } flex flex-col items-center text-center cursor-pointer transition-transform duration-150 hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 overflow-hidden ${
+            } flex flex-col items-center text-center cursor-pointer transition-transform duration-gc-fast hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 overflow-hidden ${
               isOpen
                 ? projectorMode ? 'ring-[3px] ring-inset ring-gc-turn' : 'ring-2 ring-inset ring-gc-turn'
                 : status === 'turn'

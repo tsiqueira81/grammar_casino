@@ -74,7 +74,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, playSound, sound =
 
   const baseClasses = `
     relative px-6 py-2.5 rounded-lg font-sans uppercase tracking-wider font-bold
-    transition-all duration-200 ease-out cursor-pointer select-none
+    transition-all duration-gc-fast ease-gc-out cursor-pointer select-none
     disabled:opacity-45 disabled:cursor-not-allowed disabled:grayscale disabled:shadow-none
   `;
   

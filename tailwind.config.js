@@ -55,6 +55,17 @@ export default {
         sentence: ['"Playfair Display Variable"', '"Playfair Display"', 'Georgia', 'serif'],
         logo: ['"Cinzel Variable"', 'Cinzel', 'Georgia', 'serif'],
       },
+      // Package V10: motion tokens. Three durations and two easings, used everywhere; the values
+      // live in index.css (--gc-dur-*, --gc-ease-*), so Calm mode can shorten them in one place.
+      transitionDuration: {
+        'gc-fast': 'var(--gc-dur-fast)',
+        'gc-base': 'var(--gc-dur-base)',
+        'gc-slow': 'var(--gc-dur-slow)',
+      },
+      transitionTimingFunction: {
+        'gc-out': 'var(--gc-ease-out)',
+        'gc-spring': 'var(--gc-ease-spring)',
+      },
       // Motion for the table (style A). Each one is short; devices that ask for
       // less motion skip them (see the prefers-reduced-motion rule in index.css).
       keyframes: {
@@ -139,19 +150,19 @@ export default {
         },
       },
       animation: {
-        'gc-deal': 'gc-deal 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both',
-        'gc-slide-up': 'gc-slide-up 0.4s ease both',
-        'gc-fade': 'gc-fade 0.5s ease both',
-        'gc-pop': 'gc-pop 0.4s ease both',
-        'gc-pulse': 'gc-pulse 0.3s ease-out',
+        'gc-deal': 'gc-deal var(--gc-dur-slow) var(--gc-ease-out) both',
+        'gc-slide-up': 'gc-slide-up var(--gc-dur-base) var(--gc-ease-out) both',
+        'gc-fade': 'gc-fade var(--gc-dur-base) var(--gc-ease-out) both',
+        'gc-pop': 'gc-pop var(--gc-dur-base) var(--gc-ease-spring) both',
+        'gc-pulse': 'gc-pulse var(--gc-dur-base) var(--gc-ease-out)',
         'gc-breathe': 'gc-breathe 2.2s ease-in-out infinite',
-        'gc-stamp': 'gc-stamp 0.55s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both',
+        'gc-stamp': 'gc-stamp var(--gc-dur-slow) var(--gc-dur-fast) var(--gc-ease-spring) both',
         'gc-blink': 'gc-blink 1.2s ease-in-out infinite both',
         'gc-ring': 'gc-ring 1.8s ease-out infinite',
-        'gc-rise': 'gc-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both',
+        'gc-rise': 'gc-rise var(--gc-dur-slow) var(--gc-ease-out) both',
         'gc-confetti': 'gc-confetti 2s cubic-bezier(0.25, 0.6, 0.45, 1) both',
         'gc-coin-fall': 'gc-coin-fall 2.2s cubic-bezier(0.35, 0.1, 0.6, 1) both',
-        'gc-shake': 'gc-shake 0.55s 0.15s ease-in-out both',
+        'gc-shake': 'gc-shake var(--gc-dur-slow) var(--gc-dur-fast) var(--gc-ease-out) both',
         'gc-glow': 'gc-glow 1.6s 0.2s ease-out both',
         'gc-sheen': 'gc-sheen 1.1s 0.25s ease-out both',
       },
