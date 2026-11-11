@@ -685,7 +685,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       },
       isLoadingSentence: isLoading,
       isProcessingResults: isProcessing,
-      me: player,
+      // Package R5: a player's growing history goes to the phone only at the end of the game.
+      me: step === 'GAME_OVER' ? player : { ...player, history: [] },
       myBet: bets[player.id] || {},
       myHint: hints[player.id],
       myActivePowerUps: myActive,

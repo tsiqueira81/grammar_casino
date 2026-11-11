@@ -80,6 +80,9 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
 - Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
+### Sending less (package R5)
+- The host writes the room to Firestore at most twice a second and within 250 ms of the first change (`utils/flushPlan.ts`), pushes to the local relay at most every 100 ms, sends a player's own `history` only at game over, and checks at most 4 corrections with the AI at once.
+
 ### Presence (package R2)
 - A phone sends a `HEARTBEAT` intent every 20 s while on screen (only the newest is kept in its intent document) and at once when it comes back to the foreground or online; it also keeps the screen awake. The host keeps "last heard" in a ref, not in `mpSeats`, so presence never rebroadcasts the table. A seat silent for 45 s or disconnected is away (`game/presence.ts`): greyed on the projector, counted in the room bar, and it never holds up the reveal (it sits the hand out).
 - A phone shows "Locked in" only after the host's view confirms it, shows "Sending…" until then and resends every 3 s. Offline, it shows a full-width banner and cannot lock in.

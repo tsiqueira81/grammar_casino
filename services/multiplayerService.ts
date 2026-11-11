@@ -19,6 +19,7 @@ import {
   FirestoreSeatWrite,
 } from './firebaseService';
 import { isE2eMode } from '../utils/e2eContent';
+import { nextFlushAt } from '../utils/flushPlan';
 import { cleanName as cleanPlayerName, generateFriendlyName, isBlockedName } from '../utils/nameFilter';
 
 /** Package R6: at most this many seats in one room. */
@@ -204,6 +205,9 @@ export class HostRoomController {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private firestoreFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Package R5: when the planned room write happens, and when the last one happened. */
+  private firestoreFlushAt: number | null = null;
+  private lastFirestoreFlushAt = 0;
   private firestoreRetryMs = 0;
   private firestoreUnsubscribe: (() => void) | null = null;
   private authUnsubscribe: (() => void) | null = null;
@@ -278,13 +282,18 @@ export class HostRoomController {
   private scheduleFirestoreFlush(delayMs = 100) {
     if (this.destroyed) return;
     this.saveRoom();
-    if (this.firestoreFlushTimer) {
-      clearTimeout(this.firestoreFlushTimer);
-    }
+    // At most two room writes a second, soon after the first change (package R5).
+    const now = Date.now();
+    const at = nextFlushAt(now, delayMs, this.lastFirestoreFlushAt, this.firestoreFlushTimer ? this.firestoreFlushAt : null);
+    if (this.firestoreFlushTimer && this.firestoreFlushAt === at) return;
+    if (this.firestoreFlushTimer) clearTimeout(this.firestoreFlushTimer);
+    this.firestoreFlushAt = at;
     this.firestoreFlushTimer = setTimeout(() => {
       this.firestoreFlushTimer = null;
+      this.firestoreFlushAt = null;
+      this.lastFirestoreFlushAt = Date.now();
       void this.flushFirestore();
-    }, delayMs);
+    }, Math.max(0, at - now));
   }
 
   /**
@@ -771,12 +780,23 @@ export class HostRoomController {
     this.latestViews = views;
 
     // 1. Coalesce into one Firestore batch: the shared table plus the seat records that changed
-    this.scheduleFirestoreFlush(80);
+    this.scheduleFirestoreFlush(250);
 
-    // 2. Also push to local server if available (it sends each phone only its own view)
-    if (!this.localServerAvailable) return;
+    // 2. Also push to local server if available (it sends each phone only its own view).
+    // Package R5: at most one push per 100 ms; the newest views go out when the timer fires.
+    if (!this.localServerAvailable || this.localPushTimer) return;
+    this.localPushTimer = setTimeout(() => {
+      this.localPushTimer = null;
+      void this.pushLocalViews();
+    }, 100);
+  }
+
+  private localPushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private async pushLocalViews() {
+    if (this.destroyed || !this.localServerAvailable) return;
     const sentAt = Date.now();
-    views = Object.fromEntries(Object.entries(views).map(([id, v]) => [id, { ...v, serverNow: sentAt }]));
+    const views = Object.fromEntries(Object.entries(this.latestViews).map(([id, v]) => [id, { ...v, serverNow: sentAt }]));
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
@@ -964,6 +984,10 @@ export class HostRoomController {
     if (this.authUnsubscribe) {
       this.authUnsubscribe();
       this.authUnsubscribe = null;
+    }
+    if (this.localPushTimer) {
+      clearTimeout(this.localPushTimer);
+      this.localPushTimer = null;
     }
     if (this.firestoreFlushTimer) {
       clearTimeout(this.firestoreFlushTimer);

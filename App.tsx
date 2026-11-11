@@ -4,6 +4,7 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
@@ -3402,8 +3403,8 @@ export function App() {
       setProcessingStatus(
         `Verifying ${uniqueGroups.size} unique correction(s) across ${playersToVerify.length} player(s)...`
       );
-      await Promise.all(
-        Array.from(uniqueGroups.values()).map(async (group) => {
+      // Package R5: at most 4 AI checks at once, so a full class does not flood the AI.
+      await mapWithLimit(Array.from(uniqueGroups.values()), 4, async (group) => {
           try {
             const res = await GeminiService.verifyCorrection(
               currentSentence.text,
@@ -3423,8 +3424,7 @@ export function App() {
               };
             });
           }
-        })
-      );
+        });
     }
 
     setProcessingStatus('');
