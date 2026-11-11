@@ -127,6 +127,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 
 ### Keyboard shortcuts (package T2)
 - A shortcut presses the on-screen button marked `data-hotkey="<action>"` (`utils/hotkeys.ts`), so a new control gets its shortcut by adding that attribute, and a shortcut can only do what the screen offers. Keys typed in fields are never taken. While a window is open, only its own buttons count.
+- During a hand the reveal button and the teacher controls sit in one toolbar (`control-bar`) pinned to the bottom of the screen from the `sm` width up (on a phone-sized host it stays in the page). Anything fixed at the bottom-left during a hand (the demo banner) moves up so it does not cover it.
 
 ### Player names and room order (package R6)
 - Every name goes through `utils/nameFilter.ts` (`safePlayerName`): printable, at most 20 characters, English blocklist (a blocked name becomes a friendly one like "Lucky Fox"), unique at the table ("Ana 2"). Phones may change their name only before the first hand.

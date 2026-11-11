@@ -7281,14 +7281,21 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     )}
                   </div>
                 )}
-                <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
-                  <div className={`rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
+                {/* Package T2: one control bar, pinned to the bottom of the screen during the hand,
+                    so the teacher never scrolls past 35 seats to reveal. */}
+                <div
+                  className="relative sm:sticky sm:bottom-0 z-30 mt-10 -mx-3 sm:-mx-4 px-3 sm:px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gc-bg/90 backdrop-blur-md border-t border-gc-line/[0.12] flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 print:hidden"
+                  data-testid="control-bar"
+                  role="toolbar"
+                  aria-label="Hand controls"
+                >
+                  <div className={`order-first w-full sm:w-auto flex justify-center rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
                     <ActionButton 
                       data-hotkey="primary"
                       onClick={handleRevealResults} 
                       playSound={playSound} 
                       variant="primary"
-                      className="w-full md:w-auto min-h-[60px] text-gc-lead py-3 px-10" 
+                      className="w-full md:w-auto min-h-[52px] text-gc-lead py-3 px-10" 
                       disabled={isProcessing || !canRevealResults}
                     >
                       {isProcessing ? processingStatus || 'Settling the bets…' : (
@@ -8197,7 +8204,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         {isDemoRoom && (
           <div
             data-testid="demo-banner"
-            className="fixed bottom-4 left-4 z-40 max-w-[calc(100vw-2rem)] h-11 pl-3 pr-1.5 inline-flex items-center gap-2 rounded-full gc-panel shadow-gc-2 text-gc-small font-semibold text-gc-ink"
+            className={`fixed ${step === 'IN_GAME' ? 'bottom-4 sm:bottom-auto sm:top-20' : 'bottom-4'} left-4 z-40 max-w-[calc(100vw-2rem)] h-11 pl-3 pr-1.5 inline-flex items-center gap-2 rounded-full gc-panel shadow-gc-2 text-gc-small font-semibold text-gc-ink`}
           >
             <Bot className="w-4 h-4 text-gc-gold shrink-0" aria-hidden="true" />
             <span className="truncate">Demo with {DEMO_BOT_COUNT} bots. Nothing is saved.</span>
