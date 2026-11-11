@@ -24,6 +24,27 @@ export interface DesktopStatus {
   maskedKey?: string;
 }
 
+// Package T6: on the web the AI key lives on the game's server, so "AI sentences" depends on
+// whether the server has one. /api/health says so (a yes or no, never the key). Asked at most once
+// every 5 minutes.
+let serverAiCache: { at: number; value: boolean } | null = null;
+export async function serverHasAi(): Promise<boolean> {
+  if (serverAiCache && Date.now() - serverAiCache.at < 5 * 60_000) return serverAiCache.value;
+  let value = false;
+  try {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch('/api/health', { signal: controller?.signal });
+    if (timer) clearTimeout(timer);
+    const body = res.ok ? await res.json() : null;
+    value = Boolean(body && body.aiConfigured === true);
+  } catch {
+    value = false;
+  }
+  serverAiCache = { at: Date.now(), value };
+  return value;
+}
+
 interface ElectronDesktopAPI {
   isDesktop: boolean;
   gemini: {
@@ -68,11 +89,13 @@ export const getDesktopStatus = async (): Promise<DesktopStatus> => {
       console.warn('Failed to get desktop status:', e);
     }
   }
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   return {
     isDesktop: false,
     isPortable: false,
-    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    hasKey: false,
+    isOnline,
+    // On the web, "has a key" means the game's server has one.
+    hasKey: isOnline && typeof fetch === 'function' ? await serverHasAi() : false,
     isEncrypted: false,
   };
 };

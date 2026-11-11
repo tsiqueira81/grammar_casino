@@ -1,5 +1,5 @@
 import { handleGeminiRequest } from './aiHandler';
-import { deepHealth, deepHealthAllowed } from './aiProviders';
+import { deepHealth, deepHealthAllowed, hasConfiguredAiKey } from './aiProviders';
 
 /**
  * Serverless Web Request -> Express API dispatcher for Netlify Functions & Cloudflare Workers (`/api/*`).
@@ -114,7 +114,8 @@ export async function dispatchServerlessApi(
     }
 
     if (url.pathname === "/api/health") {
-      mockRes.json({ status: "ok", app: "grammar-casino" });
+      // Package T6: whether AI sentences are on (a yes or no, never the key).
+      mockRes.json({ status: "ok", app: "grammar-casino", aiConfigured: hasConfiguredAiKey() });
       return;
     }
 

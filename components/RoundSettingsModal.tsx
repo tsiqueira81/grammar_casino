@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Eye, EyeOff, Info, KeyRound, Lock, Pencil, X } fr
 import { Settings, CEFRLevel, SoundEffect, ChallengeFormat, QuestionType } from '../types';
 import { GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import ActionButton from './ActionButton';
+import { AI_DAILY_SENTENCE_LIMIT } from '../utils/aiDailyLimit';
 import {
   isDesktopApp,
   getDesktopStatus,
@@ -596,7 +597,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                     <span className="text-[22px] leading-none" aria-hidden="true">{aiOn ? '⚡' : '💾'}</span>
                     <div className="min-w-0">
                       <p className="text-gc-cap text-gc-quiet">Using now</p>
-                      <p className="text-gc-body font-bold text-gc-ink">{aiOn ? 'AI sentences from Gemini' : 'The offline sentence bank'}</p>
+                      <p className="text-gc-body font-bold text-gc-ink">{aiOn ? (desktopStatus.isDesktop ? 'AI sentences from Gemini' : "AI sentences from the game's server") : 'The offline sentence bank'}</p>
                     </div>
                   </div>
                   {desktopStatus.isPortable && (
@@ -630,13 +631,13 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
 
                 {/* What works without the AI key */}
                 <div className={card}>
-                  <h3 className={cardTitle}>What works without an AI key</h3>
+                  <h3 className={cardTitle}>{desktopStatus.isDesktop ? 'What works without an AI key' : 'What works without AI'}</h3>
                   <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {[
                       { ok: true, title: 'Sentence bank, A1 to C2', text: 'Ready-made sentences for every level and question type. Works offline.' },
                       { ok: true, title: 'Hints and answer checks', text: 'Grammar clues and checks that work offline.' },
-                      { ok: aiOn, title: 'New sentences', text: aiOn ? 'Fresh sentences for any topic you type.' : 'Needs the AI key and the internet. The bank is used instead.' },
-                      { ok: aiOn, title: 'Natural voice', text: aiOn ? 'Gemini reads the sentences aloud.' : "Without the key, the computer's own voice reads aloud." },
+                      { ok: aiOn, title: 'New sentences', text: aiOn ? 'Fresh sentences for any topic you type.' : desktopStatus.isDesktop ? 'Needs the AI key and the internet. The bank is used instead.' : 'Needs the internet. The bank is used instead.' },
+                      { ok: aiOn, title: 'Natural voice', text: aiOn ? 'An AI voice reads the sentences aloud.' : "The computer's own voice reads aloud instead." },
                     ].map(item => (
                       <li key={item.title} className="p-2.5 rounded-gc-sm bg-gc-line/[0.04] flex items-start gap-2">
                         {item.ok
@@ -651,7 +652,18 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   </ul>
                 </div>
 
-                {/* Optional Gemini key */}
+                {/* Package T6: on the web the game's server holds the AI key; only the desktop app takes one. */}
+                {!desktopStatus.isDesktop && (
+                  <div className={card}>
+                    <h3 className={cardTitle}>AI on the web</h3>
+                    <p className={`mt-1 ${hint}`}>
+                      The game's server has its own AI key, so there is nothing to set up. Each device can ask for up to {AI_DAILY_SENTENCE_LIMIT} AI sentences a day; after that, the bank is used.
+                    </p>
+                  </div>
+                )}
+
+                {/* Optional Gemini key (desktop app only) */}
+                {desktopStatus.isDesktop && (
                 <div className={card}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className={cardTitle}>Gemini API key <span className="font-normal text-gc-quiet">(optional)</span></h3>
@@ -728,6 +740,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                     The key is encrypted with Windows' own protection (DPAPI) and kept in your app data folder. It is never put in the installer or shared.
                   </p>
                 </div>
+                )}
               </div>
             )}
           </div>

@@ -5,7 +5,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { APP_ROOT_DIR, isCloudflareWorker, isServerlessRuntime } from './server/runtime';
 import { handleGeminiRequest } from './server/aiHandler';
-import { deepHealth, deepHealthAllowed } from './server/aiProviders';
+import { deepHealth, deepHealthAllowed, hasConfiguredAiKey } from './server/aiProviders';
 import { pushEventToHost, registerRelayRoutes, relayIntentId, rooms, sendViewToStudent, serializeSeat } from './server/relay';
 
 /**
@@ -37,7 +37,8 @@ app.get("/api/health", async (req, res) => {
     const ok = Object.values(providers).some((p) => p.ok);
     return res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded", app: "grammar-casino", providers });
   }
-  res.json({ status: "ok", app: "grammar-casino" });
+  // Package T6: whether AI sentences are on (a yes or no, never the key).
+  res.json({ status: "ok", app: "grammar-casino", aiConfigured: hasConfiguredAiKey() });
 });
 
 registerRelayRoutes(app);
