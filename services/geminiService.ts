@@ -1,3 +1,4 @@
+import { getAiCallKind, getBrowserDailyStorage, tryUseAiCall } from '../utils/aiDailyLimit';
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { getCuratedSentence } from './fallbackSentences';
@@ -128,102 +129,6 @@ export const clearPortableGame = async () => {
   return { success: false };
 };
 
-// --- Teacher PIN Gate (Offline-Only Fallback for Unauthenticated Visitors) ---
-const TEACHER_PIN_STORAGE_KEY = 'grammar_casino_teacher_pin';
-
-// Stored strictly in volatile memory (never persisted in localStorage/sessionStorage).
-// Editing the URL, reloading the page, opening a new tab, or finishing a game automatically locks Live Mode.
-let activeSessionTeacherPin = '';
-
-if (typeof window !== 'undefined') {
-  try {
-    localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-    sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-  } catch {}
-}
-
-export const getSavedTeacherPin = (): string => {
-  return activeSessionTeacherPin.trim();
-};
-
-export const setSavedTeacherPin = (pin: string): void => {
-  activeSessionTeacherPin = (pin || '').trim();
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-      sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-    } catch {}
-  }
-};
-
-export const clearSavedTeacherPin = (): void => {
-  activeSessionTeacherPin = '';
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-      sessionStorage.removeItem(TEACHER_PIN_STORAGE_KEY);
-    } catch {}
-  }
-};
-
-export const isTeacherPinUnlocked = (): boolean => {
-  return true;
-};
-
-export const verifyTeacherGoogleOnServer = async (_idToken: string): Promise<{ valid: boolean; error?: string }> => {
-  return { valid: true };
-};
-
-export const checkTeacherPinStatus = async (): Promise<boolean> => {
-  return true;
-};
-
-export const verifyTeacherPinOnServer = async (pin: string): Promise<{ valid: boolean; error?: string }> => {
-  const cleanPin = (pin || '').trim();
-  if (!cleanPin) return { valid: false, error: 'Please enter the Teacher PIN.' };
-  try {
-    const res = await fetch('/api/teacher-auth/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: cleanPin }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data?.valid) {
-      setSavedTeacherPin(cleanPin);
-      return { valid: true };
-    }
-    return { valid: false, error: data?.error || 'Incorrect Teacher PIN.' };
-  } catch {
-    return { valid: false, error: 'Could not reach the server to verify PIN.' };
-  }
-};
-
-export const changeTeacherPinOnServer = async (
-  currentPin: string,
-  newPin: string
-): Promise<{ ok: boolean; error?: string }> => {
-  const cleanCurrent = (currentPin || '').trim();
-  const cleanNew = (newPin || '').trim();
-  if (cleanNew.length < 4) {
-    return { ok: false, error: 'New PIN must be at least 4 characters.' };
-  }
-  try {
-    const res = await fetch('/api/teacher-auth/change-pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPin: cleanCurrent, newPin: cleanNew }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data?.ok) {
-      setSavedTeacherPin(cleanNew);
-      return { ok: true };
-    }
-    return { ok: false, error: data?.error || 'Failed to update Teacher PIN.' };
-  } catch {
-    return { ok: false, error: 'Could not reach the server to update PIN.' };
-  }
-};
-
 async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
   const response = await fetch('/api/gemini', {
     method: 'POST',
@@ -275,7 +180,11 @@ async function requestDealerAction<T>(action: string, payload: Record<string, an
     }
   }
 
-  // Otherwise, use existing web / Netlify function endpoints
+  // The web app is open to everyone, so each device has a daily AI allowance (utils/aiDailyLimit.ts).
+  // Past it, callers fall back to the offline bank and local checks, as when the network is down.
+  if (!tryUseAiCall(getBrowserDailyStorage(), getAiCallKind(action))) {
+    throw new Error('Daily AI limit reached on this device; using the offline bank.');
+  }
   return postToGeminiApi<T>(action, payload);
 }
 

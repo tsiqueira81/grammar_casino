@@ -14,9 +14,10 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | --- | --- |
 | `npm ci` | Install exactly what `package-lock.json` pins |
 | `npm run dev` | Express dev server with Vite and the local WebSocket relay, on http://localhost:3000 |
-| `npm run lint` | TypeScript check (`tsc --noEmit`) |
+| `npm run lint` | TypeScript check (`tsc --noEmit`), plus strict mode for `game/`, `utils/`, `types.ts` and `constants.ts` (`tsconfig.strict.json`). Keep new code there strict-clean |
 | `npm test` | Unit tests (vitest, `tests/`) |
 | `npm run build` | Production bundle in `dist/` |
+| `npm run size` | After a build, compares gzipped file sizes with `scripts/bundle-baseline.json` and fails past +10% (CI runs it). Run `node scripts/check-bundle-size.mjs --update` when growth is intended, and say why in the pull request |
 | `npm run test:e2e` | Browser tests (Playwright, `e2e/`): a whole local game and a live room with three phones. Starts the dev server itself |
 | `npm run bots -- <ROOM> [count]` | Joins simulated students to a room on the dev server, for load checks and demos |
 
@@ -24,8 +25,8 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 
 - **Web app:** static files on Cloudflare Pages at `https://grammarcasino.pages.dev/`. Every push to `main` deploys there, but only after lint, tests and build pass (`.github/workflows/deploy-cloudflare.yml`).
 - **Pull requests:** `.github/workflows/ci.yml` runs lint, unit tests, build, the Firestore rules checks and the browser tests on every pull request and every non-`main` branch push. When those pass, it publishes a preview of the branch on Cloudflare Pages and puts the address in the job summary.
-- **AI and teacher endpoints:** `functions/api/[[route]].ts` (a Cloudflare Pages Function) calls `dispatchServerlessApi` in `server.ts`. This covers `/api/gemini`, `/api/health` and `/api/teacher-auth/*`. Provider order: Groq first, then Gemini, then the offline sentence bank.
-- **Live rooms:** phones and the projector talk through Firestore documents: `rooms/{code}` (the shared table), `rooms/{code}/seats/{clientId}` (each phone's private view) and `rooms/{code}/intents/{clientId}` (what each phone asks for). The WebSocket relay in `server.ts` runs only in local development.
+- **AI endpoints:** `functions/api/[[route]].ts` (a Cloudflare Pages Function) calls `dispatchServerlessApi` (`server/serverless.ts`, re-exported by `server.ts`). This covers `/api/gemini` and `/api/health`. There is no teacher PIN (decision D3): AI sentences and live rooms are open to everyone, each device has a daily AI allowance (`utils/aiDailyLimit.ts`) and the server a daily limit per address; only cloud saves need the teacher's Google sign-in. Provider order: Groq first, then Gemini, then the offline sentence bank.
+- **Live rooms:** phones and the projector talk through Firestore documents: `rooms/{code}` (the shared table), `rooms/{code}/seats/{clientId}` (each phone's private view) and `rooms/{code}/intents/{clientId}` (what each phone asks for). The WebSocket relay (`server/relay.ts`, started by `server.ts`) runs only in local development.
 - **Game authority:** the teacher's browser tab. Phones only send intents, and the host must check every one (see `game/intents.ts`).
 - **Legacy, awaiting decision D1:** `worker.ts`, `netlify.toml`, `netlify/` and the Electron app (`electron/`). Do not build on them; do not delete them until Thiago confirms.
 
@@ -34,11 +35,13 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | Path | What lives there |
 | --- | --- |
 | `App.tsx` | The host screen and almost all game flow (very large; being split up in a later phase) |
+| `index.tsx`, `student/StudentApp.tsx` | Entry point. A link with `?room=CODE` loads only `StudentApp` (the phone app); everything else loads `App`. Keep teacher-only code (the offline bank, PDFs, the 3D table, the cloud vault) out of what `StudentApp` imports; `e2e/phone-inputs.spec.ts` checks it |
 | `components/` | Screens and widgets. `StudentControllerView.tsx` is the phone app, `PlayerBettingCard.tsx` the single-screen seat card, `Tabletop3DOverlay.tsx` the lazy-loaded three.js table |
-| `game/` | Pure game rules with no React. `intents.ts` checks what phones may do |
+| `game/` | Pure game rules with no React (package F5): `intents.ts` (what phones may do), `betLimits.ts` (Bet Cap, High Roller), `betValidity.ts` (is a bet ready), `status.ts` (shield, frozen, silenced), `flow.ts` (game over, winner), `revealGate.ts` (who is in, may the answer be revealed), `persistence.ts` (bringing old saved games up to date). Change a rule here, not in `App.tsx` |
 | `utils/` | Pure helpers: `roundSettlement.ts` (payouts), `multiplayerProtocol.ts` (per-phone views), `soundEngine.ts` (Web Audio synthesis), `sentenceSegments.ts`, and others |
 | `services/` | AI client (`geminiService.ts`), offline banks (`fallbackSentences.ts`, `expandedCuratedBank*.ts`), Firebase, room transport (`multiplayerService.ts`) |
-| `server.ts` | Dev server plus the serverless API used by the Pages Function |
+| `server.ts` | Dev server (Vite, the WebSocket relay) and the entry the Pages Function imports (`dispatchServerlessApi`) |
+| `server/` | The server's parts (package A1): `runtime.ts` (where it runs, `.env`), `limits.ts` (rate and daily limits, AI cache), `aiProviders.ts` (Groq and Gemini calls), `sentenceSchemas.ts` and `sentenceIntegrity.ts` (what an AI sentence must look like), `aiHandler.ts` (`/api/gemini`), `relay.ts` (the dev-only live-room relay), `serverless.ts` (the Pages Function dispatcher). `tests/serverRoutes.test.ts` checks the routes |
 | `functions/api/` | Cloudflare Pages Function entry |
 | `public/models/` | GLB models for the 3D table (byte-pinned by `tests/tabletop3DAssets.test.ts`) |
 | `scripts/` | `check-firestore-rules.mjs` (emulator checks), `assets/` (Blender and fallback GLB generators) |
@@ -52,7 +55,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 2. **One work package per pull request**, small enough to review in ten minutes. A "move code, change nothing" change must not change behaviour.
 3. **Green before and after.** `npm run lint` and `npm test` must pass. Never delete, skip or loosen a test to get green. If a test pins behaviour you deliberately change, update it in the same pull request and say so.
 4. **Search, don't trust line numbers.** Files move.
-5. **Phones come first on weight.** Nothing only the projector needs (three.js, 3D models, large images) may enter the bundle a phone downloads. Compare `npm run build` chunk sizes in the pull request.
+5. **Phones come first on weight.** Nothing only the projector needs (three.js, 3D models, large images) may enter the bundle a phone downloads. `npm run size` compares chunk sizes with the baseline; CI fails past +10%.
 6. **The lesson must never stall.** Anything that uses the network or AI needs an offline fallback, and every screen needs a way out for the teacher.
 7. **Respect Calm mode** and the system's reduced-motion setting for any new animation, flash or sound.
 8. **No real student data.** Nicknames only; no accounts or emails for students.
@@ -69,8 +72,12 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - **Seat by name.** A phone from another device asking for a seated name needs the teacher's yes (`SEAT_TAKEOVER_REQUEST`).
 - **Never render sentence text as HTML.** Use `components/SentenceText.tsx`.
 
+### Phone screens
+- Every field where a student types an answer spreads `ANSWER_INPUT_PROPS` (`utils/answerInputProps.ts`), so a phone never capitalises or autocorrects the answer.
+- Every control on the student screens is at least 44 by 44 CSS pixels and nothing scrolls sideways at 320 pixels wide. `e2e/phone-inputs.spec.ts` checks both.
+
 ### Game modes and elimination
-- `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer'`).
+- `lastPlayer`: play until one solvent player remains. The $150 House Bailout never applies here, even in a room (`isBailoutEnabled` in `game/flow.ts`). When the game ends and who wins is decided only in `game/flow.ts`.
 - `rounds` and `targetAmount`: in a live room, a bankrupt player gets the $150 House Bailout at the start of the next hand.
 
 ### Power-up compatibility (`constants.ts`)
@@ -96,12 +103,15 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 
 ## Browser storage keys
 
+Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/safeStorage.ts`), never `localStorage` directly: some browsers refuse storage and throw, and `e2e/blocked-storage.spec.ts` checks the game still runs then.
+
 | Key | Storage | What it holds |
 | --- | --- | --- |
 | `grammarCasinoGameState` | local | The saved single game (players, round, settings) |
 | `grammar_casino_student_session_v1` | local | A phone's room and seat, for reconnecting |
+| `grammar_casino_host_room_v1` | local | The teacher's open live room (code, seats, handled intents), so a reload reopens it for up to 6 hours |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
-| `grammar_casino_teacher_pin` | session | Teacher PIN unlock (being replaced by a signed token, package R7) |
+| `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |
 | `grammar_casino_theme` | local | Light or dark theme |
 | `grammar_casino_projector_mode` | local | Projector readability mode |
 | `grammar_casino_calm_mode` | local | Calm mode (less motion and sound) |

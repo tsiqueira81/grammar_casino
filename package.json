@@ -11,11 +11,12 @@
     "start": "node server.ts",
     "build": "vite build",
     "deploy:cloudflare": "vite build && wrangler pages deploy dist --project-name grammarcasino --branch main",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test --trace off",
-    "bots": "tsx scripts/bots.ts"
+    "bots": "tsx scripts/bots.ts",
+    "size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",

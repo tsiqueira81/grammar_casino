@@ -5,10 +5,12 @@
 // unit tested. The asynchronous answer checking (AI judge, correction checks) still
 // happens in App.tsx; its results are passed in as `verifications` and
 // `clozeWordVerifications`. Sounds are returned in order instead of played here.
+import { isFrozenBySubZero } from '../game/status';
+import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
   Player, Bet, GeneratedSentence, ActivePowerUp, PlayerEffect, RoundResultInfo, RoundPlayerResult, QuestionType,
 } from '../types';
-import { BET_CAP_AMOUNT, JACKPOT_MULTIPLIER } from '../constants';
+import { JACKPOT_MULTIPLIER } from '../constants';
 import { isPlayerUnderdog } from './multiplayerProtocol';
 import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
 import { normalizeUkUsSpelling } from './offlineGrammarEngine';
@@ -280,7 +282,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     if (!activePlayers.find(ap => ap.id === player.id)) return;
     const playerPowerUps = (activePowerUps[player.id] || []) as ActivePowerUp[];
 
-    const isFrozen = allActivePowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === ('SUB_ZERO' as any));
+    const isFrozen = isFrozenBySubZero(player, allActivePowerUps);
     if (isFrozen) {
       draftsById.set(player.id, {
         player,
@@ -325,27 +327,12 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     const playerBetData = bets[player.id];
     const betAmount = typeof playerBetData?.bet === 'number' ? playerBetData.bet : 0;
     const hasSplitBet = playerPowerUps.some(pu => pu.type === 'SPLIT_BET');
-    const playerCaps = allActivePowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerPowerUps.includes(pu)));
-    const isPlayerBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === ('BET_CAP' as any));
-    const playerCapLimit = playerCaps.length > 0
-      ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-      : (isPlayerBetCapped ? 50 : BET_CAP_AMOUNT);
+    const { isCapped: isPlayerBetCapped, capAmount: playerCapLimit } = getBetCap(player, activePowerUps);
     let finalBet = isPlayerBetCapped ? Math.min(betAmount, playerCapLimit) : betAmount;
 
     // Enforce High Roller minimum floor if targeted
-    const playerHighRollers = allActivePowerUps.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-    if (playerHighRollers.length > 0 && player.money > 0) {
-      const minRollerFloor = Math.min(
-        player.money,
-        Math.max(
-          1,
-          playerHighRollers.reduce(
-            (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-            Math.ceil(player.money * 0.5)
-          )
-        )
-      );
-      finalBet = Math.max(finalBet, minRollerFloor);
+    if (getHighRoller(player, activePowerUps).isHighRoller && player.money > 0) {
+      finalBet = Math.max(finalBet, getDisplayedMinBet(player, activePowerUps));
     }
 
     const hasDoubleOrNothing = playerPowerUps.some(pu => pu.type === 'DOUBLE_OR_NOTHING');

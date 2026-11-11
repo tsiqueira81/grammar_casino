@@ -1,3 +1,6 @@
+import { isBetComplete, isValidKeyWordTransformationPhrase } from '../game/betValidity';
+import { hasShieldProtection, isFrozenBySubZero, isSilencedThisHand } from '../game/status';
+import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
   Player,
   Settings,
@@ -16,7 +19,6 @@ import {
   RoundHistoryRecord,
 } from '../types';
 import {
-  BET_CAP_AMOUNT,
   POWERUP_COST,
   GENEROUS_GIFT_AMOUNT,
   CLOZE_DISABLED_POWER_UPS,
@@ -391,23 +393,11 @@ export function isPlayerTargetedThisRound(
   return false;
 }
 
-export function isValidKeyWordTransformationPhrase(
-  phrase: string | undefined,
-  baseWord?: string
-): boolean {
-  const trimmed = (phrase || '').trim().replace(/\s+/g, ' ');
-  if (!trimmed) return false;
-  const words = trimmed.split(' ').filter(Boolean);
-  if (words.length < 2 || words.length > 6) return false;
-  const key = (baseWord || '').trim().toLowerCase();
-  if (!key) return true;
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const keyRegex = new RegExp(`(^|[^a-zA-Z])${escapedKey}([^a-zA-Z]|$)`, 'i');
-  return keyRegex.test(trimmed);
-}
+export { isValidKeyWordTransformationPhrase };
 
 /**
  * Checks if a player's current bet is complete and ready to lock in.
+ * Kept under its old name; the rule lives in game/betValidity.ts.
  */
 export function isBetCompleteForQuestionType(
   bet: Bet | undefined,
@@ -415,40 +405,7 @@ export function isBetCompleteForQuestionType(
   hasSplitBet: boolean,
   baseWord?: string
 ): boolean {
-  if (!bet) return false;
-  const hasValidBetAmount = typeof bet.bet === 'number' && !isNaN(bet.bet) && bet.bet >= 0;
-  if (!hasValidBetAmount) return false;
-
-  if (questionType === 'multipleChoice') {
-    return hasSplitBet
-      ? (bet.splitOptions?.length ?? 0) >= 1
-      : Boolean(bet.selectedOption?.trim());
-  }
-  if (questionType === 'keyWordTransformation') {
-    if (hasSplitBet) {
-      const w1 = (bet.splitClozeAnswers?.[0] || '').trim();
-      const w2 = (bet.splitClozeAnswers?.[1] || '').trim();
-      if (!w1 && !w2) return false;
-      if (w1 && !isValidKeyWordTransformationPhrase(w1, baseWord)) return false;
-      if (w2 && !isValidKeyWordTransformationPhrase(w2, baseWord)) return false;
-      return true;
-    }
-    return isValidKeyWordTransformationPhrase(bet.clozeAnswer, baseWord);
-  }
-  if (questionType === 'openCloze' || questionType === 'wordFormation') {
-    const cleanBase = (baseWord || '').trim().toLowerCase();
-    const isValidWord = (w?: string) => {
-      const trimmed = (w || '').trim().toLowerCase();
-      if (!trimmed) return false;
-      if (questionType === 'wordFormation' && cleanBase && trimmed === cleanBase) return false;
-      return true;
-    };
-    return hasSplitBet
-      ? isValidWord(bet.splitClozeAnswers?.[0]) || isValidWord(bet.splitClozeAnswers?.[1])
-      : isValidWord(bet.clozeAnswer);
-  }
-  if (hasSplitBet) return true;
-  return Boolean(bet.opinion);
+  return isBetComplete(bet, questionType, hasSplitBet, baseWord);
 }
 
 /**
@@ -504,9 +461,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
   const peers: PeerSummary[] = players.map(p => {
     const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
     const isFrozen =
-      allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === p.id) ||
-      p.effects.some(e => e.type === ('SUB_ZERO' as any));
-    const isShielded = pActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      isFrozenBySubZero(p, allActive);
+    const isShielded = hasShieldProtection(pActive);
     const targetedThisRound = isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
     const hasSplitBet = pActive.some(pu => pu.type === 'SPLIT_BET');
     const seat = seats[p.id];
@@ -536,38 +492,13 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     const myUsed = powerUpsUsedThisRound[player.id] || [];
     const hasPowerSurge = myActive.some(pu => pu.type === 'POWER_SURGE');
     const powerUpLimit = hasPowerSurge ? 3 : 1;
-    const isSilenced = player.effects.some(e => e.type === 'SILENCED');
+    const isSilenced = isSilencedThisHand(player);
     const isFrozen =
-      allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) ||
-      player.effects.some(e => e.type === ('SUB_ZERO' as any));
+      isFrozenBySubZero(player, allActive);
 
-    const playerCaps = allActive.filter(
-      pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : myActive.includes(pu))
-    );
-    const isBetCapped = playerCaps.length > 0 || player.effects.some(e => e.type === ('BET_CAP' as any));
-    const betCapAmount =
-      playerCaps.length > 0
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : isBetCapped
-          ? 50
-          : BET_CAP_AMOUNT;
-
-    const playerHighRollers = allActive.filter(
-      pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id
-    );
-    const isHighRoller = playerHighRollers.length > 0;
-    const minBetAmount = isHighRoller
-      ? Math.min(
-          player.money,
-          Math.max(
-            1,
-            playerHighRollers.reduce(
-              (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-              Math.ceil(player.money * 0.5)
-            )
-          )
-        )
-      : 0;
+    const { isCapped: isBetCapped, capAmount: betCapAmount } = getBetCap(player, activePowerUps);
+    const { isHighRoller } = getHighRoller(player, activePowerUps);
+    const minBetAmount = getDisplayedMinBet(player, activePowerUps);
 
     // Build 50/50 Scalpel hint without leaking full answer
     const scalpelPu = myActive.find(pu => pu.type === 'SCALPEL');

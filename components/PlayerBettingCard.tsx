@@ -1,4 +1,6 @@
+import { hasPlainShield, isSilencedThisHand } from '../game/status';
 import React, { useRef } from 'react';
+import { ANSWER_INPUT_PROPS } from '../utils/answerInputProps';
 import { AlertTriangle, Check, Lock, Pencil, Snowflake, X } from 'lucide-react';
 import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
 import ActionButton from './ActionButton';
@@ -300,11 +302,11 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   const hasSafetyNet = activePowerUps.some(p => p.type === 'SAFETY_NET');
   const hasImmunity = activePowerUps.some(p => p.type === 'IMMUNITY_IDOL');
   const hasJackpot = activePowerUps.some(p => p.type === 'JACKPOT');
-  const hasShield = activePowerUps.some(p => p.type === 'SHIELD');
+  const hasShield = hasPlainShield(activePowerUps);
   const hasSplitBet = activePowerUps.some(p => p.type === 'SPLIT_BET');
   const hasBlessing = player.effects.some(e => e.type === 'BLESSING');
   const hasCrucio = player.effects.some(e => e.type === 'CRUCIO');
-  const isSilenced = player.effects.some(e => e.type === 'SILENCED');
+  const isSilenced = isSilencedThisHand(player);
   const hasSecondChance = player.effects.some(e => e.type === 'SECOND_CHANCE');
   const hasTeachersPet = activePowerUps.some(p => p.type === 'TEACHERS_PET') || player.effects.some(e => e.type === 'TEACHERS_PET');
   const hasSavings = activePowerUps.some(p => p.type === 'SAVINGS_ACCOUNT');
@@ -1307,6 +1309,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         <input
                           ref={splitWord1InputRef}
                           type="text"
+                          {...ANSWER_INPUT_PROPS}
                           value={bet?.splitClozeAnswers?.[0] || ''}
                           onChange={(e) => {
                             if (isBlocked) return;
@@ -1340,6 +1343,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         <input
                           ref={splitWord2InputRef}
                           type="text"
+                          {...ANSWER_INPUT_PROPS}
                           value={bet?.splitClozeAnswers?.[1] || ''}
                           onChange={(e) => {
                             if (isBlocked) return;
@@ -1389,6 +1393,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   <input
                     ref={clozeWordInputRef}
                     type="text"
+                    {...ANSWER_INPUT_PROPS}
                     value={bet?.clozeAnswer || ''}
                     onChange={(e) => {
                       if (isBlocked) return;
@@ -1610,6 +1615,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     </label>
                     <textarea 
                       value={bet?.userCorrection || ''}
+                      {...ANSWER_INPUT_PROPS}
                       onChange={handleCorrectionChange}
                       onDoubleClick={() => {
                         if (!isBlocked && currentSentenceText) {
@@ -1777,6 +1783,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     </div>
                     <textarea 
                       value={bet?.userCorrection || ''}
+                      {...ANSWER_INPUT_PROPS}
                       onChange={handleCorrectionChange}
                       onDoubleClick={() => {
                         if (!isBlocked && currentSentenceText) {

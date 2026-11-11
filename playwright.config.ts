@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [
     {
       name: 'host',
-      testMatch: /local-game\.spec\.ts|room-game\.spec\.ts/,
+      testMatch: /\.spec\.ts$/,
       use: { ...devices['Desktop Chrome'], viewport: { width: 1366, height: 768 } },
     },
   ],

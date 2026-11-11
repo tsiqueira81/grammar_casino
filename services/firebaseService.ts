@@ -1,3 +1,4 @@
+import { safeLocalStorage } from '../utils/safeStorage';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   connectAuthEmulator,
@@ -35,7 +36,8 @@ import {
   RoundHistoryRecord,
   Settings,
 } from '../types';
-import { getBuiltInCuratedSentencesForCloudSeed } from './fallbackSentences';
+// Only the type: the offline bank itself stays out of this file, so phones do not download it (S1).
+import type { BuiltInSeedItem } from './fallbackSentences';
 import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
 
 // Initialize Firebase App singleton
@@ -291,6 +293,29 @@ export async function writeFirestoreRoom(params: {
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
     return false;
+  }
+}
+
+/**
+ * Whether this device may host a room under this code: nobody has it, its host is this
+ * device, or it was left over from an earlier class (the rules then allow a takeover).
+ * If Firestore cannot be reached the code is treated as free; the lesson must not stall.
+ */
+export async function isFirestoreRoomCodeFree(code: string): Promise<boolean> {
+  const cleanCode = code.trim().toUpperCase();
+  try {
+    const user = await ensureFirebaseUser();
+    // Opening the room must stay quick even on a slow school network.
+    const snap = await Promise.race([
+      getDoc(doc(db, 'rooms', cleanCode)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+    ]);
+    if (!snap || !snap.exists()) return true;
+    const data = snap.data() || {};
+    if (!data.hostUid || (user && data.hostUid === user.uid)) return true;
+    return typeof data.updatedAt !== 'number' || data.updatedAt < Date.now() - 6 * 60 * 60 * 1000;
+  } catch {
+    return true;
   }
 }
 
@@ -637,7 +662,7 @@ export async function saveCloudRoster(params: {
       startingCash: Math.max(1, Math.min(1000000, Math.round(params.startingCash || 500))),
       playersJson: JSON.stringify(cleanPlayers),
       playerCount: cleanPlayers.length,
-      updatedBy: auth.currentUser?.email || 'Teacher PIN',
+      updatedBy: auth.currentUser?.email || 'Teacher',
       createdAt,
       updatedAt: now,
     };
@@ -878,7 +903,7 @@ export function computeSentenceFingerprintId(text: string, questionType: Questio
 export function loadCachedCloudSentences(): CloudCuratedSentence[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
+    const raw = safeLocalStorage.getItem(CLOUD_SENTENCE_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -890,7 +915,7 @@ export function loadCachedCloudSentences(): CloudCuratedSentence[] {
 export function saveCachedCloudSentences(sentences: CloudCuratedSentence[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(
+    safeLocalStorage.setItem(
       CLOUD_SENTENCE_STORAGE_KEY,
       JSON.stringify(sentences.slice(0, MAX_CACHED_CLOUD_SENTENCES))
     );
@@ -980,10 +1005,10 @@ export async function syncCloudSentenceBank(options?: {
 }
 
 export function getMissingBuiltInCloudSeedCount(
-  currentCloudSentences: CloudCuratedSentence[]
+  currentCloudSentences: CloudCuratedSentence[],
+  builtIn: BuiltInSeedItem[]
 ): number {
   const existingIds = new Set(currentCloudSentences.map((s) => s.id));
-  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
   let missing = 0;
   for (const item of builtIn) {
     const id = computeSentenceFingerprintId(item.text, item.questionType);
@@ -994,6 +1019,7 @@ export function getMissingBuiltInCloudSeedCount(
 
 export async function seedBuiltInBankToCloud(
   currentCloudSentences: CloudCuratedSentence[],
+  builtIn: BuiltInSeedItem[],
   onProgress?: (seededCount: number, totalToSeed: number) => void
 ): Promise<{
   ok: boolean;
@@ -1013,7 +1039,6 @@ export async function seedBuiltInBankToCloud(
   }
 
   const existingIds = new Set(currentCloudSentences.map((s) => s.id));
-  const builtIn = getBuiltInCuratedSentencesForCloudSeed();
   const baseNow = Date.now();
 
   const toWrite: { id: string; payload: Record<string, any>; entry: CloudCuratedSentence }[] = [];

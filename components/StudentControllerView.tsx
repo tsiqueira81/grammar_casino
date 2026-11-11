@@ -1,4 +1,6 @@
+import { safeLocalStorage } from '../utils/safeStorage';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
   HINT_COST,
   POWERUP_COST,
@@ -18,7 +20,6 @@ import WheelModal from './WheelModal';
 import SentenceText from './SentenceText';
 import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
-import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { diffWords } from '../utils/errorHighlight';
 import {
   AlertTriangle,
@@ -53,6 +54,14 @@ interface StudentControllerViewProps {
   isDarkMode: boolean;
   onToggleTheme: () => void;
 }
+
+const isTouchScreen = () => {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+};
 
 export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   initialRoomCode = '',
@@ -95,12 +104,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const splitWord1InputRef = useRef<HTMLInputElement>(null);
   const splitWord2InputRef = useRef<HTMLInputElement>(null);
   const wagerInputRef = useRef<HTMLInputElement>(null);
+  /** A text field has focus on a touch screen, so the on-screen keyboard is probably open. */
+  const [isTyping, setIsTyping] = useState<'answer' | 'wager' | null>(null);
   const lastCorrectionTapRef = useRef<number>(0);
 
   // Load saved session on mount and auto-reconnect if matching room code
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
+      const raw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
       if (!raw) return;
       const saved: SavedStudentSession = JSON.parse(raw);
       if (saved.name) setPlayerNameInput(saved.name);
@@ -246,7 +257,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       let tokenToUse = tokenOverride || '';
       if (!tokenToUse) {
         try {
-          const savedRaw = localStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
+          const savedRaw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
           if (savedRaw) {
             const saved: SavedStudentSession = JSON.parse(savedRaw);
             if (saved.code === code && saved.name.toLowerCase() === name.toLowerCase()) {
@@ -264,7 +275,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         reconnectToken: tokenToUse,
         onViewUpdate: handleViewUpdate,
         onKicked: () => {
-          localStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
+          safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
           setView(null);
           setJoinError('You were removed from the room or the room was closed.');
         },
@@ -280,7 +291,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         reconnectToken: ctrl.seat.reconnectToken,
         playerId: ctrl.seat.playerId,
       };
-      localStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(sessionToSave));
+      safeLocalStorage.setItem(STUDENT_SESSION_STORAGE_KEY, JSON.stringify(sessionToSave));
       playSound('addPlayer');
     } catch (err: any) {
       setJoinError(err.message || 'Could not connect to room.');
@@ -522,10 +533,40 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     sendIntent({ type: 'LOCK_IN', locked: true, bet: localBet });
   };
 
+  // Enter on an answer field moves to the next missing control, or locks in when all is done.
+  const onAnswerEnter = (e: React.KeyboardEvent<HTMLInputElement>, next: HTMLInputElement | null) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (next && !next.value.trim()) {
+      next.focus();
+      return;
+    }
+    if (!(Number(localBet.bet) > 0)) {
+      wagerInputRef.current?.focus();
+      return;
+    }
+    handleToggleLockIn();
+  };
+
+  // While the keyboard is open the pinned lock-in bar would cover the field, so it hides and
+  // an inline lock-in button shows under the field instead.
+  const typingBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onTypingFocus = (el: HTMLElement, where: 'answer' | 'wager' = 'answer') => {
+    if (typingBlurTimerRef.current) clearTimeout(typingBlurTimerRef.current);
+    keepFieldInView(el);
+    if (isTouchScreen()) setIsTyping(where);
+  };
+  const onTypingBlur = () => {
+    // Wait a moment, so a tap on the inline lock-in button still lands.
+    if (typingBlurTimerRef.current) clearTimeout(typingBlurTimerRef.current);
+    typingBlurTimerRef.current = setTimeout(() => setIsTyping(null), 250);
+  };
+
   const handleLeaveRoom = () => {
+    if (view && !window.confirm('Leave the table? Your seat stays saved, and you can join again with the same name.')) return;
     controllerRef.current?.destroy();
     controllerRef.current = null;
-    localStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
+    safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
     setView(null);
     onExitStudentMode();
   };
@@ -537,8 +578,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     const fieldClass =
       'w-full rounded-gc border-2 border-gc-line/[0.14] bg-gc-line/[0.06] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold transition-colors';
     return (
-      <div className="game-container min-h-screen text-gc-ink flex justify-center">
-        <div className="w-full max-w-md min-h-screen flex flex-col px-[22px] pt-5 pb-7 animate-gc-slide-up">
+      <div className="game-container min-h-[100dvh] text-gc-ink flex justify-center">
+        <div className="w-full max-w-md min-h-[100dvh] flex flex-col px-[22px] pt-5 pb-7 animate-gc-slide-up">
           <div className="flex items-center justify-between mb-6">
             <p className="font-logo font-bold text-[17px] tracking-[0.08em] text-gc-gold m-0">Grammar Casino</p>
             <button
@@ -691,6 +732,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           : 'Type your answer'
       : 'Now choose your bet';
 
+  // Shown under the field being typed in while the keyboard hides the pinned lock-in bar.
+  const inlineLockButton = (
+    <button
+      type="button"
+      onClick={handleToggleLockIn}
+      className={`w-full min-h-[52px] py-2.5 px-5 rounded-full text-gc-body font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
+        isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet'
+      }`}
+    >
+      {isReadyToLock && <Lock className="w-5 h-5 shrink-0" aria-hidden="true" />}
+      <span className="break-words min-w-0">{lockLabel}</span>
+    </button>
+  );
+
   const sectionTitle = 'text-gc-small font-bold text-gc-quiet';
   const requiredChip = 'text-gc-cap font-bold px-2.5 py-0.5 rounded-full bg-gc-loss/15 text-gc-loss';
   const textField =
@@ -699,14 +754,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const fieldBad = 'border-gc-loss ring-2 ring-gc-loss/25';
 
   return (
-    <div className="game-container min-h-screen text-gc-ink flex flex-col pb-28">
+    <div className="game-container min-h-[100dvh] text-gc-ink flex flex-col pb-28">
       {/* Top bar: who you are, the room and hand, your balance */}
-      <header className="sticky top-0 z-30 h-16 px-4 bg-gc-bg/85 backdrop-blur-md border-b border-gc-line/[0.1] flex items-center justify-between gap-2">
+      <header className="sticky top-0 z-30 min-h-16 pt-[env(safe-area-inset-top)] px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-gc-bg/85 backdrop-blur-md border-b border-gc-line/[0.1] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             type="button"
             onClick={() => setShowAvatarPicker((v) => !v)}
-            className="w-10 h-10 rounded-full border-2 border-gc-turn/70 p-0.5 bg-gc-line/[0.08] grid place-items-center shrink-0 cursor-pointer hover:scale-105 transition-transform"
+            className="w-11 h-11 rounded-full border-2 border-gc-turn/70 p-0.5 bg-gc-line/[0.08] grid place-items-center shrink-0 cursor-pointer hover:scale-105 transition-transform"
             aria-label="Change your avatar"
             aria-expanded={showAvatarPicker}
           >
@@ -734,7 +789,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <button
             type="button"
             onClick={handleLeaveRoom}
-            className="w-9 h-9 rounded-full grid place-items-center text-gc-quiet hover:text-gc-danger cursor-pointer"
+            className="w-11 h-11 rounded-full grid place-items-center text-gc-quiet hover:text-gc-danger cursor-pointer"
             aria-label="Leave the room"
             title="Leave the room"
           >
@@ -752,7 +807,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAvatarPicker(false)}
-                className="h-8 px-3.5 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
+                className="h-11 px-4 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
               >
                 Done
               </button>
@@ -857,7 +912,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 <span className="mt-4 max-w-full min-h-10 px-4 py-1.5 rounded-full inline-flex items-center gap-1.5 text-[17px] font-extrabold bg-gc-line/[0.07] border border-gc-line/[0.12]">
                   {pickText ? (
                     <>
-                      <span className="truncate">{pickText}</span>
+                      <span className="break-words min-w-0">{pickText}</span>
                       <span className="text-gc-money tabular-nums shrink-0">· {money(betAmountNum)}</span>
                     </>
                   ) : (
@@ -1031,7 +1086,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           <button
                             type="button"
                             onClick={() => setLockWarning(null)}
-                            className="h-8 px-3.5 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.16] text-gc-ink text-gc-small font-bold cursor-pointer shrink-0"
+                            className="h-11 px-4 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.16] text-gc-ink text-gc-small font-bold cursor-pointer shrink-0"
                           >
                             OK
                           </button>
@@ -1068,7 +1123,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   aria-label="How much goes on Valid"
                                   value={localBet.splitCorrectPercent ?? 50}
                                   onChange={(e) => updateBetField('splitCorrectPercent', Number(e.target.value))}
-                                  className="w-full accent-amber-500 h-6 cursor-pointer"
+                                  className="w-full accent-amber-500 h-11 cursor-pointer"
                                 />
                               </div>
                             ) : (
@@ -1134,6 +1189,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   <input
                                     id="gc-phone-correction"
                                     type="text"
+                                    {...ANSWER_INPUT_PROPS}
+                                    onFocus={(e) => onTypingFocus(e.currentTarget)}
+                                    onBlur={onTypingBlur}
+                                    onKeyDown={(e) => onAnswerEnter(e, null)}
                                     value={localBet.userCorrection || ''}
                                     onChange={(e) => updateBetField('userCorrection', e.target.value)}
                                     onDoubleClick={() => {
@@ -1232,7 +1291,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                       >
                                         {letter}
                                       </span>
-                                      <span className={`text-gc-lead font-sentence italic font-semibold truncate ${isEliminatedOpt ? 'line-through' : ''}`}>
+                                      <span className={`text-gc-lead font-sentence italic font-semibold break-words min-w-0 text-left ${isEliminatedOpt ? 'line-through' : ''}`}>
                                         {opt}
                                       </span>
                                     </span>
@@ -1295,6 +1354,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   <input
                                     ref={splitWord1InputRef}
                                     type="text"
+                                    {...ANSWER_INPUT_PROPS}
+                                    onFocus={(e) => onTypingFocus(e.currentTarget)}
+                                    onBlur={onTypingBlur}
+                                    onKeyDown={(e) => onAnswerEnter(e, splitWord2InputRef.current)}
                                     aria-label="First answer"
                                     maxLength={qType === 'keyWordTransformation' ? 80 : 32}
                                     value={localBet.splitClozeAnswers?.[0] || ''}
@@ -1318,6 +1381,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   <input
                                     ref={splitWord2InputRef}
                                     type="text"
+                                    {...ANSWER_INPUT_PROPS}
+                                    onFocus={(e) => onTypingFocus(e.currentTarget)}
+                                    onBlur={onTypingBlur}
+                                    onKeyDown={(e) => onAnswerEnter(e, null)}
                                     aria-label="Second answer"
                                     maxLength={qType === 'keyWordTransformation' ? 80 : 32}
                                     value={localBet.splitClozeAnswers?.[1] || ''}
@@ -1337,6 +1404,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                 <input
                                   ref={clozeWordInputRef}
                                   type="text"
+                                  {...ANSWER_INPUT_PROPS}
+                                  onFocus={(e) => onTypingFocus(e.currentTarget)}
+                                  onBlur={onTypingBlur}
+                                  onKeyDown={(e) => onAnswerEnter(e, null)}
                                   aria-label="Your answer"
                                   maxLength={qType === 'keyWordTransformation' ? 80 : 32}
                                   value={localBet.clozeAnswer || ''}
@@ -1379,6 +1450,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             </div>
                           );
                         })()}
+                        {isTyping === 'answer' && inlineLockButton}
                       </section>
 
                       {/* Your bet */}
@@ -1405,6 +1477,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                               ref={wagerInputRef}
                               type="text"
                               inputMode="numeric"
+                              enterKeyHint="done"
+                              autoComplete="off"
+                              onFocus={(e) => onTypingFocus(e.currentTarget, 'wager')}
+                              onBlur={onTypingBlur}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter') return;
+                                e.preventDefault();
+                                handleToggleLockIn();
+                              }}
                               pattern="[0-9]*"
                               aria-label="Your bet in dollars"
                               value={localBet.bet ?? ''}
@@ -1420,7 +1501,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => updateBetField('bet', Math.min(maxAllowedBet, view.minBetAmount))}
-                                className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                                className="h-11 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
                               >
                                 Least
                               </button>
@@ -1428,14 +1509,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             <button
                               type="button"
                               onClick={() => updateBetField('bet', maxAllowedBet)}
-                              className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                              className="h-11 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
                             >
                               All in
                             </button>
                             <button
                               type="button"
                               onClick={() => updateBetField('bet', '')}
-                              className="h-10 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
+                              className="h-11 px-3.5 rounded-full border border-gc-line/[0.16] text-gc-small font-bold text-gc-ink cursor-pointer"
                             >
                               Clear
                             </button>
@@ -1464,6 +1545,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                             </button>
                           ))}
                         </div>
+                        {isTyping === 'wager' && inlineLockButton}
                       </section>
 
                       {/* Help: a hint and a power-up */}
@@ -1669,8 +1751,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             setIsGeneratingPdf(true);
             setPdfStatusToast(null);
 
-            setTimeout(() => {
+            setTimeout(async () => {
               try {
+                // The PDF library is large, so a phone downloads it only when asked for a report card.
+                const { generateGrammarReportPDF } = await import('../utils/pdfGenerator');
                 const reportPlayers: Player[] = view.peers.map(p => ({
                   id: p.id,
                   name: p.name,
@@ -1802,18 +1886,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       </main>
 
       {/* Lock-in button, pinned to the bottom while betting */}
-      {view.step === 'IN_GAME' && !view.isFrozen && view.me.money > 0 && !isPlayerLocked && view.sentence && (
+      {view.step === 'IN_GAME' && !view.isFrozen && view.me.money > 0 && !isPlayerLocked && view.sentence && !isTyping && (
         <div className="fixed bottom-0 inset-x-0 z-30 px-4 pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-gc-bg via-gc-bg/90 to-transparent">
           <div className="max-w-xl mx-auto">
             <button
               type="button"
               onClick={handleToggleLockIn}
-              className={`w-full h-[58px] px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
+              className={`w-full min-h-[58px] py-3 px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
                 isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet shadow-gc-1'
               }`}
             >
               {isReadyToLock && <Lock className="w-5 h-5 shrink-0" aria-hidden="true" />}
-              <span className="truncate">{lockLabel}</span>
+              <span className="break-words min-w-0">{lockLabel}</span>
             </button>
           </div>
         </div>

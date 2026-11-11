@@ -1,4 +1,11 @@
+import { safeLocalStorage } from './utils/safeStorage';
+import { migrateSavedGame } from './game/persistence';
+import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
+import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
+import { checkBet, isBetComplete } from './game/betValidity';
+import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
 import { 
   Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, 
   PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload,
@@ -64,18 +71,15 @@ import {
   buildAudiencePollSummary,
   isPlayerUnderdog,
 } from './utils/multiplayerProtocol';
-import { HostRoomController, HostEventPayload, SeatTakeoverRequest } from './services/multiplayerService';
+import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
-  signInTeacherWithGoogle,
-  signOutTeacherGoogle,
   subscribeToAuthChanges,
   syncCloudSentenceBank,
-  isVerifiedTeacherUser,
   CloudRoster,
 } from './services/firebaseService';
 
@@ -87,7 +91,7 @@ const STICKY_TOP_PX = 76;
 // --- Sound engine (Web Audio, no downloads; see utils/soundEngine.ts) ---
 const readStoredSfxVolume = (): number => {
   try {
-    return clampVolume(localStorage.getItem(SFX_VOLUME_STORAGE_KEY), DEFAULT_SFX_VOLUME);
+    return clampVolume(safeLocalStorage.getItem(SFX_VOLUME_STORAGE_KEY), DEFAULT_SFX_VOLUME);
   } catch {
     return DEFAULT_SFX_VOLUME;
   }
@@ -218,38 +222,9 @@ function pcmToAudioBuffer(
 
 const loadInitialState = () => { 
   try { 
-    const s = localStorage.getItem(LOCAL_STORAGE_KEY); 
+    const s = safeLocalStorage.getItem(LOCAL_STORAGE_KEY); 
     if (s) {
-      const parsed = JSON.parse(s);
-      // Migration: Add avatar, streak, effects to players if missing
-      if (parsed.players) {
-        parsed.players = parsed.players.map((p: any) => ({
-            ...p,
-            avatar: p.avatar || getRandomCharacterAvatar(),
-            winStreak: p.winStreak || 0,
-            effects: p.effects || []
-        }));
-      }
-      // Migration: powerUpsUsedThisRound to UsedPowerUp[]
-      if (parsed.powerUpsUsedThisRound) {
-        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
-        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
-            const key = Number(k);
-            const val = parsed.powerUpsUsedThisRound[key];
-            if (Array.isArray(val)) {
-                 if (val.length > 0 && typeof val[0] === 'string') {
-                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
-                 } else {
-                     fixedPowerUps[key] = val; 
-                 }
-            } else if (typeof val === 'number') {
-                fixedPowerUps[key] = []; 
-            } else {
-                 fixedPowerUps[key] = [];
-            }
-        });
-        parsed.powerUpsUsedThisRound = fixedPowerUps;
-      }
+      const parsed = migrateSavedGame(JSON.parse(s), () => getRandomCharacterAvatar());
       if (parsed && typeof parsed.step === 'string') return parsed;
     }
     return null;
@@ -332,7 +307,7 @@ export function App() {
   
   const [isMuted, setIsMuted] = useState(() => {
     try {
-      return localStorage.getItem(SFX_MUTED_STORAGE_KEY) === 'true';
+      return safeLocalStorage.getItem(SFX_MUTED_STORAGE_KEY) === 'true';
     } catch {
       return false;
     }
@@ -342,7 +317,7 @@ export function App() {
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [orpheusVoice, setOrpheusVoice] = useState<GeminiService.OrpheusVoiceId>(() => {
     try {
-      const saved = localStorage.getItem('grammar_casino_orpheus_voice_v2');
+      const saved = safeLocalStorage.getItem('grammar_casino_orpheus_voice_v2');
       if (saved && GeminiService.ORPHEUS_VOICE_OPTIONS.some(v => v.id === saved)) {
         return saved as GeminiService.OrpheusVoiceId;
       }
@@ -352,7 +327,7 @@ export function App() {
   const handleOrpheusVoiceChange = useCallback((nextVoice: GeminiService.OrpheusVoiceId) => {
     setOrpheusVoice(nextVoice);
     try {
-      localStorage.setItem('grammar_casino_orpheus_voice_v2', nextVoice);
+      safeLocalStorage.setItem('grammar_casino_orpheus_voice_v2', nextVoice);
     } catch {}
   }, []);
   const [ttsAudioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 }));
@@ -408,7 +383,7 @@ export function App() {
   const [nextRoundSettings, setNextRoundSettings] = useState<Settings | null>(initialGameState?.nextRoundSettings || null);
   const [isSettingsDeckExpanded, setIsSettingsDeckExpanded] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
+      return safeLocalStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
     }
     return false;
   });
@@ -446,6 +421,8 @@ export function App() {
     setMpTakeoverRequests([]);
   }, [mpRoomCode]);
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
+  // Shown for a few seconds after a reload reopened the live room.
+  const [mpResumeNotice, setMpResumeNotice] = useState<string | null>(null);
   const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
   // Single-screen table layout: defaults to compact grid.
   const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards'>('grid');
@@ -467,20 +444,10 @@ export function App() {
     isEncrypted: false,
   });
 
-  // Teacher PIN & Google Auth Gate for Web Live AI, Cloud Vault & Live Classroom Hosting
-  const [isTeacherAiUnlocked, setIsTeacherAiUnlocked] = useState<boolean>(() => GeminiService.isTeacherPinUnlocked());
+  // Google sign-in is only needed for cloud saves (decision D3). AI sentences and live rooms are open to everyone.
   const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
-  const [isSigningInGoogle, setIsSigningInGoogle] = useState<boolean>(false);
-  const [showTeacherPinModal, setShowTeacherPinModal] = useState<boolean>(false);
-  const [teacherPinInput, setTeacherPinInput] = useState<string>('');
-  const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
-  const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
   // A yes/no question before an action that cannot be undone (F4 fix 10)
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
-  const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
-  const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
-  const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
-  const pendingOpenCloudTabAfterPinRef = useRef<CloudManagerTab | null>(null);
 
   // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
   const [showCloudModal, setShowCloudModal] = useState<boolean>(false);
@@ -489,7 +456,6 @@ export function App() {
 
   const refreshDesktopStatus = useCallback(() => {
     GeminiService.getDesktopStatus().then(setDesktopStatus);
-    GeminiService.checkTeacherPinStatus().then(setIsTeacherAiUnlocked);
   }, []);
 
   useEffect(() => {
@@ -497,20 +463,9 @@ export function App() {
     // Sync the auto-growing Cloud Sentence Bank into local cache on startup
     void syncCloudSentenceBank();
 
-    // Listen to Firebase Google Auth state
-    const unsubscribeAuth = subscribeToAuthChanges(async (user) => {
-      if (user && user.email) {
-        setTeacherGoogleEmail(user.email);
-        if (isVerifiedTeacherUser(user)) {
-          try {
-            const idToken = await user.getIdToken();
-            await GeminiService.verifyTeacherGoogleOnServer(idToken);
-          } catch {}
-          setIsTeacherAiUnlocked(true);
-        }
-      } else {
-        setTeacherGoogleEmail(null);
-      }
+    // Listen to Firebase Google Auth state (cloud saves show who is signed in)
+    const unsubscribeAuth = subscribeToAuthChanges((user) => {
+      setTeacherGoogleEmail(user?.email || null);
     });
 
     const handleOnline = () => refreshDesktopStatus();
@@ -524,19 +479,8 @@ export function App() {
     };
   }, [refreshDesktopStatus]);
 
-  const handleOpenTeacherPinModal = () => {
-    playSound('click');
-    pendingCreateRoomAfterPinRef.current = false;
-    pendingOpenCloudTabAfterPinRef.current = null;
-    setTeacherPinInput('');
-    setNewTeacherPinInput('');
-    setShowChangePinForm(false);
-    setTeacherPinNotice(null);
-    setShowTeacherPinModal(true);
-  };
-
   // The vault asks for the teacher's Google sign-in itself (the Firestore rules require it),
-  // so it opens straight away instead of going through the Teacher PIN.
+  // so it opens straight away.
   const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
     playSound('click');
     setCloudModalTab(tab);
@@ -562,143 +506,9 @@ export function App() {
     }
   };
 
-  const handleSignInWithGoogle = async () => {
-    if (isSigningInGoogle) return;
-    playSound('click');
-    setIsSigningInGoogle(true);
-    setTeacherPinNotice(null);
-    const res = await signInTeacherWithGoogle();
-    if (!res.ok || !res.user) {
-      setIsSigningInGoogle(false);
-      if (res.error) {
-        setTeacherPinNotice({ type: 'error', text: res.error });
-      }
-      return;
-    }
-
-    setTeacherGoogleEmail(res.user.email || null);
-    if (!res.isVerifiedTeacher) {
-      setIsSigningInGoogle(false);
-      playSound('error');
-      setTeacherPinNotice({
-        type: 'error',
-        text: `Signed in as ${res.user.email}. Only teacher.siqueira@gmail.com unlocks without a PIN, so enter the PIN instead.`,
-      });
-      return;
-    }
-
-    if (res.idToken) {
-      await GeminiService.verifyTeacherGoogleOnServer(res.idToken);
-    }
-    setIsSigningInGoogle(false);
-    playSound('success');
-    setIsTeacherAiUnlocked(true);
-
-    if (pendingCreateRoomAfterPinRef.current) {
-      pendingCreateRoomAfterPinRef.current = false;
-      setShowTeacherPinModal(false);
-      await startHostMultiplayerRoom();
-      return;
-    }
-    if (pendingOpenCloudTabAfterPinRef.current) {
-      const targetTab = pendingOpenCloudTabAfterPinRef.current;
-      pendingOpenCloudTabAfterPinRef.current = null;
-      setShowTeacherPinModal(false);
-      setCloudModalTab(targetTab);
-      setShowCloudModal(true);
-      return;
-    }
-    setTeacherPinNotice({
-      type: 'success',
-      text: `Signed in with Google as ${res.user.email}. The live room, AI sentences and cloud saves are on.`,
-    });
-  };
-
-  const handleUnlockTeacherPin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!teacherPinInput.trim() || isVerifyingTeacherPin) return;
-    setIsVerifyingTeacherPin(true);
-    setTeacherPinNotice(null);
-    const res = await GeminiService.verifyTeacherPinOnServer(teacherPinInput);
-    setIsVerifyingTeacherPin(false);
-    if (res.valid) {
-      playSound('success');
-      setIsTeacherAiUnlocked(true);
-      setTeacherPinInput('');
-      if (pendingCreateRoomAfterPinRef.current) {
-        pendingCreateRoomAfterPinRef.current = false;
-        setShowTeacherPinModal(false);
-        await startHostMultiplayerRoom();
-        return;
-      }
-      if (pendingOpenCloudTabAfterPinRef.current) {
-        const targetTab = pendingOpenCloudTabAfterPinRef.current;
-        pendingOpenCloudTabAfterPinRef.current = null;
-        setShowTeacherPinModal(false);
-        setCloudModalTab(targetTab);
-        setShowCloudModal(true);
-        return;
-      }
-      setTeacherPinNotice({
-        type: 'success',
-        text: 'PIN accepted. The live room and AI sentences are on for this game. Cloud saves need the Google sign-in.',
-      });
-    } else {
-      playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || "That PIN didn't work. Try again." });
-    }
-  };
-
-  const handleLockTeacherPin = async () => {
-    playSound('click');
-    pendingCreateRoomAfterPinRef.current = false;
-    pendingOpenCloudTabAfterPinRef.current = null;
-    GeminiService.clearSavedTeacherPin();
-    if (teacherGoogleEmail) {
-      await signOutTeacherGoogle();
-      setTeacherGoogleEmail(null);
-    }
-    setIsTeacherAiUnlocked(false);
-    setShowChangePinForm(false);
-    if (mpControllerRef.current) {
-      mpControllerRef.current.destroy();
-      mpControllerRef.current = null;
-    }
-    setMpRoomCode(null);
-    setMpRoomLocked(false);
-    setMpHostConnected(false);
-    setMpSeats({});
-    setMpStudentPendingTarget({});
-    setMpStudentPendingWheel({});
-    setMpStudentNotifications({});
-    setShowMpLobbyModal(false);
-    setTeacherPinNotice({ type: 'success', text: 'Locked. The game now uses the offline bank.' });
-  };
-
-  const handleChangeTeacherPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const currentPin = teacherPinInput.trim() || GeminiService.getSavedTeacherPin();
-    if (!currentPin || !newTeacherPinInput.trim() || isVerifyingTeacherPin) return;
-    setIsVerifyingTeacherPin(true);
-    setTeacherPinNotice(null);
-    const res = await GeminiService.changeTeacherPinOnServer(currentPin, newTeacherPinInput);
-    setIsVerifyingTeacherPin(false);
-    if (res.ok) {
-      playSound('success');
-      setIsTeacherAiUnlocked(true);
-      setTeacherPinInput('');
-      setNewTeacherPinInput('');
-      setShowChangePinForm(false);
-      setTeacherPinNotice({ type: 'success', text: 'PIN changed. Keep the new PIN safe.' });
-    } else {
-      playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || "The PIN wasn't changed. Try again." });
-    }
-  };
-
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('grammar_casino_theme');
+      const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
       if (savedTheme) {
         return savedTheme === 'dark';
       }
@@ -712,10 +522,10 @@ export function App() {
       const next = !prev;
       if (next) {
         document.documentElement.classList.add('dark');
-        localStorage.setItem('grammar_casino_theme', 'dark');
+        safeLocalStorage.setItem('grammar_casino_theme', 'dark');
       } else {
         document.documentElement.classList.remove('dark');
-        localStorage.setItem('grammar_casino_theme', 'light');
+        safeLocalStorage.setItem('grammar_casino_theme', 'light');
       }
       return next;
     });
@@ -724,7 +534,7 @@ export function App() {
   // Projector mode: solid text and bigger small labels for reading from the back of a classroom.
   const [isProjectorMode, setIsProjectorMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('grammar_casino_projector_mode') === 'on';
+      return safeLocalStorage.getItem('grammar_casino_projector_mode') === 'on';
     } catch {
       return false;
     }
@@ -734,7 +544,7 @@ export function App() {
   // confetti). Phones in a live room follow it too.
   const [isCalmMode, setIsCalmMode] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('grammar_casino_calm_mode') === 'on';
+      return safeLocalStorage.getItem('grammar_casino_calm_mode') === 'on';
     } catch {
       return false;
     }
@@ -748,7 +558,7 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
     try {
-      localStorage.setItem('grammar_casino_calm_mode', isCalmMode ? 'on' : 'off');
+      safeLocalStorage.setItem('grammar_casino_calm_mode', isCalmMode ? 'on' : 'off');
     } catch {
       // Storage can be blocked (private window); the mode still works for this visit.
     }
@@ -757,14 +567,14 @@ export function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('projector', isProjectorMode);
     try {
-      localStorage.setItem('grammar_casino_projector_mode', isProjectorMode ? 'on' : 'off');
+      safeLocalStorage.setItem('grammar_casino_projector_mode', isProjectorMode ? 'on' : 'off');
     } catch {
       // Storage can be blocked (private window); the mode still works for this visit.
     }
   }, [isProjectorMode]);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('grammar_casino_theme');
+    const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
     if (savedTheme === 'light') {
       document.documentElement.classList.remove('dark');
       setIsDarkMode(false);
@@ -789,14 +599,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    try { localStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
+    try { safeLocalStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
   }, [isMuted]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
     setSfxVolume(v);
     soundEngine.setVolume(v);
-    try { localStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(v)); } catch {}
+    try { safeLocalStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(v)); } catch {}
   }, []);
 
   useEffect(() => { 
@@ -835,7 +645,7 @@ export function App() {
     setIsSettingsDeckExpanded(prev => {
       const next = !prev;
       try {
-        localStorage.setItem('grammar_casino_expand_settings_deck', String(next));
+        safeLocalStorage.setItem('grammar_casino_expand_settings_deck', String(next));
       } catch (e) {}
       return next;
     });
@@ -909,16 +719,14 @@ export function App() {
   const isPlayerFrozen = useCallback((playerId: number): boolean => {
     const player = players.find(p => p.id === playerId);
     if (!player) return false;
-    const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-    return allPowerUps.some(pu => pu.type === 'SUB_ZERO' && pu.target === playerId) ||
-           player.effects.some(e => e.type === 'SUB_ZERO');
+    return isFrozenBySubZero(player, Object.values(activePowerUps).flat() as ActivePowerUp[]);
   }, [players, activePowerUps]);
 
   const seat3DStates = useMemo<Seat3DState[]>(() => {
     const totalSeats = Math.max(1, activePlayers.length);
     return activePlayers.map((p, idx) => {
       const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-      const hasShield = pActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const hasShield = hasShieldProtection(pActive);
       return {
         playerId: p.id,
         seatIndex: idx,
@@ -931,49 +739,13 @@ export function App() {
   }, [activePlayers, activePowerUps, isPlayerFrozen]);
 
   const hasPlayerPlacedBet = useCallback((playerId: number): boolean => {
-    const playerBet = bets[playerId];
-    if (!playerBet) return false;
-    const hasValidBetAmount = typeof playerBet.bet === 'number' && !isNaN(playerBet.bet) && Number(playerBet.bet) > 0;
-    if (!hasValidBetAmount) return false;
     const hasSplitBet = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
     const qType: QuestionType = currentSentence?.questionType || 'binary';
-
-    if (qType === 'multipleChoice') {
-      if (hasSplitBet) return (playerBet.splitOptions?.length ?? 0) >= 1;
-      return Boolean(playerBet.selectedOption?.trim());
-    }
-    if (qType === 'openCloze' || qType === 'wordFormation') {
-      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
-      const isValidWord = (w?: string) => {
-        const trimmed = (w || '').trim().toLowerCase();
-        if (!trimmed) return false;
-        if (baseNorm && trimmed === baseNorm) return false;
-        return true;
-      };
-      if (hasSplitBet) {
-        const w1 = playerBet.splitClozeAnswers?.[0];
-        const w2 = playerBet.splitClozeAnswers?.[1];
-        if (baseNorm && ((w1?.trim() && w1.trim().toLowerCase() === baseNorm) || (w2?.trim() && w2.trim().toLowerCase() === baseNorm))) {
-          return false;
-        }
-        return isValidWord(w1) || isValidWord(w2);
-      }
-      return isValidWord(playerBet.clozeAnswer);
-    }
-    if (qType === 'keyWordTransformation') {
-      const keyWord = currentSentence?.baseWord;
-      if (hasSplitBet) {
-        const w1 = (playerBet.splitClozeAnswers?.[0] || '').trim();
-        const w2 = (playerBet.splitClozeAnswers?.[1] || '').trim();
-        if (!w1 && !w2) return false;
-        if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
-        if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
-        return true;
-      }
-      return isValidKeyWordTransformationPhrase(playerBet.clozeAnswer, keyWord);
-    }
-    if (hasSplitBet) return true;
-    return playerBet.opinion === 'correct' || playerBet.opinion === 'incorrect';
+    return isBetComplete(bets[playerId], qType, hasSplitBet, currentSentence?.baseWord, {
+      requirePositiveAmount: true,
+      strictSplitBaseWord: true,
+      strictOpinion: true,
+    });
   }, [bets, activePowerUps, currentSentence]);
 
   // System hold: pause any running timer while a popup/modal is open or a hint is loading
@@ -1480,7 +1252,9 @@ export function App() {
         powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
         sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
       }; 
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState)); 
+      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState))) {
+        console.warn('The browser would not save the game, so it is kept for this tab only.');
+      }
       GeminiService.savePortableGame(gameState); 
     } catch (e) { 
       console.error("Failed to save game state:", e); 
@@ -1681,7 +1455,7 @@ export function App() {
     const activeMixedSubsetKey = (targetSettings.challengeFormat || 'binary') === 'mixed'
       ? getEffectiveMixedFormats(targetSettings.mixedFormats).join(',')
       : '';
-    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${activeMixedSubsetKey}|${pastSentences.length}|${isTeacherAiUnlocked ? 'ai' : 'offline'}`;
+    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${activeMixedSubsetKey}|${pastSentences.length}`;
     if (prefetchRef.current?.key === settingsKey) return;
 
     const triggerPrefetch = () => {
@@ -1736,7 +1510,7 @@ export function App() {
     }
 
     triggerPrefetch();
-  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes, isTeacherAiUnlocked]);
+  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes]);
 
   const fetchNewSentence = useCallback(async (currentSettings: Settings, history: string[], forcedBatch?: boolean[], mistakeHistory?: string[]) => {
     setIsLoading(true);
@@ -1752,7 +1526,7 @@ export function App() {
         const expectedMixedSubsetKey = formatSetting === 'mixed'
           ? getEffectiveMixedFormats(currentSettings.mixedFormats).join(',')
           : '';
-        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${expectedMixedSubsetKey}|${history.length}|${GeminiService.isTeacherPinUnlocked() ? 'ai' : 'offline'}`;
+        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${expectedMixedSubsetKey}|${history.length}`;
 
         let generated: GeneratedSentence | null = null;
         let subtype: string | null = null;
@@ -1984,24 +1758,7 @@ export function App() {
 
     let finalValue = value;
     if (field === 'bet') {
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
-      const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-      const capLimit = playerCaps.length > 0 
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : (isCapped ? 50 : BET_CAP_AMOUNT);
-      const maxBetAmount = isCapped ? Math.min(player.money, capLimit) : player.money;
-
-      if (value === '') {
-        finalValue = '';
-      } else {
-        const num = parseInt(String(value), 10);
-        if (isNaN(num)) {
-            finalValue = ''; 
-        } else {
-            finalValue = Math.max(0, Math.min(num, maxBetAmount));
-        }
-      }
+      finalValue = clampBetInput(value, getBetLimits(player, activePowerUps).max);
     }
     setBets(prev => {
       const prevBetVal = prev[playerId]?.bet;
@@ -2047,13 +1804,8 @@ export function App() {
       const currentBetNum = Number(playerBet.bet);
       if (isNaN(currentBetNum)) return prevBets;
 
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
-      const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === playerId : (activePowerUps[playerId] || []).includes(pu)));
-      const isCapped = playerCaps.length > 0 || (players.find(p => p.id === playerId)?.effects.some(e => e.type === 'BET_CAP') ?? false);
-      const capLimit = playerCaps.length > 0 
-        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-        : (isCapped ? 50 : BET_CAP_AMOUNT);
-      const maxAllowed = isCapped ? Math.min(validAmount, capLimit) : validAmount;
+      const effects = players.find(p => p.id === playerId)?.effects ?? [];
+      const maxAllowed = getBetLimits({ id: playerId, money: validAmount, effects }, activePowerUps).max;
 
       if (validAmount <= 0) {
         if (currentBetNum !== 0) {
@@ -2081,31 +1833,10 @@ export function App() {
     setBets(prevBets => {
       let changed = false;
       const updatedBets = { ...prevBets };
-      const allPowerUps = Object.values(activePowerUps).flat() as ActivePowerUp[];
 
       players.forEach(player => {
         const playerBet = updatedBets[player.id];
-        const playerCaps = allPowerUps.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : (activePowerUps[player.id] || []).includes(pu)));
-        const isCapped = playerCaps.length > 0 || player.effects.some(e => e.type === 'BET_CAP');
-        const capLimit = playerCaps.length > 0 
-          ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-          : (isCapped ? 50 : BET_CAP_AMOUNT);
-        const maxLimit = isCapped ? Math.min(Math.max(0, player.money), capLimit) : Math.max(0, player.money);
-
-        const playerHighRollers = allPowerUps.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-        const isHighRoller = playerHighRollers.length > 0;
-        const minLimit = isHighRoller && player.money > 0
-          ? Math.min(
-              maxLimit,
-              Math.max(
-                1,
-                playerHighRollers.reduce(
-                  (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-                  Math.ceil(player.money * 0.5)
-                )
-              )
-            )
-          : 0;
+        const { max: maxLimit, min: minLimit, isHighRoller } = getBetLimits(player, activePowerUps);
 
         if (player.money <= 0) {
           if (playerBet && playerBet.bet !== undefined && playerBet.bet !== '' && playerBet.bet !== 0) {
@@ -2175,7 +1906,7 @@ export function App() {
       const ignoresShield = powerUpKey === 'COPYCAT';
       const unshieldedTargets = eligibleTargets.filter(p => {
         const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-        const hasShield = !ignoresShield && pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+        const hasShield = !ignoresShield && hasShieldProtection(pActivePowerUps);
         const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
         return !hasShield && !alreadyAttacked;
       });
@@ -2369,7 +2100,7 @@ export function App() {
             let taxCollected = 0;
             const updatedTaxedPlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                const isShielded = hasShieldProtection(pActivePowerUps);
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.min(TAXMAN_AMOUNT, p.money);
                     taxCollected += tax;
@@ -2383,7 +2114,7 @@ export function App() {
              let taxCollected = 0;
              const updatedTithePlayers = players.map(p => {
                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                const isShielded = hasShieldProtection(pActivePowerUps);
                 if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
                     const tax = Math.floor(p.money * 0.10);
                     taxCollected += tax;
@@ -2459,7 +2190,7 @@ export function App() {
              // Phase 1: Steal from Richest
              const newPlayerState = players.map(p => {
                  const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                 const isShielded = pActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                 const isShielded = hasShieldProtection(pActivePowerUps);
                  
                  if (richestPlayers.find(rp => rp.id === p.id) && !isShielded) {
                      const stolen = Math.floor(p.money * 0.20);
@@ -2609,7 +2340,7 @@ export function App() {
           const updated = ps.map(p => {
             if (p.id !== playerId && p.money > 0) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              const isShielded = hasPlainShield(pActive);
               if (!isShielded) {
                 const take = Math.min(100, p.money);
                 stolen += take;
@@ -2626,7 +2357,7 @@ export function App() {
           players.forEach(p => {
             if (p.id !== playerId && nextBets[p.id]?.bet) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = pActive.some(pu => pu.type === 'SHIELD');
+              const isShielded = hasPlainShield(pActive);
               if (!isShielded) {
                 const remainingMoney = Math.max(0, p.money - 100);
                 if (Number(nextBets[p.id].bet) > remainingMoney) {
@@ -2824,7 +2555,7 @@ export function App() {
     const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(powerUpKey);
     const ignoresShield = powerUpKey === 'COPYCAT';
     const targetActivePowerUps = (activePowerUps[targetId] || []) as ActivePowerUp[];
-    const isTargetShielded = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+    const isTargetShielded = !ignoresShield && hasShieldProtection(targetActivePowerUps);
     const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(targetId, powerUpsUsedThisRound, activePowerUps);
     if (isTargetShielded || alreadyAttacked) {
         if (isRemoteBuyer) {
@@ -3174,7 +2905,7 @@ export function App() {
     return players.some(p => {
       if (p.id === buyerId || p.money <= 0) return false;
       const targetActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-      const hasShield = !ignoresShield && targetActive.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+      const hasShield = !ignoresShield && hasShieldProtection(targetActive);
       const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
       return !hasShield && !alreadyAttacked;
     });
@@ -3455,12 +3186,50 @@ export function App() {
     setPlayers(prev => prev.map(p => p.money <= 0 ? { ...p, money: HOUSE_BAILOUT_AMOUNT } : p));
   }, [playSound]);
 
-  // Cleanup multiplayer room controller on unmount
+  // On unmount, stop listening but keep the room open and saved: a real page close never
+  // runs this, and in development React unmounts once on purpose (StrictMode).
   useEffect(() => {
     return () => {
-      mpControllerRef.current?.destroy();
+      mpControllerRef.current?.detach();
     };
   }, []);
+
+  // Reopen the live room after the teacher's page reloads (package R1). Phones keep their
+  // seats and bets: the room code, seats and handled intents were saved by the controller,
+  // and the game itself comes back from the saved game state.
+  useEffect(() => {
+    if (isStudentControllerMode) return;
+    const saved = loadSavedHostRoom();
+    if (!saved) return;
+    const controller = HostRoomController.resumeRoom(
+      saved,
+      (ev) => mpEventHandlerRef.current(ev),
+      (connected) => setMpHostConnected(connected)
+    );
+    mpControllerRef.current = controller;
+    const seats: Record<number, MultiplayerSeat> = {};
+    controller.getSeats().forEach((seat) => {
+      seats[seat.playerId] = seat;
+    });
+    setMpSeats(seats);
+    setMpRoomLocked(controller.isLocked());
+    setMpRoomCode(controller.code);
+    setMpResumeNotice(`Room ${controller.code} is open again. Phones keep their seats and bets.`);
+    return () => {
+      if (mpControllerRef.current === controller) {
+        controller.detach();
+        mpControllerRef.current = null;
+      }
+    };
+    // Runs once on load; the phone view never hosts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mpResumeNotice) return;
+    const timer = setTimeout(() => setMpResumeNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [mpResumeNotice]);
 
   // Broadcast per-player filtered views whenever relevant game state changes
   useEffect(() => {
@@ -3613,10 +3382,13 @@ export function App() {
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (mpRoomCode) {
-      const allMpReady = unfrozenPlayers.every(p => {
-        if (mpSeats[p.id]?.lockedIn) return true;
-        const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        return isBetCompleteForQuestionType(bets[p.id], qType, hasSplit, currentSentence?.baseWord);
+      const allMpReady = isEveryRoomPlayerReady({
+        playerIds: unfrozenPlayers.map(p => p.id),
+        bets,
+        activePowerUps,
+        questionType: qType,
+        baseWord: currentSentence?.baseWord,
+        seats: mpSeats,
       });
       if (!allMpReady && !teacherRevealOverride) {
         setError({
@@ -3634,56 +3406,12 @@ export function App() {
     } else {
       let hasUnchangedBaseWordPlayer: string | null = null;
       let hasInvalidKwtPlayer: string | null = null;
-      const baseNorm = qType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
       const allValidBetsFinalized = unfrozenPlayers.every(p => {
-        const playerBet = bets[p.id];
-        const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
-        if (!hasValidBetAmount) return false;
         const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-        if (qType === 'multipleChoice') {
-          return hasSplitBet
-            ? (playerBet?.splitOptions?.length ?? 0) >= 1
-            : Boolean(playerBet?.selectedOption?.trim());
-        }
-        if (qType === 'openCloze' || qType === 'wordFormation') {
-          if (hasSplitBet) {
-            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
-            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
-            if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) {
-              hasUnchangedBaseWordPlayer = p.name;
-              return false;
-            }
-            return Boolean(w1 || w2);
-          }
-          const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
-          if (baseNorm && w && w === baseNorm) {
-            hasUnchangedBaseWordPlayer = p.name;
-            return false;
-          }
-          return Boolean(w);
-        }
-        if (qType === 'keyWordTransformation') {
-          const keyWord = currentSentence?.baseWord;
-          if (hasSplitBet) {
-            const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
-            const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
-            if (!w1 && !w2) return false;
-            if ((w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) || (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord))) {
-              hasInvalidKwtPlayer = p.name;
-              return false;
-            }
-            return true;
-          }
-          const w = (playerBet?.clozeAnswer || '').trim();
-          if (!w) return false;
-          if (!isValidKeyWordTransformationPhrase(w, keyWord)) {
-            hasInvalidKwtPlayer = p.name;
-            return false;
-          }
-          return true;
-        }
-        if (hasSplitBet) return true;
-        return Boolean(playerBet?.opinion);
+        const problem = checkBet(bets[p.id], qType, hasSplitBet, currentSentence?.baseWord, { strictSplitBaseWord: true });
+        if (problem === 'unchangedBaseWord') hasUnchangedBaseWordPlayer = p.name;
+        if (problem === 'invalidKeyWord') hasInvalidKwtPlayer = p.name;
+        return problem === null;
       });
 
       if (!allValidBetsFinalized && !teacherRevealOverride) { 
@@ -3983,36 +3711,14 @@ export function App() {
   const handleNextRound = useCallback(() => {
     if (!nextRoundGuardRef.current.tryEnter()) return;
     const stillActivePlayers = players.filter(p => p.money > 0);
-    const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
-    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-    
-    // In Multiplayer Classroom Mode, bankrupt players receive an automatic $150 House Bailout ONLY in Fixed Rounds or Target Bankroll modes (never in High-Roller Survival)
-    const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
-    const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
-    const hasTargetWinner = gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount);
-    const isMultiplayerWinner = !isBailoutEnabled && players.length > 1 && stillActivePlayers.length <= 1;
-    const isAllBankruptGameOver = !isBailoutEnabled && stillActivePlayers.length === 0;
-    const isGameOver = isRoundLimitReached || hasTargetWinner || isMultiplayerWinner || isAllBankruptGameOver;
+    // In a live room, bankrupt players get the $150 House Bailout, except in last player standing.
+    const gameEndInput = { players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) };
+    const { isGameOver, bailoutEnabled: isBailoutEnabled } = checkGameEnd(gameEndInput);
 
     if (isGameOver) {
         playSound('gameOver');
-    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
-        let finalWinnerPlayer: Player | null = null;
-        const pool = stillActivePlayers.length > 0 ? stillActivePlayers : players;
-        if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
-            const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
-            finalWinnerPlayer = qualifiers[0];
-            if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) {
-                finalWinnerPlayer = null; // Tied
-            }
-        } else if (stillActivePlayers.length === 1 && !isBailoutEnabled) {
-            finalWinnerPlayer = stillActivePlayers[0];
-        } else if (pool.length >= 1 && isRoundLimitReached) {
-             const sortedPlayers = [...pool].sort((a,b) => b.money - a.money);
-             finalWinnerPlayer = sortedPlayers[0]; 
-             if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
-        } else if (stillActivePlayers.length === 0) finalWinnerPlayer = null;
-        setWinner(finalWinnerPlayer);
+        setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+        setWinner(pickWinnerAtGameEnd(gameEndInput));
         prefetchRef.current = null;
         setStep('GAME_OVER');
     } else {
@@ -4079,27 +3785,13 @@ export function App() {
   const handleEndGameEarly = useCallback(() => {
     playSound('gameOver');
     setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
-    const stillActivePlayers = players.filter(p => p.money > 0);
-    const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-    let finalWinnerPlayer: Player | null = null;
-    if (gameMode === 'targetAmount' && stillActivePlayers.some(p => p.money >= numTargetAmount)) {
-      const qualifiers = stillActivePlayers.filter(p => p.money >= numTargetAmount).sort((a, b) => b.money - a.money);
-      finalWinnerPlayer = qualifiers[0];
-      if (qualifiers.length > 1 && qualifiers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null;
-    } else if (stillActivePlayers.length === 1) {
-        finalWinnerPlayer = stillActivePlayers[0];
-    } else if (stillActivePlayers.length > 1) {
-         const sortedPlayers = [...stillActivePlayers].sort((a,b) => b.money - a.money);
-         finalWinnerPlayer = sortedPlayers[0]; 
-         if (sortedPlayers.length > 1 && sortedPlayers[1].money === finalWinnerPlayer.money) finalWinnerPlayer = null; 
-    }
-    setWinner(finalWinnerPlayer);
+    setWinner(pickWinnerWhenEndedEarly({ players, gameMode, targetAmount }));
     prefetchRef.current = null;
     setStep('GAME_OVER');
   }, [players, gameMode, targetAmount, playSound]);
 
   const handleRestartGame = useCallback(() => {
-    localStorage.removeItem(LOCAL_STORAGE_KEY); 
+    safeLocalStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     // Automatically close any open multiplayer room on restart / returning to lobby
     if (mpControllerRef.current) {
@@ -4197,32 +3889,7 @@ export function App() {
   const handleConfirmLoadGame = useCallback(() => {
     if (!pendingLoadGame) return;
     try {
-      const parsed = pendingLoadGame;
-      if (parsed.players) {
-        parsed.players = parsed.players.map((p: any) => ({
-            ...p,
-            avatar: p.avatar || getRandomCharacterAvatar(),
-            winStreak: p.winStreak || 0,
-            effects: p.effects || []
-        }));
-      }
-      if (parsed.powerUpsUsedThisRound) {
-        const fixedPowerUps: Record<number, UsedPowerUp[]> = {};
-        Object.keys(parsed.powerUpsUsedThisRound).forEach(k => {
-            const key = Number(k);
-            const val = parsed.powerUpsUsedThisRound[key];
-            if (Array.isArray(val)) {
-                 if (val.length > 0 && typeof val[0] === 'string') {
-                     fixedPowerUps[key] = val.map((p: string) => ({ key: p as PowerUpKey }));
-                 } else {
-                     fixedPowerUps[key] = val; 
-                 }
-            } else {
-                 fixedPowerUps[key] = [];
-            }
-        });
-        parsed.powerUpsUsedThisRound = fixedPowerUps;
-      }
+      const parsed = migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
       
       setStep(parsed.step || 'PLAYER_SETUP');
       setPlayers(parsed.players || []);
@@ -4469,7 +4136,6 @@ export function App() {
   const renderStepContent = () => {
     switch(step) {
         case 'PLAYER_SETUP': {
-          const canHostRoom = isTeacherAiUnlocked || desktopStatus.isDesktop;
           const phonesConnected = Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length;
           return (
           <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-8 animate-gc-fade">
@@ -4551,16 +4217,13 @@ export function App() {
                       onClick={handleCreateMpRoom}
                       variant="ghost"
                       className="h-12 px-5 text-gc-body font-bold"
-                      title={canHostRoom ? 'Open a live room with a QR code' : 'You need the teacher PIN to open a live room'}
+                      title="Open a live room with a QR code"
                     >
                       <span className="inline-flex items-center gap-1.5">
-                        {canHostRoom ? <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" /> : <Lock className="w-4 h-4 shrink-0" aria-hidden="true" />}
+                        <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
                         Open a live room
                       </span>
                     </ActionButton>
-                  )}
-                  {!mpRoomCode && !canHostRoom && (
-                    <span className="text-gc-small text-gc-quiet">Needs the teacher PIN</span>
                   )}
                   <button
                     type="button"
@@ -5376,68 +5039,29 @@ export function App() {
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
 
-            const allValidBetsFinalized = unfrozenActivePlayers.every(p => {
-                const playerBet = bets[p.id];
-                const hasValidBetAmount = typeof playerBet?.bet === 'number' && Number(playerBet.bet) >= 0;
-                if (!hasValidBetAmount) return false;
-                const hasSplitBet = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-                if (currentQuestionType === 'multipleChoice') {
-                    return hasSplitBet
-                      ? (playerBet?.splitOptions?.length ?? 0) >= 1
-                      : Boolean(playerBet?.selectedOption?.trim());
-                }
-                if (currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation') {
-                    const baseNorm = currentQuestionType === 'wordFormation' ? (currentSentence?.baseWord || '').trim().toLowerCase() : '';
-                    if (hasSplitBet) {
-                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim().toLowerCase();
-                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim().toLowerCase();
-                      if (baseNorm && ((w1 && w1 === baseNorm) || (w2 && w2 === baseNorm))) return false;
-                      return Boolean(w1 || w2);
-                    }
-                    const w = (playerBet?.clozeAnswer || '').trim().toLowerCase();
-                    if (baseNorm && w && w === baseNorm) return false;
-                    return Boolean(w);
-                }
-                if (currentQuestionType === 'keyWordTransformation') {
-                    const keyWord = currentSentence?.baseWord;
-                    if (hasSplitBet) {
-                      const w1 = (playerBet?.splitClozeAnswers?.[0] || '').trim();
-                      const w2 = (playerBet?.splitClozeAnswers?.[1] || '').trim();
-                      if (!w1 && !w2) return false;
-                      if (w1 && !isValidKeyWordTransformationPhrase(w1, keyWord)) return false;
-                      if (w2 && !isValidKeyWordTransformationPhrase(w2, keyWord)) return false;
-                      return true;
-                    }
-                    return isValidKeyWordTransformationPhrase(playerBet?.clozeAnswer, keyWord);
-                }
-                if (hasSplitBet) {
-                     return true;
-                }
-                return Boolean(playerBet?.opinion);
+            // Who is in, and whether the answer may be revealed (game/revealGate.ts).
+            const revealGate = getRevealGate({
+              playerIds: unfrozenActivePlayers.map(p => p.id),
+              bets,
+              activePowerUps,
+              questionType: currentQuestionType,
+              baseWord: currentSentence?.baseWord,
+              mode: mpRoomCode ? 'room' : isTurnTimerEnabled ? 'turnTimer' : 'free',
+              seats: mpSeats,
+              turnTimers,
+              teacherOverride: teacherRevealOverride,
             });
-
-            const allActivePlayersLocked = unfrozenActivePlayers.every(p => turnTimers[p.id]?.status === 'locked');
-            const lockedCount = unfrozenActivePlayers.filter(p => turnTimers[p.id]?.status === 'locked').length;
-            const mpLockedCount = unfrozenActivePlayers.filter(p => {
-              if (mpSeats[p.id]) return mpSeats[p.id].lockedIn;
-              const hasSplit = (activePowerUps[p.id] || []).some(pu => pu.type === 'SPLIT_BET');
-              return isBetCompleteForQuestionType(bets[p.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
-            }).length;
-            const allMpPlayersLocked = unfrozenActivePlayers.length > 0 && mpLockedCount === unfrozenActivePlayers.length;
-            const canRevealResults = mpRoomCode
-              ? (allMpPlayersLocked || allValidBetsFinalized || teacherRevealOverride)
-              : isTurnTimerEnabled
-                ? (allActivePlayersLocked || teacherRevealOverride)
-                : (allValidBetsFinalized || teacherRevealOverride);
+            const allValidBetsFinalized = revealGate.allBetsValid;
+            const allActivePlayersLocked = revealGate.allTimersLocked;
+            const lockedCount = revealGate.timerLockedCount;
+            const mpLockedCount = revealGate.roomLockedCount;
+            const allMpPlayersLocked = revealGate.allRoomLocked;
+            const canRevealResults = revealGate.canReveal;
 
             // Bets bar and reveal button: how many players are in, and what the reveal waits for.
-            const betsReadyCount = mpRoomCode
-              ? mpLockedCount
-              : isTurnTimerEnabled
-                ? lockedCount
-                : unfrozenActivePlayers.filter(p => hasPlayerPlacedBet(p.id)).length;
+            const betsReadyCount = revealGate.readyCount;
             const betsReadyWord = mpRoomCode || isTurnTimerEnabled ? 'locked in' : 'bets placed';
-            const everyoneIn = unfrozenActivePlayers.length > 0 && betsReadyCount === unfrozenActivePlayers.length;
+            const everyoneIn = revealGate.everyoneIn;
             const revealNote = !canRevealResults
               ? `when all ${unfrozenActivePlayers.length} ${mpRoomCode || isTurnTimerEnabled ? 'are locked in' : 'have bet'}`
               : teacherRevealOverride && !everyoneIn
@@ -5460,26 +5084,10 @@ export function App() {
             const renderPlayerSeat = (player: Player) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                      const playerCaps = allActive.filter(pu => pu.type === 'BET_CAP' && (pu.target !== undefined ? pu.target === player.id : playerActive.includes(pu)));
-                      const isBetCapped = playerCaps.length > 0 || player.effects.some(e => (e.type as string) === 'BET_CAP');
-                      const betCapAmount = playerCaps.length > 0 
-                        ? playerCaps.reduce((min, pu) => Math.min(min, pu.amount ?? BET_CAP_AMOUNT), BET_CAP_AMOUNT)
-                        : (isBetCapped ? 50 : BET_CAP_AMOUNT);
-                      const playerHighRollers = allActive.filter(pu => pu.type === 'HIGH_ROLLER' && pu.target === player.id);
-                      const isHighRoller = playerHighRollers.length > 0;
-                      const minBetAmount = isHighRoller
-                        ? Math.min(
-                            player.money,
-                            Math.max(
-                              1,
-                              playerHighRollers.reduce(
-                                (max, pu) => Math.max(max, pu.amount ?? Math.ceil(player.money * 0.5)),
-                                Math.ceil(player.money * 0.5)
-                              )
-                            )
-                          )
-                        : 0;
-                      const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
+                      const { isCapped: isBetCapped, capAmount: betCapAmount } = getBetCap(player, activePowerUps);
+                      const { isHighRoller } = getHighRoller(player, activePowerUps);
+                      const minBetAmount = getDisplayedMinBet(player, activePowerUps);
+const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
                       if (scalpelPu && currentSentence) {
                         if (currentQuestionType === 'multipleChoice') {
@@ -5525,7 +5133,7 @@ export function App() {
                           }
                         }
                       }
-                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => (e.type as string) === 'SUB_ZERO');
+                      const isFrozen = isFrozenBySubZero(player, allActive);
                       const myActive = playerActive[0]; 
                       const playerTimer = turnTimers[player.id];
                       const isSatOut = isTurnTimerEnabled && playerTimer?.status === 'locked' && !isFrozen && !hasPlayerPlacedBet(player.id);
@@ -6263,7 +5871,7 @@ export function App() {
                     {players.map((player, idx) => {
                       const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
                       const playerActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
-                      const isFrozen = allActive.some(pu => pu.type === 'SUB_ZERO' && pu.target === player.id) || player.effects.some(e => e.type === 'SUB_ZERO');
+                      const isFrozen = isFrozenBySubZero(player, allActive);
                       const mpSeat = mpSeats[player.id];
                       const hasSplit = playerActive.some(pu => pu.type === 'SPLIT_BET');
                       const isBetReady = mpSeat
@@ -6556,14 +6164,15 @@ export function App() {
             ); 
         }
         case 'RESULTS': {
-            const numTotalRounds = typeof totalRounds === 'string' ? parseInt(totalRounds,10) : totalRounds;
             const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
-            const isBailoutEnabled = Boolean(mpRoomCode) && gameMode !== 'lastPlayer';
-            const isRoundLimitReached = gameMode === 'rounds' && currentRound >= numTotalRounds;
-            const hasTargetWinner = gameMode === 'targetAmount' && players.some(p => p.money >= numTargetAmount);
-            const isEliminationVictory = !isBailoutEnabled && players.length > 1 && activePlayers.length <= 1;
-            const isAllBankrupt = !isBailoutEnabled && activePlayers.length === 0;
-            const isGameOver = isRoundLimitReached || hasTargetWinner || isEliminationVictory || isAllBankrupt;
+            const {
+              isGameOver,
+              isRoundLimitReached,
+              hasTargetWinner,
+              isEliminationVictory,
+              isAllBankrupt,
+              bailoutEnabled: isBailoutEnabled,
+            } = checkGameEnd({ players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) });
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
             const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
             // Flawed Valid/Flawed sentences: underline the mistake and highlight the fix.
@@ -7448,7 +7057,7 @@ export function App() {
                       const targetActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
                       const isNonOffensive = NON_OFFENSIVE_TARGETED_POWER_UPS.includes(showTargetModal.powerUp);
                       const ignoresShield = showTargetModal.powerUp === 'COPYCAT';
-                      const hasShield = !ignoresShield && targetActivePowerUps.some(pu => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
+                      const hasShield = !ignoresShield && hasShieldProtection(targetActivePowerUps);
                       const alreadyAttacked = !isNonOffensive && Boolean(mpRoomCode) && isPlayerTargetedThisRound(p.id, powerUpsUsedThisRound, activePowerUps);
                       const isShielded = hasShield || alreadyAttacked;
                       return ( 
@@ -7624,6 +7233,22 @@ export function App() {
           }}
           playSound={playSound}
         />
+      )}
+      {mpResumeNotice && mpRoomCode && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,30rem)] gc-panel rounded-gc-lg border-gc-win/50 px-4 py-3 flex items-center gap-3"
+        >
+          <span className="w-2 h-2 shrink-0 rounded-full bg-gc-win" aria-hidden="true" />
+          <p className="flex-1 min-w-0 text-gc-body font-bold text-gc-ink">{mpResumeNotice}</p>
+          <button
+            type="button"
+            onClick={() => setMpResumeNotice(null)}
+            className="h-10 px-4 rounded-full border border-gc-line/[0.2] text-gc-small font-bold text-gc-ink cursor-pointer"
+          >
+            OK
+          </button>
+        </div>
       )}
       {mpRoomCode && mpTakeoverRequests.length > 0 && (() => {
         const request = mpTakeoverRequests[0];
