@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BUDGET, FrameGuard, TIER_SETTINGS, type QualityTier } from '../show/quality';
 import { POT_CENTER, POT_CHIP_CAP, potSlot } from '../show/pot';
+import { TOTEM_NODES, totemScreenPoint, totemsFor, type TotemKind } from '../show/totems';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -99,6 +100,17 @@ interface RigidChipBody {
   /** The pile's slot on the felt and the height this chip rests at. */
   slot?: { x: number; z: number };
   floorY?: number;
+}
+
+interface SeatTotem {
+  mesh: THREE.Object3D;
+  playerId: number;
+  kind: TotemKind;
+  index: number;
+  count: number;
+  /** 0..1 pop-in progress. */
+  pop: number;
+  scale: number;
 }
 
 interface FallingCoin {
@@ -232,6 +244,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   sweepEvent,
   boomerangEvent,
   jackpotEvent,
+  seatStates,
   onChipImpactSound,
   potTotal = 0,
   behindInterface = false,
@@ -275,7 +288,12 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     makeShadow: () => THREE.Mesh;
     coins: FallingCoin[];
     wake: () => void;
+    totemTemplates: Partial<Record<TotemKind, THREE.Object3D>>;
+    totems: Map<string, SeatTotem>;
+    syncTotems: () => void;
   } | null>(null);
+  const seatStatesRef = useRef(seatStates);
+  seatStatesRef.current = seatStates;
 
   // Initialize Three.js WebGL scene & load `.glb` chip/boomerang models
   useEffect(() => {
@@ -401,6 +419,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       makeShadow: (() => new THREE.Mesh()) as () => THREE.Mesh,
       coins: [] as FallingCoin[],
       wake: () => {},
+      totemTemplates: {} as Partial<Record<TotemKind, THREE.Object3D>>,
+      totems: new Map<string, SeatTotem>(),
+      syncTotems: () => {},
     };
     sceneRef.current = stateObj;
 
@@ -508,6 +529,14 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     loader.load(
       '/models/powerup_totems.glb',
       (gltf) => {
+        for (const kind of Object.keys(TOTEM_NODES) as TotemKind[]) {
+          const node = gltf.scene.getObjectByName(TOTEM_NODES[kind].node);
+          if (!node) continue;
+          const t = node.clone(true);
+          t.position.set(0, 0, 0);
+          stateObj.totemTemplates[kind] = t;
+        }
+        stateObj.syncTotems();
         const boomerang = gltf.scene.getObjectByName('Totem_Boomerang');
         if (boomerang) {
           const c = boomerang.clone(true);
@@ -534,7 +563,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     // A chip resting on a pot pile is not work: the loop stops and the still frame stays.
     const resting = (c: RigidChipBody) => Boolean(c.inPot && c.settled && !c.sweeping && c.wobble <= 0.002);
     const hasWork = () =>
-      stateObj.chips.some((c) => !resting(c)) || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
+      stateObj.chips.some((c) => !resting(c)) ||
+      [...stateObj.totems.values()].some((t) => t.pop < 1) || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
 
     // Render only while something is moving; an idle overlay costs nothing on the projector laptop.
     stateObj.wake = () => {
@@ -745,6 +775,15 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       coinMesh.count = coinCount;
       coinMesh.instanceMatrix.needsUpdate = true;
 
+      // Package V4: totems pop in with a small overshoot, then rest.
+      for (const t of stateObj.totems.values()) {
+        if (t.pop >= 1) continue;
+        t.pop = Math.min(1, t.pop + dt / 0.35);
+        const k = t.pop;
+        const back = 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
+        t.mesh.scale.setScalar(t.scale * Math.max(0.001, back));
+      }
+
       renderer.render(scene, camera);
       if (showBudgetRef.current && performance.now() - lastBudgetAt > 250) {
         lastBudgetAt = performance.now();
@@ -775,9 +814,81 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
+    // --- Package V4: totems over the seats (shield, ice, crown), placed over each player's tile ---
+    const layoutTotems = (): boolean => {
+      let moved = false;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      for (const t of stateObj.totems.values()) {
+        const el = document.querySelector(`[data-seat-player="${t.playerId}"]`);
+        const r = el?.getBoundingClientRect();
+        const pt = r && r.width > 0 ? totemScreenPoint(r, t.index, t.count) : null;
+        const hit = pt ? seatPointFromScreen({ left: pt.x - 1, top: pt.y, width: 2, height: 0 }, viewport, camera, 0.5) : null;
+        const visible = Boolean(hit);
+        if (t.mesh.visible !== visible) moved = true;
+        t.mesh.visible = visible;
+        if (hit && hit.distanceToSquared(t.mesh.position) > 1e-6) {
+          t.mesh.position.copy(hit);
+          moved = true;
+        }
+      }
+      return moved;
+    };
+    const renderIfIdle = () => {
+      if (!running) renderer.render(scene, camera);
+    };
+    stateObj.syncTotems = () => {
+      const wanted = new Map<string, { playerId: number; kind: TotemKind; index: number; count: number }>();
+      for (const seat of seatStatesRef.current ?? []) {
+        const kinds = totemsFor(seat);
+        kinds.forEach((kind, index) => wanted.set(`${seat.playerId}:${kind}`, { playerId: seat.playerId, kind, index, count: kinds.length }));
+      }
+      let changed = false;
+      for (const [key, t] of stateObj.totems) {
+        if (wanted.has(key)) continue;
+        scene.remove(t.mesh);
+        stateObj.totems.delete(key);
+        changed = true;
+      }
+      for (const [key, w] of wanted) {
+        const have = stateObj.totems.get(key);
+        if (have) {
+          have.index = w.index;
+          have.count = w.count;
+          continue;
+        }
+        const template = stateObj.totemTemplates[w.kind];
+        if (!template) continue;
+        const mesh = template.clone(true);
+        mesh.scale.setScalar(0.001);
+        scene.add(mesh);
+        stateObj.totems.set(key, { mesh, playerId: w.playerId, kind: w.kind, index: w.index, count: w.count, pop: 0, scale: TOTEM_NODES[w.kind].scale });
+        changed = true;
+      }
+      layoutTotems();
+      if (changed) stateObj.wake();
+      else renderIfIdle();
+    };
+    // Tiles move when the page scrolls or the layout changes, so the totems follow them.
+    let layoutQueued = false;
+    const queueLayout = () => {
+      if (layoutQueued || stateObj.totems.size === 0) return;
+      layoutQueued = true;
+      requestAnimationFrame(() => {
+        layoutQueued = false;
+        if (layoutTotems()) renderIfIdle();
+      });
+    };
+    window.addEventListener('scroll', queueLayout, { capture: true, passive: true });
+    window.addEventListener('resize', queueLayout);
+    const totemTimer = window.setInterval(queueLayout, 800);
+    stateObj.syncTotems();
+
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', queueLayout, { capture: true });
+      window.removeEventListener('resize', queueLayout);
+      window.clearInterval(totemTimer);
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       running = false;
       envTexture.dispose();
@@ -947,6 +1058,12 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     ctx.spawnSparks(potCenter, hasWinners ? 36 : 14, hasWinners ? undefined : [0xff6b6b, 0xffb347, 0x8b1e1e], hasWinners ? 1.1 : 0.6);
     ctx.wake();
   }, [sweepEvent, calmMode]);
+
+  // Package V4: a totem appears or leaves as a player's shield, freeze or streak changes.
+  useEffect(() => {
+    if (calmMode) return;
+    sceneRef.current?.syncTotems();
+  }, [seatStates, calmMode]);
 
   // Package V3: when the bets leave the table without a payout (a void hand, a new hand), the pot
   // chips fade where they lie.
