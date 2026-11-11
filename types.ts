@@ -70,7 +70,7 @@ export type GrammarTopic = 'Tenses' | 'Prepositions' | 'Articles' | 'Conditional
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 export type Theme = 'Fantasy 🐉' | 'Sci-Fi 🚀' | 'History 🏛️' | 'Everyday Life ☕' | 'Business 💼' | 'Technology 💻' | 'Pop Culture 🍿' | 'Custom ✍️';
 
-export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation';
+export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation' | 'spotError' | 'wordOrder';
 export type ChallengeFormat = QuestionType | 'mixed';
 
 export interface Settings {

@@ -26,7 +26,7 @@ export interface PowerUpCatalogEntry {
   targeted: boolean;
 }
 
-const ALL_TYPES: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'];
+const ALL_TYPES: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation', 'spotError', 'wordOrder'];
 
 const PLAIN: Record<PowerUpKey, { text: string; category: PowerUpCategory }> = {
   GRAMMAR_GOGGLES: { text: 'Shows you the important grammar words in the sentence.', category: 'insight' },
@@ -71,7 +71,7 @@ const PLAIN: Record<PowerUpKey, { text: string; category: PowerUpCategory }> = {
   SCAVENGER: { text: 'Collect 25% of the bets other players lose, up to $500.', category: 'boost' },
 };
 
-const CLOZE_TYPES: QuestionType[] = ['multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'];
+const CLOZE_TYPES: QuestionType[] = ['multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation', 'spotError', 'wordOrder'];
 
 function allowedTypes(key: PowerUpKey): QuestionType[] {
   return ALL_TYPES.filter((t) => {

@@ -73,7 +73,10 @@ export function randomBotBet(view: BotView, rand: Rand = Math.random): Partial<B
   const s = view.sentence || {};
   switch (s.questionType) {
     case 'multipleChoice':
+    case 'spotError':
       return { bet, selectedOption: pick(s.options?.length ? s.options : ['A'], rand) };
+    case 'wordOrder':
+      return { bet, clozeAnswer: [...(s.options || ['yes'])].sort(() => rand() - 0.5).join(' ') };
     case 'openCloze':
       return { bet, clozeAnswer: pick(['in', 'on', 'at', 'the', 'have', 'been'], rand) };
     case 'wordFormation':

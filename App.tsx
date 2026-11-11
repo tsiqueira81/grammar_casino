@@ -39,7 +39,7 @@ import {
   POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
   INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
-  CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
+  CHALLENGE_FORMATS, ALL_QUESTION_TYPES, DEFAULT_MIXED_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag, Bot, CircleHelp, Clock } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
@@ -127,6 +127,9 @@ import {
   syncCloudSentenceBank,
   CloudRoster,
 } from './services/firebaseService';
+import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType, questionTypeLabel } from './game/questionTypes';
+import { wordOrderHint } from './game/newFormats';
+import { SpotErrorSentence, WordTiles, newFormatTask } from './components/NewFormatSentence';
 
 const HOUSE_BAILOUT_AMOUNT = 150;
 // The sentence banner sticks this far from the top of the window, just below the
@@ -327,7 +330,7 @@ export function App() {
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
       challengeFormat: 'binary',
-      mixedFormats: ALL_QUESTION_TYPES,
+      mixedFormats: DEFAULT_MIXED_FORMATS,
     };
   });
   const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
@@ -2175,11 +2178,12 @@ export function App() {
       setHints(h => ({...h, [playerId]: { text: '', isLoading: true }}));
       
       try {
-        const hintText = await GeminiService.getHint(
+        const hintText = currentSentence.questionType === 'wordOrder' ? wordOrderHint(currentSentence) : await GeminiService.getHint(
           currentSentence.text,
           settings.topic,
           settings.level as any,
-          currentSentence.questionType || 'binary',
+          // Spot the error is a flawed sentence, so it gets the hint a flawed sentence gets.
+          currentSentence.questionType === 'spotError' ? 'binary' : (currentSentence.questionType || 'binary'),
           currentSentence.baseWord,
           currentSentence.leadInSentence
         );
@@ -2333,7 +2337,7 @@ export function App() {
     if (!player || player.money < POWERUP_COST) return;
     if (!mayBuyPowerUps(player)) return;
     
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const isClozeRound = isGapType(currentSentence?.questionType);
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
     if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(powerUpKey)) return;
     if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(powerUpKey)) return;
@@ -2408,7 +2412,7 @@ export function App() {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         } else if (powerUpKey === 'SCALPEL' && currentSentence) {
             const qType = currentSentence.questionType || 'binary';
-            if (qType === 'multipleChoice') {
+            if (isOptionType(qType)) {
               const correctNorm = (currentSentence.correctAnswer || '').trim().toLowerCase();
               const wrongOpts = (currentSentence.options || []).filter(
                 o => o.trim().toLowerCase() !== correctNorm
@@ -2471,7 +2475,7 @@ export function App() {
                 [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
               }));
               modalMessage = `${powerUp.icon} Word Formation Clue: ${mask}`;
-            } else if (qType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+            } else if ((qType === 'keyWordTransformation' || qType === 'wordOrder') && currentSentence.correctAnswer) {
               const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
               let mask = '';
               if (words.length <= 2) {
@@ -2484,7 +2488,7 @@ export function App() {
                 ...prev,
                 [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
               }));
-              modalMessage = `${powerUp.icon} Key Word Transformation Clue: ${mask}`;
+              modalMessage = `${powerUp.icon} ${qType === 'wordOrder' ? 'Word Order' : 'Key Word Transformation'} Clue: ${mask}`;
             } else {
               setActivePowerUps(prev => ({
                 ...prev,
@@ -2893,7 +2897,7 @@ export function App() {
     const limit = hasPowerSurge ? 3 : 1;
     if (usage >= limit) return;
 
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const isClozeRound = isGapType(currentSentence?.questionType);
     const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
     const drawablePool = availablePowerUps.filter(k => {
       if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
@@ -3232,9 +3236,9 @@ export function App() {
         const qType = currentSentence?.questionType || 'binary';
         let spySummary = 'Undecided';
         if (tBet) {
-          if (qType === 'multipleChoice') {
+          if (isOptionType(qType)) {
             spySummary = tBet.selectedOption ? `"${tBet.selectedOption}"` : (tBet.splitOptions?.length ? `Split: ${tBet.splitOptions.join(' / ')}` : 'Undecided');
-          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+          } else if (isTypedAnswerType(qType)) {
             spySummary = tBet.clozeAnswer ? `"${tBet.clozeAnswer}"` : (tBet.splitClozeAnswers?.some(Boolean) ? `Split: ${tBet.splitClozeAnswers.filter(Boolean).join(' / ')}` : 'Undecided');
           } else {
             spySummary = tBet.opinion === 'correct' ? '✓ Valid' : tBet.opinion === 'incorrect' ? '✕ Flawed' : 'Undecided';
@@ -3932,7 +3936,7 @@ export function App() {
           ? `${hasUnchangedBaseWordPlayer} typed the unchanged base word "(${(currentSentence?.baseWord || '').toUpperCase()})". Players must transform the base word into a new grammatical form before revealing results!`
           : hasInvalidKwtPlayer
             ? `${hasInvalidKwtPlayer}'s answer must use 2 to 6 words and include the exact unchanged KEY WORD "${(currentSentence?.baseWord || '').toUpperCase()}"!`
-            : qType === 'multipleChoice'
+            : isOptionType(qType)
               ? "All active (unfrozen) players must choose an option and enter a bet."
               : qType === 'keyWordTransformation'
                 ? `All active (unfrozen) players must type a 2–6 word phrase containing "${(currentSentence?.baseWord || '').toUpperCase()}" and enter a bet.`
@@ -4001,6 +4005,7 @@ export function App() {
     const { acceptedSet, baseWordNorm } = buildAcceptedAnswerSet(currentSentence, qType);
 
     const clozeWordVerifications: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> = {};
+    // Word order is judged exactly; only open cloze and word formation ask the AI.
     if (qType === 'openCloze' || qType === 'wordFormation') {
       const unmatchedWordsMap = new Map<string, number>(); // normalizedWord -> representative playerId
       validPlayers.forEach(p => {
@@ -4548,7 +4553,7 @@ export function App() {
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
       challengeFormat: 'binary',
-      mixedFormats: ALL_QUESTION_TYPES,
+      mixedFormats: DEFAULT_MIXED_FORMATS,
     });
     setMixedFormatSetupWarning(null);
     mixedFormatIndexRef.current = 0;
@@ -5561,9 +5566,9 @@ export function App() {
                       <div className="mt-4 p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-3 animate-gc-fade">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="text-gc-body font-bold text-gc-ink">
-                            In the mix <span className="text-gc-quiet font-semibold tabular-nums">({activeMixed.length} of 5)</span>
+                            In the mix <span className="text-gc-quiet font-semibold tabular-nums">({activeMixed.length} of {ALL_QUESTION_TYPES.length})</span>
                           </h3>
-                          {activeMixed.length < 5 && (
+                          {activeMixed.length < ALL_QUESTION_TYPES.length && (
                             <button
                               type="button"
                               onClick={() => {
@@ -5618,7 +5623,7 @@ export function App() {
                     <p className="mt-4 text-gc-small text-gc-quiet flex items-start gap-2">
                       <Info className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
                       <span>
-                        Gap questions pay 1:1. Key word transformation pays 1× the bet for 1 mark and 2× for 2 marks.
+                        Gap questions, Spot the error and Word order pay 1:1. Key word transformation pays 1× the bet for 1 mark and 2× for 2 marks.
                         A split bet covers two answers at half the bet each. The correction bonus and Grammar Goggles are off for gap questions.
                       </span>
                     </p>
@@ -5929,7 +5934,7 @@ export function App() {
         case 'IN_GAME': { 
             const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
+            const isClozeRound = isGapType(currentQuestionType);
 
             // Who is in, and whether the answer may be revealed (game/revealGate.ts).
             const revealGate = getRevealGate({
@@ -5982,7 +5987,7 @@ export function App() {
 const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
                       if (scalpelPu && currentSentence) {
-                        if (currentQuestionType === 'multipleChoice') {
+                        if (isOptionType(currentQuestionType)) {
                           scalpelHint = { eliminatedOptions: scalpelPu.eliminatedOptions || [] };
                         } else if (currentQuestionType === 'openCloze' && currentSentence.correctAnswer) {
                           const word = currentSentence.correctAnswer.trim();
@@ -6009,7 +6014,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               };
                             }
                           }
-                        } else if (currentQuestionType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+                        } else if ((currentQuestionType === 'keyWordTransformation' || currentQuestionType === 'wordOrder') && currentSentence.correctAnswer) {
                           const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
                           if (words.length > 0) {
                             if (words.length <= 2) {
@@ -6151,15 +6156,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             const nextFormatConfig = nextRoundSettings?.challengeFormat
               ? CHALLENGE_FORMATS.find(f => f.id === nextRoundSettings.challengeFormat)
               : undefined;
-            const currentHandFormatBadge = currentQuestionType === 'multipleChoice'
-              ? 'Multiple choice'
-              : currentQuestionType === 'openCloze'
-                ? 'Open cloze'
-                : currentQuestionType === 'wordFormation'
-                  ? 'Word formation'
-                  : currentQuestionType === 'keyWordTransformation'
-                    ? 'Key word transformation'
-                    : 'Valid or flawed?';
+            const currentHandFormatBadge = currentQuestionType === 'binary' ? 'Valid or flawed?' : questionTypeLabel(currentQuestionType);
             // Style A chips under the sentence: quiet, no emoji; a gold "Next" tag when a change is queued.
             const metaChip = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-small font-medium text-gc-quiet whitespace-nowrap';
             const nextTag = 'inline-flex items-center h-5 px-1.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold';
@@ -6394,15 +6391,26 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                   )
                                 )}
 
+                                {!isSentenceHeaderStuck && newFormatTask(currentQuestionType) && (
+                                  <p data-testid="format-task" className="text-center text-gc-body font-semibold text-gc-quiet">
+                                    {newFormatTask(currentQuestionType)}
+                                  </p>
+                                )}
                                 <p 
                                   className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
                                 >
+                                  {currentQuestionType === 'spotError' && currentSentence.options?.length === 4 ? (
+                                    <SpotErrorSentence parts={currentSentence.options} compact={isSentenceHeaderStuck} />
+                                  ) : currentQuestionType === 'wordOrder' && currentSentence.options?.length ? (
+                                    <WordTiles tiles={currentSentence.options} size={isSentenceHeaderStuck ? 'md' : 'lg'} />
+                                  ) : (
                                   <SentenceText
                                     text={currentSentence?.text || ''}
                                     highlight={highlightedPhrase}
                                     showGaps={isClozeRound}
                                     baseWord={currentQuestionType === 'wordFormation' ? currentSentence?.baseWord : null}
                                   />
+                                  )}
                                 </p>
                             </div> 
                             
@@ -7168,7 +7176,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               bailoutEnabled: isBailoutEnabled,
             } = checkGameEnd({ players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) });
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
+            const isResultCloze = isGapType(resultQuestionType);
             // Flawed Valid/Flawed sentences: underline the mistake and highlight the fix.
             const revealHighlight = (() => {
               if (!currentSentence || isResultCloze || currentSentence.isCorrect || !currentSentence.correction) return null;
@@ -7257,7 +7265,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             <h3 className="text-gc-small font-bold text-gc-quiet">
                               The answer: <span className="text-gc-win">&ldquo;{currentSentence?.correctAnswer}&rdquo;</span>
                             </h3>
-                            {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && (() => {
+                            {(isTypedAnswerType(resultQuestionType)) && (() => {
                               const altAccepted = getAlternativeAcceptedAnswers(currentSentence.correctAnswer, currentSentence.acceptedAnswers);
                               return altAccepted.length > 0 ? (
                                 <span className="text-gc-small font-semibold text-gc-win bg-gc-win/15 px-2.5 py-0.5 rounded-full">
@@ -7409,7 +7417,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     options: currentSentence.options,
                     isRightAnswer: (a) => {
                       const k = normalizeGapAnswer(a);
-                      if (qt === 'multipleChoice') return k === normalizeGapAnswer(currentSentence.correctAnswer);
+                      if (isOptionType(qt)) return k === normalizeGapAnswer(currentSentence.correctAnswer);
                       if (qt === 'keyWordTransformation') return verdicts[k]?.marks === 2;
                       return accepted.has(k) || Boolean(verdicts[k]?.isCorrect);
                     },

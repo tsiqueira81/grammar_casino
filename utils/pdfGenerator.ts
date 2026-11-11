@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { RoundHistoryRecord, Player, Settings, GameMode } from '../types';
 import { getAlternativeAcceptedAnswers } from './roundSettlement';
 import { buildReport } from '../game/report';
+import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
 
 export interface GeneratePDFOptions {
   history: RoundHistoryRecord[];
@@ -421,7 +422,7 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
   roundsToRender.forEach((record) => {
     const qType = record.sentence.questionType || 'binary';
-    const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+    const isCloze = isGapType(qType);
     const isError = !isCloze && !record.sentence.isCorrect;
     const cleanLeadIn = cleanText(record.sentence.leadInSentence || '');
     const cleanSentenceText = cleanText(record.sentence.text);
@@ -434,7 +435,7 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     const cleanBaseWord = cleanText(record.sentence.baseWord || '');
 
     const altAccepted = getAlternativeAcceptedAnswers(record.sentence.correctAnswer, record.sentence.acceptedAnswers);
-    const optionsLine = (qType === 'multipleChoice' && record.sentence.options)
+    const optionsLine = (isOptionType(qType) && record.sentence.options)
       ? `Options: ${record.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${cleanText(opt)}`).join('   ')}`
       : (qType === 'keyWordTransformation')
         ? `KEY WORD: [${cleanBaseWord || 'KEY'}]${altAccepted.length > 0 ? `   |   Also Accepted: ${altAccepted.map(a => cleanText(a)).join(' / ')}` : ''}`
@@ -540,7 +541,9 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
     // Header line inside card (left side, bounded so it never touches the right badge)
     const modePrefix =
-      qType === 'multipleChoice'
+      qType === 'spotError' || qType === 'wordOrder'
+        ? ` - ${questionTypeLabel(qType).toUpperCase()}`
+        : isOptionType(qType)
         ? ' - MULTIPLE-CHOICE CLOZE'
         : qType === 'keyWordTransformation'
           ? ` - KEY WORD TRANSFORMATION (${cleanBaseWord || 'KEY'})`

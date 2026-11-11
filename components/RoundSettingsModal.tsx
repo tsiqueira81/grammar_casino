@@ -523,9 +523,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                           <div className="mt-2 p-3.5 rounded-gc border border-gc-gold/40 bg-gc-gold/[0.06] animate-gc-fade">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <p className="text-gc-small font-bold text-gc-ink">
-                                In the mix <span className="text-gc-quiet font-semibold tabular-nums">({effectiveMixedFormats.length} of 5)</span>
+                                In the mix <span className="text-gc-quiet font-semibold tabular-nums">({effectiveMixedFormats.length} of {ALL_QUESTION_TYPES.length})</span>
                               </p>
-                              {effectiveMixedFormats.length < 5 && (
+                              {effectiveMixedFormats.length < ALL_QUESTION_TYPES.length && (
                                 <button
                                   type="button"
                                   onClick={() => {

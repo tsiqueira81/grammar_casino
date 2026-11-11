@@ -42,6 +42,7 @@ import {
   signInTeacherWithGoogle,
   syncCloudSentenceBank,
 } from '../services/firebaseService';
+import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
 
 export type CloudManagerTab = 'rosters' | 'reports' | 'sentences';
 
@@ -1323,10 +1324,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                     <div className="space-y-2.5 max-h-[48vh] overflow-y-auto pr-1 modal-content-scroll">
                       {filteredSentences.map((item) => {
                         const isCloze =
-                          item.questionType === 'multipleChoice' ||
-                          item.questionType === 'openCloze' ||
-                          item.questionType === 'wordFormation' ||
-                          item.questionType === 'keyWordTransformation';
+                          isGapType(item.questionType);
                         return (
                           <div
                             key={item.id}
@@ -1338,7 +1336,9 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                   {item.topic} &middot; {item.level}
                                 </span>
                                 <span className="px-2 py-0.5 rounded-full bg-gc-line/[0.08] text-gc-quiet">
-                                  {item.questionType === 'multipleChoice'
+                                  {item.questionType === 'spotError' || item.questionType === 'wordOrder'
+                                    ? questionTypeLabel(item.questionType)
+                                    : isOptionType(item.questionType)
                                     ? '🔠 MC Cloze'
                                     : item.questionType === 'openCloze'
                                       ? '✍️ Open Cloze'

@@ -25,6 +25,7 @@ import {
   BINARY_DISABLED_POWER_UPS,
   NON_OFFENSIVE_TARGETED_POWER_UPS,
 } from '../constants';
+import { isGapType, isOptionType, isTypedAnswerType } from '../game/questionTypes';
 
 export interface MultiplayerSeat {
   seatId: string;
@@ -215,7 +216,7 @@ export function buildAudiencePollSummary(
   if (qType === 'binary') {
     counts.set('correct', { label: '✓ Valid', weight: 0 });
     counts.set('incorrect', { label: '✕ Flawed', weight: 0 });
-  } else if (qType === 'multipleChoice') {
+  } else if (isOptionType(qType)) {
     const opts = currentSentence?.options && currentSentence.options.length > 0
       ? currentSentence.options
       : ['Option A', 'Option B', 'Option C', 'Option D'];
@@ -250,7 +251,7 @@ export function buildAudiencePollSummary(
         addVote('incorrect', '✕ Flawed', 1);
         submittedCount += 1;
       }
-    } else if (qType === 'multipleChoice') {
+    } else if (isOptionType(qType)) {
       if (hasSplit) {
         const picked = (rBet.splitOptions || []).filter(Boolean);
         if (picked.length > 0) {
@@ -301,7 +302,7 @@ export function buildAudiencePollSummary(
     percent: totalWeight > 0 ? Math.round((item.weight / totalWeight) * 100) : 0,
   }));
 
-  if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+  if (isTypedAnswerType(qType)) {
     breakdown = breakdown
       .filter(b => b.count > 0)
       .sort((a, b) => b.count - a.count)
@@ -470,7 +471,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
   const qType: QuestionType = currentSentence?.questionType || 'binary';
-  const isClozeRound = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+  const isClozeRound = isGapType(qType);
   const drawablePool = availablePowerUps.filter(k => {
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
     if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(k)) return false;
@@ -527,7 +528,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     const scalpelPu = myActive.find(pu => pu.type === 'SCALPEL');
     let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
     if (scalpelPu && currentSentence && step === 'IN_GAME') {
-      if (qType === 'multipleChoice') {
+      if (isOptionType(qType)) {
         scalpelHint = {
           eliminatedOptions: scalpelPu.eliminatedOptions || [],
         };
@@ -553,7 +554,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
             clozeMask: `${word[0]}${rest ? ' ' + rest : ''} (${word.length} letter${word.length === 1 ? '' : 's'})`,
           };
         }
-      } else if (qType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+      } else if ((qType === 'keyWordTransformation' || qType === 'wordOrder') && currentSentence.correctAnswer) {
         const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
         if (words.length >= 2) {
           const middleBlanks = Array(Math.max(0, words.length - 2)).fill('___').join(' ');
@@ -577,7 +578,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
               const tHasSplit = tActive.some(a => a.type === 'SPLIT_BET');
               let answerSummary = 'Undecided...';
               if (tBet) {
-                if (qType === 'multipleChoice') {
+                if (isOptionType(qType)) {
                   if (tHasSplit) {
                     const opts = (tBet.splitOptions || []).filter(Boolean);
                     answerSummary = opts.length > 0 ? `Split: ${opts.join(' / ')}` : 'Undecided...';
@@ -588,7 +589,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
                     const letter = idx >= 0 ? ['A', 'B', 'C', 'D'][idx] || '' : '';
                     answerSummary = letter ? `${letter}: "${tBet.selectedOption}"` : `"${tBet.selectedOption}"`;
                   }
-                } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+                } else if (isTypedAnswerType(qType)) {
                   if (tHasSplit) {
                     const w1 = tBet.splitClozeAnswers?.[0]?.trim() || '';
                     const w2 = tBet.splitClozeAnswers?.[1]?.trim() || '';

@@ -83,6 +83,30 @@ export const E2E_SENTENCES = {
     grammarPhrase: 'have been working here for',
     questionType: 'keyWordTransformation',
   },
+  // Package L8: made from the flawed binary item by toSpotError, written out so tests know it.
+  spotError: {
+    text: 'He have finished his homework already.',
+    isCorrect: true,
+    correction: 'He has finished his homework already.',
+    correctAnswer: 'have finished',
+    acceptedAnswers: ['have finished'],
+    options: ['He', 'have finished', 'his homework', 'already'],
+    explanation: 'Third person singular takes "has", not "have".',
+    grammarPhrase: 'have finished',
+    errorPhrase: 'have finished',
+    questionType: 'spotError',
+  },
+  wordOrder: {
+    text: 'homework / she / her / finished / already / has',
+    isCorrect: true,
+    correction: 'She has already finished her homework.',
+    correctAnswer: 'she has already finished her homework',
+    acceptedAnswers: ['she has already finished her homework'],
+    options: ['homework', 'she', 'her', 'finished', 'already', 'has'],
+    explanation: '"Already" goes between "has" and the past participle.',
+    grammarPhrase: 'has already finished',
+    questionType: 'wordOrder',
+  },
 } satisfies Record<string, GeneratedSentence>;
 
 /** The fixed item for a hand. Binary hands use the valid or flawed item the deck asked for. */
@@ -96,6 +120,10 @@ export function getE2eSentence(questionType: QuestionType | undefined, forceCorr
       return { ...E2E_SENTENCES.wordFormation };
     case 'keyWordTransformation':
       return { ...E2E_SENTENCES.keyWordTransformation };
+    case 'spotError':
+      return { ...E2E_SENTENCES.spotError };
+    case 'wordOrder':
+      return { ...E2E_SENTENCES.wordOrder };
     default:
       return forceCorrect === false ? { ...E2E_SENTENCES.binaryFlawed } : { ...E2E_SENTENCES.binaryValid };
   }

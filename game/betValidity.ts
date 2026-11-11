@@ -1,4 +1,5 @@
 import type { Bet, QuestionType } from '../types';
+import { isOptionType, isWordAnswerType } from './questionTypes';
 
 /**
  * Is a bet ready? (package F5). One checker for the host's reveal gate, the "has bet" seat
@@ -48,7 +49,7 @@ export function checkBet(
     typeof amount === 'number' && !isNaN(amount) && (options.requirePositiveAmount ? amount > 0 : amount >= 0);
   if (!amountOk) return 'amount';
 
-  if (questionType === 'multipleChoice') {
+  if (isOptionType(questionType)) {
     const ok = hasSplitBet ? (bet.splitOptions?.length ?? 0) >= 1 : Boolean(bet.selectedOption?.trim());
     return ok ? null : 'answer';
   }
@@ -66,7 +67,7 @@ export function checkBet(
     return isValidKeyWordTransformationPhrase(bet.clozeAnswer, baseWord) ? null : 'invalidKeyWord';
   }
 
-  if (questionType === 'openCloze' || questionType === 'wordFormation') {
+  if (isWordAnswerType(questionType)) {
     const base = questionType === 'wordFormation' ? (baseWord || '').trim().toLowerCase() : '';
     const norm = (w?: string) => (w || '').trim().toLowerCase();
     const isUnchanged = (w: string) => Boolean(base) && w === base;

@@ -166,7 +166,9 @@ export function parseDeckText(text: string): ParsedDeck {
 }
 
 /** How the game remembers a dealt sentence (the same text as App's history). */
-export function sentenceRecordOf(s: Pick<GeneratedSentence, 'text' | 'correction' | 'leadInSentence'>): string {
+export function sentenceRecordOf(s: Pick<GeneratedSentence, 'text' | 'correction' | 'leadInSentence'> & Partial<Pick<GeneratedSentence, 'questionType'>>): string {
+  // Word order shows shuffled tiles: the sentence it came from is what must not repeat.
+  if (s.questionType === 'wordOrder' && s.correction) return s.correction;
   if (s.leadInSentence) return `${s.leadInSentence} -> ${s.correction || s.text}`;
   if (s.correction && s.text.includes(GAP)) return `${s.text} (${s.correction})`;
   return s.text;

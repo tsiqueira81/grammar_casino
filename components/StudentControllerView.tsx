@@ -48,6 +48,8 @@ import { SFX_MUTED_STORAGE_KEY } from '../utils/soundEngine';
 import { TEXT_SIZES, applyStudentPrefs, readStudentPrefs, saveStudentPrefs, type StudentPrefs } from '../utils/studentPrefs';
 import { useFocusTrap } from '../utils/useFocusTrap';
 import { studentReview } from '../game/report';
+import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType, questionTypeLabel } from '../game/questionTypes';
+import { SpotErrorSentence, WordTilePicker, WordTiles, newFormatTask } from './NewFormatSentence';
 
 /** Package S5: how long a toast stays, and how many stack at once. */
 const TOAST_MS = 7000;
@@ -604,7 +606,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           !isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord));
 
     let hasValidAnswer = false;
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       hasValidAnswer = hasSplitBet
         ? (localBet.splitOptions?.length || 0) >= 1
         : Boolean(localBet.selectedOption?.trim());
@@ -614,7 +616,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             (!localBet.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))) ||
           (!localBet.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))
         : isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord);
-    } else if (qType === 'openCloze' || qType === 'wordFormation') {
+    } else if (isWordAnswerType(qType)) {
       const isWordOk = (w?: string) => {
         const trimmed = (w || '').trim().toLowerCase();
         if (!trimmed) return false;
@@ -644,7 +646,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       let missingField: 'answer' | 'wager' | 'both' = 'both';
       // Package S3: plain messages, from strings/en.ts.
       const word = `"${(view.sentence?.baseWord || '').toUpperCase()}"`;
-      const split = hasSplitBet && (qType === 'multipleChoice' || qType === 'openCloze') ? 'Split' : '';
+      const split = hasSplitBet && (isOptionType(qType) || qType === 'openCloze') ? 'Split' : '';
       if (isUnchangedBaseWord) {
         missingField = 'answer';
         message = t('lock.baseWordUnchanged', { word });
@@ -671,9 +673,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       window.requestAnimationFrame(() => {
         if (!hasValidAnswer || isUnchangedBaseWord || isInvalidKwtAnswer) {
           answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          if (qType === 'multipleChoice') {
+          if (isOptionType(qType)) {
             firstOptionBtnRef.current?.focus();
-          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+          } else if (isTypedAnswerType(qType)) {
             if (hasSplitBet) {
               const targetInput = !localBet.splitClozeAnswers?.[0]?.trim()
                 ? splitWord1InputRef.current
@@ -868,23 +870,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // Derived State for Active Student Controller
   // ============================================================================
   const qType: QuestionType = view.sentence?.questionType || 'binary';
-  const isClozeRound = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+  const isClozeRound = isGapType(qType);
   const hasSplitBet = view.myActivePowerUps.some((pu) => pu.type === 'SPLIT_BET');
   const maxAllowedBet = view.isBetCapped
     ? Math.min(view.me.money, view.betCapAmount)
     : view.me.money;
 
   // Plain names for the answer types, as on the projector.
-  const formatLabel =
-    qType === 'multipleChoice'
-      ? 'Multiple choice'
-      : qType === 'openCloze'
-        ? 'Open cloze'
-        : qType === 'wordFormation'
-          ? 'Word formation'
-          : qType === 'keyWordTransformation'
-            ? 'Key word transformation'
-            : 'Valid or flawed?';
+  const formatLabel = qType === 'binary' ? 'Valid or flawed?' : questionTypeLabel(qType);
 
   // A true minus sign: a hyphen leaves a gap before the $ at large sizes.
   const money = (n: number) => `${n < 0 ? '\u2212' : ''}$${Math.abs(Math.round(n)).toLocaleString()}`;
@@ -899,7 +892,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       }
       return localBet.opinion === 'correct' ? 'Valid' : localBet.opinion === 'incorrect' ? 'Flawed' : '';
     }
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       if (hasSplitBet) {
         const list = localBet.splitOptions || [];
         return list.length === 2 && list[0] === list[1] ? `${list[0]} (2×)` : list.join(' / ');
@@ -921,7 +914,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     : !pickText
       ? qType === 'binary'
         ? 'Choose Valid or Flawed'
-        : qType === 'multipleChoice'
+        : isOptionType(qType)
           ? 'Choose an answer'
           : 'Type your answer'
       : 'Now choose your bet';
@@ -1272,9 +1265,17 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           )}
                         </div>
                       )}
+                      {newFormatTask(qType) && (
+                        <div data-testid="phone-format-task" className="text-gc-small font-semibold text-gc-quiet">{newFormatTask(qType)}</div>
+                      )}
                       <p
                         className="m-0 font-sentence italic font-medium text-[23px] leading-[1.3] text-gc-ink text-balance"
                       >
+                        {qType === 'spotError' && view.sentence.options?.length === 4 ? (
+                          <SpotErrorSentence parts={view.sentence.options} />
+                        ) : qType === 'wordOrder' && view.sentence.options?.length ? (
+                          <WordTiles tiles={view.sentence.options} size="md" />
+                        ) : (
                         <SentenceText
                           text={view.sentence?.text || ''}
                           highlight={view.sentence?.grammarPhrase}
@@ -1282,6 +1283,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           baseWord={qType === 'wordFormation' ? view.sentence?.baseWord : null}
                           size="phone"
                         />
+                        )}
                       </p>
                     </div>
                   )}
@@ -1569,7 +1571,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
 
                         {/* Multiple choice */}
-                        {qType === 'multipleChoice' && (
+                        {isOptionType(qType) && (
                           <div className="grid grid-cols-1 gap-2.5">
                             {(() => {
                               const eliminatedSet = new Set(
@@ -1641,7 +1643,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
 
                         {/* Open cloze, word formation, key word transformation */}
-                        {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                        {(isTypedAnswerType(qType)) && (() => {
                           const cleanBase = (view.sentence?.baseWord || '').trim().toLowerCase();
                           const isUnchangedBase =
                             qType === 'wordFormation' &&
@@ -1692,11 +1694,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                     onBlur={onTypingBlur}
                                     onKeyDown={(e) => onAnswerEnter(e, splitWord2InputRef.current)}
                                     aria-label="First answer"
-                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                     value={localBet.splitClozeAnswers?.[0] || ''}
                                     onChange={(e) =>
                                       updateBetField('splitClozeAnswers', [
-                                        qType === 'keyWordTransformation'
+                                        (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                           ? e.target.value.replace(/\s{2,}/g, ' ')
                                           : e.target.value.replace(/\s+/g, ''),
                                         localBet.splitClozeAnswers?.[1] || '',
@@ -1719,12 +1721,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                     onBlur={onTypingBlur}
                                     onKeyDown={(e) => onAnswerEnter(e, null)}
                                     aria-label="Second answer"
-                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                     value={localBet.splitClozeAnswers?.[1] || ''}
                                     onChange={(e) =>
                                       updateBetField('splitClozeAnswers', [
                                         localBet.splitClozeAnswers?.[0] || '',
-                                        qType === 'keyWordTransformation'
+                                        (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                           ? e.target.value.replace(/\s{2,}/g, ' ')
                                           : e.target.value.replace(/\s+/g, ''),
                                       ])
@@ -1742,12 +1744,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   onBlur={onTypingBlur}
                                   onKeyDown={(e) => onAnswerEnter(e, null)}
                                   aria-label="Your answer"
-                                  maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                  maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                   value={localBet.clozeAnswer || ''}
                                   onChange={(e) =>
                                     updateBetField(
                                       'clozeAnswer',
-                                      qType === 'keyWordTransformation'
+                                      (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                         ? e.target.value.replace(/\s{2,}/g, ' ')
                                         : e.target.value.replace(/\s+/g, '')
                                     )
@@ -1757,9 +1759,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                       ? `2 to 6 words, including ${baseUpper}`
                                       : qType === 'wordFormation' && baseUpper
                                         ? `A new form of ${baseUpper}`
-                                        : 'The missing word'
+                                        : qType === 'wordOrder'
+                                          ? 'Tap the words, or type the sentence'
+                                          : 'The missing word'
                                   }
                                   className={`${textField} ${bad ? fieldBad : fieldOk} h-14 px-4 font-sentence italic font-semibold text-gc-title`}
+                                />
+                              )}
+                              {qType === 'wordOrder' && !hasSplitBet && (view.sentence?.options || []).length > 0 && (
+                                <WordTilePicker
+                                  tiles={view.sentence?.options || []}
+                                  value={localBet.clozeAnswer || ''}
+                                  onChange={(next) => updateBetField('clozeAnswer', next)}
                                 />
                               )}
                               {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (

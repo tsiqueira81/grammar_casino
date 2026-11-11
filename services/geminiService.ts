@@ -273,7 +273,43 @@ export function forgetUnplayedSentence(text: string | undefined): void {
   if (text) pendingArchive.delete(text);
 }
 
+/**
+ * Package L8: Spot the error and Word order are made from Valid-or-flawed items (a flawed one, or
+ * a short correct one), so they reuse the AI writer, its check and the offline bank.
+ */
 export const generateSentence = async (
+  settings: Settings,
+  pastSentences: string[] = [],
+  forceCorrect: boolean | null = null,
+  subtype: string | null = null,
+  pastMistakes: string[] = [],
+  questionType?: QuestionType
+): Promise<GeneratedSentence> => {
+  if (questionType !== 'spotError' && questionType !== 'wordOrder') {
+    return generateBaseSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+  }
+  if ((import.meta as any).env.DEV && isE2eMode()) return getE2eSentence(questionType, forceCorrect);
+  const { toSpotError, toWordOrder } = await import('../game/newFormats');
+  const convert = (item: GeneratedSentence) => (questionType === 'spotError' ? toSpotError(item) : toWordOrder(item));
+  const wantCorrect = questionType === 'wordOrder';
+  for (let tries = 0; tries < 3; tries++) {
+    const item = await generateBaseSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary');
+    const made = convert(item);
+    if (made) return made;
+  }
+  // The bank has many items: keep drawing until one fits.
+  const { getCuratedSentence } = await import('./fallbackSentences');
+  for (let tries = 0; tries < 40; tries++) {
+    const made = convert(getCuratedSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary'));
+    if (made) return made;
+  }
+  const last = questionType === 'spotError'
+    ? toSpotError({ text: 'She don\'t like getting up early on Mondays.', isCorrect: false, correction: 'She doesn\'t like getting up early on Mondays.', errorPhrase: "don't", grammarPhrase: "don't", explanation: 'With she, he and it, the present simple negative is "doesn\'t".', questionType: 'binary' })
+    : toWordOrder({ text: 'We have already finished our homework.', isCorrect: true, correction: '', explanation: '"Already" goes between "have" and the past participle.', grammarPhrase: 'have already finished', questionType: 'binary' });
+  return last!;
+};
+
+const generateBaseSentence = async (
   settings: Settings,
   pastSentences: string[] = [],
   forceCorrect: boolean | null = null,

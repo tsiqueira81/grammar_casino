@@ -4,6 +4,7 @@
 import { normalizeGapAnswer, settleRound, type SettleRoundInput, type SettleRoundOutput } from '../utils/roundSettlement';
 import type { Bet, Player, PlayerTurnTimer } from '../types';
 import type { MultiplayerSeat } from '../utils/multiplayerProtocol';
+import { isOptionType } from './questionTypes';
 
 /** "Undo reveal" is offered for this long after the reveal. */
 export const UNDO_REVEAL_MS = 10_000;
@@ -67,7 +68,7 @@ const norm = normalizeGapAnswer;
 
 /** Can a teacher accept another answer for this kind of item? (Multiple choice can only be voided.) */
 export function canAcceptOtherAnswers(input: SettleRoundInput): boolean {
-  if (input.qType === 'multipleChoice') return false;
+  if (isOptionType(input.qType)) return false;
   if (input.qType === 'binary') return !input.currentSentence.isCorrect;
   return true;
 }

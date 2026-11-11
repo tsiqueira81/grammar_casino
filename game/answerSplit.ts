@@ -2,6 +2,7 @@
 // teacher sees the popular wrong answer. A split bet counts each of its two picks.
 import type { Bet, QuestionType } from '../types';
 import { normalizeGapAnswer } from '../utils/roundSettlement';
+import { isOptionType } from './questionTypes';
 
 export interface AnswerSplitRow {
   label: string;
@@ -24,7 +25,7 @@ const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
 function picksOf(qType: QuestionType, bet: Bet): string[] {
   if (qType === 'binary') return bet.opinion ? [bet.opinion] : [];
-  if (qType === 'multipleChoice') {
+  if (isOptionType(qType)) {
     const split = (bet.splitOptions || []).filter(Boolean);
     return split.length ? split : bet.selectedOption ? [bet.selectedOption] : [];
   }
@@ -48,7 +49,7 @@ export function answerSplit(input: AnswerSplitInput): AnswerSplitRow[] {
       if (input.qType === 'binary') {
         label = raw === 'correct' ? 'Valid' : 'Flawed';
         isRight = (raw === 'correct') === Boolean(input.sentenceIsCorrect);
-      } else if (input.qType === 'multipleChoice') {
+      } else if (isOptionType(input.qType)) {
         const idx = (input.options || []).findIndex((o) => normalizeGapAnswer(o) === key);
         label = idx >= 0 && LETTERS[idx] ? `${LETTERS[idx]}: ${raw.trim()}` : raw.trim();
         isRight = input.isRightAnswer(raw);

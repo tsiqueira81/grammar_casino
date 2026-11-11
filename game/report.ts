@@ -1,6 +1,7 @@
 // The game report, built once (package L7). The on-screen report card, the PDF and the CSV all
 // read this, so they can never disagree again.
 import type { Player, QuestionType, RoundHistoryRecord, RoundPlayerResult } from '../types';
+import { QUESTION_TYPE_LABEL } from './questionTypes';
 
 export type ReportFilter = 'all' | 'errors' | 'missed' | 'perfect';
 
@@ -65,13 +66,7 @@ export interface GameReport {
   stillConfused: ConfusedItem[];
 }
 
-const TYPE_LABEL: Record<QuestionType, string> = {
-  binary: 'Valid or flawed',
-  multipleChoice: 'Multiple choice',
-  openCloze: 'Open cloze',
-  wordFormation: 'Word formation',
-  keyWordTransformation: 'Key word transformation',
-};
+const TYPE_LABEL: Record<QuestionType, string> = QUESTION_TYPE_LABEL;
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
