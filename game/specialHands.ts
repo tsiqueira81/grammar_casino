@@ -16,7 +16,7 @@ export const SPECIAL_HANDS_KEY = 'grammar_casino_special_hands';
 export const SAY_IT_KEY = 'grammar_casino_say_it';
 
 export const SPECIAL_HAND_INFO: Record<SpecialHand, { title: string; rule: string; multiplier: number; icon: string }> = {
-  finalTable: { title: 'Final Table', rule: 'Last hand. Every win pays double.', multiplier: 2, icon: '🏆' },
+  finalTable: { title: 'Final Table', rule: 'Last hand. Every win pays double. Balances stay hidden on the big screen until the reveal.', multiplier: 2, icon: '🏆' },
   secondLook: { title: 'Second look', rule: 'A sentence from earlier is back. Wins pay 1.5 times.', multiplier: 1.5, icon: '🔁' },
   spotlight: { title: 'Spotlight', rule: 'The grammar point the class missed most. Get it right for a free power-up draw.', multiplier: 1, icon: '🔦' },
   fixIt: { title: 'Fix it', rule: 'This sentence has a mistake. Type your correction: the class sees them after the reveal, without names.', multiplier: 1, icon: '🛠️' },

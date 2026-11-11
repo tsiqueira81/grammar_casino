@@ -21,6 +21,8 @@ test('the Final Table pays wins double and leaves losses as they are', async ({ 
 
   await expect(page.getByTestId('special-hand-card')).toContainText('Final Table');
   await expect(page.getByText(/Hand 1 of 1 · .* · Final Table 2×/).first()).toBeVisible();
+  // The balances stay hidden on the big screen until the reveal.
+  await expect(page.getByTestId('tile-money').first()).toHaveText('$ ? ? ?');
 
   const fullCards = page.getByRole('button', { name: 'Full cards' });
   if (await fullCards.isVisible()) await fullCards.click();
