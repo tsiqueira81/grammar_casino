@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The room controller talks to Firestore and the teacher PIN helpers; replace both with fakes
+// The room controller talks to Firestore; replace it with a fake
 // so the test can feed it intent documents directly.
 const firestore = vi.hoisted(() => ({
   intentHandler: null as null | ((clientId: string, msg: any, uid: string | null) => void),
@@ -27,12 +27,6 @@ vi.mock('../services/firebaseService', () => ({
   listenToFirestoreSeat: vi.fn(),
   ensureFirebaseUser: vi.fn(async () => ({ uid: 'host-uid' })),
   subscribeToAuthChanges: vi.fn(() => () => {}),
-}));
-
-vi.mock('../services/geminiService', () => ({
-  getSavedTeacherPin: () => '',
-  isDesktopApp: () => true,
-  isTeacherPinUnlocked: () => true,
 }));
 
 import {

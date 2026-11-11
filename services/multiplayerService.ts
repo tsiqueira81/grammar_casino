@@ -4,7 +4,6 @@ import {
   StudentIntent,
   splitPlayerViews,
 } from '../utils/multiplayerProtocol';
-import { getSavedTeacherPin, isDesktopApp, isTeacherPinUnlocked } from './geminiService';
 import {
   writeFirestoreRoom,
   deleteFirestoreRoom,
@@ -408,26 +407,14 @@ export class HostRoomController {
     onEvent: (event: HostEventPayload) => void,
     onConnectionChange?: (connected: boolean) => void
   ): Promise<HostRoomController> {
-    const savedPin = getSavedTeacherPin();
-    if (!isDesktopApp() && !isTeacherPinUnlocked()) {
-      throw new Error('Teacher PIN or Google Sign-In required to host a Live Classroom Room.');
-    }
-
-    // Try local Express server first; if hosted statically on Netlify/Electron, fall back to Firestore
-    // Browser tests (?e2e=1 on the dev server) always use the local relay, never Firestore.
-    if ((savedPin && savedPin !== 'google_verified') || ((import.meta as any).env.DEV && isE2eMode())) {
+    // Live rooms are open to everyone (decision D3), so no PIN is asked for.
+    // Browser tests (?e2e=1 on the dev server) use the local relay; everything else uses Firestore.
+    if ((import.meta as any).env.DEV && isE2eMode()) {
       const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-teacher-pin': savedPin,
-        },
-        body: JSON.stringify({ teacherPin: savedPin }),
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
       });
-
-      if (res.status === 401 || res.status === 403) {
-        throw new Error((res.data as any)?.error || 'Teacher PIN required to host a Live Classroom Room.');
-      }
 
       if (res.ok && res.isJson && res.data?.code && res.data?.hostToken) {
         return new HostRoomController(

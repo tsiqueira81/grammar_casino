@@ -77,11 +77,8 @@ import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } fr
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
-  signInTeacherWithGoogle,
-  signOutTeacherGoogle,
   subscribeToAuthChanges,
   syncCloudSentenceBank,
-  isVerifiedTeacherUser,
   CloudRoster,
 } from './services/firebaseService';
 
@@ -446,20 +443,10 @@ export function App() {
     isEncrypted: false,
   });
 
-  // Teacher PIN & Google Auth Gate for Web Live AI, Cloud Vault & Live Classroom Hosting
-  const [isTeacherAiUnlocked, setIsTeacherAiUnlocked] = useState<boolean>(() => GeminiService.isTeacherPinUnlocked());
+  // Google sign-in is only needed for cloud saves (decision D3). AI sentences and live rooms are open to everyone.
   const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
-  const [isSigningInGoogle, setIsSigningInGoogle] = useState<boolean>(false);
-  const [showTeacherPinModal, setShowTeacherPinModal] = useState<boolean>(false);
-  const [teacherPinInput, setTeacherPinInput] = useState<string>('');
-  const [newTeacherPinInput, setNewTeacherPinInput] = useState<string>('');
-  const [showChangePinForm, setShowChangePinForm] = useState<boolean>(false);
   // A yes/no question before an action that cannot be undone (F4 fix 10)
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
-  const [teacherPinNotice, setTeacherPinNotice] = useState<{ type: 'error' | 'success' | 'info'; text: string } | null>(null);
-  const [isVerifyingTeacherPin, setIsVerifyingTeacherPin] = useState<boolean>(false);
-  const pendingCreateRoomAfterPinRef = useRef<boolean>(false);
-  const pendingOpenCloudTabAfterPinRef = useRef<CloudManagerTab | null>(null);
 
   // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
   const [showCloudModal, setShowCloudModal] = useState<boolean>(false);
@@ -468,7 +455,6 @@ export function App() {
 
   const refreshDesktopStatus = useCallback(() => {
     GeminiService.getDesktopStatus().then(setDesktopStatus);
-    GeminiService.checkTeacherPinStatus().then(setIsTeacherAiUnlocked);
   }, []);
 
   useEffect(() => {
@@ -476,20 +462,9 @@ export function App() {
     // Sync the auto-growing Cloud Sentence Bank into local cache on startup
     void syncCloudSentenceBank();
 
-    // Listen to Firebase Google Auth state
-    const unsubscribeAuth = subscribeToAuthChanges(async (user) => {
-      if (user && user.email) {
-        setTeacherGoogleEmail(user.email);
-        if (isVerifiedTeacherUser(user)) {
-          try {
-            const idToken = await user.getIdToken();
-            await GeminiService.verifyTeacherGoogleOnServer(idToken);
-          } catch {}
-          setIsTeacherAiUnlocked(true);
-        }
-      } else {
-        setTeacherGoogleEmail(null);
-      }
+    // Listen to Firebase Google Auth state (cloud saves show who is signed in)
+    const unsubscribeAuth = subscribeToAuthChanges((user) => {
+      setTeacherGoogleEmail(user?.email || null);
     });
 
     const handleOnline = () => refreshDesktopStatus();
@@ -503,19 +478,8 @@ export function App() {
     };
   }, [refreshDesktopStatus]);
 
-  const handleOpenTeacherPinModal = () => {
-    playSound('click');
-    pendingCreateRoomAfterPinRef.current = false;
-    pendingOpenCloudTabAfterPinRef.current = null;
-    setTeacherPinInput('');
-    setNewTeacherPinInput('');
-    setShowChangePinForm(false);
-    setTeacherPinNotice(null);
-    setShowTeacherPinModal(true);
-  };
-
   // The vault asks for the teacher's Google sign-in itself (the Firestore rules require it),
-  // so it opens straight away instead of going through the Teacher PIN.
+  // so it opens straight away.
   const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
     playSound('click');
     setCloudModalTab(tab);
@@ -538,140 +502,6 @@ export function App() {
       setShowMpLobbyModal(true);
     } catch (e: any) {
       setError({ title: 'Multiplayer Error', message: e?.message || 'Could not create multiplayer room.' });
-    }
-  };
-
-  const handleSignInWithGoogle = async () => {
-    if (isSigningInGoogle) return;
-    playSound('click');
-    setIsSigningInGoogle(true);
-    setTeacherPinNotice(null);
-    const res = await signInTeacherWithGoogle();
-    if (!res.ok || !res.user) {
-      setIsSigningInGoogle(false);
-      if (res.error) {
-        setTeacherPinNotice({ type: 'error', text: res.error });
-      }
-      return;
-    }
-
-    setTeacherGoogleEmail(res.user.email || null);
-    if (!res.isVerifiedTeacher) {
-      setIsSigningInGoogle(false);
-      playSound('error');
-      setTeacherPinNotice({
-        type: 'error',
-        text: `Signed in as ${res.user.email}. Only teacher.siqueira@gmail.com unlocks without a PIN, so enter the PIN instead.`,
-      });
-      return;
-    }
-
-    if (res.idToken) {
-      await GeminiService.verifyTeacherGoogleOnServer(res.idToken);
-    }
-    setIsSigningInGoogle(false);
-    playSound('success');
-    setIsTeacherAiUnlocked(true);
-
-    if (pendingCreateRoomAfterPinRef.current) {
-      pendingCreateRoomAfterPinRef.current = false;
-      setShowTeacherPinModal(false);
-      await startHostMultiplayerRoom();
-      return;
-    }
-    if (pendingOpenCloudTabAfterPinRef.current) {
-      const targetTab = pendingOpenCloudTabAfterPinRef.current;
-      pendingOpenCloudTabAfterPinRef.current = null;
-      setShowTeacherPinModal(false);
-      setCloudModalTab(targetTab);
-      setShowCloudModal(true);
-      return;
-    }
-    setTeacherPinNotice({
-      type: 'success',
-      text: `Signed in with Google as ${res.user.email}. The live room, AI sentences and cloud saves are on.`,
-    });
-  };
-
-  const handleUnlockTeacherPin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!teacherPinInput.trim() || isVerifyingTeacherPin) return;
-    setIsVerifyingTeacherPin(true);
-    setTeacherPinNotice(null);
-    const res = await GeminiService.verifyTeacherPinOnServer(teacherPinInput);
-    setIsVerifyingTeacherPin(false);
-    if (res.valid) {
-      playSound('success');
-      setIsTeacherAiUnlocked(true);
-      setTeacherPinInput('');
-      if (pendingCreateRoomAfterPinRef.current) {
-        pendingCreateRoomAfterPinRef.current = false;
-        setShowTeacherPinModal(false);
-        await startHostMultiplayerRoom();
-        return;
-      }
-      if (pendingOpenCloudTabAfterPinRef.current) {
-        const targetTab = pendingOpenCloudTabAfterPinRef.current;
-        pendingOpenCloudTabAfterPinRef.current = null;
-        setShowTeacherPinModal(false);
-        setCloudModalTab(targetTab);
-        setShowCloudModal(true);
-        return;
-      }
-      setTeacherPinNotice({
-        type: 'success',
-        text: 'PIN accepted. The live room and AI sentences are on for this game. Cloud saves need the Google sign-in.',
-      });
-    } else {
-      playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || "That PIN didn't work. Try again." });
-    }
-  };
-
-  const handleLockTeacherPin = async () => {
-    playSound('click');
-    pendingCreateRoomAfterPinRef.current = false;
-    pendingOpenCloudTabAfterPinRef.current = null;
-    GeminiService.clearSavedTeacherPin();
-    if (teacherGoogleEmail) {
-      await signOutTeacherGoogle();
-      setTeacherGoogleEmail(null);
-    }
-    setIsTeacherAiUnlocked(false);
-    setShowChangePinForm(false);
-    if (mpControllerRef.current) {
-      mpControllerRef.current.destroy();
-      mpControllerRef.current = null;
-    }
-    setMpRoomCode(null);
-    setMpRoomLocked(false);
-    setMpHostConnected(false);
-    setMpSeats({});
-    setMpStudentPendingTarget({});
-    setMpStudentPendingWheel({});
-    setMpStudentNotifications({});
-    setShowMpLobbyModal(false);
-    setTeacherPinNotice({ type: 'success', text: 'Locked. The game now uses the offline bank.' });
-  };
-
-  const handleChangeTeacherPin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const currentPin = teacherPinInput.trim() || GeminiService.getSavedTeacherPin();
-    if (!currentPin || !newTeacherPinInput.trim() || isVerifyingTeacherPin) return;
-    setIsVerifyingTeacherPin(true);
-    setTeacherPinNotice(null);
-    const res = await GeminiService.changeTeacherPinOnServer(currentPin, newTeacherPinInput);
-    setIsVerifyingTeacherPin(false);
-    if (res.ok) {
-      playSound('success');
-      setIsTeacherAiUnlocked(true);
-      setTeacherPinInput('');
-      setNewTeacherPinInput('');
-      setShowChangePinForm(false);
-      setTeacherPinNotice({ type: 'success', text: 'PIN changed. Keep the new PIN safe.' });
-    } else {
-      playSound('error');
-      setTeacherPinNotice({ type: 'error', text: res.error || "The PIN wasn't changed. Try again." });
     }
   };
 
@@ -1622,7 +1452,7 @@ export function App() {
     const activeMixedSubsetKey = (targetSettings.challengeFormat || 'binary') === 'mixed'
       ? getEffectiveMixedFormats(targetSettings.mixedFormats).join(',')
       : '';
-    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${activeMixedSubsetKey}|${pastSentences.length}|${isTeacherAiUnlocked ? 'ai' : 'offline'}`;
+    const settingsKey = `${targetSettings.topic}|${targetSettings.level}|${targetSettings.theme}|${targetSettings.challengeFormat || 'binary'}|${activeMixedSubsetKey}|${pastSentences.length}`;
     if (prefetchRef.current?.key === settingsKey) return;
 
     const triggerPrefetch = () => {
@@ -1677,7 +1507,7 @@ export function App() {
     }
 
     triggerPrefetch();
-  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes, isTeacherAiUnlocked]);
+  }, [step, settingsPart, currentSentence, isLoading, gameMode, totalRounds, currentRound, nextRoundSettings, settings, customTopic, customTheme, pastSentences, pastMistakes, sentenceBatch, usedSubtypes]);
 
   const fetchNewSentence = useCallback(async (currentSettings: Settings, history: string[], forcedBatch?: boolean[], mistakeHistory?: string[]) => {
     setIsLoading(true);
@@ -1693,7 +1523,7 @@ export function App() {
         const expectedMixedSubsetKey = formatSetting === 'mixed'
           ? getEffectiveMixedFormats(currentSettings.mixedFormats).join(',')
           : '';
-        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${expectedMixedSubsetKey}|${history.length}|${GeminiService.isTeacherPinUnlocked() ? 'ai' : 'offline'}`;
+        const expectedKey = `${currentSettings.topic}|${currentSettings.level}|${currentSettings.theme}|${formatSetting}|${expectedMixedSubsetKey}|${history.length}`;
 
         let generated: GeneratedSentence | null = null;
         let subtype: string | null = null;
@@ -4303,7 +4133,6 @@ export function App() {
   const renderStepContent = () => {
     switch(step) {
         case 'PLAYER_SETUP': {
-          const canHostRoom = isTeacherAiUnlocked || desktopStatus.isDesktop;
           const phonesConnected = Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length;
           return (
           <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-8 animate-gc-fade">
@@ -4385,16 +4214,13 @@ export function App() {
                       onClick={handleCreateMpRoom}
                       variant="ghost"
                       className="h-12 px-5 text-gc-body font-bold"
-                      title={canHostRoom ? 'Open a live room with a QR code' : 'You need the teacher PIN to open a live room'}
+                      title="Open a live room with a QR code"
                     >
                       <span className="inline-flex items-center gap-1.5">
-                        {canHostRoom ? <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" /> : <Lock className="w-4 h-4 shrink-0" aria-hidden="true" />}
+                        <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
                         Open a live room
                       </span>
                     </ActionButton>
-                  )}
-                  {!mpRoomCode && !canHostRoom && (
-                    <span className="text-gc-small text-gc-quiet">Needs the teacher PIN</span>
                   )}
                   <button
                     type="button"

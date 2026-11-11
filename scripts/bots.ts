@@ -8,8 +8,8 @@
  * Usage:
  *   npx tsx scripts/bots.ts <ROOM> [count=10] [baseUrl=http://localhost:3000]
  *
- * Open a room on the teacher screen first (with ?e2e=1 in the address on the
- * dev server, or with a teacher PIN), then run the script with its code.
+ * Open a room on the teacher screen first with ?e2e=1 in the address on the
+ * dev server, then run the script with its code.
  */
 
 type Seat = { playerId: number; reconnectToken: string; name: string };

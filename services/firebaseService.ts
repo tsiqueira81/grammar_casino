@@ -660,7 +660,7 @@ export async function saveCloudRoster(params: {
       startingCash: Math.max(1, Math.min(1000000, Math.round(params.startingCash || 500))),
       playersJson: JSON.stringify(cleanPlayers),
       playerCount: cleanPlayers.length,
-      updatedBy: auth.currentUser?.email || 'Teacher PIN',
+      updatedBy: auth.currentUser?.email || 'Teacher',
       createdAt,
       updatedAt: now,
     };

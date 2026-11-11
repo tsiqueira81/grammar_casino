@@ -74,139 +74,6 @@ if (!isCloudflareWorker) {
   app.use(express.json({ limit: '10mb' }));
 }
 
-// --- Teacher PIN Gate for Live Gemini AI (Offline-Only Fallback for Students) ---
-const TEACHER_PIN_FILE = path.resolve(APP_ROOT_DIR, '.teacher-pin.json');
-// No default PIN: if TEACHER_PIN is not set (and no saved PIN file exists), Live AI stays locked
-// and the game runs on the free Offline Curated Bank.
-let activeTeacherPin = (process.env.TEACHER_PIN || '').trim();
-
-if (!isServerlessRuntime) {
-  try {
-    if (fs.existsSync(TEACHER_PIN_FILE)) {
-      const saved = JSON.parse(fs.readFileSync(TEACHER_PIN_FILE, 'utf-8'));
-      if (saved && typeof saved.pin === 'string' && saved.pin.trim().length >= 4) {
-        activeTeacherPin = saved.pin.trim();
-      }
-    }
-  } catch (err) {
-    console.warn('Could not read .teacher-pin.json, using env TEACHER_PIN (if set).');
-  }
-}
-
-// Cryptographic session token issued when teacher.siqueira@gmail.com signs in via Google OAuth
-// Derived via HMAC so serverless function instances validate the same token consistently
-function getGoogleVerifiedSessionToken(): string {
-  const sessionHmacSecret =
-    activeTeacherPin ||
-    process.env.TEACHER_PIN ||
-    process.env.GROQ_API_KEY ||
-    process.env.GEMINI_API_KEY ||
-    'grammar_casino_default_hmac_seed';
-  return `gauth_${crypto
-    .createHmac('sha256', sessionHmacSecret)
-    .update('teacher.siqueira@gmail.com:grammar_casino_verified')
-    .digest('hex')
-    .slice(0, 48)}`;
-}
-
-function isPinConfigured(): boolean {
-  if (!activeTeacherPin && process.env.TEACHER_PIN) {
-    activeTeacherPin = String(process.env.TEACHER_PIN).trim();
-  }
-  return activeTeacherPin.length > 0;
-}
-
-const PIN_NOT_CONFIGURED_ERROR =
-  'No Teacher PIN is set on this server. Sign in with the teacher Google account or add TEACHER_PIN to the server environment (.env).';
-
-function safeTimingEqual(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  const bufA = Buffer.from(a, 'utf-8');
-  const bufB = Buffer.from(b, 'utf-8');
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
-function verifyPinMatch(candidate: string): boolean {
-  if (!activeTeacherPin && process.env.TEACHER_PIN) {
-    activeTeacherPin = String(process.env.TEACHER_PIN).trim();
-  }
-  const cleanCandidate = String(candidate || '').trim();
-  if (!cleanCandidate) return false;
-  if (safeTimingEqual(cleanCandidate, getGoogleVerifiedSessionToken())) return true;
-  if (activeTeacherPin && safeTimingEqual(cleanCandidate, activeTeacherPin)) return true;
-  return false;
-}
-
-// Strict PIN Brute-Force Lockout (5 failed attempts per 15 minutes per IP)
-interface PinAttemptState {
-  failedCount: number;
-  firstFailedAt: number;
-  lockedUntil: number;
-}
-
-const PIN_MAX_FAILED_ATTEMPTS = 5;
-const PIN_WINDOW_MS = 15 * 60 * 1000;
-const PIN_LOCKOUT_MS = 15 * 60 * 1000;
-const pinAttemptsByIp = new Map<string, PinAttemptState>();
-
-function getClientIp(req: Request): string {
-  return (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
-}
-
-function checkPinLockout(ip: string): { locked: boolean; retryAfterSec?: number } {
-  const state = pinAttemptsByIp.get(ip);
-  if (!state) return { locked: false };
-  const now = Date.now();
-  if (state.lockedUntil > now) {
-    return {
-      locked: true,
-      retryAfterSec: Math.ceil((state.lockedUntil - now) / 1000),
-    };
-  }
-  if (now - state.firstFailedAt > PIN_WINDOW_MS) {
-    pinAttemptsByIp.delete(ip);
-  }
-  return { locked: false };
-}
-
-function recordPinOutcome(ip: string, success: boolean): { locked: boolean; retryAfterSec?: number } {
-  if (success) {
-    pinAttemptsByIp.delete(ip);
-    return { locked: false };
-  }
-  const now = Date.now();
-  let state = pinAttemptsByIp.get(ip);
-  if (!state || now - state.firstFailedAt > PIN_WINDOW_MS) {
-    state = { failedCount: 1, firstFailedAt: now, lockedUntil: 0 };
-  } else {
-    state.failedCount += 1;
-  }
-  if (state.failedCount >= PIN_MAX_FAILED_ATTEMPTS) {
-    state.lockedUntil = now + PIN_LOCKOUT_MS;
-  }
-  pinAttemptsByIp.set(ip, state);
-  if (state.lockedUntil > now) {
-    return {
-      locked: true,
-      retryAfterSec: Math.ceil((state.lockedUntil - now) / 1000),
-    };
-  }
-  return { locked: false };
-}
-
-function isTeacherAuthorized(req: Request, payload?: any): boolean {
-  const ip = getClientIp(req);
-  if (checkPinLockout(ip).locked) return false;
-  const headerPin = req.headers['x-teacher-pin'];
-  const rawPin = Array.isArray(headerPin) ? headerPin[0] : headerPin || payload?.teacherPin || '';
-  const candidate = String(rawPin).trim();
-  if (!candidate) return false;
-  const matched = verifyPinMatch(candidate);
-  recordPinOutcome(ip, matched);
-  return matched;
-}
-
 // --- Rate Limiting & Abuse Protection ---
 interface RateLimitBucket {
   tokens: number;
@@ -216,6 +83,31 @@ interface RateLimitBucket {
 const RATE_LIMIT_CAPACITY = 40;
 const REFILL_RATE_PER_MS = RATE_LIMIT_CAPACITY / 60000;
 const ipBuckets = new Map<string, RateLimitBucket>();
+
+// A daily limit per address (package R7). AI is open to everyone, so one visitor must not use up the
+// shared quota. The browser keeps its own, lower, per-device allowance (utils/aiDailyLimit.ts); this one
+// is a backstop for calls that bypass the game. Serverless instances keep it in memory, so it is best effort.
+const DAILY_AI_REQUESTS_PER_IP = 2500;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dailyIpCounts = new Map<string, { windowStart: number; count: number }>();
+
+export function checkDailyIpLimit(ip: string, now: number = Date.now()): { allowed: boolean; retryAfter?: number } {
+  let entry = dailyIpCounts.get(ip);
+  if (!entry || now - entry.windowStart >= DAY_MS) {
+    entry = { windowStart: now, count: 0 };
+    dailyIpCounts.set(ip, entry);
+  }
+  if (entry.count >= DAILY_AI_REQUESTS_PER_IP) {
+    return { allowed: false, retryAfter: Math.ceil((entry.windowStart + DAY_MS - now) / 1000) };
+  }
+  entry.count += 1;
+  if (dailyIpCounts.size > 5000) {
+    for (const [key, value] of dailyIpCounts) {
+      if (now - value.windowStart >= DAY_MS) dailyIpCounts.delete(key);
+    }
+  }
+  return { allowed: true };
+}
 
 let activeRequests = 0;
 const MAX_CONCURRENT_REQUESTS = 10;
@@ -1281,6 +1173,13 @@ const batchClozeVerificationSchema = {
 async function handleGeminiRequest(req: Request, res: Response) {
   const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0].trim() || req.socket.remoteAddress || "127.0.0.1";
 
+  const dailyCheck = checkDailyIpLimit(clientIp);
+  if (!dailyCheck.allowed) {
+    res.setHeader("Retry-After", String(dailyCheck.retryAfter || 3600));
+    // fallback: true sends the game to its offline bank instead of showing an error.
+    return res.status(429).json({ fallback: true, error: "Daily AI limit reached; using the offline bank." });
+  }
+
   const rateCheck = checkRateLimit(clientIp);
   if (!rateCheck.allowed) {
     res.setHeader("Retry-After", String(rateCheck.retryAfter || 30));
@@ -2089,154 +1988,6 @@ Respond ONLY with valid JSON matching the schema.`;
 
 app.post("/api/gemini", handleGeminiRequest);
 
-// Teacher PIN Auth & Status Endpoints (Live AI enabled by default)
-app.get("/api/teacher-auth/status", (_req, res) => {
-  res.json({
-    unlocked: true,
-    pinRequired: false,
-    pinConfigured: true,
-  });
-});
-
-app.post("/api/teacher-auth/verify", (req, res) => {
-  if (!isPinConfigured()) {
-    return res.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
-  }
-  const clientIp = getClientIp(req);
-  const lockout = checkPinLockout(clientIp);
-  if (lockout.locked) {
-    const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
-    return res.status(429).json({
-      valid: false,
-      error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
-    });
-  }
-  const candidate = String(req.body?.pin || "").trim();
-  const valid = verifyPinMatch(candidate);
-  const outcome = recordPinOutcome(clientIp, valid);
-  if (!valid) {
-    if (outcome.locked) {
-      return res.status(429).json({
-        valid: false,
-        error: "Too many failed PIN attempts. Locked for 15 minutes.",
-      });
-    }
-    return res.status(401).json({ valid: false, error: "Incorrect Teacher PIN." });
-  }
-  return res.json({ valid: true });
-});
-
-app.post("/api/teacher-auth/change-pin", (req, res) => {
-  if (!isPinConfigured()) {
-    return res.status(503).json({ ok: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
-  }
-  const clientIp = getClientIp(req);
-  const lockout = checkPinLockout(clientIp);
-  if (lockout.locked) {
-    const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
-    return res.status(429).json({
-      ok: false,
-      error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
-    });
-  }
-  const currentPin = String(req.body?.currentPin || "").trim();
-  const newPin = String(req.body?.newPin || "").trim();
-  const currentValid = verifyPinMatch(currentPin);
-  const outcome = recordPinOutcome(clientIp, currentValid);
-  if (!currentValid) {
-    if (outcome.locked) {
-      return res.status(429).json({
-        ok: false,
-        error: "Too many failed PIN attempts. Locked for 15 minutes.",
-      });
-    }
-    return res.status(401).json({ ok: false, error: "Current Teacher PIN is incorrect." });
-  }
-  if (newPin.length < 4 || newPin.length > 32) {
-    return res.status(400).json({ ok: false, error: "New PIN must be between 4 and 32 characters." });
-  }
-  activeTeacherPin = newPin;
-  try {
-    fs.writeFileSync(TEACHER_PIN_FILE, JSON.stringify({ pin: activeTeacherPin }, null, 2), "utf-8");
-  } catch (err) {
-    console.warn("Could not persist .teacher-pin.json to disk, updated in memory:", err);
-  }
-  return res.json({ ok: true });
-});
-
-let cachedGoogleCerts: { certs: Record<string, string>; expiresAt: number } | null = null;
-
-async function getGoogleSecureTokenCerts(): Promise<Record<string, string>> {
-  if (cachedGoogleCerts && Date.now() < cachedGoogleCerts.expiresAt) {
-    return cachedGoogleCerts.certs;
-  }
-  const resp = await fetch(
-    "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
-  );
-  if (!resp.ok) {
-    throw new Error("Failed to fetch Google public certificates.");
-  }
-  const certs = (await resp.json()) as Record<string, string>;
-  cachedGoogleCerts = {
-    certs,
-    expiresAt: Date.now() + 60 * 60 * 1000, // cache 1 hour
-  };
-  return certs;
-}
-
-app.post("/api/teacher-auth/google-verify", async (req, res) => {
-  try {
-    const idToken = String(req.body?.idToken || "").trim();
-    const parts = idToken.split(".");
-    if (!idToken || parts.length !== 3) {
-      return res.status(400).json({ valid: false, error: "Invalid Google ID token." });
-    }
-    const [headerB64, payloadB64, signatureB64] = parts;
-    const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf-8"));
-    const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
-
-    // 1. Verify cryptographic signature using Google's official public X.509 certs
-    const certs = await getGoogleSecureTokenCerts();
-    const cert = certs[header?.kid];
-    if (!cert || header?.alg !== "RS256") {
-      return res.status(401).json({ valid: false, error: "Unrecognized token signature key." });
-    }
-    const verifier = crypto.createVerify("RSA-SHA256");
-    verifier.update(`${headerB64}.${payloadB64}`);
-    verifier.end();
-    const signatureValid = verifier.verify(cert, Buffer.from(signatureB64, "base64url"));
-    if (!signatureValid) {
-      return res.status(401).json({ valid: false, error: "Invalid token signature." });
-    }
-
-    // 2. Verify Firebase project audience, issuer, expiration, and exact Teacher email
-    const email = String(claims?.email || "").trim().toLowerCase();
-    const emailVerified = Boolean(claims?.email_verified);
-    const exp = Number(claims?.exp || 0) * 1000;
-    const aud = String(claims?.aud || "");
-    const iss = String(claims?.iss || "");
-
-    if (
-      !emailVerified ||
-      email !== "teacher.siqueira@gmail.com" ||
-      exp < Date.now() ||
-      aud !== "cool-citadel-456408-k5" ||
-      iss !== "https://securetoken.google.com/cool-citadel-456408-k5"
-    ) {
-      return res.status(403).json({
-        valid: false,
-        error: "Access denied: Only teacher.siqueira@gmail.com can unlock Live AI via Google Sign-In.",
-      });
-    }
-
-    const clientIp = getClientIp(req);
-    recordPinOutcome(clientIp, true);
-    return res.json({ valid: true, sessionPin: activeTeacherPin || getGoogleVerifiedSessionToken() });
-  } catch (err) {
-    return res.status(400).json({ valid: false, error: "Could not verify Google ID token." });
-  }
-});
-
 // Health check endpoint
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", app: "grammar-casino" });
@@ -2769,9 +2520,6 @@ export async function dispatchServerlessApi(
         process.env[k] = v;
       }
     }
-    if (typeof env.TEACHER_PIN === "string" && env.TEACHER_PIN.trim().length > 0 && !activeTeacherPin) {
-      activeTeacherPin = env.TEACHER_PIN.trim();
-    }
   }
   const url = new URL(webReq.url);
   let parsedBody: any = {};
@@ -2857,134 +2605,6 @@ export async function dispatchServerlessApi(
 
     if (url.pathname === "/api/health") {
       mockRes.json({ status: "ok", app: "grammar-casino" });
-      return;
-    }
-
-    if (url.pathname === "/api/teacher-auth/status" && webReq.method === "GET") {
-      mockRes.json({
-        unlocked: true,
-        pinRequired: false,
-        pinConfigured: true,
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/teacher-auth/verify" && webReq.method === "POST") {
-      if (!isPinConfigured()) {
-        mockRes.status(503).json({ valid: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
-        return;
-      }
-      const reqIp = getClientIp(mockReq);
-      const lockout = checkPinLockout(reqIp);
-      if (lockout.locked) {
-        const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
-        mockRes.status(429).json({
-          valid: false,
-          error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
-        });
-        return;
-      }
-      const candidate = String(parsedBody?.pin || "").trim();
-      const valid = verifyPinMatch(candidate);
-      const outcome = recordPinOutcome(reqIp, valid);
-      if (!valid) {
-        if (outcome.locked) {
-          mockRes.status(429).json({ valid: false, error: "Too many failed PIN attempts. Locked for 15 minutes." });
-          return;
-        }
-        mockRes.status(401).json({ valid: false, error: "Incorrect Teacher PIN." });
-        return;
-      }
-      mockRes.json({ valid: true });
-      return;
-    }
-
-    if (url.pathname === "/api/teacher-auth/change-pin" && webReq.method === "POST") {
-      if (!isPinConfigured()) {
-        mockRes.status(503).json({ ok: false, pinConfigured: false, error: PIN_NOT_CONFIGURED_ERROR });
-        return;
-      }
-      const reqIp = getClientIp(mockReq);
-      const lockout = checkPinLockout(reqIp);
-      if (lockout.locked) {
-        const mins = Math.ceil((lockout.retryAfterSec || 60) / 60);
-        mockRes.status(429).json({
-          ok: false,
-          error: `Too many failed PIN attempts. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`,
-        });
-        return;
-      }
-      const currentPin = String(parsedBody?.currentPin || "").trim();
-      const newPin = String(parsedBody?.newPin || "").trim();
-      const currentValid = verifyPinMatch(currentPin);
-      const outcome = recordPinOutcome(reqIp, currentValid);
-      if (!currentValid) {
-        if (outcome.locked) {
-          mockRes.status(429).json({ ok: false, error: "Too many failed PIN attempts. Locked for 15 minutes." });
-          return;
-        }
-        mockRes.status(401).json({ ok: false, error: "Current Teacher PIN is incorrect." });
-        return;
-      }
-      if (newPin.length < 4 || newPin.length > 32) {
-        mockRes.status(400).json({ ok: false, error: "New PIN must be between 4 and 32 characters." });
-        return;
-      }
-      activeTeacherPin = newPin;
-      mockRes.json({ ok: true });
-      return;
-    }
-
-    if (url.pathname === "/api/teacher-auth/google-verify" && webReq.method === "POST") {
-      (async () => {
-        try {
-          const idToken = String(parsedBody?.idToken || "").trim();
-          const parts = idToken.split(".");
-          if (!idToken || parts.length !== 3) {
-            mockRes.status(400).json({ valid: false, error: "Invalid Google ID token." });
-            return;
-          }
-          const [headerB64, payloadB64, signatureB64] = parts;
-          const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf-8"));
-          const claims = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
-          const certs = await getGoogleSecureTokenCerts();
-          const cert = certs[header?.kid];
-          if (!cert || header?.alg !== "RS256") {
-            mockRes.status(401).json({ valid: false, error: "Unrecognized token signature key." });
-            return;
-          }
-          const verifier = crypto.createVerify("RSA-SHA256");
-          verifier.update(`${headerB64}.${payloadB64}`);
-          verifier.end();
-          const signatureValid = verifier.verify(cert, Buffer.from(signatureB64, "base64url"));
-          if (!signatureValid) {
-            mockRes.status(401).json({ valid: false, error: "Invalid token signature." });
-            return;
-          }
-          const email = String(claims?.email || "").trim().toLowerCase();
-          const emailVerified = Boolean(claims?.email_verified);
-          const exp = Number(claims?.exp || 0) * 1000;
-          const aud = String(claims?.aud || "");
-          const iss = String(claims?.iss || "");
-          if (
-            !emailVerified ||
-            email !== "teacher.siqueira@gmail.com" ||
-            exp < Date.now() ||
-            aud !== "cool-citadel-456408-k5" ||
-            iss !== "https://securetoken.google.com/cool-citadel-456408-k5"
-          ) {
-            mockRes.status(403).json({
-              valid: false,
-              error: "Access denied: Only teacher.siqueira@gmail.com can unlock Live AI via Google Sign-In.",
-            });
-            return;
-          }
-          recordPinOutcome(getClientIp(mockReq), true);
-          mockRes.json({ valid: true, sessionPin: activeTeacherPin || getGoogleVerifiedSessionToken() });
-        } catch {
-          mockRes.status(400).json({ valid: false, error: "Could not verify Google ID token." });
-        }
-      })();
       return;
     }
 

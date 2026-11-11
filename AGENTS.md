@@ -24,7 +24,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 
 - **Web app:** static files on Cloudflare Pages at `https://grammarcasino.pages.dev/`. Every push to `main` deploys there, but only after lint, tests and build pass (`.github/workflows/deploy-cloudflare.yml`).
 - **Pull requests:** `.github/workflows/ci.yml` runs lint, unit tests, build, the Firestore rules checks and the browser tests on every pull request and every non-`main` branch push. When those pass, it publishes a preview of the branch on Cloudflare Pages and puts the address in the job summary.
-- **AI and teacher endpoints:** `functions/api/[[route]].ts` (a Cloudflare Pages Function) calls `dispatchServerlessApi` in `server.ts`. This covers `/api/gemini`, `/api/health` and `/api/teacher-auth/*`. Provider order: Groq first, then Gemini, then the offline sentence bank.
+- **AI and teacher endpoints:** `functions/api/[[route]].ts` (a Cloudflare Pages Function) calls `dispatchServerlessApi` in `server.ts`. This covers `/api/gemini` and `/api/health`. There is no teacher PIN (decision D3): AI sentences and live rooms are open to everyone, each device has a daily AI allowance (`utils/aiDailyLimit.ts`) and the server a daily limit per address; only cloud saves need the teacher's Google sign-in. Provider order: Groq first, then Gemini, then the offline sentence bank.
 - **Live rooms:** phones and the projector talk through Firestore documents: `rooms/{code}` (the shared table), `rooms/{code}/seats/{clientId}` (each phone's private view) and `rooms/{code}/intents/{clientId}` (what each phone asks for). The WebSocket relay in `server.ts` runs only in local development.
 - **Game authority:** the teacher's browser tab. Phones only send intents, and the host must check every one (see `game/intents.ts`).
 - **Legacy, awaiting decision D1:** `worker.ts`, `netlify.toml`, `netlify/` and the Electron app (`electron/`). Do not build on them; do not delete them until Thiago confirms.
@@ -106,7 +106,7 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 | `grammar_casino_student_session_v1` | local | A phone's room and seat, for reconnecting |
 | `grammar_casino_host_room_v1` | local | The teacher's open live room (code, seats, handled intents), so a reload reopens it for up to 6 hours |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
-| `grammar_casino_teacher_pin` | session | Teacher PIN unlock (being replaced by a signed token, package R7) |
+| `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |
 | `grammar_casino_theme` | local | Light or dark theme |
 | `grammar_casino_projector_mode` | local | Projector readability mode |
 | `grammar_casino_calm_mode` | local | Calm mode (less motion and sound) |
