@@ -4,7 +4,7 @@ import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { validateItem } from '../content/schema';
 import { logEvent } from '../utils/debugLog';
 import { nextDeckItem } from '../game/teacherDeck';
-import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
+import { archiveSentenceToCloudBank } from './firebaseService';
 import {
   evaluateBinaryCorrectionOffline,
   evaluateWordFormationOffline,

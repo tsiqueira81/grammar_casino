@@ -2,11 +2,15 @@ rules_version = '2';
 
 // Grammar Casino Firestore rules.
 //
-// Who can do what:
-// - Class rosters and session reports (student names and scores): only the teacher's
-//   Google account, signed in through the game's "Sign in with Google" button.
-// - Cloud sentence bank: anyone can read it (it holds no personal data); only the
-//   teacher can add or delete sentences.
+// Who can do what (package A6, decision D9: the game is for any teacher):
+// - Class rosters and session reports (student names and scores): each teacher who signs in
+//   with a verified Google account has a private space, teachers/{their uid}/..., that only
+//   they can read or write. No teacher can see another teacher's classes.
+// - Cloud sentence bank: anyone can read it (it holds no personal data); only the owners
+//   listed in config/owners (field "emails", a list) can add or delete sentences. That
+//   document is edited in the Firebase console only; no app can read or write it.
+// - The old shared rosters and session_reports collections (from before private spaces):
+//   only an owner can read or delete them, so the game can copy them into the owner's space.
 // - Live rooms: the teacher's screen and the students' phones sign in silently
 //   (Firebase Anonymous sign-in), so each device has its own id. Only the device that
 //   created a room can change or close it.
@@ -34,12 +38,24 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // The one Google account that may see class data. Keep in sync with
-    // VERIFIED_TEACHER_EMAIL in services/firebaseService.ts.
-    function isTeacher() {
+    // Any teacher signed in with Google and a verified email.
+    function isGoogleTeacher() {
       return request.auth != null
-        && request.auth.token.get('email', '') == 'teacher.siqueira@gmail.com'
+        && request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'google.com'
         && request.auth.token.get('email_verified', false) == true;
+    }
+
+    // The teacher whose private space this is.
+    function ownsSpace(teacherId) {
+      return isGoogleTeacher() && request.auth.uid == teacherId;
+    }
+
+    // An owner of the shared sentence bank (listed in config/owners).
+    function isBankOwner() {
+      let owners = /databases/$(database)/documents/config/owners;
+      return isGoogleTeacher()
+        && exists(owners)
+        && request.auth.token.get('email', '') in get(owners).data.get('emails', []);
     }
 
     // 1. Live Classroom Multiplayer Rooms (QR Code Join & Real-Time Sync)
@@ -77,8 +93,8 @@ service cloud.firestore {
       allow read: if isValidRoomCode();
       allow create: if isSignedIn() && isValidRoomCode() && isValidRoomWrite();
       allow update: if isSignedIn() && isValidRoomCode() && isValidRoomWrite()
-        && (isRoomHost() || isTeacher() || isAbandonedRoom());
-      allow delete: if isRoomHost() || isTeacher();
+        && (isRoomHost() || isAbandonedRoom());
+      allow delete: if isRoomHost();
 
       // Per-phone private records: that student's own bet, hints and power-ups.
       match /seats/{clientId} {
@@ -107,10 +123,10 @@ service cloud.firestore {
 
         // A phone may also check a record that doesn't exist yet (before the host answers).
         allow get: if isSignedIn()
-          && (resource == null || resource.data.uid == request.auth.uid || hostUidNow() == request.auth.uid || isTeacher());
+          && (resource == null || resource.data.uid == request.auth.uid || hostUidNow() == request.auth.uid);
         allow list: if false;
         allow create, update: if isSignedIn() && hostUidAfter() == request.auth.uid && isValidSeatWrite();
-        allow delete: if isSignedIn() && (hostUidNow() == request.auth.uid || isTeacher());
+        allow delete: if isSignedIn() && hostUidNow() == request.auth.uid;
       }
 
       // Per-student intents: join requests, bets and power-ups sent to the host.
@@ -134,51 +150,75 @@ service cloud.firestore {
             && d.updatedAt is number;
         }
 
-        allow read: if isHostOfThisRoom() || isTeacher() || isIntentAuthor();
+        allow read: if isHostOfThisRoom() || isIntentAuthor();
         allow create: if isSignedIn() && isValidIntentWrite();
         // Intents written before this rule change have no uid; the first new write claims them.
         allow update: if isSignedIn() && isValidIntentWrite()
           && (isIntentAuthor() || !('uid' in resource.data));
-        allow delete: if isIntentAuthor() || isHostOfThisRoom() || isTeacher();
+        allow delete: if isIntentAuthor() || isHostOfThisRoom();
       }
     }
 
-    // 2. Cloud Classroom Rosters (student names): teacher only
+    // 2 and 3. Each teacher's private space: class rosters, session reports and resumable saves.
+    match /teachers/{teacherId} {
+      allow read, write: if false; // the space itself holds nothing
+
+      function isValidRoster(rosterId) {
+        let d = request.resource.data;
+        return isBoundedString(rosterId, 3, 100)
+          && isBoundedString(d.name, 1, 100)
+          && d.startingCash is number
+          && d.startingCash >= 1
+          && d.startingCash <= 1000000
+          && isBoundedString(d.playersJson, 2, 250000)
+          && d.playerCount is number
+          && d.createdAt is number
+          && d.updatedAt is number;
+      }
+
+      function isValidReport(reportId) {
+        let d = request.resource.data;
+        return isBoundedString(reportId, 3, 100)
+          && isBoundedString(d.title, 1, 160)
+          && isBoundedString(d.topic, 1, 100)
+          && isBoundedString(d.level, 1, 20)
+          && d.roundsPlayed is number
+          && d.playerCount is number
+          && isBoundedString(d.playersJson, 2, 250000)
+          && isBoundedString(d.roundHistoryJson, 2, 700000)
+          && (!('fullGameStateJson' in d) || isBoundedString(d.fullGameStateJson, 0, 800000))
+          && d.createdAt is number;
+      }
+
+      match /rosters/{rosterId} {
+        allow read, delete: if ownsSpace(teacherId);
+        allow create, update: if ownsSpace(teacherId) && isValidRoster(rosterId);
+      }
+
+      match /session_reports/{reportId} {
+        allow read, delete: if ownsSpace(teacherId);
+        allow create, update: if ownsSpace(teacherId) && isValidReport(reportId);
+      }
+    }
+
+    // The old shared collections, from before private spaces: read (to copy) and delete only.
     match /rosters/{rosterId} {
-      allow read, delete: if isTeacher();
-      allow create, update: if isTeacher()
-        && isBoundedString(rosterId, 3, 100)
-        && isBoundedString(request.resource.data.name, 1, 100)
-        && request.resource.data.startingCash is number
-        && request.resource.data.startingCash >= 1
-        && request.resource.data.startingCash <= 1000000
-        && isBoundedString(request.resource.data.playersJson, 2, 250000)
-        && request.resource.data.playerCount is number
-        && request.resource.data.createdAt is number
-        && request.resource.data.updatedAt is number;
+      allow read, delete: if isBankOwner();
     }
-
-    // 3. Cloud Session Reports & Resumable Saves (student names and scores): teacher only
     match /session_reports/{reportId} {
-      allow read, delete: if isTeacher();
-      allow create, update: if isTeacher()
-        && isBoundedString(reportId, 3, 100)
-        && isBoundedString(request.resource.data.title, 1, 160)
-        && isBoundedString(request.resource.data.topic, 1, 100)
-        && isBoundedString(request.resource.data.level, 1, 20)
-        && request.resource.data.roundsPlayed is number
-        && request.resource.data.playerCount is number
-        && isBoundedString(request.resource.data.playersJson, 2, 250000)
-        && isBoundedString(request.resource.data.roundHistoryJson, 2, 700000)
-        && (!('fullGameStateJson' in request.resource.data) || isBoundedString(request.resource.data.fullGameStateJson, 0, 800000))
-        && request.resource.data.createdAt is number;
+      allow read, delete: if isBankOwner();
     }
 
-    // 4. Cloud Sentence Bank: public read, teacher-only changes
+    // Settings such as the bank owners: changed in the Firebase console only.
+    match /config/{docId} {
+      allow read, write: if false;
+    }
+
+    // 4. Cloud Sentence Bank: public read, owner-only changes
     match /curated_sentences/{sentenceId} {
       allow read: if true;
-      allow delete: if isTeacher();
-      allow create, update: if isTeacher()
+      allow delete: if isBankOwner();
+      allow create, update: if isBankOwner()
         && isBoundedString(sentenceId, 3, 120)
         && isBoundedString(request.resource.data.topic, 1, 100)
         && isBoundedString(request.resource.data.level, 1, 10)

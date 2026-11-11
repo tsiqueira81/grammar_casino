@@ -101,7 +101,8 @@ import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, nor
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
-  subscribeToAuthChanges,
+  subscribeToTeacherAuth,
+  isVerifiedTeacherUser,
   syncCloudSentenceBank,
   CloudRoster,
 } from './services/firebaseService';
@@ -555,8 +556,8 @@ export function App() {
     void syncCloudSentenceBank();
 
     // Listen to Firebase Google Auth state (cloud saves show who is signed in)
-    const unsubscribeAuth = subscribeToAuthChanges((user) => {
-      setTeacherGoogleEmail(user?.email || null);
+    const unsubscribeAuth = subscribeToTeacherAuth((user) => {
+      setTeacherGoogleEmail(isVerifiedTeacherUser(user) ? user?.email || null : null);
     });
 
     const handleOnline = () => refreshDesktopStatus();

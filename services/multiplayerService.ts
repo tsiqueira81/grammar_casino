@@ -266,8 +266,8 @@ export class HostRoomController {
     // Initialize Firestore room state. Student intents are read once the room doc exists,
     // because the Firestore rules only let the room's recorded host read them.
     this.scheduleFirestoreFlush(0);
-    // If the teacher signs in or out of Google mid-class, this device's Firebase id changes:
-    // rewrite the room under the new id so the intent listener can start again.
+    // If this device's room id changes (its first silent sign-in; Google sign-in no longer touches
+    // it, package A6), rewrite the room under the new id so the intent listener can start again.
     this.authUnsubscribe = subscribeToAuthChanges(() => {
       this.forceRoomWrite = true;
       this.scheduleFirestoreFlush(200);

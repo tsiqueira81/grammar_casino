@@ -42,21 +42,29 @@ import type { BuiltInSeedItem } from './fallbackSentences';
 import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
 
 // Initialize Firebase App singleton
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().some((a) => a.name === '[DEFAULT]') ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Package A6: the teacher's Google sign-in lives in a second Firebase app, so signing in or out
+// never changes the silent anonymous id that live rooms use on this screen. Cloud saves (class
+// lists, reports) and additions to the shared sentence bank go through this one.
+const teacherApp = getApps().find((a) => a.name === 'teacher') ?? initializeApp(firebaseConfig, 'teacher');
+export const teacherAuth = getAuth(teacherApp);
+export const teacherDb = getFirestore(teacherApp, firebaseConfig.firestoreDatabaseId);
 
 // Local testing only: start the dev server with VITE_FIREBASE_EMULATORS=1 to use the Firebase
 // Auth and Firestore emulators (ports 9099 and 8080) instead of the real project.
 if ((import.meta as any).env?.VITE_FIREBASE_EMULATORS === '1') {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(teacherAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(teacherDb, '127.0.0.1', 8080);
 }
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const VERIFIED_TEACHER_EMAIL = 'teacher.siqueira@gmail.com';
 
 export enum OperationType {
   CREATE = 'create',
@@ -117,9 +125,26 @@ export function handleFirestoreError(
 // 1. Teacher Google Authentication
 // ============================================================================
 
+/**
+ * Package A6 (decision D9): the game is for any teacher. Anyone signed in with a verified Google
+ * account gets their own private space for class lists and reports (see firestore.rules).
+ */
 export function isVerifiedTeacherUser(user: User | null | undefined): boolean {
-  if (!user || !user.email) return false;
-  return user.email.trim().toLowerCase() === VERIFIED_TEACHER_EMAIL;
+  if (!user || user.isAnonymous || !user.email || !user.emailVerified) return false;
+  return user.providerData.some((p) => p.providerId === 'google.com');
+}
+
+/** The signed-in teacher's own folder, or null when nobody is signed in with Google. */
+export function teacherSpace(): string | null {
+  const user = teacherAuth.currentUser;
+  return isVerifiedTeacherUser(user) && user ? `teachers/${user.uid}` : null;
+}
+
+const NOT_SIGNED_IN = new Error('Sign in with Google first.');
+function spacePath(sub: 'rosters' | 'session_reports'): string {
+  const space = teacherSpace();
+  if (!space) throw NOT_SIGNED_IN;
+  return `${space}/${sub}`;
 }
 
 export async function signInTeacherWithGoogle(): Promise<{
@@ -130,9 +155,10 @@ export async function signInTeacherWithGoogle(): Promise<{
   error?: string;
 }> {
   try {
-    const result = await signInWithPopup(auth, googleProvider);
+    const result = await signInWithPopup(teacherAuth, googleProvider);
     const user = result.user;
     const isVerified = isVerifiedTeacherUser(user);
+    if (isVerified) void moveLegacyCloudData(user.uid);
     const idToken = await user.getIdToken();
     return {
       ok: true,
@@ -161,7 +187,7 @@ export async function signInTeacherWithGoogle(): Promise<{
 
 export async function signOutTeacherGoogle(): Promise<void> {
   try {
-    await signOut(auth);
+    await signOut(teacherAuth);
   } catch (err) {
     console.warn('Failed to sign out of Google:', err);
   }
@@ -171,9 +197,51 @@ export function subscribeToAuthChanges(callback: (user: User | null) => void): U
   return onAuthStateChanged(auth, callback);
 }
 
+/** The teacher's Google sign-in (cloud saves), separate from the room identity above. */
+export function subscribeToTeacherAuth(callback: (user: User | null) => void): Unsubscribe {
+  return onAuthStateChanged(teacherAuth, callback);
+}
+
+/**
+ * Package A6: class lists and reports saved before each teacher had a private space sit in the
+ * old shared collections, which only a bank owner can still read. On sign-in they are copied into
+ * that teacher's own space once; a copy never overwrites something already there, and the old
+ * documents are left as they are.
+ */
+const LEGACY_MOVED_KEY = 'grammar_casino_cloud_moved_v1';
+export async function moveLegacyCloudData(uid: string): Promise<number> {
+  try {
+    if (safeLocalStorage.getItem(LEGACY_MOVED_KEY) === uid) return 0;
+  } catch {}
+  let copied = 0;
+  for (const sub of ['rosters', 'session_reports'] as const) {
+    let snap;
+    try {
+      snap = await getDocs(collection(teacherDb, sub));
+    } catch {
+      return 0; // not an owner of the old data: nothing to move
+    }
+    for (const old of snap.docs) {
+      const target = doc(teacherDb, 'teachers', uid, sub, old.id);
+      try {
+        if ((await getDoc(target)).exists()) continue;
+        await setDoc(target, old.data());
+        copied++;
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `teachers/${uid}/${sub}/${old.id}`);
+        return copied; // try again next sign-in
+      }
+    }
+  }
+  try {
+    safeLocalStorage.setItem(LEGACY_MOVED_KEY, uid);
+  } catch {}
+  return copied;
+}
+
 // Live rooms need every device to have a Firebase identity, so the Firestore rules can tell
-// the host apart from the students. The teacher keeps their Google sign-in; everyone else
-// gets a silent anonymous one (no account, no prompt). If that fails (offline, or Anonymous
+// the host apart from the students. Every device, the teacher's screen too, gets a silent
+// anonymous one (no account, no prompt); the teacher's Google sign-in is separate (teacherAuth). If that fails (offline, or Anonymous
 // sign-in is switched off in the Firebase console) we return null and the room carries on
 // over its other relays.
 const ANON_SIGN_IN_RETRY_MS = 60_000;
@@ -604,9 +672,10 @@ export interface CloudRoster {
 }
 
 export async function listCloudRosters(): Promise<CloudRoster[]> {
-  const path = 'rosters';
+  let path = 'rosters';
   try {
-    const q = query(collection(db, 'rosters'), orderBy('updatedAt', 'desc'), limit(50));
+    path = spacePath('rosters');
+    const q = query(collection(teacherDb, path), orderBy('updatedAt', 'desc'), limit(50));
     const snap = await getDocs(q);
     const results: CloudRoster[] = [];
     snap.forEach((docSnap) => {
@@ -645,7 +714,7 @@ export async function saveCloudRoster(params: {
   const rosterId =
     params.id ||
     `roster_${now}_${Math.random().toString(36).slice(2, 7)}`;
-  const path = `rosters/${rosterId}`;
+  let path = `rosters/${rosterId}`;
 
   const cleanPlayers: CloudRosterPlayer[] = params.players.map((p, idx) => ({
     id: p.id || idx + 1,
@@ -656,9 +725,10 @@ export async function saveCloudRoster(params: {
   }));
 
   try {
+    path = `${spacePath('rosters')}/${rosterId}`;
     let createdAt = now;
     if (params.id) {
-      const existing = await getDoc(doc(db, 'rosters', rosterId));
+      const existing = await getDoc(doc(teacherDb, path));
       if (existing.exists() && existing.data()?.createdAt) {
         createdAt = Number(existing.data()?.createdAt);
       }
@@ -670,12 +740,12 @@ export async function saveCloudRoster(params: {
       startingCash: Math.max(1, Math.min(1000000, Math.round(params.startingCash || 500))),
       playersJson: JSON.stringify(cleanPlayers),
       playerCount: cleanPlayers.length,
-      updatedBy: auth.currentUser?.email || 'Teacher',
+      updatedBy: 'Teacher',
       createdAt,
       updatedAt: now,
     };
 
-    await setDoc(doc(db, 'rosters', rosterId), docData);
+    await setDoc(doc(teacherDb, path), docData);
 
     return {
       id: rosterId,
@@ -695,9 +765,10 @@ export async function saveCloudRoster(params: {
 }
 
 export async function deleteCloudRoster(rosterId: string): Promise<boolean> {
-  const path = `rosters/${rosterId}`;
+  let path = `rosters/${rosterId}`;
   try {
-    await deleteDoc(doc(db, 'rosters', rosterId));
+    path = `${spacePath('rosters')}/${rosterId}`;
+    await deleteDoc(doc(teacherDb, path));
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
@@ -724,9 +795,10 @@ export interface CloudSessionReport {
 }
 
 export async function listCloudSessionReports(): Promise<CloudSessionReport[]> {
-  const path = 'session_reports';
+  let path = 'session_reports';
   try {
-    const q = query(collection(db, 'session_reports'), orderBy('createdAt', 'desc'), limit(40));
+    path = spacePath('session_reports');
+    const q = query(collection(teacherDb, path), orderBy('createdAt', 'desc'), limit(40));
     const snap = await getDocs(q);
     const reports: CloudSessionReport[] = [];
     snap.forEach((docSnap) => {
@@ -783,7 +855,7 @@ export async function saveCloudSessionReport(params: {
 }): Promise<CloudSessionReport | null> {
   const now = Date.now();
   const reportId = `session_${now}_${Math.random().toString(36).slice(2, 7)}`;
-  const path = `session_reports/${reportId}`;
+  let path = `session_reports/${reportId}`;
 
   const sortedPlayers = [...params.players].sort((a, b) => b.money - a.money);
   const topPlayer = params.winner || sortedPlayers[0] || null;
@@ -804,6 +876,7 @@ export async function saveCloudSessionReport(params: {
   const finalTitle = (params.title || defaultTitle).trim().slice(0, 150);
 
   try {
+    path = `${spacePath('session_reports')}/${reportId}`;
     const docData: Record<string, any> = {
       title: finalTitle,
       topic: (params.topic || 'Grammar').slice(0, 100),
@@ -827,7 +900,7 @@ export async function saveCloudSessionReport(params: {
       }
     }
 
-    await setDoc(doc(db, 'session_reports', reportId), docData);
+    await setDoc(doc(teacherDb, path), docData);
 
     return {
       id: reportId,
@@ -853,9 +926,10 @@ export async function saveCloudSessionReport(params: {
 }
 
 export async function deleteCloudSessionReport(reportId: string): Promise<boolean> {
-  const path = `session_reports/${reportId}`;
+  let path = `session_reports/${reportId}`;
   try {
-    await deleteDoc(doc(db, 'session_reports', reportId));
+    path = `${spacePath('session_reports')}/${reportId}`;
+    await deleteDoc(doc(teacherDb, path));
     return true;
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
@@ -1036,13 +1110,13 @@ export async function seedBuiltInBankToCloud(
   updatedList: CloudCuratedSentence[];
   error?: string;
 }> {
-  if (!isVerifiedTeacherUser(auth.currentUser)) {
+  if (!isVerifiedTeacherUser(teacherAuth.currentUser)) {
     return {
       ok: false,
       addedCount: 0,
       totalCloudCount: currentCloudSentences.length,
       updatedList: currentCloudSentences,
-      error: `Sign in with ${VERIFIED_TEACHER_EMAIL} first to seed the Cloud Sentence Bank.`,
+      error: 'Sign in with Google first. Only the owners of the shared sentence bank can add to it.',
     };
   }
 
@@ -1121,9 +1195,9 @@ export async function seedBuiltInBankToCloud(
   try {
     for (let i = 0; i < toWrite.length; i += CHUNK_SIZE) {
       const slice = toWrite.slice(i, i + CHUNK_SIZE);
-      const batch = writeBatch(db);
+      const batch = writeBatch(teacherDb);
       for (const row of slice) {
-        batch.set(doc(db, 'curated_sentences', row.id), row.payload);
+        batch.set(doc(teacherDb, 'curated_sentences', row.id), row.payload);
       }
       await batch.commit();
       written += slice.length;
@@ -1153,14 +1227,17 @@ export async function seedBuiltInBankToCloud(
   }
 }
 
+let bankWriteRefused = false;
+
 export async function archiveSentenceToCloudBank(
   sentence: GeneratedSentence,
   settings: Settings,
   subtype?: string | null
 ): Promise<CloudCuratedSentence | null> {
   if (!sentence || !sentence.text || !sentence.explanation) return null;
-  // Only the teacher's Google account may add to the shared bank (see firestore.rules).
-  if (!isVerifiedTeacherUser(auth.currentUser)) return null;
+  // Only the bank owners' Google accounts may add to the shared bank (see firestore.rules). Other
+  // teachers are refused once, and then this device stops asking for the rest of the visit.
+  if (!isVerifiedTeacherUser(teacherAuth.currentUser) || bankWriteRefused) return null;
   const qType: QuestionType = sentence.questionType || 'binary';
   const sentenceId = computeSentenceFingerprintId(sentence.text, qType);
   const path = `curated_sentences/${sentenceId}`;
@@ -1211,7 +1288,15 @@ export async function archiveSentenceToCloudBank(
     if (entry.options) firestorePayload.options = entry.options;
     if (entry.subtype) firestorePayload.subtype = entry.subtype;
 
-    await setDoc(doc(db, 'curated_sentences', sentenceId), firestorePayload);
+    try {
+      await setDoc(doc(teacherDb, 'curated_sentences', sentenceId), firestorePayload);
+    } catch (err: any) {
+      if (String(err?.code || '').includes('permission-denied')) {
+        bankWriteRefused = true;
+        return null;
+      }
+      throw err;
+    }
 
     // Also prepend to local cache if not present
     const cached = loadCachedCloudSentences();
@@ -1228,7 +1313,7 @@ export async function archiveSentenceToCloudBank(
 export async function deleteCloudCuratedSentence(sentenceId: string): Promise<boolean> {
   const path = `curated_sentences/${sentenceId}`;
   try {
-    await deleteDoc(doc(db, 'curated_sentences', sentenceId));
+    await deleteDoc(doc(teacherDb, 'curated_sentences', sentenceId));
     const cached = loadCachedCloudSentences().filter((s) => s.id !== sentenceId);
     saveCachedCloudSentences(cached);
     return true;
@@ -1237,3 +1322,26 @@ export async function deleteCloudCuratedSentence(sentenceId: string): Promise<bo
     return false;
   }
 }
+
+// ============================================================================
+// Package A6: the cloud store behind one interface, so class lists and reports can move from
+// Firestore to Cloudflare D1 or KV later without touching the screens that use them.
+// ============================================================================
+
+export interface CloudStore {
+  listRosters: typeof listCloudRosters;
+  saveRoster: typeof saveCloudRoster;
+  deleteRoster: typeof deleteCloudRoster;
+  listReports: typeof listCloudSessionReports;
+  saveReport: typeof saveCloudSessionReport;
+  deleteReport: typeof deleteCloudSessionReport;
+}
+
+export const firestoreCloudStore: CloudStore = {
+  listRosters: listCloudRosters,
+  saveRoster: saveCloudRoster,
+  deleteRoster: deleteCloudRoster,
+  listReports: listCloudSessionReports,
+  saveReport: saveCloudSessionReport,
+  deleteReport: deleteCloudSessionReport,
+};

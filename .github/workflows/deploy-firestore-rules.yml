@@ -1,0 +1,63 @@
+name: Publish Firestore rules
+
+# Package A6: firestore.rules is published from the repository on merge, after the emulator
+# check passes, so the live rules can no longer drift from the file. It needs the repository
+# secret FIREBASE_SERVICE_ACCOUNT (a Firebase service account key, JSON, with the
+# "Firebase Rules Admin" role). Without it the job checks the rules and says how to publish
+# them by hand (Firebase console > Firestore Database > Rules > paste the file > Publish).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - firestore.rules
+      - scripts/check-firestore-rules.mjs
+      - .github/workflows/deploy-firestore-rules.yml
+  workflow_dispatch:
+
+concurrency:
+  group: firestore-rules
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Check and publish firestore.rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies and the emulator tools
+        run: |
+          npm ci
+          npm i --no-save @firebase/rules-unit-testing@6.0.0 firebase-tools@15.34.1
+
+      - name: Check firestore.rules against the emulator
+        run: npx firebase emulators:exec --config scripts/firestore-emulator.json --project demo-grammar-casino --only firestore "node scripts/check-firestore-rules.mjs"
+
+      - name: Publish the rules
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT is not set, so the rules were checked but not published. Paste firestore.rules into the Firebase console (Firestore Database > Rules > Publish)."
+            exit 0
+          fi
+          KEY_FILE="$RUNNER_TEMP/firebase-key.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$KEY_FILE"
+          export GOOGLE_APPLICATION_CREDENTIALS="$KEY_FILE"
+          PROJECT=$(node -e "console.log(require('./firebase-applet-config.json').projectId)")
+          npx firebase deploy --only firestore:rules --project "$PROJECT" --non-interactive
+          rm -f "$KEY_FILE"
