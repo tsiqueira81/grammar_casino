@@ -96,3 +96,39 @@ describe('saved decks', () => {
     expect(changedWords('He have two cats.', 'He has two cats.')).toEqual({ wrong: 'have', right: 'has' });
   });
 });
+
+describe('Spot the error and Word order lines (L8)', () => {
+  const deck = parseDeckText(
+    [
+      "spot: He don't like coffee in the morning. -> He doesn't like coffee in the morning.",
+      'order: We have never been to Paris.',
+      'spot: She goes to school.',
+      'order: Go to bed.',
+    ].join('\n')
+  );
+
+  it('makes a Spot the error item from a mistake line', () => {
+    const spot = deck.items[0];
+    expect(spot.questionType).toBe('spotError');
+    expect(spot.options).toHaveLength(4);
+    expect(spot.options?.some((o) => o.includes("don't"))).toBe(true);
+  });
+
+  it('makes a Word order item, shuffled the same way every time', () => {
+    const order = deck.items[1];
+    expect(order.questionType).toBe('wordOrder');
+    expect(order.correctAnswer).toBe('we have never been to Paris');
+    const again = parseDeckText('order: We have never been to Paris.').items[0];
+    expect(again.text).toBe(order.text);
+  });
+
+  it('names the problem when a line does not fit the type', () => {
+    expect(deck.problems.map((p) => p.line)).toEqual([3, 4]);
+    expect(deck.problems[0].problem).toMatch(/^spot: needs a sentence with a mistake/);
+    expect(deck.problems[1].problem).toMatch(/^order: needs a correct sentence/);
+  });
+
+  it('counts them in the summary', () => {
+    expect(deckSummary(deck.items)).toBe('2 sentences: 1 spot the error, 1 word order');
+  });
+});

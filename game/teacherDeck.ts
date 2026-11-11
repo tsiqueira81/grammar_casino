@@ -8,8 +8,11 @@
 //   I have lived here _____ 2010. [since | for, during, while]
 //                                                 multiple choice: the right answer, then the others
 //   The children laughed _____. (HAPPY) [happily] word formation: the base word in capitals
+//   spot: She go to school. -> She goes to school.  Spot the error (a mistake line, cut into A to D)
+//   order: She goes to school every day.          Word order (4 to 10 words, shuffled into tiles)
 //   # a line starting with # is a note and is skipped
 import { validateItem } from '../content/schema';
+import { WORD_ORDER_MAX_WORDS, toSpotError, toWordOrder } from './newFormats';
 import type { GeneratedSentence } from '../types';
 
 export const DECK_MAX_LINES = 60;
@@ -131,6 +134,16 @@ function parseLine(raw: string): GeneratedSentence | string {
   } as GeneratedSentence;
 }
 
+/** The same tiles every time for the same sentence, so a saved deck replays the same way. */
+function seededRand(seed: string): () => number {
+  let h = hash(seed) || 1;
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0;
+    h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
 /** Reads the teacher's text. Lines with a problem are left out and listed. */
 export function parseDeckText(text: string): ParsedDeck {
   const items: GeneratedSentence[] = [];
@@ -144,15 +157,35 @@ export function parseDeckText(text: string): ParsedDeck {
       problems.push({ line: i + 1, text: line, problem: `a deck holds up to ${DECK_MAX_LINES} sentences` });
       return;
     }
-    const parsed = parseLine(line);
-    if (typeof parsed === 'string') {
-      problems.push({ line: i + 1, text: line, problem: parsed });
+    // Package L8 types: "spot:" and "order:" before an ordinary line.
+    const prefix = line.match(/^(spot|order)\s*:\s*/i);
+    const kind = prefix ? (prefix[1].toLowerCase() as 'spot' | 'order') : null;
+    const base = parseLine(prefix ? line.slice(prefix[0].length) : line);
+    if (typeof base === 'string') {
+      problems.push({ line: i + 1, text: line, problem: base });
       return;
     }
-    const check = validateItem(parsed, parsed.questionType || 'binary');
+    const check = validateItem(base, base.questionType || 'binary');
     if (!check.ok) {
       problems.push({ line: i + 1, text: line, problem: check.errors[0] });
       return;
+    }
+    let parsed: GeneratedSentence = base;
+    if (kind === 'spot') {
+      const spot = base.questionType === 'binary' && !base.isCorrect ? toSpotError(base) : null;
+      if (!spot) {
+        problems.push({ line: i + 1, text: line, problem: 'spot: needs a sentence with a mistake, then -> and its correction (5 words or more)' });
+        return;
+      }
+      parsed = spot;
+    } else if (kind === 'order') {
+      const source: GeneratedSentence = base.questionType === 'binary' ? { ...base, text: base.correction || base.text, isCorrect: true } : base;
+      const order = toWordOrder(source, seededRand(source.correction || source.text));
+      if (!order) {
+        problems.push({ line: i + 1, text: line, problem: `order: needs a correct sentence of 4 to ${WORD_ORDER_MAX_WORDS} words` });
+        return;
+      }
+      parsed = order;
     }
     const key = parsed.text.toLowerCase();
     if (seen.has(key)) {
@@ -186,11 +219,15 @@ export function deckSummary(items: GeneratedSentence[]): string {
   if (!items.length) return 'No sentences yet';
   const binary = items.filter((i) => (i.questionType || 'binary') === 'binary');
   const flawed = binary.filter((i) => !i.isCorrect).length;
-  const gaps = items.length - binary.length;
+  const spot = items.filter((i) => i.questionType === 'spotError').length;
+  const order = items.filter((i) => i.questionType === 'wordOrder').length;
+  const gaps = items.length - binary.length - spot - order;
   const parts = [
     binary.length - flawed ? `${binary.length - flawed} correct` : '',
     flawed ? `${flawed} with a mistake` : '',
     gaps ? `${gaps} with a gap` : '',
+    spot ? `${spot} spot the error` : '',
+    order ? `${order} word order` : '',
   ].filter(Boolean);
   return `${items.length} sentence${items.length === 1 ? '' : 's'}: ${parts.join(', ')}`;
 }

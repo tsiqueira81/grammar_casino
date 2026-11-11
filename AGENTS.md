@@ -186,7 +186,7 @@ Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/sa
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
 | `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |
 | `grammar_casino_firestore_usage_v1` | local | Today's Firestore reads and writes from this device (an estimate) |
-| `grammar_casino_own_deck_v1` | local | The teacher's own sentences in use (L4) |
+| `grammar_casino_own_deck_v1` | local | The teacher's own sentences in use (L4). Lines starting `spot:` (a mistake line) or `order:` (a correct sentence) become Spot the error and Word order (`game/teacherDeck.ts`, tiles seeded by the sentence) |
 | `grammar_casino_decks_v1` | local | Saved decks of the teacher's own sentences (L4) |
 | `grammar_casino_quality_v1` | local | 3D table quality: the teacher's choice and what Automatic learned |
 | `grammar_casino_cloud_moved_v1` | local | The Google uid whose old shared rosters and reports were already copied into their private space (package A6) |
