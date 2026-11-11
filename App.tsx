@@ -108,6 +108,7 @@ import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
 import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from './game/gameLength';
+import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
 import FirstRunCoach from './components/FirstRunCoach';
@@ -923,6 +924,30 @@ export function App() {
   useEffect(() => {
     safeLocalStorage.setItem(SAY_IT_KEY, sayItOn ? 'on' : 'off');
   }, [sayItOn]);
+  // Package L6: the level follows the class, off unless the teacher turns it on.
+  const [adaptiveLevelOn, setAdaptiveLevelOn] = useState<boolean>(() => safeLocalStorage.getItem(ADAPTIVE_LEVEL_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(ADAPTIVE_LEVEL_KEY, adaptiveLevelOn ? 'on' : 'off');
+  }, [adaptiveLevelOn]);
+  const adaptLastChangeRef = useRef(0);
+  const [levelNotice, setLevelNotice] = useState<{ round: number; text: string } | null>(null);
+  useEffect(() => {
+    if (step === 'IN_GAME' && currentRound === 1) {
+      adaptLastChangeRef.current = 0;
+      setLevelNotice(null);
+    }
+  }, [step, currentRound]);
+  useEffect(() => {
+    if (!adaptiveLevelOn || step !== 'RESULTS' || roundHistory.length === 0) return;
+    if (roundHistory[roundHistory.length - 1].round !== currentRound || levelNotice?.round === currentRound) return;
+    if (gameMode === 'rounds' && currentRound >= Number(totalRounds)) return;
+    const base = nextRoundSettings || settings;
+    const change = nextAdaptiveLevel({ levels: CEFR_LEVELS, current: base.level, history: roundHistory, lastChangeRound: adaptLastChangeRef.current });
+    if (!change) return;
+    adaptLastChangeRef.current = currentRound;
+    setNextRoundSettings({ ...base, level: change.level as Settings['level'] });
+    setLevelNotice({ round: currentRound, text: levelChangeNotice(change) });
+  }, [adaptiveLevelOn, step, roundHistory, currentRound, levelNotice, gameMode, totalRounds, nextRoundSettings, settings]);
   // Listening hand: the sentence stays hidden on the projector and the phones until the reveal,
   // unless the teacher shows it (the round number it was shown for).
   const [listenShownRound, setListenShownRound] = useState<number | null>(null);
@@ -6040,6 +6065,28 @@ export function App() {
                   )}
                 </section>
 
+                {/* Package L6: the level follows the class */}
+                <section className={sectionCls} aria-labelledby="setup-adaptive-level">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-adaptive-level" className={`block ${sectionTitle}`}>Level follows the class</span>
+                      <span className={`block ${sectionHint}`}>
+                        After every three hands: over 85% right, the next hands go one level up; under 45%, one level down. You see a notice each time.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={adaptiveLevelOn}
+                      onClick={() => { playSound('click'); setAdaptiveLevelOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${adaptiveLevelOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${adaptiveLevelOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Level follows the class</span>
+                    </button>
+                  </label>
+                </section>
+
                 {/* Package L9: speaking after the reveal */}
                 <section className={sectionCls} aria-labelledby="setup-say-it">
                   <label className="flex items-center justify-between gap-4 cursor-pointer">
@@ -7528,6 +7575,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       )}
                     </p>
                 </section>
+
+                {levelNotice && levelNotice.round === currentRound && (
+                  <div role="status" data-testid="level-notice" className="mt-4 px-5 py-3 rounded-gc-lg bg-gc-info/[0.08] border border-gc-info/30 text-center text-gc-body font-semibold text-gc-ink">
+                    {levelNotice.text}
+                  </div>
+                )}
 
                 {sayItOn && currentSentence && (() => {
                   // A gap sentence is said with the answer in the gap; other types say the corrected sentence.
