@@ -4,6 +4,9 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
+/** Package T5: reports of the last 20 finished games on this computer. */
+const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
@@ -226,12 +229,8 @@ function pcmToAudioBuffer(
 
 const loadInitialState = () => { 
   try { 
-    const s = safeLocalStorage.getItem(LOCAL_STORAGE_KEY); 
-    if (s) {
-      const parsed = migrateSavedGame(JSON.parse(s), () => getRandomCharacterAvatar());
-      if (parsed && typeof parsed.step === 'string') return parsed;
-    }
-    return null;
+    // One versioned save format (package T5): game/persistence.ts reads every version.
+    return readSave(safeLocalStorage.getItem(LOCAL_STORAGE_KEY), () => getRandomCharacterAvatar());
   } catch (e) { 
     console.error("Failed to load or parse game state from localStorage:", e);
     return null; 
@@ -407,6 +406,12 @@ export function App() {
   const later = useLaterTimers();
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
+  // Package T5: "Resume or start fresh" when an unfinished game is opened again later
+  // (not when a live room is reopening by itself), and the reports of finished games.
+  const [resumeOffer, setResumeOffer] = useState(() => (loadSavedHostRoom() ? null : getResumeOffer(initialGameState, Date.now())));
+  const [finishedGames, setFinishedGames] = useState<FinishedGame[]>(() => parseFinishedGames(safeLocalStorage.getItem(FINISHED_GAMES_STORAGE_KEY)));
+  const [showPastReports, setShowPastReports] = useState(false);
+  const [pastReport, setPastReport] = useState<FinishedGame | null>(null);
   // Package T2: shortcut list and full screen for presenting.
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
@@ -782,9 +787,9 @@ export function App() {
       isProcessing
     );
     const anyHintLoading = (Object.values(hints) as Hint[]).some(h => Boolean(h?.isLoading));
-    return anyModalOpen || anyHintLoading || isPaused;
+    return anyModalOpen || anyHintLoading || isPaused || Boolean(resumeOffer);
   }, [
-    isPaused,
+    isPaused, resumeOffer,
     error, historyPlayer, mpRoomCode, showPowerUpModal, showTargetModal, showAvatarModal,
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
     showDeckConfigModal, showCloudModal, isLoading, isProcessing, hints
@@ -1269,7 +1274,7 @@ export function App() {
         powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
         sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
       }; 
-      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState))) {
+      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(stampSave(gameState, Date.now())))) {
         console.warn('The browser would not save the game, so it is kept for this tab only.');
       }
       GeminiService.savePortableGame(gameState); 
@@ -3828,6 +3833,32 @@ export function App() {
     };
   }, [isGameRunning]);
 
+  // Package T5: keep the report of a game in this computer's list of finished games.
+  const archiveGame = useCallback((finishedAt: number) => {
+    if (!roundHistory.length) return;
+    const game: FinishedGame = {
+      id: `game_${roundHistory[0].timestamp ?? roundHistory[0].round}`,
+      finishedAt,
+      winnerName: winner?.name ?? null,
+      players: players.map(p => ({ id: p.id, name: p.name, money: p.money, avatar: p.avatar })),
+      roundHistory,
+      settings,
+      gameMode,
+      totalRounds,
+      targetAmount,
+    };
+    setFinishedGames(prev => {
+      const next = addFinishedGame(prev, game);
+      safeLocalStorage.setItem(FINISHED_GAMES_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [roundHistory, winner, players, settings, gameMode, totalRounds, targetAmount]);
+  useEffect(() => {
+    if (step === 'GAME_OVER') archiveGame(Date.now());
+    // Only when the game ends; archiveGame changes with every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   // A pause belongs to one hand: leaving the hand ends it.
   useEffect(() => {
     if (step !== 'IN_GAME') setIsPaused(false);
@@ -4069,7 +4100,7 @@ export function App() {
   const handleConfirmLoadGame = useCallback(() => {
     if (!pendingLoadGame) return;
     try {
-      const parsed = migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
+      const parsed: any = readSave(pendingLoadGame, () => getRandomCharacterAvatar()) || migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
       
       setStep(parsed.step || 'PLAYER_SETUP');
       setPlayers(parsed.players || []);
@@ -4153,12 +4184,12 @@ export function App() {
   }, [startingCash, step, playSound]);
 
   const buildCurrentFullGameState = useCallback(() => {
-    return {
+    return stampSave({
       step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
       currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
       powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
       sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
-    };
+    }, Date.now());
   }, [
     step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
     currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
@@ -4634,6 +4665,24 @@ export function App() {
                           <span className="block text-gc-small text-gc-quiet">Load a class from the cloud, or see saved games</span>
                         </span>
                       </button>
+                      {finishedGames.length > 0 && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsLobbyMenuOpen(false);
+                            playSound('click');
+                            setShowPastReports(true);
+                          }}
+                          className="w-full px-3 py-2.5 rounded-gc-sm flex items-start gap-3 text-left hover:bg-gc-line/[0.07] cursor-pointer"
+                        >
+                          <BookOpen className="w-5 h-5 mt-0.5 shrink-0 text-gc-quiet" aria-hidden="true" />
+                          <span>
+                            <span className="block text-gc-body font-semibold text-gc-ink">Past reports ({finishedGames.length})</span>
+                            <span className="block text-gc-small text-gc-quiet">Reports of games finished on this computer</span>
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -7275,6 +7324,66 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             </div> 
         </Modal>
       }
+      {resumeOffer && (
+        <Modal title="Welcome back" onClose={() => setResumeOffer(null)} playSound={playSound} hideOkButton>
+          <p className="text-gc-body text-gc-ink mb-5">An unfinished game is saved on this computer.</p>
+          <div className="flex flex-col gap-3">
+            <ActionButton onClick={() => setResumeOffer(null)} playSound={playSound} variant="primary" className="min-h-[52px] px-5 text-gc-body">
+              {resumeOffer.label}
+            </ActionButton>
+            <ActionButton
+              onClick={() => {
+                archiveGame(Date.now());
+                setResumeOffer(null);
+                handleRestartGame();
+              }}
+              playSound={playSound}
+              variant="secondary"
+              className="min-h-[44px] px-5"
+            >
+              Start fresh
+            </ActionButton>
+          </div>
+        </Modal>
+      )}
+      {showPastReports && (
+        <Modal title="Past reports" onClose={() => setShowPastReports(false)} playSound={playSound}>
+          <p className="text-gc-small text-gc-quiet mb-3">The last {finishedGames.length === 1 ? 'game' : `${finishedGames.length} games`} finished on this computer. Save a report to the cloud to keep it for good.</p>
+          <ul className="space-y-2">
+            {finishedGames.map(g => (
+              <li key={g.id}>
+                <button
+                  type="button"
+                  onClick={() => { playSound('click'); setShowPastReports(false); setPastReport(g); }}
+                  className="w-full min-h-[44px] text-left rounded-gc-sm border border-gc-line/[0.14] hover:border-gc-line/30 px-3 py-2 cursor-pointer text-gc-ink"
+                >
+                  <span className="block font-semibold">{new Date(g.finishedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="block text-gc-small text-gc-quiet">
+                    {g.players.length} players · {g.roundHistory.length} {g.roundHistory.length === 1 ? 'hand' : 'hands'}{g.winnerName ? ` · ${g.winnerName} won` : ''}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+      {pastReport && (
+        <Modal title="Report card" onClose={() => setPastReport(null)} playSound={playSound}>
+          <div className="max-h-[78vh] overflow-y-auto pr-1 modal-content-scroll">
+            <GrammarReportCard
+              history={pastReport.roundHistory}
+              players={pastReport.players.map(p => ({ ...p, history: [], winStreak: 0, effects: [] }))}
+              winner={null}
+              playSound={playSound}
+              onRestartGame={() => setPastReport(null)}
+              settings={pastReport.settings}
+              gameMode={pastReport.gameMode as GameMode | undefined}
+              totalRounds={pastReport.totalRounds}
+              targetAmount={pastReport.targetAmount}
+            />
+          </div>
+        </Modal>
+      )}
       {showHotkeyHelp && (
         <Modal title="Keyboard shortcuts" onClose={() => setShowHotkeyHelp(false)} playSound={playSound}>
           <p className="text-gc-body text-gc-ink mb-4">A presenter clicker works too: its buttons send Page Down and Page Up.</p>
@@ -7686,7 +7795,27 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           buildCurrentFullGameState={buildCurrentFullGameState}
           activeRosterId={activeCloudRoster?.id || null}
           activeRosterName={activeCloudRoster?.className || ''}
-          onLoadRoster={handleLoadCloudRoster}
+          onLoadRoster={(roster, mode) => {
+            // Package T5: loading a class during a game asks first, and keeps the game's report.
+            if (step === 'IN_GAME' || step === 'RESULTS') {
+              setConfirmAction({
+                title: 'Load this class now?',
+                message: 'The game in progress ends. Its report is kept under Past reports on this computer.',
+                confirmLabel: 'Load the class',
+                onConfirm: () => {
+                  archiveGame(Date.now());
+                  setRoundHistory([]);
+                  setRoundResults([]);
+                  setCurrentRound(1);
+                  setCurrentSentence(null);
+                  setBets({});
+                  handleLoadCloudRoster(roster, mode);
+                },
+              });
+              return;
+            }
+            handleLoadCloudRoster(roster, mode);
+          }}
           onLoadFullGameState={handleApplyCloudFullGameState}
           onActiveRosterUpdated={(roster: CloudRoster) => setActiveCloudRoster({ id: roster.id, className: roster.name })}
           playSound={playSound}

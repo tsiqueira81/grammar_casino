@@ -80,6 +80,9 @@ npm is the only package manager. Do not add `bun.lock`, `yarn.lock` or `pnpm-loc
 - Swap this sentence refunds what each player spent this hand (`refundHandSpending`); Pause holds every timer and makes the host ignore phone intents (only `UPDATE_PROFILE` gets through); Reveal now reveals as if the early-reveal switch were on.
 - Undo reveal lasts 10 seconds (`UNDO_REVEAL_MS`) and is gone after any ruling correction. The reveal snapshot is kept in memory only, so a reload ends both Undo reveal and Correct the ruling for that hand.
 
+### Saved games (package T5)
+- Every save goes through `game/persistence.ts`: `stampSave` writes `saveVersion: 2` and `savedAt`, `readSave` reads versions 1 and 2. Opening an unfinished game saved more than 10 minutes ago offers "Resume" or "Start fresh" (not while a live room reopens by itself).
+
 ### Keyboard shortcuts (package T2)
 - A shortcut presses the on-screen button marked `data-hotkey="<action>"` (`utils/hotkeys.ts`), so a new control gets its shortcut by adding that attribute, and a shortcut can only do what the screen offers. Keys typed in fields are never taken. While a window is open, only its own buttons count.
 
@@ -122,6 +125,7 @@ Read and write them through `safeLocalStorage` / `safeSessionStorage` (`utils/sa
 | `grammar_casino_student_session_v1` | local | A phone's room and seat, for reconnecting |
 | `grammar_casino_removed_rooms_v1` | local | Rooms this phone was removed from in the last 12 hours (package R6) |
 | `grammar_casino_host_room_v1` | local | The teacher's open live room (code, seats, handled intents), so a reload reopens it for up to 6 hours |
+| `grammar_casino_finished_games_v1` | local | Reports of the last 20 games finished on this computer (package T5) |
 | `grammar_casino_cloud_sentences_v1` | local | Cached cloud sentence bank |
 | `grammar_casino_ai_daily_v1` | local | Today's AI calls on this device (sentences and other calls), for the daily AI limit |
 | `grammar_casino_theme` | local | Light or dark theme |
