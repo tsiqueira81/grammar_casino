@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import { SFX_MUTED_STORAGE_KEY } from '../utils/soundEngine';
 import { TEXT_SIZES, applyStudentPrefs, readStudentPrefs, saveStudentPrefs, type StudentPrefs } from '../utils/studentPrefs';
+import { useFocusTrap } from '../utils/useFocusTrap';
 
 /** Package S5: how long a toast stays, and how many stack at once. */
 const TOAST_MS = 7000;
@@ -147,6 +148,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [isConnected, setIsConnected] = useState(false);
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
+  // Package S8: the keyboard stays in the target window while it is open.
+  const targetDialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(targetDialogRef, Boolean(view?.pendingTarget));
   const [localBet, setLocalBet] = useState<Bet>({});
   const localBetRef = useRef<Bet>({});
   localBetRef.current = localBet;
@@ -2262,7 +2266,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {/* Choosing a target for an attack power-up */}
       {view.pendingTarget && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="gc-panel rounded-gc-lg max-w-md w-full p-5 space-y-4 animate-gc-slide-up" role="dialog" aria-modal="true" aria-labelledby="gc-target-title">
+          <div ref={targetDialogRef} className="gc-panel rounded-gc-lg max-w-md w-full p-5 space-y-4 animate-gc-slide-up" role="dialog" aria-modal="true" aria-labelledby="gc-target-title">
             <div className="text-center space-y-1">
               <div className="text-4xl" aria-hidden="true">{POWER_UPS[view.pendingTarget.powerUp]?.icon}</div>
               <h3 id="gc-target-title" className="m-0 text-gc-title font-extrabold">

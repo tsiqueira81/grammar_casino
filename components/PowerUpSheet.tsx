@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useFocusTrap } from '../utils/useFocusTrap';
 import { X } from 'lucide-react';
 import { POWER_UPS } from '../constants';
 import { getPowerUpEntry, type PowerUpCategory } from '../game/powerUpCatalog';
@@ -69,9 +70,12 @@ const PowerUpSheet: React.FC<{ info: PowerUpSheetInfo; onClose: () => void }> = 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // Package S8: the keyboard stays in this sheet while it is open.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef);
   const name = getPowerUpEntry(info.key)?.name ?? 'Power-up';
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label={name}>
+    <div ref={dialogRef} className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label={name}>
       <button type="button" className="absolute inset-0 bg-black/40 cursor-default" aria-label="Close" onClick={onClose} />
       <div className="relative w-full max-w-lg rounded-t-[24px] gc-surface px-5 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] animate-gc-slide-up">
         <button type="button" onClick={onClose} className="absolute right-3 top-3 w-11 h-11 grid place-items-center rounded-full text-gc-quiet" aria-label="Close">

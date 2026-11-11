@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useFocusTrap } from '../utils/useFocusTrap';
 import QRCode from 'qrcode';
 import { Player, SoundEffect } from '../types';
 import { MultiplayerSeat } from '../utils/multiplayerProtocol';
@@ -88,6 +89,9 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
       .catch((err) => console.error('QR generation failed:', err));
   }, [roomCode, joinUrl]);
 
+  // Package S8: the keyboard stays in this window while it is open.
+  const dialogRef = React.useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, isOpen);
   if (!isOpen) return null;
 
   const handleCopyJoinLink = () => {
@@ -110,6 +114,7 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Live room"

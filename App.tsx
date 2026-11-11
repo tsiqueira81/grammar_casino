@@ -102,6 +102,9 @@ import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
 import { LENGTH_PRESETS, estimateMinutes, handsLeftNote } from './game/gameLength';
+import { useFocusTrap } from './utils/useFocusTrap';
+import LiveAnnouncer from './components/LiveAnnouncer';
+import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
@@ -771,6 +774,10 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // Package S8: the pause window keeps the keyboard while it is open.
+  const pauseDialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(pauseDialogRef, isPaused && step === 'IN_GAME');
+
   // Package G7: "2 hands left" and "Last hand" on the hand badge.
   const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
 
@@ -7636,6 +7643,15 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
         </React.Suspense>
+        <LiveAnnouncer
+          message={phaseAnnouncement({
+            step,
+            round: currentRound,
+            totalRounds: gameMode === 'rounds' ? Number(totalRounds) : null,
+            paused: isPaused && step === 'IN_GAME',
+            winnerName: winner?.name ?? null,
+          })}
+        />
         <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
@@ -7973,7 +7989,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         </Modal>
       )}
       {isPaused && step === 'IN_GAME' && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
+        <div ref={pauseDialogRef} className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
           <div className="w-full max-w-md rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-8 text-center space-y-5 text-gc-ink">
             <Pause className="w-12 h-12 mx-auto text-gc-gold" aria-hidden="true" />
             <h2 id="gc-pause-title" className="text-gc-h2 font-bold">Paused</h2>

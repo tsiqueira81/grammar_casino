@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useFocusTrap } from '../utils/useFocusTrap';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, Check, Eye, EyeOff, Info, KeyRound, Lock, Pencil, X } from 'lucide-react';
 import { Settings, CEFRLevel, SoundEffect, ChallengeFormat, QuestionType } from '../types';
@@ -132,6 +133,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onClose, playSound]);
 
+  // Package S8: the keyboard stays in this window while it is open.
+  const dialogRef = React.useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, isOpen);
   if (!isOpen) return null;
 
   const resolvedTopic = isCustomTopicMode ? (customTopicInput.trim() || 'Custom Grammar') : selectedTopic;
@@ -267,7 +271,8 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.96, opacity: 0, y: 12 }}
           transition={{ type: 'spring', damping: 28, stiffness: 340 }}
-          role="dialog"
+          ref={dialogRef}
+        role="dialog"
           aria-modal="true"
           aria-label="Game settings"
           className="gc-panel rounded-gc-lg w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden"
