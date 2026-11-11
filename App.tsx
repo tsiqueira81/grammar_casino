@@ -5886,15 +5886,27 @@ export function App() {
                                 }}
                                 className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
                               />
-                              {LENGTH_PRESETS.map(({ hands: r, name }) => (
+                              {LENGTH_PRESETS.map(({ hands: r, name, timerSeconds: presetTimer }) => (
                                 <button
                                   key={r}
                                   type="button"
                                   aria-pressed={totalRounds === r}
-                                  onClick={() => { playSound('click'); setTotalRounds(r); }}
-                                  className={`h-9 min-w-[2.5rem] px-3 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
+                                  onClick={() => {
+                                    playSound('click');
+                                    setTotalRounds(r);
+                                    // Package G7: a preset sets the timer too (shown on the button).
+                                    if (presetTimer !== undefined && TURN_TIMER_OPTIONS.includes(presetTimer)) {
+                                      setTurnTimerSeconds(presetTimer);
+                                      setTurnTimers({});
+                                      setMpRoundTimer({ status: 'idle', remainingMs: presetTimer * 1000 });
+                                      mpAutoStartedRoundRef.current = 0;
+                                    }
+                                  }}
+                                  title={presetTimer ? `${r} hands and a ${presetTimer}-second timer` : `${r} hands`}
+                                  className={`min-h-9 min-w-[2.5rem] px-3 py-1 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
                                 >
                                   <span className="tabular-nums">{r}</span> · {name}
+                                  {presetTimer ? <span className="font-semibold opacity-80"> · {presetTimer} s</span> : null}
                                 </button>
                               ))}
                               {Number(totalRounds) > 0 && (

@@ -11,6 +11,11 @@ test('quick start deals at once with the last settings', async ({ page }) => {
   await addPlayers(page, ['Ana']);
   await expect(page.getByTestId('quick-start')).toHaveCount(0);
   await setUpMixedGame(page, { drop: ['Open cloze', 'Word formation', 'Key word'], hands: 3 });
+  // Package G7: a length preset sets the timer too.
+  await page.getByRole('button', { name: /^5 · Warm-up/ }).click();
+  await expect(page.getByRole('group', { name: 'Turn timer' }).getByRole('button', { name: /^45 s/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('group', { name: 'Turn timer' }).getByRole('button', { name: /^Off/ }).click();
+  await page.locator('input[type="number"]:visible').first().fill('3');
   await page.getByRole('button', { name: 'Deal the first hand' }).click();
   await expect(sentence(page)).toBeVisible();
 

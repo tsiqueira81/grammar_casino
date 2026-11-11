@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { TURN_TIMER_OPTIONS } from '../constants';
 import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from '../game/gameLength';
 
 describe('game lengths (package G7)', () => {
   it('names the presets the setup screen offers', () => {
     expect(LENGTH_PRESETS.map((p) => p.hands)).toEqual([5, 10, 15, 20]);
     expect(LENGTH_PRESETS.slice(0, 3).map((p) => p.name)).toEqual(['Warm-up', 'Review', 'Full table']);
+  });
+
+  it('sets only timers the timer picker offers', () => {
+    for (const p of LENGTH_PRESETS) if (p.timerSeconds !== undefined) expect(TURN_TIMER_OPTIONS).toContain(p.timerSeconds);
+    expect(LENGTH_PRESETS[0].timerSeconds).toBe(45);
   });
 
   it('estimates longer games for more hands, more players on one screen and longer timers', () => {

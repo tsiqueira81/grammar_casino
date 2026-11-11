@@ -4,12 +4,14 @@
 export interface LengthPreset {
   hands: number;
   name: string;
+  /** The timer the preset sets too (seconds), shown on its button. None: the timer is left as it is. */
+  timerSeconds?: number;
 }
 
 export const LENGTH_PRESETS: LengthPreset[] = [
-  { hands: 5, name: 'Warm-up' },
-  { hands: 10, name: 'Review' },
-  { hands: 15, name: 'Full table' },
+  { hands: 5, name: 'Warm-up', timerSeconds: 45 },
+  { hands: 10, name: 'Review', timerSeconds: 60 },
+  { hands: 15, name: 'Full table', timerSeconds: 60 },
   { hands: 20, name: 'Long' },
 ];
 
