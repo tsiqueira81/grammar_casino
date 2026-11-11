@@ -182,3 +182,18 @@ export function reportToCsv(report: GameReport): string {
   ];
   return rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
 }
+
+/** Package V9: one line that hands the lesson back to the teacher at the end of the game. */
+export function classResultLine(report: Pick<GameReport, 'bets' | 'accuracy' | 'byTopic'>): string {
+  if (!report.bets) return '';
+  const parts = [`Together you got ${report.accuracy}% right.`];
+  const topics = report.byTopic.filter((t) => t.bets >= 2);
+  if (topics.length > 1) {
+    const best = topics.reduce((a, b) => (b.accuracy > a.accuracy ? b : a));
+    if (best.accuracy > Math.min(...topics.map((t) => t.accuracy))) parts.push(`Best topic: ${best.label}.`);
+  }
+  // byTopic is sorted weakest first, so the first one under 75% is the one to review.
+  const review = report.byTopic.find((t) => t.bets > 0 && t.accuracy < 75);
+  if (review) parts.push(`To review: ${review.label}.`);
+  return parts.join(' ');
+}

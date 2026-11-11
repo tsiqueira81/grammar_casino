@@ -70,6 +70,14 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
   await expect(podium.getByRole('listitem').filter({ hasText: 'Place 2:' })).toContainText(/Caio\s*\$1,210/);
   await expect(podium.getByRole('listitem').filter({ hasText: 'Place 3:' })).toContainText(/Ana\s*\$1,000/);
 
+  // Package V9: the ceremony ends on the class result, and the podium can be saved as a picture.
+  await expect(page.getByTestId('class-result')).toContainText(/Together you got \d+% right\./);
+  await expect(page.getByTestId('class-result')).toHaveCSS('opacity', '1', { timeout: 10_000 });
+  await expect(page.getByTestId('ceremony-skip')).toHaveCount(0);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save this moment' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^grammar-casino-.*\.png$/);
+
   expect(errors).toEqual([]);
 });
 

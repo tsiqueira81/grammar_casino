@@ -20,6 +20,8 @@ import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs 
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
 const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
+import { CEREMONY_DONE, ceremonyTimes, cueForStage, drawMoment, placeShown, type CeremonyStage } from './game/ceremony';
+import { buildReport, classResultLine } from './game/report';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
@@ -778,6 +780,54 @@ export function App() {
     if (isMuted || !audioReady) return;
     soundEngine.play(sound, ...args);
   }, [isMuted, audioReady]);
+
+  // Package V9: the winner's ceremony. Entering game over plays "The vault opens", third place,
+  // second place, then the winner with the fanfare and the coin shower, then the class result.
+  // Calm mode, reduced motion and a game that was reloaded on the final screen skip to the end.
+  const [ceremonyStage, setCeremonyStage] = useState<CeremonyStage>(CEREMONY_DONE);
+  const ceremonyStageRef = useRef<CeremonyStage>(CEREMONY_DONE);
+  const ceremonyTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const ceremonyPrevStepRef = useRef(step);
+  const podiumSize = Math.min(3, players.length);
+  const ceremonyCtxRef = useRef({ playSound, isCalmMode, podiumSize, everyoneBust: false });
+  ceremonyCtxRef.current = { playSound, isCalmMode, podiumSize, everyoneBust: !winner && players.length > 0 && players.every(p => p.money <= 0) };
+  const enterCeremonyStage = useCallback((stage: CeremonyStage) => {
+    const ctx = ceremonyCtxRef.current;
+    const cue = cueForStage(stage, ctx.podiumSize);
+    if (cue === 'drumroll' && !ctx.isCalmMode) ctx.playSound('drumroll');
+    if (cue === 'step' && !ctx.isCalmMode) ctx.playSound('chipClink', 100);
+    if (cue === 'winner') {
+      ctx.playSound('gameOver');
+      setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+    }
+    ceremonyStageRef.current = stage;
+    setCeremonyStage(stage);
+  }, []);
+  const skipCeremony = useCallback(() => {
+    ceremonyTimersRef.current.forEach(clearTimeout);
+    ceremonyTimersRef.current = [];
+    if (ceremonyStageRef.current < 3) enterCeremonyStage(3);
+    enterCeremonyStage(CEREMONY_DONE);
+  }, [enterCeremonyStage]);
+  useEffect(() => {
+    const cameFrom = ceremonyPrevStepRef.current;
+    ceremonyPrevStepRef.current = step;
+    if (step !== 'GAME_OVER' || cameFrom === 'GAME_OVER') return;
+    const ctx = ceremonyCtxRef.current;
+    const reduced = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (ctx.isCalmMode || reduced || ctx.everyoneBust || ctx.podiumSize === 0) {
+      enterCeremonyStage(3);
+      enterCeremonyStage(CEREMONY_DONE);
+      return;
+    }
+    enterCeremonyStage(0);
+    ceremonyTimersRef.current = ceremonyTimes(ctx.podiumSize).map((at, i) => setTimeout(() => enterCeremonyStage((i + 1) as CeremonyStage), at));
+    return () => {
+      ceremonyTimersRef.current.forEach(clearTimeout);
+      ceremonyTimersRef.current = [];
+      ceremonyPrevStepRef.current = cameFrom; // so a remount (React strict mode) starts it again
+    };
+  }, [step, enterCeremonyStage]);
 
   const handleToggleSettingsDeckExpanded = useCallback(() => {
     playSound('click');
@@ -4124,8 +4174,7 @@ export function App() {
     const { isGameOver, bailoutEnabled: isBailoutEnabled } = checkGameEnd(gameEndInput);
 
     if (isGameOver) {
-        playSound('gameOver');
-        setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+        // The fanfare and the coin shower wait for the winner's moment in the ceremony (V9).
         setWinner(pickWinnerAtGameEnd(gameEndInput));
         prefetchRef.current = null;
         setStep('GAME_OVER');
@@ -4191,8 +4240,7 @@ export function App() {
   }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats, currentSentence]);
 
   const handleEndGameEarly = useCallback(() => {
-    playSound('gameOver');
-    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+    playSound('click');
     setWinner(pickWinnerWhenEndedEarly({ players, gameMode, targetAmount }));
     prefetchRef.current = null;
     setStep('GAME_OVER');
@@ -7284,10 +7332,33 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             { place: 3, block: 'h-16 sm:h-20', avatar: 'w-14 h-14 sm:w-16 sm:h-16 text-[30px] sm:text-[34px]', delay: '0.45s' },
           ];
           const confettiColours = ['#f1cf72', '#e2b04a', '#86efac', '#fda4af', '#a5e3ff', '#fffdf7'];
+          // Package V9: the ceremony reveals each part in turn; everything stays in the page
+          // (only faded), so screen readers and the buttons below never wait for it.
+          const stage = ceremonyStage;
+          const ceremonyOn = stage < CEREMONY_DONE;
+          const winnerShown = stage >= 3;
+          const reveal = (shown: boolean) => `transition-[opacity,transform] duration-500 ease-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`;
+          const classLine = classResultLine(buildReport(roundHistory, players));
+          const saveMoment = () => {
+            playSound('click');
+            const places = podiumOrder
+              .map((p, idx) => (p ? { place: podiumStyle[idx].place, name: p.name, money: p.money } : null))
+              .filter((x): x is { place: number; name: string; money: number } => x !== null);
+            const url = drawMoment(places, winner ? `${winner.name} wins!` : 'Table closed', classLine);
+            if (!url) return;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `grammar-casino-${new Date().toISOString().slice(0, 10)}.png`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            logEvent('info', 'Saved the podium picture');
+          };
           return (
           <div className="relative w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-12 text-center animate-gc-fade">
-            {/* Confetti, once. Calm mode and reduced motion skip it. */}
-            {winner && !isCalmMode && (
+            {/* Confetti, once, on the winner's beat, only when the 3D table (and its coin shower)
+                is off. Calm mode and reduced motion skip it. */}
+            {winner && winnerShown && !isCalmMode && qualityTier === 'off' && (
               <div className="gc-confetti pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
                 {Array.from({ length: 70 }, (_, i) => (
                   <span
@@ -7308,8 +7379,20 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
 
             <p className="text-gc-small font-semibold text-gc-quiet">Final results</p>
-            <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">Table closed</h1>
-            <p className="mt-2 text-gc-lead text-gc-quiet text-balance">
+            <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">
+              {ceremonyOn && !winnerShown ? 'The vault opens…' : 'Table closed'}
+            </h1>
+            {ceremonyOn && (
+              <button
+                type="button"
+                onClick={() => { playSound('click'); skipCeremony(); }}
+                data-testid="ceremony-skip"
+                className="absolute right-4 top-4 h-11 px-4 rounded-full border border-gc-line/20 bg-gc-card/80 text-gc-small font-semibold text-gc-quiet hover:text-gc-ink cursor-pointer"
+              >
+                Skip
+              </button>
+            )}
+            <p className={`mt-2 text-gc-lead text-gc-quiet text-balance ${reveal(winnerShown)}`}>
               {winner ? (
                 <>
                   <b className="text-gc-ink">{winner.name}</b> wins with <b className="text-gc-money tabular-nums">${winner.money.toLocaleString()}</b>
@@ -7330,7 +7413,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                   const st = podiumStyle[idx];
                   const isFirst = st.place === 1;
                   return (
-                    <li key={p.id} className="w-24 sm:w-40 flex flex-col items-center animate-gc-rise" style={{ animationDelay: st.delay }}>
+                    <li
+                      key={p.id}
+                      className={`w-24 sm:w-40 flex flex-col items-center ${reveal(placeShown(st.place, stage))}`}
+                      data-shown={placeShown(st.place, stage) ? 'true' : 'false'}
+                    >
                       <span className="sr-only">Place {st.place}: </span>
                       {isFirst && winner && <span className="text-[30px] sm:text-[38px] leading-none mb-1" aria-hidden="true">👑</span>}
                       <span className={`${st.avatar} rounded-full bg-gc-card p-1 grid place-items-center leading-none ring-4 ${isFirst ? 'ring-gc-gold' : 'ring-gc-line/20'} shadow-gc-1`} aria-hidden="true">
@@ -7354,6 +7441,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
             {podium.length > 0 && !everyoneBust && <div className="h-px bg-gc-line/[0.14] max-w-xl mx-auto" aria-hidden="true" />}
 
+            {classLine && (
+              <p className={`mt-6 mx-auto max-w-2xl text-gc-lead font-semibold text-gc-ink text-balance ${reveal(stage >= CEREMONY_DONE)}`} data-testid="class-result">
+                {classLine}
+              </p>
+            )}
+
             {everyoneBust && (
               <div className="mt-8 mx-auto max-w-md gc-surface rounded-gc-lg p-8">
                 <div className="text-[56px] leading-none mb-3" aria-hidden="true">🏛️</div>
@@ -7372,6 +7465,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
                 <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to the cloud</span>
               </ActionButton>
+              {podium.length > 0 && !everyoneBust && (
+                <ActionButton onClick={saveMoment} variant="ghost" className="h-12 px-5 text-gc-body font-semibold" title="Download a picture of the podium (nicknames only) for the class group">
+                  Save this moment
+                </ActionButton>
+              )}
             </div>
 
             {/* The session report */}

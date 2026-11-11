@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReport, correctionAccepted, filterHistory, reportToCsv } from '../game/report';
+import { buildReport, classResultLine, correctionAccepted, filterHistory, reportToCsv } from '../game/report';
 import type { Player, RoundHistoryRecord, RoundPlayerResult } from '../types';
 
 const player = (id: number, name: string, money: number): Player => ({ id, name, money, avatar: 'a', history: [], winStreak: 0, effects: [] } as unknown as Player);
@@ -55,5 +55,16 @@ describe('buildReport (package L7)', () => {
     expect(lines[0]).toBe('Rank,Student,Final money,Bets,Right,Percent right,Corrections tried,Corrections accepted');
     expect(lines[1]).toBe("1,'=HACK(),1300,3,3,100,1,1");
     expect(lines[3]).toBe('3,"Bruno, Jr",700,3,1,33,1,0');
+  });
+});
+
+describe('classResultLine (package V9)', () => {
+  it('hands the lesson back: overall, best topic, topic to review', () => {
+    expect(classResultLine(buildReport(history, players))).toBe('Together you got 56% right. Best topic: Articles. To review: Tenses.');
+  });
+  it('says nothing for a game without bets, and no best topic when all topics tie', () => {
+    expect(classResultLine(buildReport([], players))).toBe('');
+    const even = [hand(1, 'A', true, [res(1, true), res(2, true)]), hand(2, 'B', true, [res(1, true), res(2, true)])];
+    expect(classResultLine(buildReport(even, players))).toBe('Together you got 100% right.');
   });
 });
