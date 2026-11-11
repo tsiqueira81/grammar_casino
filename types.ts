@@ -255,6 +255,8 @@ export interface RoundHistoryRecord {
   theme: string;
   playerResults: RoundPlayerResult[];
   timestamp?: number;
+  /** Package L7: when the sentence was shown, so the report can say how long each hand took. */
+  dealtAt?: number;
   /** Package L7: "Got it" / "Still confused" answers from phones after the reveal (package L5). */
   feedback?: { gotIt: number; confused: number };
 }

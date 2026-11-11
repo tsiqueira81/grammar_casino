@@ -64,6 +64,41 @@ export interface GameReport {
   teachNext: string[];
   /** Hands with at least one "Still confused", most confused first. */
   stillConfused: ConfusedItem[];
+  /** Package L7: how long hands took, from the deal to the reveal. Null when no hand was timed. */
+  pace: ReportPace | null;
+}
+
+export interface ReportPace {
+  averageSeconds: number;
+  /** Up to three hands that took longest, longest first. */
+  slowest: { round: number; text: string; seconds: number }[];
+}
+
+/** A hand that took longer than this was left open (a break, a talk), so it is not counted. */
+export const PACE_MAX_SECONDS = 20 * 60;
+
+export function handSeconds(r: Pick<RoundHistoryRecord, 'dealtAt' | 'timestamp'>): number | null {
+  if (typeof r.dealtAt !== 'number' || typeof r.timestamp !== 'number') return null;
+  const s = Math.round((r.timestamp - r.dealtAt) / 1000);
+  return s > 0 && s <= PACE_MAX_SECONDS ? s : null;
+}
+
+export function reportPace(history: RoundHistoryRecord[]): ReportPace | null {
+  const timed = history
+    .map((r) => ({ round: r.round, text: r.sentence.text, seconds: handSeconds(r) }))
+    .filter((t): t is { round: number; text: string; seconds: number } => t.seconds !== null);
+  if (!timed.length) return null;
+  const averageSeconds = Math.round(timed.reduce((sum, t) => sum + t.seconds, 0) / timed.length);
+  const slowest = timed.length >= 3 ? [...timed].sort((a, b) => b.seconds - a.seconds || a.round - b.round).slice(0, 3) : [];
+  return { averageSeconds, slowest };
+}
+
+/** "45 s", "1 min 20 s", "3 min". */
+export function formatSeconds(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m === 0) return `${s} s`;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
 }
 
 const TYPE_LABEL: Record<QuestionType, string> = QUESTION_TYPE_LABEL;
@@ -174,6 +209,7 @@ export function buildReport(history: RoundHistoryRecord[], players: Player[]): G
       .map((r) => ({ round: r.round, text: r.sentence.text, confused: r.feedback!.confused, gotIt: r.feedback!.gotIt }))
       .sort((a, b) => b.confused - a.confused || a.round - b.round)
       .slice(0, 5),
+    pace: reportPace(history),
   };
 }
 

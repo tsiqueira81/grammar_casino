@@ -29,6 +29,11 @@ test("the teacher's own sentences are dealt first", async ({ page }) => {
     await card(page, name).getByPlaceholder('Your bet').fill('50');
   }
   await clickButton(page, /^Reveal the answer/);
+  // Package L7: the report card says how long the hand took.
+  await clickButton(page, /^Report card \(1\)/);
+  await expect(page.getByTestId('report-pace')).toContainText(/On average \d+ s from the deal to the reveal/);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('report-pace')).toHaveCount(0);
   await clickButton(page, 'Deal the next hand');
   await expect(sentence(page)).toContainText('My dog sleep in the garden.');
   expect(errors).toEqual([]);

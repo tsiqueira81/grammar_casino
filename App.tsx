@@ -870,6 +870,16 @@ export function App() {
   const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
   // Package G7: the teacher's game clock, from the first deal.
   const [gameStartedAt, setGameStartedAt] = useState<number | null>(null);
+  /** Package L7: when this hand's sentence was shown, for "time per hand" in the report. */
+  const handShownAtRef = useRef<number | null>(null);
+  const handShownTextRef = useRef<string>('');
+  useEffect(() => {
+    if (step !== 'IN_GAME' || isLoading || !currentSentence) return;
+    const key = `${currentRound}|${currentSentence.text}`;
+    if (handShownTextRef.current === key) return;
+    handShownTextRef.current = key;
+    handShownAtRef.current = Date.now();
+  }, [step, isLoading, currentSentence, currentRound]);
   const [clockNow, setClockNow] = useState(() => Date.now());
   useEffect(() => {
     if (step === 'PLAYER_SETUP') setGameStartedAt(null);
@@ -4390,6 +4400,7 @@ export function App() {
         theme: settings.theme === 'Custom' ? customTheme : settings.theme,
         playerResults: newRoundPlayerResults,
         timestamp: Date.now(),
+        ...(handShownAtRef.current ? { dealtAt: handShownAtRef.current } : {}),
       };
       setRoundHistory(prev => [...prev, historyRecord]);
     }

@@ -4,7 +4,7 @@ import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Print
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { getAlternativeAcceptedAnswers } from '../utils/roundSettlement';
 import { PlayerAvatar } from './PlayerAvatar';
-import { buildReport, filterHistory, reportToCsv, type ReportFilter } from '../game/report';
+import { buildReport, filterHistory, formatSeconds, reportToCsv, type ReportFilter } from '../game/report';
 import { getAvatarPlainText } from '../utils/characterAvatars';
 import { isGapType, isOptionType, isTypedAnswerType, questionTypeLabel } from '../game/questionTypes';
 
@@ -416,6 +416,26 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                 </li>
               ))}
             </ol>
+          </div>
+        )}
+
+        {/* Package L7: how long the hands took */}
+        {report.pace && (
+          <div className="mb-5 p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]" data-testid="report-pace">
+            <div className={label}>Time per hand</div>
+            <p className="m-0 mt-1 text-gc-body text-gc-ink">
+              On average {formatSeconds(report.pace.averageSeconds)} from the deal to the reveal.
+            </p>
+            {report.pace.slowest.length > 0 && (
+              <ol className="m-0 mt-2 pl-5 text-gc-small text-gc-ink space-y-1">
+                {report.pace.slowest.map(h => (
+                  <li key={h.round}>
+                    <span className="font-sentence italic">{h.text}</span>
+                    <span className="block text-gc-quiet">Hand {h.round}: {formatSeconds(h.seconds)}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         )}
 
