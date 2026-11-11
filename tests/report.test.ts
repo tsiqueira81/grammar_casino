@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReport, classResultLine, correctionAccepted, filterHistory, reportToCsv } from '../game/report';
+import { buildReport, classResultLine, correctionAccepted, filterHistory, reportToCsv, studentReview } from '../game/report';
 import type { Player, RoundHistoryRecord, RoundPlayerResult } from '../types';
 
 const player = (id: number, name: string, money: number): Player => ({ id, name, money, avatar: 'a', history: [], winStreak: 0, effects: [] } as unknown as Player);
@@ -82,5 +82,23 @@ describe('still confused in the report (package L7)', () => {
 
   it('is empty when no phone answered', () => {
     expect(buildReport(history, players).stillConfused).toEqual([]);
+  });
+});
+
+describe('student slip (package L7)', () => {
+  const mk = (round: number, phrase: string, win: boolean, extra: Record<string, unknown> = {}): RoundHistoryRecord =>
+    ({ round, topic: 'T', level: 'B1', theme: 't', sentence: { text: `S${round}`, isCorrect: false, correction: `Fixed ${round}`, explanation: `Why ${round}`, grammarPhrase: phrase, ...extra }, playerResults: [res(1, win)] } as RoundHistoryRecord);
+
+  it('picks up to three missed hands, newest first, one per grammar point', () => {
+    const h = [mk(1, 'since', false), mk(2, 'since', false), mk(3, 'for', true), mk(4, 'articles', false), mk(5, 'since', false)];
+    expect(studentReview(h, 1).map(i => i.round)).toEqual([5, 4, 2]);
+  });
+
+  it('gives the right answer for gap hands and says when a sentence was right', () => {
+    const h = [mk(1, 'a', false, { questionType: 'multipleChoice', correctAnswer: 'had' }), mk(2, 'b', false, { isCorrect: true })];
+    const items = studentReview(h, 1);
+    expect(items.find(i => i.round === 1)!.answer).toBe('had');
+    expect(items.find(i => i.round === 2)!.answer).toBe('The sentence was already right.');
+    expect(studentReview(h, 99)).toEqual([]);
   });
 });

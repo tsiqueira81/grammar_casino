@@ -47,6 +47,7 @@ import {
 import { SFX_MUTED_STORAGE_KEY } from '../utils/soundEngine';
 import { TEXT_SIZES, applyStudentPrefs, readStudentPrefs, saveStudentPrefs, type StudentPrefs } from '../utils/studentPrefs';
 import { useFocusTrap } from '../utils/useFocusTrap';
+import { studentReview } from '../game/report';
 
 /** Package S5: how long a toast stays, and how many stack at once. */
 const TOAST_MS = 7000;
@@ -2142,6 +2143,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           });
           const myAccuracy = myTotalHands > 0 ? Math.round((myWins / myTotalHands) * 100) : 0;
           const isMeChampion = view.winner?.id === view.me.id;
+          // Package L7: the student's own slip, up to three missed hands to review.
+          const toReview = studentReview(history, view.me.id);
 
           const handleDownloadPdf = () => {
             if (isGeneratingPdf || history.length === 0) return;
@@ -2241,6 +2244,23 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   </div>
                 </div>
               </div>
+
+              {toReview.length > 0 && (
+                <div className="gc-surface rounded-[20px] px-[18px] py-4 space-y-3" data-testid="my-review">
+                  <h2 className="m-0 text-gc-small font-bold text-gc-quiet">
+                    {toReview.length === 1 ? 'One to review' : `${toReview.length === 2 ? 'Two' : 'Three'} to review`}
+                  </h2>
+                  <ol className="m-0 p-0 list-none space-y-3">
+                    {toReview.map(item => (
+                      <li key={item.round} className="rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.1] px-3 py-2.5">
+                        <p className="m-0 font-sentence italic text-gc-body text-gc-ink">{item.text}</p>
+                        {item.answer && <p className="m-0 mt-1 text-gc-small font-bold text-gc-win">{item.answer}</p>}
+                        {item.explanation && <p className="m-0 mt-1 text-gc-small text-gc-quiet">{item.explanation}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
 
               {history.length > 0 && (
                 <div className="space-y-2">

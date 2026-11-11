@@ -66,5 +66,14 @@ test('a phone in a live room shows the Final Table', async ({ page: host, browse
 
   await expect(phone.getByTestId('phone-special-hand')).toContainText('Final Table');
   await expect(phone.getByTestId('phone-special-hand')).toContainText('Every win pays double');
+
+  // Package L7: a missed hand comes back on the phone's slip at game over, with the right answer.
+  await phone.getByRole('button', { name: new RegExp(`^[A-D] ${KNOWN.multipleChoiceWrong}$`) }).click();
+  await phone.getByRole('textbox', { name: 'Your bet in dollars' }).fill('50');
+  await clickButton(phone, /^Lock in \$50 on/);
+  await clickButton(host, /^Reveal the answer/);
+  await clickButton(host, /See the final results/);
+  await expect(phone.getByTestId('my-review')).toContainText('One to review');
+  await expect(phone.getByTestId('my-review')).toContainText(KNOWN.multipleChoiceAnswer);
   await context.close();
 });

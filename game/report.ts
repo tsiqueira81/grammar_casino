@@ -212,3 +212,42 @@ export function classResultLine(report: Pick<GameReport, 'bets' | 'accuracy' | '
   if (review) parts.push(`To review: ${review.label}.`);
   return parts.join(' ');
 }
+
+/** Package L7: one item on a student's slip. */
+export interface ReviewItem {
+  round: number;
+  text: string;
+  /** The right sentence or answer. */
+  answer: string;
+  explanation: string;
+}
+
+/**
+ * Package L7: a student's own slip at game over: up to three hands they missed to review, the
+ * most recent first, one per grammar point when possible.
+ */
+export function studentReview(history: RoundHistoryRecord[], playerId: number, max = 3): ReviewItem[] {
+  const missed = history
+    .filter((r) => r.playerResults.some((p) => p.playerId === playerId && !p.isWin))
+    .slice()
+    .reverse();
+  const picked: RoundHistoryRecord[] = [];
+  const seen = new Set<string>();
+  for (const r of missed) {
+    const key = (r.sentence.grammarPhrase || r.topic || '').toLowerCase();
+    if (key && seen.has(key)) continue;
+    seen.add(key);
+    picked.push(r);
+    if (picked.length === max) break;
+  }
+  for (const r of missed) {
+    if (picked.length === max) break;
+    if (!picked.includes(r)) picked.push(r);
+  }
+  return picked.map((r) => {
+    const s = r.sentence;
+    const gap = s.questionType && s.questionType !== 'binary';
+    const answer = gap ? s.correctAnswer || s.correction || '' : s.isCorrect ? 'The sentence was already right.' : s.correction || '';
+    return { round: r.round, text: s.text, answer, explanation: s.explanation || '' };
+  });
+}
