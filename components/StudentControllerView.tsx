@@ -1225,6 +1225,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {isRoundTimeUp && !view.lockedIn ? "Time's up" : "You're locked in"}
                 </h1>
                 <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">Watch the projector for the reveal.</p>
+                {view.betsSplit && (
+                  <p className="mt-2 mb-0 text-gc-body font-semibold text-gc-ink" data-testid="room-split">
+                    The room: {view.betsSplit}
+                  </p>
+                )}
                 <span className="mt-4 max-w-full min-h-10 px-4 py-1.5 rounded-full inline-flex items-center gap-1.5 text-[17px] font-extrabold bg-gc-line/[0.07] border border-gc-line/[0.12]">
                   {pickText ? (
                     <>

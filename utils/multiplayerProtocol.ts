@@ -151,6 +151,8 @@ export interface PlayerViewPayload {
   paused?: boolean;
   /** Package G6: the special hand being played, shown on the phone. */
   specialHand?: SpecialHandBanner | null;
+  /** Package S4: once bets close, the room's split ("62% Valid · 38% Flawed"), the same for everyone. */
+  betsSplit?: string | null;
   /** Package G6 Spotlight: this player's next power-up draw is free. */
   freeDraw?: boolean;
   /** Package T3: only on the teacher's remote, never on a student's phone. */
@@ -794,6 +796,7 @@ export const SHARED_VIEW_KEYS = [
   'calmMode',
   'paused',
   'specialHand',
+  'betsSplit',
 ] as const satisfies readonly (keyof PlayerViewPayload)[];
 
 export interface SplitPlayerViews {

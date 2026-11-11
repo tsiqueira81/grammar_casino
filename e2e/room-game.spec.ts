@@ -123,6 +123,10 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await clickButton(phones[i], new RegExp(`^Lock in \\$${players[i].bet} on`));
   }
 
+  // Package S4: once everyone is in, each phone sees the room's split (no right answer yet).
+  await expect(phones[0].getByTestId('room-split')).toContainText(`67% `);
+  await expect(phones[2].getByTestId('room-split')).toContainText('33%');
+
   await clickButton(host, /^Reveal the answer/);
 
   for (let i = 0; i < players.length; i++) {

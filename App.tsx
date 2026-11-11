@@ -16,7 +16,7 @@ import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
 import { deckSummary, parseDeckText, sentenceRecordOf } from './game/teacherDeck';
 import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type FreeDraws, type MissTally, type SecondLook } from './game/spacing';
-import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
+import { answerSplit, reactionCounts, recordReaction, roomSplitLine, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
@@ -3908,6 +3908,23 @@ export function App() {
         : null,
       freeDraws,
     });
+    // Package S4: once bets close (everyone here locked in, or time is up), the phones see the room's split.
+    if (step === 'IN_GAME' && currentSentence && !isPaused) {
+      const here = activePlayers.filter(p => mpSeats[p.id] && !mpAwayIds.includes(p.id));
+      const closed = (here.length > 0 && here.every(p => mpSeats[p.id]?.lockedIn)) || (isTurnTimerEnabled && mpRoundTimer.status === 'locked');
+      if (closed) {
+        const qt = (currentSentence.questionType || 'binary') as QuestionType;
+        const line = roomSplitLine(qt, answerSplit({
+          qType: qt,
+          bets,
+          playerIds: here.map(p => p.id),
+          sentenceIsCorrect: currentSentence.isCorrect,
+          options: currentSentence.options,
+          isRightAnswer: () => false,
+        }));
+        if (line) for (const id of Object.keys(views)) views[Number(id)] = { ...views[Number(id)], betsSplit: line };
+      }
+    }
     // Package T3: the remote gets the shared table plus its own view, never a player's.
     const pairNow = remotePair;
     const base = Object.values(views)[0] as unknown as Record<string, unknown> | undefined;
