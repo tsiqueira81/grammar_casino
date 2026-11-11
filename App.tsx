@@ -109,6 +109,7 @@ import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
 import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from './game/gameLength';
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
+import { AWARDS_KEY, computeAwards } from './game/awards';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
 import FirstRunCoach from './components/FirstRunCoach';
@@ -929,6 +930,11 @@ export function App() {
   useEffect(() => {
     safeLocalStorage.setItem(ADAPTIVE_LEVEL_KEY, adaptiveLevelOn ? 'on' : 'off');
   }, [adaptiveLevelOn]);
+  // Package G3 / V9: end-of-game awards, off unless the teacher turns them on.
+  const [awardsOn, setAwardsOn] = useState<boolean>(() => safeLocalStorage.getItem(AWARDS_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(AWARDS_KEY, awardsOn ? 'on' : 'off');
+  }, [awardsOn]);
   const adaptLastChangeRef = useRef(0);
   const [levelNotice, setLevelNotice] = useState<{ round: number; text: string } | null>(null);
   useEffect(() => {
@@ -6108,6 +6114,28 @@ export function App() {
                   </label>
                 </section>
 
+                {/* Package G3 / V9: awards at the end */}
+                <section className={sectionCls} aria-labelledby="setup-awards">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-awards" className={`block ${sectionTitle}`}>Awards at the end</span>
+                      <span className={`block ${sectionHint}`}>
+                        After the winner, up to five awards (sharpest eye, hot streak, best corrector, comeback, boldest bet), each to a different student. They change no money.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={awardsOn}
+                      onClick={() => { playSound('click'); setAwardsOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${awardsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${awardsOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Awards at the end</span>
+                    </button>
+                  </label>
+                </section>
+
                 {/* Package L9: speaking after the reveal */}
                 <section className={sectionCls} aria-labelledby="setup-say-it">
                   <label className="flex items-center justify-between gap-4 cursor-pointer">
@@ -8168,6 +8196,23 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               </ol>
             )}
             {podium.length > 0 && !everyoneBust && <div className="h-px bg-gc-line/[0.14] max-w-xl mx-auto" aria-hidden="true" />}
+
+            {awardsOn && (() => {
+              const awards = computeAwards(roundHistory, startingCash);
+              if (awards.length === 0) return null;
+              return (
+                <ul className={`mt-6 mx-auto max-w-3xl p-0 list-none grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 ${reveal(stage >= CEREMONY_DONE)}`} data-testid="awards" aria-label="Awards">
+                  {awards.map(a => (
+                    <li key={a.id} className="gc-surface rounded-gc-lg px-3 py-4 text-center">
+                      <div className="text-[34px] leading-none" aria-hidden="true">{a.icon}</div>
+                      <div className="mt-2 text-gc-small font-bold text-gc-quiet">{a.title}</div>
+                      <div className="text-gc-lead font-extrabold text-gc-ink break-words">{a.name}</div>
+                      <div className="text-gc-cap text-gc-quiet">{a.detail}</div>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
 
             {classLine && (
               <p className={`mt-6 mx-auto max-w-2xl text-gc-lead font-semibold text-gc-ink text-balance ${reveal(stage >= CEREMONY_DONE)}`} data-testid="class-result">
