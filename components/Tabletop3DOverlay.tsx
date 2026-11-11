@@ -3,6 +3,18 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
+/** Is WebGL drawn in software here (SwiftShader, llvmpipe, Microsoft Basic Render Driver)? */
+export function isSoftwareRenderer(renderer: THREE.WebGLRenderer): boolean {
+  try {
+    const gl = renderer.getContext();
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    return /swiftshader|llvmpipe|softpipe|software|basic render driver/i.test(name);
+  } catch {
+    return false;
+  }
+}
+
 export interface Seat3DState {
   playerId: number;
   seatIndex: number;
@@ -223,6 +235,13 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         powerPreference: 'high-performance',
       });
     } catch {
+      return;
+    }
+    // No 3D table on a computer that draws WebGL in software (no graphics acceleration, as
+    // on some school PCs): building the scene there froze the whole screen for seconds after a
+    // reload. The table is decoration only, so the game goes on without it.
+    if (isSoftwareRenderer(renderer)) {
+      renderer.dispose();
       return;
     }
 
