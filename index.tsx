@@ -8,6 +8,8 @@ import '@fontsource-variable/playfair-display/wght.css';
 import '@fontsource-variable/playfair-display/wght-italic.css';
 import '@fontsource-variable/cinzel/wght.css';
 import './index.css';
+import { RecoverBoundary } from './components/RecoverBoundary';
+import { isE2eMode } from './utils/e2eContent';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -18,11 +20,19 @@ const root = ReactDOM.createRoot(rootElement);
 
 // Package S1: a phone opening a room link (?room=CODE) downloads only the phone app.
 // Everyone else, and a phone that leaves the room, gets the full teacher app.
+// Browser tests only (?e2e=1&crash=1 on the dev server): a screen that crashes, to check the way out.
+function E2eCrash(): React.ReactElement {
+  throw new Error('Test crash (e2e)');
+}
+const e2eCrash = isE2eMode() && new URLSearchParams(window.location.search).get('crash') === '1';
+
 async function showTeacherApp() {
   const { App } = await import('./App');
   root.render(
     <React.StrictMode>
-      <App />
+      <RecoverBoundary who="teacher">
+        {e2eCrash ? <E2eCrash /> : <App />}
+      </RecoverBoundary>
     </React.StrictMode>
   );
 }
@@ -37,7 +47,9 @@ async function showStudentApp(roomCode: string) {
   };
   root.render(
     <React.StrictMode>
-      <StudentApp initialRoomCode={roomCode} onExit={leave} />
+      <RecoverBoundary who="phone">
+        {e2eCrash ? <E2eCrash /> : <StudentApp initialRoomCode={roomCode} onExit={leave} />}
+      </RecoverBoundary>
     </React.StrictMode>
   );
 }
