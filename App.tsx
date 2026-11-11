@@ -99,6 +99,7 @@ import {
   isValidKeyWordTransformationPhrase,
   buildAudiencePollSummary,
   isPlayerUnderdog,
+  SHARED_VIEW_KEYS,
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
@@ -129,6 +130,8 @@ import {
 } from './services/firebaseService';
 import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType, questionTypeLabel } from './game/questionTypes';
 import { wordOrderHint } from './game/newFormats';
+import { REMOTE_STORAGE_KEY, buildRemoteView, isRemoteAction, isRemoteAvatar, newRemoteKey, remoteAvatar, remoteLink } from './game/teacherRemote';
+import { RemotePairModal } from './components/RemotePairModal';
 import { SpotErrorSentence, WordTiles, newFormatTask } from './components/NewFormatSentence';
 
 const HOUSE_BAILOUT_AMOUNT = 150;
@@ -571,6 +574,29 @@ export function App() {
   const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
   // Package L5: "Got it" / "Still confused" from the phones, per hand.
   const [handReactions, setHandReactions] = useState<HandReactions>({});
+  // Package T3: the teacher's phone as a remote (one per room).
+  const [remotePair, setRemotePair] = useState<{ code: string; key: string; seatId: number | null } | null>(() => {
+    try {
+      const raw = safeLocalStorage.getItem(REMOTE_STORAGE_KEY);
+      const saved = raw ? JSON.parse(raw) : null;
+      return saved && typeof saved.code === 'string' && typeof saved.key === 'string' ? { code: saved.code, key: saved.key, seatId: typeof saved.seatId === 'number' ? saved.seatId : null } : null;
+    } catch {
+      return null;
+    }
+  });
+  const remotePairRef = useRef(remotePair);
+  remotePairRef.current = remotePair;
+  /** Remote seats that are no longer the remote (unpaired, or a second phone): their phones are told so, and nothing they send counts. */
+  const [retiredRemoteSeats, setRetiredRemoteSeats] = useState<number[]>([]);
+  const retiredRemoteSeatsRef = useRef(retiredRemoteSeats);
+  retiredRemoteSeatsRef.current = retiredRemoteSeats;
+  const [remoteNotice, setRemoteNotice] = useState<string | null>(null);
+  const [showRemotePair, setShowRemotePair] = useState(false);
+  const [remoteBase, setRemoteBase] = useState('');
+  useEffect(() => {
+    if (remotePair) safeLocalStorage.setItem(REMOTE_STORAGE_KEY, JSON.stringify(remotePair));
+    else safeLocalStorage.removeItem(REMOTE_STORAGE_KEY);
+  }, [remotePair]);
   // Package L7: the phones' "Got it" / "Still confused" counts go into each hand's record, so the
   // report and past reports keep them.
   useEffect(() => {
@@ -3452,6 +3478,39 @@ export function App() {
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
     mpEventHandlerRef.current = (event: HostEventPayload) => {
+      // Package T3: the teacher's remote is never a player.
+      const pair = remotePairRef.current;
+      if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.seat && isRemoteAvatar(event.seat.avatar)) {
+        const seatId = event.seat.playerId;
+        const keyOk = Boolean(pair && pair.code === mpRoomCode && event.seat.avatar === remoteAvatar(pair.key));
+        // One remote at a time: a second phone with the same link is refused.
+        if (keyOk && pair && (pair.seatId === null || pair.seatId === seatId)) {
+          setRetiredRemoteSeats(prev => prev.filter(id => id !== seatId));
+          setRemotePair({ ...pair, seatId });
+          setShowRemotePair(false);
+          setRemoteNotice(null);
+          if (pair.seatId === null) playSound('success');
+          logEvent('room', 'Teacher remote paired');
+        } else {
+          // Not kicked: a kick bans the phone from the room, and it may be a student who scanned the code.
+          logEvent('room', 'A remote link that is not current was refused');
+          setRetiredRemoteSeats(prev => (prev.includes(seatId) ? prev : [...prev, seatId]));
+        }
+        return;
+      }
+      if (event.playerId !== undefined && (event.playerId === pair?.seatId || retiredRemoteSeatsRef.current.includes(event.playerId))) {
+        if (event.playerId === pair?.seatId && event.type === 'STUDENT_INTENT' && event.intent?.type === 'REMOTE_COMMAND') {
+          const action = event.intent.action;
+          const button = isRemoteAction(action) && typeof document !== 'undefined' ? findHotkeyButton(document, action) : null;
+          if (button) {
+            button.click();
+            setRemoteNotice(null);
+          } else {
+            setRemoteNotice('That is not available right now.');
+          }
+        }
+        return;
+      }
       if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.playerId !== undefined) {
         mpLastSeenRef.current[event.playerId] = Date.now();
         const seenId = event.playerId;
@@ -3746,6 +3805,7 @@ export function App() {
     mpControllerRef.current = controller;
     const seats: Record<number, MultiplayerSeat> = {};
     controller.getSeats().forEach((seat) => {
+      if (isRemoteAvatar(seat.avatar)) return; // the teacher's remote is never a player
       seats[seat.playerId] = seat;
     });
     setMpSeats(seats);
@@ -3827,8 +3887,39 @@ export function App() {
         : null,
       freeDraws,
     });
+    // Package T3: the remote gets the shared table plus its own view, never a player's.
+    const pairNow = remotePair;
+    const base = Object.values(views)[0] as unknown as Record<string, unknown> | undefined;
+    const shared: Record<string, unknown> = {};
+    if (base) for (const k of SHARED_VIEW_KEYS) if (base[k] !== undefined) shared[k] = base[k];
+    for (const id of retiredRemoteSeats) {
+      if (id !== pairNow?.seatId) views[id] = { ...shared, remote: { ended: true } } as unknown as typeof views[number];
+    }
+    if (pairNow && pairNow.seatId !== null && pairNow.code === mpRoomCode) {
+      views[pairNow.seatId] = {
+        ...shared,
+        remote: buildRemoteView({
+          step,
+          round: currentRound,
+          totalRounds: gameMode === 'rounds' ? Number(totalRounds) || null : null,
+          paused: isPaused,
+          sentence: currentSentence,
+          players: activePlayers.map(p => ({ id: p.id, name: p.name })),
+          lockedIds: Object.values(mpSeats).filter(s => s.lockedIn).map(s => s.playerId),
+          awayIds: mpAwayIds,
+          reactions: handReactions[currentRound] ? reactionCounts(handReactions, currentRound) : null,
+          notice: remoteNotice,
+        }),
+      } as unknown as typeof views[number];
+    }
     mpControllerRef.current.pushViews(views);
   }, [
+    remotePair,
+    retiredRemoteSeats,
+    remoteNotice,
+    handReactions,
+    mpAwayIds,
+    activePlayers,
     freeDraws,
     isSentenceHiddenForListening,
     isCalmMode,
@@ -8822,7 +8913,28 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           onKickPlayer={handleKickMpPlayer}
           onCloseRoom={handleCloseMpRoom}
           onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
+          onOpenRemote={(base) => { playSound('click'); setRemoteBase(base); setShowMpLobbyModal(false); setShowRemotePair(true); }}
+          remotePaired={Boolean(remotePair && remotePair.code === mpRoomCode && remotePair.seatId !== null)}
           playSound={playSound}
+        />
+      )}
+      {showRemotePair && mpRoomCode && (
+        <RemotePairModal
+          link={remotePair && remotePair.code === mpRoomCode && remotePair.seatId === null ? remoteLink(remoteBase, mpRoomCode, remotePair.key) : null}
+          paired={Boolean(remotePair && remotePair.code === mpRoomCode && remotePair.seatId !== null)}
+          onMakeLink={() => {
+            setRemotePair({ code: mpRoomCode, key: newRemoteKey(), seatId: null });
+          }}
+          onUnpair={() => {
+            if (remotePair?.seatId != null) {
+              // That phone is told it is no longer the remote.
+              const old = remotePair.seatId;
+              setRetiredRemoteSeats(prev => (prev.includes(old) ? prev : [...prev, old]));
+            }
+            setRemotePair(null);
+          }}
+          roomLocked={mpRoomLocked}
+          onClose={() => setShowRemotePair(false)}
         />
       )}
       {showCloudModal && (

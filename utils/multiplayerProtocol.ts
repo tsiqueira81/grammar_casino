@@ -26,6 +26,7 @@ import {
   NON_OFFENSIVE_TARGETED_POWER_UPS,
 } from '../constants';
 import { isGapType, isOptionType, isTypedAnswerType } from '../game/questionTypes';
+import type { TeacherRemoteView } from '../game/teacherRemote';
 
 export interface MultiplayerSeat {
   seatId: string;
@@ -152,6 +153,8 @@ export interface PlayerViewPayload {
   specialHand?: SpecialHandBanner | null;
   /** Package G6 Spotlight: this player's next power-up draw is free. */
   freeDraw?: boolean;
+  /** Package T3: only on the teacher's remote, never on a student's phone. */
+  remote?: TeacherRemoteView;
   /** The teacher's clock when this update was sent (package R3); added by the transport. */
   serverNow?: number;
 }
@@ -340,7 +343,9 @@ export type StudentIntent =
   /** Package R2: "still here", sent every 20 s while the phone is on screen. */
   | { type: 'HEARTBEAT' }
   /** Package L5: after the reveal, "Got it" or "Still confused" for this hand. */
-  | { type: 'FEEDBACK_REACTION'; round: number; value: 'gotIt' | 'confused' };
+  | { type: 'FEEDBACK_REACTION'; round: number; value: 'gotIt' | 'confused' }
+  /** Package T3: the teacher's remote pressed a button (the same actions as the shortcuts). */
+  | { type: 'REMOTE_COMMAND'; action: string };
 
 export interface BuildPlayerViewsParams {
   roomCode: string;

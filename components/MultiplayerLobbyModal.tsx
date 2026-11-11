@@ -5,7 +5,7 @@ import { Player, SoundEffect } from '../types';
 import { MultiplayerSeat } from '../utils/multiplayerProtocol';
 import ActionButton from './ActionButton';
 import { PlayerAvatar } from './PlayerAvatar';
-import { Check, Copy, Lock, LockOpen, X } from 'lucide-react';
+import { Check, Copy, Lock, LockOpen, Smartphone, X } from 'lucide-react';
 import { lobbyTipAt, missingFromClass } from '../game/classList';
 
 interface MultiplayerLobbyModalProps {
@@ -23,6 +23,9 @@ interface MultiplayerLobbyModalProps {
   onBailoutBankruptPlayers: () => void;
   /** Package T4: the loaded class, so students not on a phone yet show as "Not here yet". */
   classListName?: string | null;
+  /** Package T3: open the teacher-remote pairing, with the address phones use. */
+  onOpenRemote?: (baseUrl: string) => void;
+  remotePaired?: boolean;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
 }
 
@@ -40,6 +43,8 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
   onKickPlayer,
   onBailoutBankruptPlayers,
   classListName = null,
+  onOpenRemote,
+  remotePaired = false,
   playSound,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -346,6 +351,19 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                     {roomLocked ? <Lock className="w-4 h-4 text-gc-loss" aria-hidden="true" /> : <LockOpen className="w-4 h-4 text-gc-win" aria-hidden="true" />}
                     {roomLocked ? 'Room locked' : 'Room open'}
                   </button>
+
+                  {onOpenRemote && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenRemote(baseOrigin)}
+                      className={ghostBtn}
+                      data-testid="open-teacher-remote"
+                      title="Use your own phone to run the game from anywhere in the room"
+                    >
+                      <Smartphone className="w-4 h-4" aria-hidden="true" />
+                      {remotePaired ? 'Teacher remote: paired' : 'Teacher remote'}
+                    </button>
+                  )}
 
                   {bankruptCount > 0 && (
                     <button

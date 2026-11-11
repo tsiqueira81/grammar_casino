@@ -54,5 +54,23 @@ async function showStudentApp(roomCode: string) {
   );
 }
 
-const roomCode = new URLSearchParams(window.location.search).get('room') || '';
-void (roomCode.trim() ? showStudentApp(roomCode) : showTeacherApp());
+// Package T3: the teacher's own phone as a remote (?room=CODE&remote=KEY).
+async function showTeacherRemote(code: string, key: string) {
+  const { default: TeacherRemoteApp } = await import('./student/TeacherRemoteApp');
+  root.render(
+    <React.StrictMode>
+      <RecoverBoundary who="phone">
+        <TeacherRemoteApp roomCode={code} remoteKey={key} />
+      </RecoverBoundary>
+    </React.StrictMode>
+  );
+}
+
+const params = new URLSearchParams(window.location.search);
+const roomCode = params.get('room') || '';
+const remoteKey = (params.get('remote') || '').trim();
+void (roomCode.trim() && /^[0-9a-f]{16}$/.test(remoteKey)
+  ? showTeacherRemote(roomCode, remoteKey)
+  : roomCode.trim()
+    ? showStudentApp(roomCode)
+    : showTeacherApp());
