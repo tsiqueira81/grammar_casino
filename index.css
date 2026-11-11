@@ -80,12 +80,22 @@ html.dark {
 /* Calm mode (the teacher's switch, also sent to phones in a live room): the same rule.
    Animations still end in their final state, so nothing is left hidden or half-way. */
 html.gc-calm *, html.gc-calm *::before, html.gc-calm *::after,
-html.gc-calm-room *, html.gc-calm-room *::before, html.gc-calm-room *::after {
+html.gc-calm-room *, html.gc-calm-room *::before, html.gc-calm-room *::after,
+html.gc-less-motion *, html.gc-less-motion *::before, html.gc-less-motion *::after {
   animation-duration: 0.01ms !important;
   animation-delay: 0s !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
+}
+
+/* Package S6: comfort settings on a student's phone. */
+html.gc-text-zoom body {
+  zoom: var(--gc-phone-zoom, 1);
+}
+html.gc-plain-font .font-sentence {
+  font-family: var(--gc-font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-style: normal;
 }
 
 /* ===== Older named colours, still used by the custom classes below ===== */

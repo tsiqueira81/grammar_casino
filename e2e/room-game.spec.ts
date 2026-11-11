@@ -62,6 +62,18 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
   }
   await expect(host.getByRole('dialog')).toContainText('3 connected');
 
+  // Package S6: each phone has its own comfort settings, kept on that phone.
+  const eva = phones[1];
+  await eva.getByTestId('comfort-button').click();
+  await eva.getByRole('button', { name: 'Larger' }).click();
+  await expect(eva.locator('html')).toHaveClass(/gc-text-zoom/);
+  await eva.getByRole('button', { name: 'Normal' }).click();
+  await expect(eva.locator('html')).not.toHaveClass(/gc-text-zoom/);
+  await eva.getByRole('switch', { name: /Plain font/ }).click();
+  await expect(eva.locator('html')).toHaveClass(/gc-plain-font/);
+  await eva.getByTestId('comfort-panel').getByRole('button', { name: 'Done' }).click();
+  await expect(phones[0].locator('html')).not.toHaveClass(/gc-plain-font/);
+
   // Multiple-choice game, dealt from the teacher's screen.
   await host.getByRole('button', { name: 'Back to the table' }).click();
   await host.getByRole('button', { name: 'Set up the game' }).click();
