@@ -1,4 +1,5 @@
 import { safeLocalStorage } from '../utils/safeStorage';
+import { PracticeQuiz } from './PracticeQuiz';
 import { plainDescriptionOf } from '../game/powerUpCatalog';
 import { settlePendingBet, type PendingBet } from '../game/presence';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -420,6 +421,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   }, []);
 
   // Package L5: "Got it" / "Still confused" after the reveal, remembered for the hand.
+  const [showPractice, setShowPractice] = useState(false);
   const [myReaction, setMyReaction] = useState<{ round: number; value: 'gotIt' | 'confused' } | null>(null);
   const sendReaction = useCallback((round: number, value: 'gotIt' | 'confused') => {
     setMyReaction({ round, value });
@@ -2314,7 +2316,19 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       </li>
                     ))}
                   </ol>
+                  {/* Package L6: a short solo quiz on these, no money and no room. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPractice(true)}
+                    data-testid="practice-these"
+                    className="w-full min-h-[48px] rounded-full border border-gc-gold/60 text-gc-body font-bold text-gc-ink cursor-pointer"
+                  >
+                    Practice these
+                  </button>
                 </div>
+              )}
+              {showPractice && toReview.length > 0 && (
+                <PracticeQuiz items={toReview} onClose={() => setShowPractice(false)} />
               )}
 
               {history.length > 0 && (

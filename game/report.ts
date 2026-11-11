@@ -251,6 +251,8 @@ export interface ReviewItem {
   /** The right sentence or answer. */
   answer: string;
   explanation: string;
+  /** The item itself, for "Practice these" (package L6). */
+  sentence: RoundHistoryRecord['sentence'];
 }
 
 /**
@@ -279,6 +281,6 @@ export function studentReview(history: RoundHistoryRecord[], playerId: number, m
     const s = r.sentence;
     const gap = s.questionType && s.questionType !== 'binary';
     const answer = gap ? s.correctAnswer || s.correction || '' : s.isCorrect ? 'The sentence was already right.' : s.correction || '';
-    return { round: r.round, text: s.text, answer, explanation: s.explanation || '' };
+    return { round: r.round, text: s.text, answer, explanation: s.explanation || '', sentence: s };
   });
 }

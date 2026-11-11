@@ -77,6 +77,14 @@ test('a phone in a live room shows the Final Table', async ({ page: host, browse
   await clickButton(host, /See the final results/);
   await expect(phone.getByTestId('my-review')).toContainText('One to review');
   await expect(phone.getByTestId('my-review')).toContainText(KNOWN.multipleChoiceAnswer);
+  // Package L6: "Practice these" replays the missed hand as a solo quiz.
+  await phone.getByTestId('practice-these').click();
+  const quiz = phone.getByTestId('practice-quiz');
+  await expect(quiz).toContainText('Practice 1 of 1');
+  await quiz.getByRole('button', { name: new RegExp(`${KNOWN.multipleChoiceAnswer}$`) }).click();
+  await expect(quiz.getByTestId('practice-result')).toContainText('Right!');
+  await quiz.getByRole('button', { name: 'See my score' }).click();
+  await expect(quiz.getByTestId('practice-score')).toHaveText('1 of 1 right. Well done!');
   await context.close();
 });
 
