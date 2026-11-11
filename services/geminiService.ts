@@ -3,6 +3,7 @@ import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { validateItem } from '../content/schema';
 import { logEvent } from '../utils/debugLog';
+import { nextDeckItem } from '../game/teacherDeck';
 import { archiveSentenceToCloudBank, auth, isVerifiedTeacherUser } from './firebaseService';
 import {
   evaluateBinaryCorrectionOffline,
@@ -217,6 +218,12 @@ async function requestDealerAction<T>(action: string, payload: Record<string, an
   return postToGeminiApi<T>(action, payload);
 }
 
+// Package L4: the teacher's own sentences, dealt first and in order.
+let teacherDeck: GeneratedSentence[] = [];
+export function setTeacherDeck(items: GeneratedSentence[]): void {
+  teacherDeck = items.slice();
+}
+
 const pendingArchive = new Map<string, { sentence: GeneratedSentence; settings: Settings; subtype: string | null }>();
 const PENDING_ARCHIVE_LIMIT = 30;
 
@@ -251,6 +258,8 @@ export const generateSentence = async (
   pastMistakes: string[] = [],
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
+  const own = nextDeckItem(teacherDeck, pastSentences);
+  if (own) return own;
   // Browser tests get a fixed, known sentence for each question type.
   if ((import.meta as any).env.DEV && isE2eMode()) {
     return getE2eSentence(questionType, forceCorrect);

@@ -11,6 +11,8 @@ import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { APP_VERSION, logEvent } from './utils/debugLog';
 import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
+import { OwnDeckModal } from './components/OwnDeckModal';
+import { deckSummary, parseDeckText, sentenceRecordOf } from './game/teacherDeck';
 import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
@@ -259,6 +261,7 @@ function loadSetupPrefs(): Partial<SetupPrefs> {
     minTargetAmount: MIN_TARGET_AMOUNT,
   }) ?? {};
 }
+const OWN_DECK_KEY = 'grammar_casino_own_deck_v1';
 const initialPrefs = initialGameState ? {} : loadSetupPrefs();
 
 const renderTextSegments = (segments: TextSegment[], markClassName: string) =>
@@ -449,6 +452,23 @@ export function App() {
   // Package T2: shortcut list and full screen for presenting.
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
   const [showDebugLog, setShowDebugLog] = useState(false);
+  // Package L4: the teacher's own sentences (kept per browser, dealt first).
+  const [ownDeck, setOwnDeck] = useState<{ text: string; name: string }>(() => {
+    try {
+      const raw = safeLocalStorage.getItem(OWN_DECK_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed.text === 'string') return { text: parsed.text, name: String(parsed.name || 'My deck') };
+    } catch {
+      // start empty
+    }
+    return { text: '', name: 'My deck' };
+  });
+  const [showOwnDeck, setShowOwnDeck] = useState(false);
+  const ownDeckItems = useMemo(() => parseDeckText(ownDeck.text).items, [ownDeck.text]);
+  useEffect(() => {
+    GeminiService.setTeacherDeck(ownDeckItems);
+    safeLocalStorage.setItem(OWN_DECK_KEY, JSON.stringify(ownDeck));
+  }, [ownDeckItems, ownDeck]);
   const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
   isPausedRef.current = isPaused;
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
@@ -1714,11 +1734,7 @@ export function App() {
         }
 
         setCurrentSentence(generated);
-        const sentenceRecord = generated.leadInSentence
-          ? `${generated.leadInSentence} -> ${generated.correction || generated.text}`
-          : generated.correction && generated.text.includes('_____')
-          ? `${generated.text} (${generated.correction})`
-          : generated.text;
+        const sentenceRecord = sentenceRecordOf(generated);
         setPastSentences(prev => [...prev, sentenceRecord]);
         // Small delay to allow initial card render before flip
         later(() => {
@@ -4962,7 +4978,7 @@ export function App() {
                       <TextInput
                         value={customTopic}
                         onChange={e => setCustomTopic(e.target.value)}
-                        placeholder="For example: School subjects, Places in town, Inversion"
+                        placeholder="We are studying… for example: unit 6, second conditional, travel"
                         aria-label="Your own topic"
                         className="h-12"
                       />
@@ -5203,6 +5219,30 @@ export function App() {
                       </span>
                     </p>
                   )}
+                </section>
+
+                {/* Package L4: the teacher's own sentences */}
+                <section className={sectionCls} aria-labelledby="setup-own">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 id="setup-own" className={sectionTitle}>Your own sentences <span className="text-gc-quiet font-semibold">(optional)</span></h2>
+                      <p className={sectionHint} data-testid="own-deck-status">
+                        {ownDeckItems.length
+                          ? `${ownDeck.name}: ${deckSummary(ownDeckItems)}. They are dealt first.`
+                          : 'Paste sentences from your lesson or your students\' writing. The game deals them first.'}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      {ownDeckItems.length > 0 && (
+                        <ActionButton onClick={() => { playSound('click'); setOwnDeck(d => ({ ...d, text: '' })); }} variant="ghost" className="h-11 px-4 text-gc-body font-semibold">
+                          Remove
+                        </ActionButton>
+                      )}
+                      <ActionButton onClick={() => { playSound('click'); setShowOwnDeck(true); }} variant="ghost" className="h-11 px-5 text-gc-body font-bold">
+                        {ownDeckItems.length ? 'Edit' : 'Add sentences'}
+                      </ActionButton>
+                    </div>
+                  </div>
                 </section>
               </div>
             ) : (
@@ -7621,6 +7661,15 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             />
           </div>
         </Modal>
+      )}
+      {showOwnDeck && (
+        <OwnDeckModal
+          initialText={ownDeck.text}
+          initialName={ownDeck.name}
+          playSound={playSound}
+          onClose={() => setShowOwnDeck(false)}
+          onUse={(text, name) => { setOwnDeck({ text, name: name.trim() || 'My deck' }); setShowOwnDeck(false); }}
+        />
       )}
       {showDebugLog && <DebugLogModal onClose={() => setShowDebugLog(false)} playSound={playSound} />}
       {showHotkeyHelp && (
