@@ -81,6 +81,7 @@ import type {
   PotSweepEvent,
   JackpotEvent,
   BoomerangArcEvent,
+  ShoeDealEvent,
   Seat3DState,
 } from './components/Tabletop3DOverlay';
 // three.js is only needed on the teacher's table, so phones never download it.
@@ -672,6 +673,7 @@ export function App() {
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
   const [jackpotEvent, setJackpotEvent] = useState<JackpotEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
+  const [shoeDealEvent, setShoeDealEvent] = useState<ShoeDealEvent | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
@@ -2747,6 +2749,13 @@ export function App() {
     }
     const randomIndex = Math.floor(Math.random() * drawablePool.length);
     const selectedPowerUp = drawablePool[randomIndex];
+    // Package V4: the card leaves the dealer's shoe for this player's seat.
+    setShoeDealEvent({
+      id: `${playerId}-${Date.now()}`,
+      playerId,
+      seatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
+      totalSeats: Math.max(1, activePlayers.length),
+    });
     handleBuyPowerUp(playerId, selectedPowerUp);
   }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats]);
 
@@ -7574,6 +7583,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           tossEvent={chipTossEvent}
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
+          shoeEvent={shoeDealEvent}
           jackpotEvent={jackpotEvent}
           potTotal={step === 'IN_GAME' ? potNow : 0}
           behindInterface={isTableView}

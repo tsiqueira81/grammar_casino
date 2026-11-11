@@ -43,6 +43,14 @@ export interface PotSweepEvent {
   winnerPlayerIds?: number[];
 }
 
+/** Package V4: a power-up card is dealt from the shoe to this player. */
+export interface ShoeDealEvent {
+  id: string;
+  playerId: number;
+  seatIndex: number;
+  totalSeats: number;
+}
+
 export interface BoomerangArcEvent {
   id: string;
   attackerSeatIndex: number;
@@ -68,6 +76,7 @@ export interface Tabletop3DOverlayProps {
   tossEvent: ChipTossEvent | null;
   sweepEvent: PotSweepEvent | null;
   boomerangEvent: BoomerangArcEvent | null;
+  shoeEvent?: ShoeDealEvent | null;
   jackpotEvent?: JackpotEvent | null;
   onChipImpactSound?: (denomination: number) => void;
   /** Package V3: every bet still on the table this hand. 0 clears the pot. */
@@ -102,6 +111,14 @@ interface RigidChipBody {
   floorY?: number;
 }
 
+interface DealtCard {
+  mesh: THREE.Object3D;
+  slideFrom: THREE.Vector3;
+  arc: THREE.QuadraticBezierCurve3;
+  elapsed: number;
+  scale: number;
+}
+
 interface SeatTotem {
   mesh: THREE.Object3D;
   playerId: number;
@@ -133,6 +150,13 @@ interface ActiveBoomerangFlight {
 }
 
 const MAX_SPARKS = 420;
+// Package V4: the card shoe on the far rail, right of the dealer tray, and the deal timing.
+const SHOE_POSITION = { x: 1.25, y: 0.02, z: -2.35, turn: -0.35 };
+const SHOE_SCALE = 0.42;
+const CARD_SCALE = 0.62;
+const DEAL_SLIDE_SEC = 0.25;
+const DEAL_FLY_SEC = 0.6;
+const DEAL_FADE_SEC = 0.18;
 const MAX_COINS = 72;
 
 /** Soft round sprite used for sparkles and contact shadows. */
@@ -243,6 +267,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   tossEvent,
   sweepEvent,
   boomerangEvent,
+  shoeEvent,
   jackpotEvent,
   seatStates,
   onChipImpactSound,
@@ -280,6 +305,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     boomerangTemplate: THREE.Object3D;
     chips: RigidChipBody[];
     boomerangs: ActiveBoomerangFlight[];
+    cardTemplate: THREE.Object3D | null;
+    dealtCards: DealtCard[];
+    lastProcessedShoeId: string | null;
     lastProcessedTossId: string | null;
     lastProcessedSweepId: string | null;
     lastProcessedBoomerangId: string | null;
@@ -411,6 +439,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       boomerangTemplate: boomerangFallback as THREE.Object3D,
       chips: [] as RigidChipBody[],
       boomerangs: [] as ActiveBoomerangFlight[],
+      cardTemplate: null as THREE.Object3D | null,
+      dealtCards: [] as DealtCard[],
+      lastProcessedShoeId: null as string | null,
       lastProcessedTossId: null as string | null,
       lastProcessedSweepId: null as string | null,
       lastProcessedBoomerangId: null as string | null,
@@ -526,6 +557,30 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       () => {}
     );
 
+    // Package V4: the dealer's card shoe sits on the far rail; power-up cards are dealt from it.
+    loader.load(
+      '/models/card_shoe.glb',
+      (gltf) => {
+        const shoe = gltf.scene.getObjectByName('DealerCardShoe');
+        const card = gltf.scene.getObjectByName('PowerUpCard');
+        if (shoe) {
+          const s = shoe.clone(true);
+          s.position.set(SHOE_POSITION.x, SHOE_POSITION.y, SHOE_POSITION.z);
+          s.rotation.y = SHOE_POSITION.turn;
+          s.scale.setScalar(SHOE_SCALE);
+          scene.add(s);
+          if (!running) renderer.render(scene, camera);
+        }
+        if (card) {
+          const c = card.clone(true);
+          c.position.set(0, 0, 0);
+          stateObj.cardTemplate = c;
+        }
+      },
+      undefined,
+      () => {}
+    );
+
     loader.load(
       '/models/powerup_totems.glb',
       (gltf) => {
@@ -564,7 +619,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const resting = (c: RigidChipBody) => Boolean(c.inPot && c.settled && !c.sweeping && c.wobble <= 0.002);
     const hasWork = () =>
       stateObj.chips.some((c) => !resting(c)) ||
-      [...stateObj.totems.values()].some((t) => t.pop < 1) || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
+      [...stateObj.totems.values()].some((t) => t.pop < 1) || stateObj.dealtCards.length > 0 || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
 
     // Render only while something is moving; an idle overlay costs nothing on the projector laptop.
     stateObj.wake = () => {
@@ -678,6 +733,32 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
         chip.mesh.position.copy(chip.position);
         updateShadow(chip);
+      }
+
+      // Package V4: dealt cards slide out of the shoe, arc to the player, then shrink away.
+      for (let i = stateObj.dealtCards.length - 1; i >= 0; i--) {
+        const c = stateObj.dealtCards[i];
+        c.elapsed += dt;
+        const t = c.elapsed;
+        if (t < DEAL_SLIDE_SEC) {
+          const k = t / DEAL_SLIDE_SEC;
+          c.mesh.position.lerpVectors(c.slideFrom, c.arc.v0, k * k * (3 - 2 * k));
+        } else if (t < DEAL_SLIDE_SEC + DEAL_FLY_SEC) {
+          const k = (t - DEAL_SLIDE_SEC) / DEAL_FLY_SEC;
+          const e = 1 - Math.pow(1 - k, 2);
+          c.mesh.position.copy(c.arc.getPoint(e));
+          c.mesh.rotation.y += dt * 9;
+          c.mesh.rotation.z = Math.sin(e * Math.PI) * 0.5;
+        } else {
+          const k = (t - DEAL_SLIDE_SEC - DEAL_FLY_SEC) / DEAL_FADE_SEC;
+          if (k >= 1) {
+            scene.remove(c.mesh);
+            stateObj.dealtCards.splice(i, 1);
+            continue;
+          }
+          c.mesh.scale.setScalar(c.scale * Math.max(0.001, 1 - k));
+          if (k < dt / DEAL_FADE_SEC + 0.001) stateObj.spawnSparks(c.mesh.position, 12, [0xe9d5ff, 0xfde68a, 0xffffff], 0.7);
+        }
       }
 
       // Step 3D Boomerang flights along quadratic Bezier curves
@@ -1080,6 +1161,27 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     }
     if (any) ctx.wake();
   }, [potTotal]);
+
+  // Package V4: a power-up card leaves the shoe and flies to the player who drew it.
+  useEffect(() => {
+    if (!shoeEvent || calmMode) return;
+    const ctx = sceneRef.current;
+    if (!ctx || ctx.lastProcessedShoeId === shoeEvent.id) return;
+    ctx.lastProcessedShoeId = shoeEvent.id;
+    if (!ctx.cardTemplate) return;
+    const el = document.querySelector(`[data-seat-player="${shoeEvent.playerId}"]`);
+    const fromScreen = el ? seatPointFromScreen(el.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, ctx.camera, 0.3) : null;
+    const target = fromScreen ?? getSeatWorldPosition(shoeEvent.seatIndex, shoeEvent.totalSeats);
+    const mouth = new THREE.Vector3(SHOE_POSITION.x, SHOE_POSITION.y + 0.12, SHOE_POSITION.z + 0.42);
+    const slideFrom = new THREE.Vector3(SHOE_POSITION.x, SHOE_POSITION.y + 0.12, SHOE_POSITION.z + 0.1);
+    const mid = mouth.clone().add(target).multiplyScalar(0.5).add(new THREE.Vector3(0, 1.4, 0));
+    const mesh = ctx.cardTemplate.clone(true);
+    mesh.scale.setScalar(CARD_SCALE);
+    mesh.position.copy(slideFrom);
+    ctx.scene.add(mesh);
+    ctx.dealtCards.push({ mesh, slideFrom, arc: new THREE.QuadraticBezierCurve3(mouth, mid, target), elapsed: 0, scale: CARD_SCALE });
+    ctx.wake();
+  }, [shoeEvent, calmMode]);
 
   // Handle 3D Boomerang Parabolic Reflection Flight
   useEffect(() => {
