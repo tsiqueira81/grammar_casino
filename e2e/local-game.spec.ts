@@ -12,6 +12,12 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
 
   await page.goto(E2E_URL);
   await addPlayers(page, ['Ana', 'Bruno', 'Caio']);
+  // Package T2: removing a player can be undone for a few seconds.
+  await page.getByRole('button', { name: 'Remove Bruno' }).click();
+  await expect(page.getByRole('button', { name: 'Remove Bruno' })).toHaveCount(0);
+  await page.getByTestId('undo-remove').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('button', { name: 'Remove Bruno' })).toBeVisible();
+  await expect(page.getByTestId('undo-remove')).toHaveCount(0);
   await setUpMixedGame(page, {
     drop: ['Open cloze', 'Word formation', 'Key word'],
     hands: 2,

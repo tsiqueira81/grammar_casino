@@ -89,6 +89,8 @@ const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverla
 const TableBackdrop = React.lazy(() => import('./components/TableBackdrop'));
 /** Package F6 (part): how long the game waits after the last change before saving it. */
 const SAVE_DEBOUNCE_MS = 1000;
+/** Package T2: how long "Undo" stays up after a player is removed. */
+const REMOVE_UNDO_MS = 5000;
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -1687,10 +1689,26 @@ export function App() {
       playerNameInputRef.current?.focus(); 
     } 
   };
+  // Package T2: removing a player on this screen can be undone for 5 seconds.
+  const [removedPlayer, setRemovedPlayer] = useState<{ player: Player; index: number } | null>(null);
   const handleDeletePlayer = (idToDelete: number) => { 
     playSound('lose', 0); 
+    const index = players.findIndex(p => p.id === idToDelete);
+    if (index !== -1) setRemovedPlayer({ player: players[index], index });
     setPlayers(prev => prev.filter(p => p.id !== idToDelete)); 
   };
+  const undoRemovePlayer = () => {
+    if (!removedPlayer) return;
+    playSound('addPlayer');
+    const { player, index } = removedPlayer;
+    setPlayers(prev => (prev.some(p => p.id === player.id) ? prev : [...prev.slice(0, index), player, ...prev.slice(index)]));
+    setRemovedPlayer(null);
+  };
+  useEffect(() => {
+    if (!removedPlayer) return;
+    const timer = setTimeout(() => setRemovedPlayer(null), REMOVE_UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [removedPlayer]);
   const handleUpdateAvatar = (playerId: number, newAvatar: string) => {
     setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, avatar: newAvatar } : p));
   };
@@ -8498,6 +8516,22 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           }}
           playSound={playSound}
         />
+      )}
+      {removedPlayer && step === 'PLAYER_SETUP' && (
+        <div
+          role="status"
+          data-testid="undo-remove"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,26rem)] gc-panel rounded-gc-lg px-4 py-3 flex items-center gap-3"
+        >
+          <p className="flex-1 min-w-0 text-gc-body font-bold text-gc-ink truncate">Removed {removedPlayer.player.name}.</p>
+          <button
+            type="button"
+            onClick={undoRemovePlayer}
+            className="h-10 px-4 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold cursor-pointer"
+          >
+            Undo
+          </button>
+        </div>
       )}
       {mpResumeNotice && mpRoomCode && (
         <div
