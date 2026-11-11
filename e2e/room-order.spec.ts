@@ -31,6 +31,12 @@ test('the room replaces a rude name and keeps a removed phone out', async ({ pag
   await expect(lobby).toContainText('1 connected');
   await expect(lobby).not.toContainText(/sh1t/i);
 
+  // Package R2: going offline shows a clear banner, and coming back clears it with no tap.
+  await phone.context().setOffline(true);
+  await expect(phone.getByRole('status').filter({ hasText: "You're offline" })).toBeVisible();
+  await phone.context().setOffline(false);
+  await expect(phone.getByRole('status').filter({ hasText: "You're offline" })).toHaveCount(0, { timeout: 10_000 });
+
   // The teacher removes the phone; it cannot join again, even under another name.
   await lobby.getByRole('button', { name: /^Remove / }).click();
   await expect(lobby).not.toContainText('1 connected');

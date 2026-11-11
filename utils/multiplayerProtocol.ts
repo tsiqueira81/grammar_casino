@@ -331,7 +331,9 @@ export type StudentIntent =
   | { type: 'SELECT_POWER_UP_TARGET'; powerUp: PowerUpKey; targetId: number }
   | { type: 'CANCEL_POWER_UP_TARGET'; powerUp: PowerUpKey }
   | { type: 'APPLY_WHEEL_RESULT'; itemId: string }
-  | { type: 'UPDATE_PROFILE'; name?: string; avatar?: string };
+  | { type: 'UPDATE_PROFILE'; name?: string; avatar?: string }
+  /** Package R2: "still here", sent every 20 s while the phone is on screen. */
+  | { type: 'HEARTBEAT' };
 
 export interface BuildPlayerViewsParams {
   roomCode: string;

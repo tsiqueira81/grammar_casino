@@ -4,6 +4,7 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { awaySeatIds, presenceSummary } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
@@ -26,7 +27,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -407,6 +408,9 @@ export function App() {
   const later = useLaterTimers();
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
+  // Package R2: when each phone was last heard from, and who is away (nothing for 45 s).
+  const mpLastSeenRef = useRef<Record<number, number>>({});
+  const [mpAwayIds, setMpAwayIds] = useState<number[]>([]);
   // Package T5: "Resume or start fresh" when an unfinished game is opened again later
   // (not when a live room is reopening by itself), and the reports of finished games.
   const [resumeOffer, setResumeOffer] = useState(() => (loadSavedHostRoom() ? null : getResumeOffer(initialGameState, Date.now())));
@@ -433,6 +437,8 @@ export function App() {
   const [mpRoomLocked, setMpRoomLocked] = useState<boolean>(false);
   const [mpHostConnected, setMpHostConnected] = useState<boolean>(false);
   const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
+  const mpSeatsRef = useRef(mpSeats);
+  mpSeatsRef.current = mpSeats;
   // Phones asking to play as a name that is already seated on another device (teacher decides).
   const [mpTakeoverRequests, setMpTakeoverRequests] = useState<SeatTakeoverRequest[]>([]);
   useEffect(() => {
@@ -2982,6 +2988,11 @@ export function App() {
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
     mpEventHandlerRef.current = (event: HostEventPayload) => {
+      if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.playerId !== undefined) {
+        mpLastSeenRef.current[event.playerId] = Date.now();
+        const seenId = event.playerId;
+        setMpAwayIds(prev => (prev.includes(seenId) ? prev.filter(id => id !== seenId) : prev));
+      }
       if (event.type === 'STUDENT_JOINED' && event.seat) {
         const seat = event.seat;
         const { playerId, avatar } = seat;
@@ -3047,16 +3058,12 @@ export function App() {
       } else if (event.type === 'STUDENT_INTENT' && event.playerId !== undefined && event.intent) {
         const playerId = event.playerId;
         const intent = event.intent;
-        setMpSeats(prev => {
-          if (!prev[playerId]) return prev;
-          return {
-            ...prev,
-            [playerId]: { ...prev[playerId], lastSeen: Date.now() },
-          };
-        });
+        // Package R2: remember when the phone was heard from, without rebroadcasting the table.
+        mpLastSeenRef.current[playerId] = Date.now();
+        setMpAwayIds(prev => (prev.includes(playerId) ? prev.filter(id => id !== playerId) : prev));
 
         // While the teacher has paused the hand, phones cannot bet, lock in or buy (package R8).
-        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE') return;
+        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE' && intent.type !== 'HEARTBEAT') return;
 
         switch (intent.type) {
           case 'SET_BET': {
@@ -3425,14 +3432,16 @@ export function App() {
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
   const revealResultsCore = useCallback(async (force = false) => {
+    const unfrozenPlayersForAway = activePlayers.filter(p => !isPlayerFrozen(p.id)).map(p => p.id);
     // "Reveal now" (package R8) reveals even when not everyone is in, like the early-reveal switch.
-    const revealOverride = teacherRevealOverride || force;
+    const revealOverride = teacherRevealOverride || force || (Boolean(mpRoomCode) && mpAwayIds.some(id => unfrozenPlayersForAway.includes(id)));
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (mpRoomCode) {
       const allMpReady = isEveryRoomPlayerReady({
-        playerIds: unfrozenPlayers.map(p => p.id),
+        // Away phones (package R2) do not hold up the reveal; they sit the hand out.
+        playerIds: unfrozenPlayers.filter(p => !mpAwayIds.includes(p.id)).map(p => p.id),
         bets,
         activePowerUps,
         questionType: qType,
@@ -3750,7 +3759,7 @@ export function App() {
     if (aiGradingFailed) {
       setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
     }
-  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
   const handleRevealResults = useCallback(async (force?: unknown) => {
@@ -3861,6 +3870,21 @@ export function App() {
     // Only when the game ends; archiveGame changes with every state change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
+
+  // Package R2: every 5 s, work out which phones are away (silent for 45 s, or disconnected).
+  useEffect(() => {
+    if (!mpRoomCode) {
+      setMpAwayIds(prev => (prev.length ? [] : prev));
+      return;
+    }
+    const check = () => {
+      const next = awaySeatIds(mpSeatsRef.current, mpLastSeenRef.current, Date.now());
+      setMpAwayIds(prev => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next));
+    };
+    check();
+    const id = window.setInterval(check, 5000);
+    return () => window.clearInterval(id);
+  }, [mpRoomCode]);
 
   // A pause belongs to one hand: leaving the hand ends it.
   useEffect(() => {
@@ -5274,7 +5298,7 @@ export function App() {
 
             // Who is in, and whether the answer may be revealed (game/revealGate.ts).
             const revealGate = getRevealGate({
-              playerIds: unfrozenActivePlayers.map(p => p.id),
+              playerIds: unfrozenActivePlayers.filter(p => !(mpRoomCode && mpAwayIds.includes(p.id))).map(p => p.id),
               bets,
               activePowerUps,
               questionType: currentQuestionType,
@@ -6078,6 +6102,9 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
                         <span>Room {mpRoomCode} · QR code</span>
                       </button>
+                      <span className="text-gc-small font-semibold text-gc-quiet tabular-nums" aria-live="polite">
+                        {presenceSummary(Object.keys(mpSeats).length, mpAwayIds.filter(id => mpSeats[id]).length)}
+                      </span>
 
                       <div className="text-gc-small text-gc-quiet flex items-center gap-2">
                         <span>Locked in:</span>
@@ -6120,12 +6147,14 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         ? mpSeat.lockedIn
                         : isBetCompleteForQuestionType(bets[player.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
                       const isBankrupt = player.money <= 0;
+                      const isAway = Boolean(mpSeat && mpAwayIds.includes(player.id));
 
                       return (
                         <div
                           key={player.id}
+                          data-away={isAway ? 'true' : undefined}
                           className={`gc-surface rounded-gc shadow-gc-1 p-4 transition-all flex flex-col justify-between gap-3 animate-gc-slide-up ${
-                            isBankrupt ? 'opacity-60' : ''
+                            isBankrupt || isAway ? 'opacity-60 grayscale' : ''
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -6145,8 +6174,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                 <div className="text-gc-lead font-bold text-gc-ink truncate">
                                   {player.name}
                                 </div>
-                                <div className="text-gc-cap text-gc-quiet tabular-nums">
-                                  Seat {idx + 1} · {mpSeat ? 'on a phone' : 'at the table'}
+                                <div className="text-gc-cap text-gc-quiet tabular-nums inline-flex items-center gap-1">
+                                  Seat {idx + 1} · {isAway ? <><WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />away</> : mpSeat ? 'on a phone' : 'at the table'}
                                 </div>
                               </div>
                             </div>

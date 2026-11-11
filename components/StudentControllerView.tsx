@@ -40,6 +40,10 @@ import {
 } from 'lucide-react';
 
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
+/** Package R2: a phone tells the teacher it is still there this often, while on screen. */
+const HEARTBEAT_EVERY_MS = 20_000;
+/** A lock-in the teacher has not confirmed yet is sent again after this long. */
+const LOCK_RETRY_MS = 3_000;
 /** Rooms this phone was removed from (package R6), with the time, kept for 12 hours. */
 const REMOVED_ROOMS_STORAGE_KEY = 'grammar_casino_removed_rooms_v1';
 const REMOVED_ROOM_MS = 12 * 60 * 60 * 1000;
@@ -104,6 +108,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
   const [localBet, setLocalBet] = useState<Bet>({});
+  const localBetRef = useRef<Bet>({});
+  localBetRef.current = localBet;
   const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -117,6 +123,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const seenNotificationIdRef = useRef<string | null>(null);
   const lastRoundRef = useRef<number>(-1);
   const clockSamplesRef = useRef<number[]>([]);
+  // Package R2: is this phone online, and when did it last ask to lock in (until the host confirms).
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
+  const [lockSentAt, setLockSentAt] = useState<number | null>(null);
   const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const lastSentenceTextRef = useRef<string>('');
   const lastStepRef = useRef<string>('');
@@ -344,6 +353,70 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const sendIntent = useCallback((intent: StudentIntent) => {
     controllerRef.current?.sendIntent(intent);
   }, []);
+
+  // --- Package R2: presence, waking up, and lock-ins the teacher confirmed ---
+  const hasSeat = Boolean(view);
+  useEffect(() => {
+    if (!hasSeat) return;
+    const beat = () => {
+      if (document.visibilityState === 'visible') sendIntent({ type: 'HEARTBEAT' });
+    };
+    const id = window.setInterval(beat, HEARTBEAT_EVERY_MS);
+    return () => window.clearInterval(id);
+  }, [hasSeat, sendIntent]);
+
+  useEffect(() => {
+    if (!hasSeat) return;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+    let lock: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const keepAwake = () => {
+      if (!nav.wakeLock || document.visibilityState !== 'visible') return;
+      nav.wakeLock.request('screen').then(l => {
+        if (cancelled) void l.release().catch(() => {});
+        else lock = l;
+      }).catch(() => {});
+    };
+    // Back in the foreground: stay awake again, and tell the teacher at once.
+    const onReturn = () => {
+      setIsOnline(navigator.onLine !== false);
+      if (document.visibilityState !== 'visible') return;
+      keepAwake();
+      sendIntent({ type: 'HEARTBEAT' });
+    };
+    const onOffline = () => setIsOnline(false);
+    keepAwake();
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('online', onReturn);
+    window.addEventListener('pageshow', onReturn);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('online', onReturn);
+      window.removeEventListener('pageshow', onReturn);
+      window.removeEventListener('offline', onOffline);
+      if (lock) void lock.release().catch(() => {});
+    };
+  }, [hasSeat, sendIntent]);
+
+  // "Locked in" shows only once the teacher's screen confirms it; until then "Sending…",
+  // and the lock-in is sent again every 3 seconds.
+  const confirmedLock = Boolean(view?.lockedIn);
+  useEffect(() => {
+    if (lockSentAt === null) return;
+    if (confirmedLock || view?.step !== 'IN_GAME') {
+      setLockSentAt(null);
+      return;
+    }
+    const id = window.setTimeout(() => {
+      sendIntent({ type: 'LOCK_IN', locked: true, bet: localBetRef.current });
+      setLockSentAt(Date.now());
+    }, LOCK_RETRY_MS);
+    return () => window.clearTimeout(id);
+  }, [lockSentAt, confirmedLock, view?.step, sendIntent]);
+  const isLockSending = lockSentAt !== null && !confirmedLock;
+  const isOffline = !isOnline || (hasSeat && !isConnected);
 
   // The round deadline read on this phone's clock (package R3).
   const roundTimer = useMemo(() => toLocalTimer(view?.roundTimer, clockOffsetMs), [view?.roundTimer, clockOffsetMs]);
@@ -573,6 +646,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     playSound('lockIn');
     sendIntent({ type: 'SET_FULL_BET', bet: localBet });
     sendIntent({ type: 'LOCK_IN', locked: true, bet: localBet });
+    setLockSentAt(Date.now());
   };
 
   // Enter on an answer field moves to the next missing control, or locks in when all is done.
@@ -771,7 +845,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     return (localBet.clozeAnswer || '').trim();
   })();
   const isReadyToLock = Boolean(pickText) && betAmountNum > 0;
-  const lockLabel = isReadyToLock
+  const lockLabel = isOffline
+    ? 'Offline: waiting for the connection'
+    : isLockSending
+    ? 'Sending…'
+    : isReadyToLock
     ? `Lock in ${money(betAmountNum)} on ${pickText}`
     : !pickText
       ? qType === 'binary'
@@ -786,7 +864,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     <button
       type="button"
       onClick={handleToggleLockIn}
-      className={`w-full min-h-[52px] py-2.5 px-5 rounded-full text-gc-body font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
+      disabled={isOffline || isLockSending}
+      className={`w-full min-h-[52px] disabled:opacity-70 disabled:cursor-not-allowed py-2.5 px-5 rounded-full text-gc-body font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
         isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet'
       }`}
     >
@@ -804,6 +883,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   return (
     <div className="game-container min-h-[100dvh] text-gc-ink flex flex-col pb-28">
+      {/* Package R2: a clear banner while the phone is offline. */}
+      {isOffline && (
+        <div role="status" className="sticky top-0 z-40 w-full px-4 py-3 bg-gc-loss text-white text-gc-body font-bold text-center">
+          You're offline. Reconnecting… Your bet stays on this phone.
+        </div>
+      )}
       {/* Package R8: the teacher paused the hand. Nothing can be changed until it resumes. */}
       {view.paused && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm" role="alert" aria-live="assertive">
@@ -830,7 +915,6 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <div className="text-[12.5px] font-semibold text-gc-quiet tabular-nums flex items-center gap-1.5 leading-tight">
               <span>Room {view.roomCode}</span>
               {view.step === 'IN_GAME' || view.step === 'RESULTS' ? <span>· Hand {view.round}</span> : null}
-              {!isConnected && <span>· Reconnecting</span>}
             </div>
           </div>
         </div>
@@ -1950,7 +2034,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <button
               type="button"
               onClick={handleToggleLockIn}
-              className={`w-full min-h-[58px] py-3 px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
+              disabled={isOffline || isLockSending}
+              className={`w-full min-h-[58px] disabled:opacity-70 disabled:cursor-not-allowed py-3 px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
                 isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet shadow-gc-1'
               }`}
             >

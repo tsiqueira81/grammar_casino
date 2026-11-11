@@ -1310,6 +1310,10 @@ export class StudentRoomController {
 
     // 1. Firestore: this phone's intent document holds its recent intents (newest last), so
     // the host still gets all of them when several writes land between two of its reads.
+    if (intent.type === 'HEARTBEAT') {
+      // Only the newest "still here" matters; it never pushes real intents out.
+      this.recentIntents = this.recentIntents.filter((entry) => entry.intent.type !== 'HEARTBEAT');
+    }
     if (intent.type === 'SET_BET') {
       // A newer value for the same field replaces the older one.
       this.recentIntents = this.recentIntents.filter(
