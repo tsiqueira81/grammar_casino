@@ -7,7 +7,7 @@ import type { PowerUpKey, UsedPowerUp } from '../types';
  */
 
 /** Fills fields older saves lack. Pass the avatar picker in, so this stays free of randomness. */
-export function migrateSavedGame<T extends { players?: unknown; powerUpsUsedThisRound?: unknown }>(
+export function migrateSavedGame<T extends Record<string, any>>(
   parsed: T,
   pickAvatar: () => string
 ): T {
