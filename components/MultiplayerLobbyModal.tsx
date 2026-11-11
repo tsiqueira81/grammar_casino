@@ -19,6 +19,9 @@ interface MultiplayerLobbyModalProps {
   onCreateRoom: () => void;
   onCloseRoom: () => void;
   onToggleLockRoom: () => void;
+  /** Package R6: when off, the room locks itself as the first hand is dealt. */
+  lateJoinersAllowed?: boolean;
+  onToggleLateJoiners?: () => void;
   onKickPlayer: (playerId: number) => void;
   onBailoutBankruptPlayers: () => void;
   /** Package T4: the loaded class, so students not on a phone yet show as "Not here yet". */
@@ -40,6 +43,8 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
   onCreateRoom,
   onCloseRoom,
   onToggleLockRoom,
+  lateJoinersAllowed = true,
+  onToggleLateJoiners,
   onKickPlayer,
   onBailoutBankruptPlayers,
   classListName = null,
@@ -351,6 +356,18 @@ export const MultiplayerLobbyModal: React.FC<MultiplayerLobbyModalProps> = ({
                     {roomLocked ? <Lock className="w-4 h-4 text-gc-loss" aria-hidden="true" /> : <LockOpen className="w-4 h-4 text-gc-win" aria-hidden="true" />}
                     {roomLocked ? 'Room locked' : 'Room open'}
                   </button>
+                  {onToggleLateJoiners && (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={lateJoinersAllowed}
+                      onClick={onToggleLateJoiners}
+                      className={ghostBtn}
+                      title={lateJoinersAllowed ? 'Phones can join after the game starts. Tap to lock the room when the first hand is dealt.' : 'The room locks itself when the first hand is dealt. Tap to let late phones join.'}
+                    >
+                      {lateJoinersAllowed ? 'Late joiners: allowed' : 'Late joiners: not allowed'}
+                    </button>
+                  )}
 
                   {onOpenRemote && (
                     <button

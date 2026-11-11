@@ -3803,6 +3803,27 @@ export function App() {
     prefetchRef.current = null;
   }, [playSound]);
 
+  // Package R6: "Late joiners" off locks the room by itself when the first hand is dealt.
+  // Phones already seated can still come back; the teacher can open the room again.
+  const [lateJoinersAllowed, setLateJoinersAllowed] = useState<boolean>(() => safeLocalStorage.getItem('grammar_casino_late_joiners') !== 'off');
+  useEffect(() => {
+    safeLocalStorage.setItem('grammar_casino_late_joiners', lateJoinersAllowed ? 'on' : 'off');
+  }, [lateJoinersAllowed]);
+  const lateLockDoneRef = useRef(false);
+  useEffect(() => {
+    if (step === 'PLAYER_SETUP' || step === 'SETTINGS') {
+      lateLockDoneRef.current = false;
+      return;
+    }
+    if (step !== 'IN_GAME' || lateJoinersAllowed || !mpRoomCode || lateLockDoneRef.current) return;
+    lateLockDoneRef.current = true;
+    if (!mpRoomLocked) {
+      setMpRoomLocked(true);
+      mpControllerRef.current?.setRoomLocked(true);
+      logEvent('room', 'Room locked at the first hand (late joiners off)');
+    }
+  }, [step, lateJoinersAllowed, mpRoomCode, mpRoomLocked]);
+
   const handleToggleLockMpRoom = useCallback(() => {
     playSound('click');
     setMpRoomLocked(prev => {
@@ -9034,6 +9055,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           onCreateRoom={handleCreateMpRoom}
           classListName={activeCloudRoster?.className ?? null}
           onToggleLockRoom={handleToggleLockMpRoom}
+          lateJoinersAllowed={lateJoinersAllowed}
+          onToggleLateJoiners={() => { playSound('click'); setLateJoinersAllowed(v => !v); }}
           onKickPlayer={handleKickMpPlayer}
           onCloseRoom={handleCloseMpRoom}
           onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
