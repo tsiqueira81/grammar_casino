@@ -19,6 +19,11 @@ import {
   FirestoreSeatWrite,
 } from './firebaseService';
 import { isE2eMode } from '../utils/e2eContent';
+import { nextFlushAt } from '../utils/flushPlan';
+import { cleanName as cleanPlayerName, generateFriendlyName, isBlockedName } from '../utils/nameFilter';
+
+/** Package R6: at most this many seats in one room. */
+export const MAX_ROOM_SEATS = 40;
 
 // How phones and the teacher's screen talk:
 // - Local server (npm run dev, AI Studio): WebSocket /ws plus HTTP /api/mp/*. The server sends
@@ -141,6 +146,8 @@ export interface SavedHostRoom {
   joinResponses: Record<string, FirestoreJoinResponseItem>;
   kickedPlayerIds: number[];
   kickedClientIds: string[];
+  /** Phones the teacher removed: they may not join this room again (package R6). */
+  bannedClientIds?: string[];
   intentClientIds: string[];
   writtenSeatIds: string[];
   savedAt: number;
@@ -198,6 +205,9 @@ export class HostRoomController {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private firestoreFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Package R5: when the planned room write happens, and when the last one happened. */
+  private firestoreFlushAt: number | null = null;
+  private lastFirestoreFlushAt = 0;
   private firestoreRetryMs = 0;
   private firestoreUnsubscribe: (() => void) | null = null;
   private authUnsubscribe: (() => void) | null = null;
@@ -217,6 +227,8 @@ export class HostRoomController {
   private joinResponses: Record<string, FirestoreJoinResponseItem> = {};
   /** Phones that lost their seat (kicked, or the seat moved to another phone). */
   private kickedClientIds = new Set<string>();
+  /** Phones the teacher removed; they cannot take a seat in this room again (package R6). */
+  private bannedClientIds = new Set<string>();
   private intentClientIds = new Set<string>();
   /** Newest intent sequence number handled per phone, so re-read intents are not applied twice. */
   private lastIntentSeq = new Map<string, number>();
@@ -254,8 +266,8 @@ export class HostRoomController {
     // Initialize Firestore room state. Student intents are read once the room doc exists,
     // because the Firestore rules only let the room's recorded host read them.
     this.scheduleFirestoreFlush(0);
-    // If the teacher signs in or out of Google mid-class, this device's Firebase id changes:
-    // rewrite the room under the new id so the intent listener can start again.
+    // If this device's room id changes (its first silent sign-in; Google sign-in no longer touches
+    // it, package A6), rewrite the room under the new id so the intent listener can start again.
     this.authUnsubscribe = subscribeToAuthChanges(() => {
       this.forceRoomWrite = true;
       this.scheduleFirestoreFlush(200);
@@ -270,13 +282,18 @@ export class HostRoomController {
   private scheduleFirestoreFlush(delayMs = 100) {
     if (this.destroyed) return;
     this.saveRoom();
-    if (this.firestoreFlushTimer) {
-      clearTimeout(this.firestoreFlushTimer);
-    }
+    // At most two room writes a second, soon after the first change (package R5).
+    const now = Date.now();
+    const at = nextFlushAt(now, delayMs, this.lastFirestoreFlushAt, this.firestoreFlushTimer ? this.firestoreFlushAt : null);
+    if (this.firestoreFlushTimer && this.firestoreFlushAt === at) return;
+    if (this.firestoreFlushTimer) clearTimeout(this.firestoreFlushTimer);
+    this.firestoreFlushAt = at;
     this.firestoreFlushTimer = setTimeout(() => {
       this.firestoreFlushTimer = null;
+      this.firestoreFlushAt = null;
+      this.lastFirestoreFlushAt = Date.now();
       void this.flushFirestore();
-    }, delayMs);
+    }, Math.max(0, at - now));
   }
 
   /**
@@ -353,7 +370,8 @@ export class HostRoomController {
       code: this.code,
       locked: this.roomLocked,
       rev,
-      table,
+      // The teacher's clock at send time, so phones can match their countdown to it (R3).
+      table: { ...table, serverNow: Date.now() },
       seatRevs,
       kickedPlayerIds: this.kickedPlayerIds,
       seats: seatWrites,
@@ -493,10 +511,19 @@ export class HostRoomController {
   }
 
   private handleJoinRequest(clientId: string, uid: string | null, msg: any) {
-    const cleanName = String(msg.name || '').trim().slice(0, 20);
+    const typedName = cleanPlayerName(msg.name);
     const avatar = String(msg.avatar || '🦊');
     const requestId = String(msg.requestId || Date.now());
-    if (!cleanName) return;
+    if (!typedName) return;
+    if (this.bannedClientIds.has(clientId) || (uid && this.bannedClientIds.has(`uid:${uid}`))) {
+      this.joinResponses[clientId] = { ok: false, code: this.code, requestId, error: 'The teacher removed you from this room.' };
+      this.scheduleFirestoreFlush(30);
+      return;
+    }
+    // A rude name is replaced by a friendly one (package R6); the host makes names unique.
+    const cleanName = isBlockedName(typedName)
+      ? generateFriendlyName(Array.from(this.seatsByPlayerId.values(), (s) => s.name))
+      : typedName;
     // A phone asking to join again is no longer "removed"; its record now carries the answer.
     this.kickedClientIds.delete(clientId);
 
@@ -521,6 +548,12 @@ export class HostRoomController {
         // teacher decides.
         this.requestSeatTakeover(seat, clientId, requestId, cleanName, avatar);
       }
+      return;
+    }
+
+    if (this.seatsByPlayerId.size >= MAX_ROOM_SEATS) {
+      this.joinResponses[clientId] = { ok: false, code: this.code, requestId, error: `This room is full (${MAX_ROOM_SEATS} players).` };
+      this.scheduleFirestoreFlush(30);
       return;
     }
 
@@ -747,10 +780,23 @@ export class HostRoomController {
     this.latestViews = views;
 
     // 1. Coalesce into one Firestore batch: the shared table plus the seat records that changed
-    this.scheduleFirestoreFlush(80);
+    this.scheduleFirestoreFlush(250);
 
-    // 2. Also push to local server if available (it sends each phone only its own view)
-    if (!this.localServerAvailable) return;
+    // 2. Also push to local server if available (it sends each phone only its own view).
+    // Package R5: at most one push per 100 ms; the newest views go out when the timer fires.
+    if (!this.localServerAvailable || this.localPushTimer) return;
+    this.localPushTimer = setTimeout(() => {
+      this.localPushTimer = null;
+      void this.pushLocalViews();
+    }, 100);
+  }
+
+  private localPushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private async pushLocalViews() {
+    if (this.destroyed || !this.localServerAvailable) return;
+    const sentAt = Date.now();
+    const views = Object.fromEntries(Object.entries(this.latestViews).map(([id, v]) => [id, { ...v, serverNow: sentAt }]));
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
@@ -780,6 +826,10 @@ export class HostRoomController {
     const seat = this.seatsByPlayerId.get(playerId);
     if (seat?.reconnectToken) {
       this.kickedClientIds.add(seat.reconnectToken);
+      this.bannedClientIds.add(seat.reconnectToken);
+      // The same browser keeps its Firebase id even after clearing its saved seat.
+      const uid = this.clientUids.get(seat.reconnectToken);
+      if (uid) this.bannedClientIds.add(`uid:${uid}`);
       delete this.joinResponses[seat.reconnectToken];
     }
     this.seatsByPlayerId.delete(playerId);
@@ -874,6 +924,7 @@ export class HostRoomController {
       joinResponses: { ...this.joinResponses },
       kickedPlayerIds: [...this.kickedPlayerIds],
       kickedClientIds: Array.from(this.kickedClientIds),
+      bannedClientIds: Array.from(this.bannedClientIds),
       intentClientIds: Array.from(this.intentClientIds),
       writtenSeatIds: Array.from(this.writtenSeatIds),
       savedAt: Date.now(),
@@ -895,6 +946,7 @@ export class HostRoomController {
     this.joinResponses = { ...(saved.joinResponses || {}) };
     this.kickedPlayerIds = [...(saved.kickedPlayerIds || [])];
     (saved.kickedClientIds || []).forEach((id) => this.kickedClientIds.add(id));
+    (saved.bannedClientIds || []).forEach((id) => this.bannedClientIds.add(id));
     (saved.intentClientIds || []).forEach((id) => this.intentClientIds.add(id));
     (saved.writtenSeatIds || []).forEach((id) => this.writtenSeatIds.add(id));
   }
@@ -932,6 +984,10 @@ export class HostRoomController {
     if (this.authUnsubscribe) {
       this.authUnsubscribe();
       this.authUnsubscribe = null;
+    }
+    if (this.localPushTimer) {
+      clearTimeout(this.localPushTimer);
+      this.localPushTimer = null;
     }
     if (this.firestoreFlushTimer) {
       clearTimeout(this.firestoreFlushTimer);
@@ -975,7 +1031,7 @@ export class StudentRoomController {
   private destroyed = false;
   private localWsConnected = false;
   private onViewUpdate: (view: PlayerViewPayload) => void;
-  private onKicked: () => void;
+  private onKicked: (reason?: 'removed' | 'closed') => void;
   private onConnectionChange?: (connected: boolean) => void;
 
   constructor(
@@ -986,7 +1042,7 @@ export class StudentRoomController {
     localServerAvailable: boolean,
     seatListener: FirestoreSeatListener | null,
     onViewUpdate: (view: PlayerViewPayload) => void,
-    onKicked: () => void,
+    onKicked: (reason?: 'removed' | 'closed') => void,
     onConnectionChange?: (connected: boolean) => void
   ) {
     this.code = code;
@@ -1021,7 +1077,7 @@ export class StudentRoomController {
   private handleSeatUpdate(update: FirestoreSeatUpdate) {
     if (this.destroyed) return;
     if (update.kicked || update.kickedPlayerIds.includes(this.seat.playerId)) {
-      this.onKicked();
+      this.onKicked(update.kickedPlayerIds.includes(this.seat.playerId) ? 'removed' : 'closed');
       this.destroy();
       return;
     }
@@ -1051,7 +1107,8 @@ export class StudentRoomController {
     avatar: string;
     reconnectToken?: string;
     onViewUpdate: (view: PlayerViewPayload) => void;
-    onKicked: () => void;
+    /** 'removed': the teacher removed this phone (package R6). */
+    onKicked: (reason?: 'removed' | 'closed') => void;
     onConnectionChange?: (connected: boolean) => void;
     /** The name is already seated on another phone: the teacher has been asked to approve. */
     onWaitingForTeacher?: (message: string) => void;
@@ -1217,7 +1274,7 @@ export class StudentRoomController {
           if (msg.type === 'PLAYER_VIEW' && msg.view) {
             this.deliverViewUpdate(msg.view);
           } else if (msg.type === 'KICKED') {
-            this.onKicked();
+            this.onKicked('removed');
             this.destroy();
           }
         } catch (err) {
@@ -1277,6 +1334,10 @@ export class StudentRoomController {
 
     // 1. Firestore: this phone's intent document holds its recent intents (newest last), so
     // the host still gets all of them when several writes land between two of its reads.
+    if (intent.type === 'HEARTBEAT') {
+      // Only the newest "still here" matters; it never pushes real intents out.
+      this.recentIntents = this.recentIntents.filter((entry) => entry.intent.type !== 'HEARTBEAT');
+    }
     if (intent.type === 'SET_BET') {
       // A newer value for the same field replaces the older one.
       this.recentIntents = this.recentIntents.filter(

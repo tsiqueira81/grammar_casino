@@ -17,16 +17,20 @@ import {
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const TEACHER = 'teacher.siqueira@gmail.com';
+// Example accounts only (package A6: any teacher with Google gets a private space).
+const OWNER = 'owner@example.com';
+const google = (email, verified = true) => ({ email, email_verified: verified, firebase: { sign_in_provider: 'google.com' } });
 
 const env = await initializeTestEnvironment({
   projectId: 'demo-grammar-casino',
   firestore: { rules: readFileSync(join(here, '..', 'firestore.rules'), 'utf8') },
 });
 
-const teacher = env.authenticatedContext('teacher-uid', { email: TEACHER, email_verified: true }).firestore();
-const otherGoogle = env.authenticatedContext('other-uid', { email: 'someone@gmail.com', email_verified: true }).firestore();
-const fakeTeacher = env.authenticatedContext('fake-uid', { email: TEACHER, email_verified: false }).firestore();
+const teacher = env.authenticatedContext('teacher-uid', google(OWNER)).firestore(); // a bank owner
+const otherGoogle = env.authenticatedContext('other-uid', google('someone@example.com')).firestore(); // another teacher
+const fakeTeacher = env.authenticatedContext('fake-uid', google(OWNER, false)).firestore(); // unverified email
+const anonAsOwnerUid = env.authenticatedContext('teacher-uid', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
+await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'config/owners'), { emails: [OWNER] }));
 const hostAnon = env.authenticatedContext('host-anon', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
 const studentA = env.authenticatedContext('student-a', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
 const studentB = env.authenticatedContext('student-b', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
@@ -35,7 +39,7 @@ const nobody = env.unauthenticatedContext().firestore();
 const now = () => Date.now();
 const roster = () => ({
   name: 'Class 3B', notes: '', startingCash: 1000, playersJson: '[{"name":"Ana"}]',
-  playerCount: 1, updatedBy: TEACHER, createdAt: now(), updatedAt: now(),
+  playerCount: 1, updatedBy: 'Teacher', createdAt: now(), updatedAt: now(),
 });
 const report = () => ({
   title: 'Friday', topic: 'Tenses', level: 'C1', roundsPlayed: 3, playerCount: 2,
@@ -62,45 +66,78 @@ async function check(name, fn) {
   }
 }
 
-console.log('Rosters and reports');
-await check('teacher can save a roster', () => assertSucceeds(setDoc(doc(teacher, 'rosters/roster_1'), roster())));
-await check('teacher can list rosters', () => assertSucceeds(getDocs(collection(teacher, 'rosters'))));
-await check('teacher can delete a roster', () => assertSucceeds(deleteDoc(doc(teacher, 'rosters/roster_1'))));
-await check('anyone else cannot read rosters', async () => {
-  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'rosters/roster_2'), roster()));
-  await assertFails(getDoc(doc(nobody, 'rosters/roster_2')));
-  await assertFails(getDoc(doc(studentA, 'rosters/roster_2')));
-  await assertFails(getDoc(doc(otherGoogle, 'rosters/roster_2')));
-  await assertFails(getDocs(collection(otherGoogle, 'rosters')));
+console.log('Each teacher\'s private space');
+const mine = (sub, id) => `teachers/teacher-uid/${sub}${id ? `/${id}` : ''}`;
+const theirs = (sub, id) => `teachers/other-uid/${sub}${id ? `/${id}` : ''}`;
+await check('a teacher can save, list and delete their own roster', async () => {
+  await assertSucceeds(setDoc(doc(teacher, mine('rosters', 'roster_1')), roster()));
+  await assertSucceeds(getDocs(collection(teacher, mine('rosters'))));
+  await assertSucceeds(deleteDoc(doc(teacher, mine('rosters', 'roster_1'))));
 });
-await check('unverified email that claims to be the teacher cannot read rosters', () => assertFails(getDoc(doc(fakeTeacher, 'rosters/roster_2'))));
-await check('anyone else cannot write or delete rosters', async () => {
-  await assertFails(setDoc(doc(nobody, 'rosters/roster_3'), roster()));
-  await assertFails(setDoc(doc(otherGoogle, 'rosters/roster_3'), roster()));
-  await assertFails(deleteDoc(doc(studentA, 'rosters/roster_2')));
+await check('another teacher can do the same in their own space', async () => {
+  await assertSucceeds(setDoc(doc(otherGoogle, theirs('rosters', 'roster_b')), roster()));
+  await assertSucceeds(setDoc(doc(otherGoogle, theirs('session_reports', 'report_b')), report()));
 });
-await check('teacher can save and read a session report', async () => {
-  await assertSucceeds(setDoc(doc(teacher, 'session_reports/report_1'), report()));
+await check('teacher A cannot read, write or delete teacher B\'s class lists', async () => {
+  await assertFails(getDoc(doc(teacher, theirs('rosters', 'roster_b'))));
+  await assertFails(getDocs(collection(teacher, theirs('rosters'))));
+  await assertFails(setDoc(doc(teacher, theirs('rosters', 'roster_x')), roster()));
+  await assertFails(deleteDoc(doc(teacher, theirs('rosters', 'roster_b'))));
+});
+await check('teacher A cannot read teacher B\'s reports', async () => {
+  await assertFails(getDoc(doc(teacher, theirs('session_reports', 'report_b'))));
+  await assertFails(getDocs(collection(teacher, theirs('session_reports'))));
+});
+await check('students, strangers and unverified emails cannot reach a space', async () => {
+  await assertFails(getDocs(collection(nobody, theirs('rosters'))));
+  await assertFails(getDocs(collection(studentA, theirs('rosters'))));
+  await assertFails(getDoc(doc(fakeTeacher, mine('rosters', 'roster_1'))));
+  await assertFails(getDocs(collection(anonAsOwnerUid, mine('rosters')))); // same uid, but not Google
+});
+await check('a teacher can save and read their own report', async () => {
+  await assertSucceeds(setDoc(doc(teacher, mine('session_reports', 'report_1')), report()));
+  await assertSucceeds(getDocs(collection(teacher, mine('session_reports'))));
+});
+await check('a roster must be well formed', () => assertFails(setDoc(doc(teacher, mine('rosters', 'roster_bad')), { ...roster(), startingCash: -5 })));
+
+console.log('Old shared collections (before private spaces)');
+await env.withSecurityRulesDisabled(async (ctx) => {
+  await setDoc(doc(ctx.firestore(), 'rosters/old_roster'), roster());
+  await setDoc(doc(ctx.firestore(), 'session_reports/old_report'), report());
+});
+await check('a bank owner can read the old data, to copy it into their space', async () => {
+  await assertSucceeds(getDocs(collection(teacher, 'rosters')));
   await assertSucceeds(getDocs(collection(teacher, 'session_reports')));
 });
-await check('anyone else cannot read or delete reports', async () => {
-  await assertFails(getDocs(collection(nobody, 'session_reports')));
-  await assertFails(getDoc(doc(otherGoogle, 'session_reports/report_1')));
-  await assertFails(deleteDoc(doc(studentA, 'session_reports/report_1')));
+await check('other teachers and students cannot read the old data', async () => {
+  await assertFails(getDocs(collection(otherGoogle, 'rosters')));
+  await assertFails(getDoc(doc(otherGoogle, 'session_reports/old_report')));
+  await assertFails(getDoc(doc(studentA, 'rosters/old_roster')));
+  await assertFails(getDoc(doc(fakeTeacher, 'rosters/old_roster')));
+});
+await check('nobody can add to the old collections any more', async () => {
+  await assertFails(setDoc(doc(teacher, 'rosters/new_roster'), roster()));
+  await assertFails(setDoc(doc(otherGoogle, 'session_reports/new_report'), report()));
+});
+await check('the owners list cannot be read or changed from the app', async () => {
+  await assertFails(getDoc(doc(teacher, 'config/owners')));
+  await assertFails(setDoc(doc(otherGoogle, 'config/owners'), { emails: ['someone@example.com'] }));
 });
 
 console.log('Sentence bank');
-await check('teacher can add a sentence', () => assertSucceeds(setDoc(doc(teacher, 'curated_sentences/sent_binary_1'), sentence())));
+await check('a bank owner can add a sentence', () => assertSucceeds(setDoc(doc(teacher, 'curated_sentences/sent_binary_1'), sentence())));
 await check('everyone can read the bank', async () => {
   await assertSucceeds(getDocs(collection(nobody, 'curated_sentences')));
   await assertSucceeds(getDocs(collection(studentA, 'curated_sentences')));
 });
-await check('others cannot add or delete sentences', async () => {
+await check('other teachers and students cannot add or delete sentences', async () => {
   await assertFails(setDoc(doc(nobody, 'curated_sentences/sent_binary_2'), sentence()));
   await assertFails(setDoc(doc(otherGoogle, 'curated_sentences/sent_binary_2'), sentence()));
+  await assertFails(setDoc(doc(fakeTeacher, 'curated_sentences/sent_binary_2'), sentence()));
   await assertFails(deleteDoc(doc(studentA, 'curated_sentences/sent_binary_1')));
+  await assertFails(deleteDoc(doc(otherGoogle, 'curated_sentences/sent_binary_1')));
 });
-await check('teacher can delete a sentence', () => assertSucceeds(deleteDoc(doc(teacher, 'curated_sentences/sent_binary_1'))));
+await check('a bank owner can delete a sentence', () => assertSucceeds(deleteDoc(doc(teacher, 'curated_sentences/sent_binary_1'))));
 
 console.log('Live rooms');
 await check('signed-in host can create a room', () => assertSucceeds(setDoc(doc(hostAnon, 'rooms/ABCD'), room('ABCD', 'host-anon'))));
@@ -108,9 +145,8 @@ await check('room cannot be created without signing in', () => assertFails(setDo
 await check('room cannot be created in someone else\'s name', () => assertFails(setDoc(doc(studentA, 'rooms/WXYZ'), room('WXYZ', 'host-anon'))));
 await check('host can update the room', () => assertSucceeds(setDoc(doc(hostAnon, 'rooms/ABCD'), room('ABCD', 'host-anon', { locked: true }))));
 await check('student cannot take over or update the room', () => assertFails(setDoc(doc(studentA, 'rooms/ABCD'), room('ABCD', 'student-a'))));
-await check('teacher (Google) can take over the room', () => assertSucceeds(setDoc(doc(teacher, 'rooms/ABCD'), room('ABCD', 'teacher-uid'))));
-await check('original anonymous host can no longer write after the teacher took over', () => assertFails(setDoc(doc(hostAnon, 'rooms/ABCD'), room('ABCD', 'host-anon'))));
-await check('room cannot carry extra fields such as everyone\'s views', () => assertFails(setDoc(doc(teacher, 'rooms/ABCD'), room('ABCD', 'teacher-uid', { viewsJson: '{}' }))));
+await check('a Google teacher cannot take over another host\'s live room', () => assertFails(setDoc(doc(teacher, 'rooms/ABCD'), room('ABCD', 'teacher-uid'))));
+await check('room cannot carry extra fields such as everyone\'s views', () => assertFails(setDoc(doc(hostAnon, 'rooms/ABCD'), room('ABCD', 'host-anon', { viewsJson: '{}' }))));
 await check('anyone can read a room (the shared table only)', async () => {
   await assertSucceeds(getDoc(doc(nobody, 'rooms/ABCD')));
   await assertSucceeds(getDoc(doc(studentB, 'rooms/ABCD')));
@@ -175,9 +211,9 @@ await check('nobody can list the seat records', async () => {
   await assertFails(getDocs(collection(studentA, 'rooms/SEAT/seats')));
   await assertFails(getDocs(collection(nobody, 'rooms/SEAT/seats')));
 });
-await check('host and teacher can read a seat record', async () => {
+await check('the host can read a seat record, another teacher cannot', async () => {
   await assertSucceeds(getDoc(doc(hostAnon, 'rooms/SEAT/seats/stu_a')));
-  await assertSucceeds(getDoc(doc(teacher, 'rooms/SEAT/seats/stu_a')));
+  await assertFails(getDoc(doc(teacher, 'rooms/SEAT/seats/stu_a')));
 });
 await check('students cannot write seat records, even their own', async () => {
   await assertFails(setDoc(doc(studentA, 'rooms/SEAT/seats/stu_a'), seat('stu_a', 'student-a', { viewJson: '{"me":{"money":99999}}' })));

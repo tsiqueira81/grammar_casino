@@ -145,6 +145,10 @@ export interface PlayerViewPayload {
   turnDurationMs?: number;
   /** The teacher turned Calm mode on: this phone keeps its motion off too. */
   calmMode?: boolean;
+  /** The teacher paused the hand (package R8): the phone shows a pause card and takes no input. */
+  paused?: boolean;
+  /** The teacher's clock when this update was sent (package R3); added by the transport. */
+  serverNow?: number;
 }
 
 export interface AudiencePollBreakdownItem {
@@ -327,7 +331,11 @@ export type StudentIntent =
   | { type: 'SELECT_POWER_UP_TARGET'; powerUp: PowerUpKey; targetId: number }
   | { type: 'CANCEL_POWER_UP_TARGET'; powerUp: PowerUpKey }
   | { type: 'APPLY_WHEEL_RESULT'; itemId: string }
-  | { type: 'UPDATE_PROFILE'; name?: string; avatar?: string };
+  | { type: 'UPDATE_PROFILE'; name?: string; avatar?: string }
+  /** Package R2: "still here", sent every 20 s while the phone is on screen. */
+  | { type: 'HEARTBEAT' }
+  /** Package L5: after the reveal, "Got it" or "Still confused" for this hand. */
+  | { type: 'FEEDBACK_REACTION'; round: number; value: 'gotIt' | 'confused' };
 
 export interface BuildPlayerViewsParams {
   roomCode: string;
@@ -361,6 +369,8 @@ export interface BuildPlayerViewsParams {
   turnDurationMs?: number;
   /** The teacher's Calm mode: phones turn their motion off too. */
   calmMode?: boolean;
+  /** The teacher paused the hand (package R8). */
+  paused?: boolean;
 }
 
 /**
@@ -443,6 +453,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
     roundTimer,
     turnDurationMs,
     calmMode,
+    paused,
   } = params;
 
   const allActive = Object.values(activePowerUps).flat() as ActivePowerUp[];
@@ -676,7 +687,8 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       },
       isLoadingSentence: isLoading,
       isProcessingResults: isProcessing,
-      me: player,
+      // Package R5: a player's growing history goes to the phone only at the end of the game.
+      me: step === 'GAME_OVER' ? player : { ...player, history: [] },
       myBet: bets[player.id] || {},
       myHint: hints[player.id],
       myActivePowerUps: myActive,
@@ -711,6 +723,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
       roundTimer,
       turnDurationMs,
       calmMode: Boolean(calmMode),
+      paused: Boolean(paused) && step === 'IN_GAME',
     };
   }
 
@@ -748,6 +761,7 @@ export const SHARED_VIEW_KEYS = [
   'roundTimer',
   'turnDurationMs',
   'calmMode',
+  'paused',
 ] as const satisfies readonly (keyof PlayerViewPayload)[];
 
 export interface SplitPlayerViews {

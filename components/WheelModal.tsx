@@ -440,7 +440,7 @@ export const WheelModal: React.FC<WheelModalProps> = ({
             <button
               onClick={handleSpin}
               disabled={isSpinning}
-              className={`px-8 py-3.5 rounded-xl font-sans text-lg font-black uppercase tracking-widest transition-all duration-200 transform shadow-xl flex items-center gap-3 ${
+              className={`px-8 py-3.5 rounded-xl font-sans text-lg font-black uppercase tracking-widest transition-all duration-gc-fast transform shadow-xl flex items-center gap-3 ${
                 isSpinning
                   ? 'bg-slate-400 text-slate-200 cursor-not-allowed opacity-75'
                   : 'cursor-pointer bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 hover:scale-105 active:scale-95 border-2 border-amber-300'

@@ -5,6 +5,7 @@ import { POWER_UPS } from '../constants';
 import PowerUpTooltip from './PowerUpTooltip';
 import ActionButton from './ActionButton';
 import TextInput from './TextInput';
+import { DECK_PRESETS, matchingPreset } from '../game/powerUpCatalog';
 
 interface DeckConfigModalProps {
   isOpen: boolean;
@@ -13,6 +14,8 @@ interface DeckConfigModalProps {
   onTogglePowerUp: (key: PowerUpKey) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
+  /** Package G5: pick a ready-made deck (opt-in; the default stays all 40). */
+  onSetDeck?: (keys: PowerUpKey[]) => void;
   playSound?: (sound: SoundEffect) => void;
 }
 
@@ -25,6 +28,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
   onTogglePowerUp,
   onSelectAll,
   onClearAll,
+  onSetDeck,
   playSound,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,6 +176,41 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
             </div>
           </div>
 
+          {/* Ready-made decks (package G5) */}
+          {onSetDeck && (
+            <div className="px-4 sm:px-5 pt-3 font-sans" role="group" aria-label="Ready-made decks">
+              <div className="flex flex-wrap gap-2">
+                {DECK_PRESETS.map(preset => {
+                  const isOn = matchingPreset(selectedPowerUps) === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      aria-pressed={isOn}
+                      title={preset.description}
+                      onClick={() => { if (playSound) playSound('click'); onSetDeck([...preset.keys]); }}
+                      className={`min-h-[44px] px-4 rounded-full text-sm font-bold border transition-colors cursor-pointer ${
+                        isOn ? 'bg-[#ca8a04] text-black border-transparent' : 'border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:border-[#ca8a04]'
+                      }`}
+                    >
+                      {preset.name} ({preset.keys.length})
+                    </button>
+                  );
+                })}
+                <span
+                  className={`min-h-[44px] px-4 rounded-full text-sm font-bold border inline-flex items-center ${
+                    matchingPreset(selectedPowerUps) === 'custom' ? 'bg-[#ca8a04] text-black border-transparent' : 'border-dashed border-slate-300 dark:border-slate-600 text-slate-500'
+                  }`}
+                >
+                  Custom
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                {DECK_PRESETS.find(p => p.id === matchingPreset(selectedPowerUps))?.description ?? 'Your own choice of cards: tap a card below to add or remove it.'}
+              </p>
+            </div>
+          )}
+
           {/* Cards Grid */}
           <div className="p-4 sm:p-5 overflow-y-auto flex-1 modal-content-scroll max-h-[62vh]">
             {filteredKeys.length === 0 ? (
@@ -189,7 +228,7 @@ export const DeckConfigModal: React.FC<DeckConfigModalProps> = ({
                     <div
                       key={key}
                       onClick={() => handleCardClick(key)}
-                      className={`relative p-3 rounded-xl border text-left transition-all duration-150 cursor-pointer select-none group flex flex-col justify-between ${
+                      className={`relative p-3 rounded-xl border text-left transition-all duration-gc-fast cursor-pointer select-none group flex flex-col justify-between ${
                         isSelected
                           ? 'bg-gradient-to-br from-purple-50 to-amber-50/50 dark:from-[#1b1535] dark:to-[#0a1f14] border-purple-400 dark:border-purple-500/80 shadow-sm hover:shadow-md hover:border-purple-500'
                           : 'bg-white/60 dark:bg-[#071910]/60 border-slate-200 dark:border-[#14532d]/60 opacity-55 grayscale hover:opacity-85 hover:grayscale-0'

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { WebSocket } from 'ws';
 import { isServerlessRuntime } from './runtime';
+import { cleanName, safePlayerName } from '../utils/nameFilter';
 
 // ============================================================================
 // --- Multiplayer Room Relay (WebSocket + HTTP Fallback) ---
@@ -36,6 +37,8 @@ export interface RelayRoom {
   seats: Map<number, RelaySeat>; // playerId -> RelaySeat
   playerViews: Map<number, any>; // playerId -> latest filtered PlayerViewPayload
   pendingHostEvents: RelayHostEvent[];
+  /** Reconnect tokens of phones the teacher removed (package R6). */
+  banned: Set<string>;
 }
 
 export const ROOM_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -125,6 +128,7 @@ export function registerRelayRoutes(app: any) {
       seats: new Map(),
       playerViews: new Map(),
       pendingHostEvents: [],
+      banned: new Set(),
     };
     rooms.set(code, room);
     res.json({ code, hostToken });
@@ -133,7 +137,7 @@ export function registerRelayRoutes(app: any) {
   // 2. Join or Reconnect Room (Student)
   app.post("/api/mp/room/join", (req, res) => {
     const rawCode = String(req.body?.code || "").trim().toUpperCase();
-    const rawName = String(req.body?.name || "").trim().slice(0, 20);
+    const rawName = cleanName(req.body?.name);
     const rawAvatar = String(req.body?.avatar || "🦊").trim();
     const reconnectToken = String(req.body?.reconnectToken || "").trim();
 
@@ -143,6 +147,10 @@ export function registerRelayRoutes(app: any) {
     }
 
     room.lastActivity = Date.now();
+
+    if (reconnectToken && room.banned.has(reconnectToken)) {
+      return res.status(403).json({ error: "The teacher removed you from this room." });
+    }
 
     // Check reconnect by token first
     if (reconnectToken) {
@@ -199,13 +207,12 @@ export function registerRelayRoutes(app: any) {
       return res.status(400).json({ error: "Please enter your display name to join." });
     }
 
-    // Ensure unique display name
-    let finalName = rawName;
-    let suffix = 2;
-    const existingNames = new Set(Array.from(room.seats.values()).map(s => s.name.toLowerCase()));
-    while (existingNames.has(finalName.toLowerCase())) {
-      finalName = `${rawName.slice(0, 16)} #${suffix++}`;
+    if (room.seats.size >= 40) {
+      return res.status(403).json({ error: "This room is full (40 players)." });
     }
+
+    // A rude name becomes a friendly one, and names are unique at the table (package R6).
+    const finalName = safePlayerName(rawName, Array.from(room.seats.values(), s => s.name));
 
     const playerId = Date.now() + Math.floor(Math.random() * 10000);
     const newSeat: RelaySeat = {
@@ -262,6 +269,7 @@ export function registerRelayRoutes(app: any) {
           kicked.ws.close();
         } catch {}
       }
+      if (kicked?.reconnectToken) room.banned.add(kicked.reconnectToken);
       room.seats.delete(kickPlayerId);
       room.playerViews.delete(kickPlayerId);
     }

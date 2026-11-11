@@ -73,6 +73,16 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await expect(phone.getByRole('region', { name: 'The sentence' })).toContainText('more time');
   }
 
+  // The teacher pauses the hand (package R8): every phone shows the pause card until it resumes.
+  await host.getByRole('button', { name: 'Pause', exact: true }).click();
+  for (const phone of phones) {
+    await expect(phone.getByRole('alert').filter({ hasText: 'Your teacher paused the game' })).toBeVisible();
+  }
+  await host.getByRole('button', { name: 'Resume the hand' }).click();
+  for (const phone of phones) {
+    await expect(phone.getByRole('alert').filter({ hasText: 'Your teacher paused the game' })).toHaveCount(0);
+  }
+
   // Everyone bets; Eva's phone is reloaded before she locks in.
   for (let i = 0; i < players.length; i++) {
     await placeBet(phones[i], players[i].option, players[i].bet);
@@ -105,7 +115,23 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await expect(phone.getByRole('status').filter({ hasText: '$' }).first()).toHaveText(players[i].delta);
     await expect(phone.getByText(/^Balance/)).toContainText(players[i].balance);
     await expect(phone.getByText('Second conditional: if + past simple, would + base form.')).toBeVisible();
+    // Package L5: the phone shows the student's own answer beside the right one.
+    await expect(phone.getByTestId('my-answer')).toContainText(players[i].option);
   }
+
+  // Package S4: each phone says where it stands and how far it is to the next place.
+  await expect(phones[2].getByTestId('my-place')).toHaveText('You are 1st of 3. You are in the lead.');
+  await expect(phones[0].getByTestId('my-place')).toHaveText('You are 2nd of 3. $101 more to pass Fabio.');
+  await expect(phones[1].getByTestId('my-place')).toHaveText('You are 3rd of 3. $151 more to pass Dani.');
+
+  // Package L5: "Got it" / "Still confused" reach the teacher, beside what the class answered.
+  await phones[0].getByRole('button', { name: 'Got it' }).click();
+  await phones[1].getByRole('button', { name: 'Still confused' }).click();
+  await expect(phones[1].getByRole('button', { name: 'Still confused' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(host.getByTestId('reaction-counts')).toHaveText('1 got it · 1 still confused');
+  const split = host.getByTestId('answer-split');
+  await expect(split.getByRole('listitem').first()).toContainText(KNOWN.multipleChoiceAnswer);
+  await expect(split.getByRole('listitem').first()).toContainText('2');
 
   expect(errors).toEqual([]);
 });

@@ -200,7 +200,7 @@ export const PokerChip: React.FC<PokerChipProps> = ({
           ? `0 ${dimensions.lip} 0 ${config.darkHex}, 0 6px 12px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.45)`
           : `0 1.5px 0 ${config.darkHex}, inset 0 1px 1px rgba(255, 255, 255, 0.35)`,
       }}
-      className={`relative rounded-full flex items-center justify-center p-0.5 border border-white/25 select-none transition-all duration-150 ${dimensions.outer} ${interactiveClasses} ${className}`}
+      className={`relative rounded-full flex items-center justify-center p-0.5 border border-white/25 select-none transition-all duration-gc-fast ${dimensions.outer} ${interactiveClasses} ${className}`}
     >
       {/* Subtle recessed mold ring */}
       <div

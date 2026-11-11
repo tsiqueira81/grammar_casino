@@ -1,4 +1,5 @@
 import React from 'react';
+import { crashDetails, logEvent } from '../utils/debugLog';
 
 /**
  * The lesson must never stall (package R8). If a screen crashes, show a way out instead of a blank
@@ -13,17 +14,51 @@ interface Props {
 
 interface State {
   failed: boolean;
+  copied: boolean;
 }
 
 export class RecoverBoundary extends React.Component<Props, State> {
-  state: State = { failed: false };
+  state: State = { failed: false, copied: false };
+  private details = '';
 
   static getDerivedStateFromError(): State {
-    return { failed: true };
+    return { failed: true, copied: false };
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo) {
     console.error('A screen crashed; offering to recover.', error, info?.componentStack);
+    logEvent('error', `Crash: ${error instanceof Error ? error.message : String(error)}`);
+    // Package A4: kept for "Copy details". Nothing is sent anywhere automatically.
+    this.details = crashDetails(error, info?.componentStack);
+  }
+
+  private copyDetails = () => {
+    const done = () => this.setState({ copied: true });
+    try {
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(this.details).then(done, () => this.downloadDetails());
+        return;
+      }
+    } catch {
+      // fall through to a download
+    }
+    this.downloadDetails();
+  };
+
+  private downloadDetails = () => {
+    try {
+      const url = URL.createObjectURL(new Blob([this.details], { type: 'text/plain;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'grammar-casino-crash.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.setState({ copied: true });
+    } catch {
+      // nothing else to try
+    }
   }
 
   render() {
@@ -45,6 +80,16 @@ export class RecoverBoundary extends React.Component<Props, State> {
           >
             {isPhone ? 'Back to my seat' : 'Recover the game'}
           </button>
+          {!isPhone && (
+            <button
+              type="button"
+              onClick={this.copyDetails}
+              data-testid="crash-copy-details"
+              className="min-h-[44px] w-full rounded-gc-sm bg-gc-line/[0.07] border border-gc-line/[0.14] text-gc-ink font-semibold px-5 py-2 cursor-pointer"
+            >
+              {this.state.copied ? 'Details copied' : 'Copy details (to report the problem)'}
+            </button>
+          )}
         </div>
       </div>
     );

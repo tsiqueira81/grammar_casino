@@ -22,7 +22,7 @@ import { CEFR_LEVELS, GRAMMAR_TOPICS } from '../constants';
 import ActionButton from './ActionButton';
 import GrammarReportCard from './GrammarReportCard';
 import { PlayerAvatar } from './PlayerAvatar';
-import { getBuiltInCuratedSentencesForCloudSeed, getStaticBankCounts } from '../services/fallbackSentences';
+import type { BuiltInSeedItem } from '../services/fallbackSentences';
 import { generateSentence } from '../services/geminiService';
 import {
   archiveSentenceToCloudBank,
@@ -40,7 +40,6 @@ import {
   seedBuiltInBankToCloud,
   signInTeacherWithGoogle,
   syncCloudSentenceBank,
-  VERIFIED_TEACHER_EMAIL,
 } from '../services/firebaseService';
 
 export type CloudManagerTab = 'rosters' | 'reports' | 'sentences';
@@ -95,9 +94,10 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   teacherEmail,
   isDesktopApp,
 }) => {
-  // Rosters and reports hold student names, so the Firestore rules only open them to the
-  // teacher's Google account. The vault asks for that sign-in instead of failing quietly.
-  const isTeacherSignedIn = (teacherEmail || '').trim().toLowerCase() === VERIFIED_TEACHER_EMAIL;
+  // Rosters and reports hold student names, so the Firestore rules keep each teacher's in their
+  // own private space (package A6). The vault asks for a Google sign-in instead of failing quietly.
+  // App passes the email only for a verified Google sign-in.
+  const isTeacherSignedIn = Boolean(teacherEmail);
   const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<CloudManagerTab>(initialTab);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -138,10 +138,21 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
   const [isBatchGenerating, setIsBatchGenerating] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const staticCounts = useMemo(() => getStaticBankCounts(), []);
+  // Package L1: the built-in bank loads only when this window opens, not with the game.
+  const [bank, setBank] = useState<{ counts: ReturnType<typeof import('../services/fallbackSentences')['getStaticBankCounts']>; seed: BuiltInSeedItem[] } | null>(null);
+  useEffect(() => {
+    if (!isOpen || bank) return;
+    let alive = true;
+    void import('../services/fallbackSentences').then(m => {
+      if (alive) setBank({ counts: m.getStaticBankCounts(), seed: m.getBuiltInCuratedSentencesForCloudSeed() });
+    });
+    return () => { alive = false; };
+  }, [isOpen, bank]);
+  const staticCounts = bank?.counts ?? { totalCount: 0, binaryCount: 0, clozeCount: 0, wordFormationCount: 0, keyWordTransformationCount: 0 };
+  const builtInSeed = useMemo(() => bank?.seed ?? [], [bank]);
   const missingBuiltInSeedCount = useMemo(
-    () => getMissingBuiltInCloudSeedCount(sentences, getBuiltInCuratedSentencesForCloudSeed()),
-    [sentences]
+    () => getMissingBuiltInCloudSeedCount(sentences, builtInSeed),
+    [sentences, bank]
   );
 
   useEffect(() => {
@@ -173,7 +184,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
       playSound('error');
       setNotice({
         type: 'error',
-        text: `Signed in as ${res.user?.email || 'another account'}. Class rosters and reports open only for ${VERIFIED_TEACHER_EMAIL}.`,
+        text: 'This Google account has no verified email, so it cannot keep class lists. Try another account.',
       });
       return;
     }
@@ -331,7 +342,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
     setNotice(null);
     setSeedProgress({ done: 0, total: Math.max(1, missingBuiltInSeedCount) });
     try {
-      const res = await seedBuiltInBankToCloud(sentences, getBuiltInCuratedSentencesForCloudSeed(), (done, total) => {
+      const res = await seedBuiltInBankToCloud(sentences, builtInSeed, (done, total) => {
         setSeedProgress({ done, total });
       });
       setSentences(res.updatedList);
@@ -543,7 +554,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                     Teacher sign-in required
                   </h3>
                   <p className="text-gc-small text-gc-quiet leading-relaxed">
-                    Class rosters and session reports contain your students&apos; names and scores, so they open only for the teacher&apos;s Google account (<strong>{VERIFIED_TEACHER_EMAIL}</strong>).
+                    Class rosters and session reports contain your students&apos; names and scores. Sign in with your Google account and they are kept in your own private space: no other teacher can see them.
                   </p>
                 </div>
               </div>
@@ -575,9 +586,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                   <div className="min-w-0">
                     <p className="text-gc-body font-bold text-gc-ink">Sign in with Google</p>
                     <p className="text-gc-small text-gc-quiet">
-                      {teacherEmail
-                        ? `Currently signed in as ${teacherEmail}. Switch to ${VERIFIED_TEACHER_EMAIL}.`
-                        : `Sign in with ${VERIFIED_TEACHER_EMAIL} to open your rosters and saved sessions.`}
+                      Sign in with your Google account to open your rosters and saved sessions.
                     </p>
                   </div>
                   <ActionButton

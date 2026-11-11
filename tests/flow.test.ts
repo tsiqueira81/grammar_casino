@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkGameEnd, isBailoutEnabled, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from '../game/flow';
+import { checkGameEnd, isBailoutEnabled, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from '../game/flow';
 import type { GameMode, Player } from '../types';
 
 const p = (id: number, money: number) => ({ id, name: `P${id}`, money, history: [], avatar: 'x', winStreak: 0, effects: [] }) as Player;
@@ -80,5 +80,19 @@ describe('pickWinnerWhenEndedEarly', () => {
     expect(pickWinnerWhenEndedEarly({ players: [p(1, 500), p(2, 700)], gameMode: 'rounds', targetAmount: 2000 })?.id).toBe(2);
     expect(pickWinnerWhenEndedEarly({ players: [p(1, 700), p(2, 700)], gameMode: 'rounds', targetAmount: 2000 })).toBeNull();
     expect(pickWinnerWhenEndedEarly({ players: [p(1, 0), p(2, 0)], gameMode: 'rounds', targetAmount: 2000 })).toBeNull();
+  });
+});
+
+describe('refundHandSpending (Swap this sentence)', () => {
+  it('gives back what each player spent this hand and leaves the rest alone', () => {
+    const players = [
+      { id: 1, money: 100 },
+      { id: 2, money: 50 },
+      { id: 3, money: 0 },
+    ];
+    const out = refundHandSpending(players, { 1: 20, 3: 15 });
+    expect(out.map((p) => p.money)).toEqual([120, 50, 15]);
+    expect(out[1]).toBe(players[1]);
+    expect(players[0].money).toBe(100);
   });
 });

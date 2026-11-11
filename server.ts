@@ -5,6 +5,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { APP_ROOT_DIR, isCloudflareWorker, isServerlessRuntime } from './server/runtime';
 import { handleGeminiRequest } from './server/aiHandler';
+import { deepHealth, deepHealthAllowed } from './server/aiProviders';
 import { pushEventToHost, registerRelayRoutes, relayIntentId, rooms, sendViewToStudent, serializeSeat } from './server/relay';
 
 /**
@@ -29,7 +30,13 @@ if (!isCloudflareWorker) {
 app.post("/api/gemini", handleGeminiRequest);
 
 // Health check endpoint
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (req, res) => {
+  if (req.query.deep === "1") {
+    if (!deepHealthAllowed(req.headers.authorization)) return res.status(403).json({ error: "Deep health needs the health check token." });
+    const providers = await deepHealth();
+    const ok = Object.values(providers).some((p) => p.ok);
+    return res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded", app: "grammar-casino", providers });
+  }
   res.json({ status: "ok", app: "grammar-casino" });
 });
 

@@ -1,9 +1,32 @@
 import { safeLocalStorage } from './utils/safeStorage';
 import { migrateSavedGame } from './game/persistence';
 import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
-import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly } from './game/flow';
+import { useLaterTimers } from './utils/useLaterTimers';
+import { safePlayerName } from './utils/nameFilter';
+import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected, isProtectedFromWheelBounty, mayBuyPowerUps } from './game/powerUpRules';
+import { mapWithLimit } from './utils/flushPlan';
+import { awaySeatIds, presenceSummary } from './game/presence';
+import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
+import { APP_VERSION, logEvent } from './utils/debugLog';
+import { QUALITY_KEY, parseStoredQuality, resolveTier, type QualityChoice, type QualityTier } from './show/quality';
+import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
+import { DebugLogModal } from './components/DebugLogModal';
+import { OwnDeckModal } from './components/OwnDeckModal';
+import { deckSummary, parseDeckText, sentenceRecordOf } from './game/teacherDeck';
+import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
+import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
+import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
+import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
+/** Package T5: reports of the last 20 finished games on this computer. */
+const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
+import { tableViewOn } from './show/tableView';
+import { CEREMONY_DONE, ceremonyTimes, cueForStage, drawMoment, placeShown, type CeremonyStage } from './game/ceremony';
+import { buildReport, classResultLine } from './game/report';
+import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
+import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, undoRevealSecondsLeft, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
-import { hasPlainShield, hasShieldProtection, isFrozenBySubZero } from './game/status';
+import { hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { clampBetInput, getBetCap, getBetLimits, getDisplayedMinBet, getHighRoller } from './game/betLimits';
 import { 
@@ -18,7 +41,7 @@ import {
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
   CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -62,6 +85,7 @@ import type {
 } from './components/Tabletop3DOverlay';
 // three.js is only needed on the teacher's table, so phones never download it.
 const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
+const TableBackdrop = React.lazy(() => import('./components/TableBackdrop'));
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -73,12 +97,14 @@ import {
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
+import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
-import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers } from './utils/roundSettlement';
+import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
 import { getCefrTopicRuleSpec } from './utils/cefrGrammarMatrix';
 import {
-  subscribeToAuthChanges,
+  subscribeToTeacherAuth,
+  isVerifiedTeacherUser,
   syncCloudSentenceBank,
   CloudRoster,
 } from './services/firebaseService';
@@ -97,6 +123,13 @@ const readStoredSfxVolume = (): number => {
   }
 };
 const soundEngine = createSoundEngine(typeof window !== 'undefined' ? readStoredSfxVolume() : DEFAULT_SFX_VOLUME);
+// Package V6: the music bed. The volume is kept per computer; 0 means no music.
+function readStoredMusicVolume(): number {
+  const raw = safeLocalStorage.getItem(MUSIC_VOLUME_KEY);
+  const v = raw === null ? DEFAULT_MUSIC_VOLUME : Number(raw);
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : DEFAULT_MUSIC_VOLUME;
+}
+const musicEngine = createMusicEngine(typeof window !== 'undefined' ? readStoredMusicVolume() : DEFAULT_MUSIC_VOLUME);
 
 // --- Audio Decoding Helpers for Gemini TTS ---
 function base64ToBytes(base64: string) {
@@ -222,12 +255,8 @@ function pcmToAudioBuffer(
 
 const loadInitialState = () => { 
   try { 
-    const s = safeLocalStorage.getItem(LOCAL_STORAGE_KEY); 
-    if (s) {
-      const parsed = migrateSavedGame(JSON.parse(s), () => getRandomCharacterAvatar());
-      if (parsed && typeof parsed.step === 'string') return parsed;
-    }
-    return null;
+    // One versioned save format (package T5): game/persistence.ts reads every version.
+    return readSave(safeLocalStorage.getItem(LOCAL_STORAGE_KEY), () => getRandomCharacterAvatar());
   } catch (e) { 
     console.error("Failed to load or parse game state from localStorage:", e);
     return null; 
@@ -235,6 +264,19 @@ const loadInitialState = () => {
 };
 
 const initialGameState = loadInitialState();
+
+// Package T1: last game's setup, remembered per browser.
+function loadSetupPrefs(): Partial<SetupPrefs> {
+  return parseSetupPrefs(safeLocalStorage.getItem(SETUP_PREFS_KEY), {
+    levels: CEFR_LEVELS,
+    questionTypes: ALL_QUESTION_TYPES,
+    powerUps: Object.keys(POWER_UPS),
+    timerOptions: TURN_TIMER_OPTIONS,
+    minTargetAmount: MIN_TARGET_AMOUNT,
+  }) ?? {};
+}
+const OWN_DECK_KEY = 'grammar_casino_own_deck_v1';
+const initialPrefs = initialGameState ? {} : loadSetupPrefs();
 
 const renderTextSegments = (segments: TextSegment[], markClassName: string) =>
   segments.map((seg, i) =>
@@ -261,7 +303,7 @@ export function App() {
         mixedFormats: getEffectiveMixedFormats(saved.mixedFormats),
       };
     }
-    return {
+    return initialPrefs.settings ?? {
       topic: GRAMMAR_TOPICS[0],
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
@@ -270,14 +312,23 @@ export function App() {
     };
   });
   const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
-  const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || '');
-  const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || '');
+  const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || initialPrefs.customTopic || '');
+  const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || initialPrefs.customTheme || '');
   const mixedFormatIndexRef = useRef(0);
   
-  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || 'lastPlayer');
-  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || 10);
-  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || DEFAULT_TARGET_AMOUNT);
+  // Package G3: a new game starts in "Most money after N hands", the gentlest start for a class.
+  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || initialPrefs.gameMode || 'rounds');
+  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || initialPrefs.totalRounds || 10);
+  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT);
   const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
+  const currentRoundRef = useRef(currentRound);
+  currentRoundRef.current = currentRound;
+  // Package L6: missed grammar points come back two hands later ("a second look").
+  const secondLookQueueRef = useRef<SecondLook[]>([]);
+  const handSubtypeRef = useRef<string | null>(null);
+  /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
+  const fetchTargetRoundRef = useRef<number | null>(null);
+  const [secondLookRound, setSecondLookRound] = useState<number | null>(null);
   
   const [currentSentence, setCurrentSentence] = useState<GeneratedSentence | null>(initialGameState?.currentSentence || null);
   const [pastSentences, setPastSentences] = useState<string[]>(initialGameState?.pastSentences || []);
@@ -358,7 +409,7 @@ export function App() {
       const missing = allKeys.filter(k => !saved.includes(k));
       return [...saved, ...missing];
     }
-    return allKeys;
+    return initialPrefs.deck ?? allKeys;
   });
   const [roundSpending, setRoundSpending] = useState<Record<number, number>>(initialGameState?.roundSpending || {}); // PlayerId -> amount spent
 
@@ -369,10 +420,10 @@ export function App() {
   const [showAvatarModal, setShowAvatarModal] = useState<{ playerId: number } | null>(null);
   const [editingPlayerIdInSetup, setEditingPlayerIdInSetup] = useState<number | null>(null);
   const [editingPlayerNameInSetup, setEditingPlayerNameInSetup] = useState('');
-  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY);
+  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY);
   const [isEditingStartingCash, setIsEditingStartingCash] = useState(false);
   const [isLobbyMenuOpen, setIsLobbyMenuOpen] = useState(false);
-  const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? INITIAL_PLAYER_MONEY));
+  const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY));
   const [showWheelModal, setShowWheelModal] = useState<{ playerId: number } | null>(null);
   const [usedSubtypes, setUsedSubtypes] = useState<string[]>([]);
   const [pendingLoadGame, setPendingLoadGame] = useState<any | null>(null);
@@ -392,13 +443,48 @@ export function App() {
   const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(() => {
     const saved = initialGameState?.turnTimerSeconds;
     if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
-    return 0;
+    return initialPrefs.turnTimerSeconds ?? 0;
   });
   const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
   const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
   const mpAutoStartedRoundRef = useRef<number>(0);
   const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
   const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
+  // Package R8: the teacher paused the hand. Timers stop, phones show a pause card and take no input.
+  const later = useLaterTimers();
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  // Package R2: when each phone was last heard from, and who is away (nothing for 45 s).
+  const mpLastSeenRef = useRef<Record<number, number>>({});
+  const [mpAwayIds, setMpAwayIds] = useState<number[]>([]);
+  // Package T5: "Resume or start fresh" when an unfinished game is opened again later
+  // (not when a live room is reopening by itself), and the reports of finished games.
+  const [resumeOffer, setResumeOffer] = useState(() => (loadSavedHostRoom() ? null : getResumeOffer(initialGameState, Date.now())));
+  const [finishedGames, setFinishedGames] = useState<FinishedGame[]>(() => parseFinishedGames(safeLocalStorage.getItem(FINISHED_GAMES_STORAGE_KEY)));
+  const [showPastReports, setShowPastReports] = useState(false);
+  const [pastReport, setPastReport] = useState<FinishedGame | null>(null);
+  // Package T2: shortcut list and full screen for presenting.
+  const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
+  const [showDebugLog, setShowDebugLog] = useState(false);
+  // Package L4: the teacher's own sentences (kept per browser, dealt first).
+  const [ownDeck, setOwnDeck] = useState<{ text: string; name: string }>(() => {
+    try {
+      const raw = safeLocalStorage.getItem(OWN_DECK_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed.text === 'string') return { text: parsed.text, name: String(parsed.name || 'My deck') };
+    } catch {
+      // start empty
+    }
+    return { text: '', name: 'My deck' };
+  });
+  const [showOwnDeck, setShowOwnDeck] = useState(false);
+  const ownDeckItems = useMemo(() => parseDeckText(ownDeck.text).items, [ownDeck.text]);
+  useEffect(() => {
+    GeminiService.setTeacherDeck(ownDeckItems);
+    safeLocalStorage.setItem(OWN_DECK_KEY, JSON.stringify(ownDeck));
+  }, [ownDeckItems, ownDeck]);
+  const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
+  isPausedRef.current = isPaused;
   const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
   const turnDurationMs = turnTimerSeconds * 1000;
   const isTurnTimerEnabled = turnTimerSeconds > 0;
@@ -415,6 +501,8 @@ export function App() {
   const [mpRoomLocked, setMpRoomLocked] = useState<boolean>(false);
   const [mpHostConnected, setMpHostConnected] = useState<boolean>(false);
   const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
+  const mpSeatsRef = useRef(mpSeats);
+  mpSeatsRef.current = mpSeats;
   // Phones asking to play as a name that is already seated on another device (teacher decides).
   const [mpTakeoverRequests, setMpTakeoverRequests] = useState<SeatTakeoverRequest[]>([]);
   useEffect(() => {
@@ -447,6 +535,12 @@ export function App() {
   // Google sign-in is only needed for cloud saves (decision D3). AI sentences and live rooms are open to everyone.
   const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
   // A yes/no question before an action that cannot be undone (F4 fix 10)
+  // Package R8: the table just before the last reveal, for Undo reveal and Correct the ruling.
+  const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
+  // Package L5: "Got it" / "Still confused" from the phones, per hand.
+  const [handReactions, setHandReactions] = useState<HandReactions>({});
+  const [undoClock, setUndoClock] = useState(() => Date.now());
+  const [showRulingModal, setShowRulingModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
   // Cloud Rosters, Session Reports & Cloud Sentence Bank Modal State
@@ -464,8 +558,8 @@ export function App() {
     void syncCloudSentenceBank();
 
     // Listen to Firebase Google Auth state (cloud saves show who is signed in)
-    const unsubscribeAuth = subscribeToAuthChanges((user) => {
-      setTeacherGoogleEmail(user?.email || null);
+    const unsubscribeAuth = subscribeToTeacherAuth((user) => {
+      setTeacherGoogleEmail(isVerifiedTeacherUser(user) ? user?.email || null : null);
     });
 
     const handleOnline = () => refreshDesktopStatus();
@@ -542,6 +636,29 @@ export function App() {
 
   // Calm mode: one switch that turns the table's motion off (the deal, pulses, count-ups,
   // confetti). Phones in a live room follow it too.
+  // Package V1: quality of the 3D table. The teacher picks it, or Automatic learns it per computer.
+  const [qualityStored, setQualityStored] = useState(() => parseStoredQuality(safeLocalStorage.getItem(QUALITY_KEY)));
+  const [sessionQuality, setSessionQuality] = useState<QualityTier | null>(null);
+  const qualityTier: QualityTier = sessionQuality ?? resolveTier(qualityStored, {
+    hardwareConcurrency: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined,
+    deviceMemory: typeof navigator !== 'undefined' ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory : undefined,
+  });
+  useEffect(() => {
+    document.documentElement.dataset.quality3d = qualityTier;
+  }, [qualityTier]);
+  useEffect(() => {
+    safeLocalStorage.setItem(QUALITY_KEY, JSON.stringify(qualityStored));
+  }, [qualityStored]);
+  const handleQualityChange = useCallback((tier: QualityTier, reason: string) => {
+    logEvent('perf', `3D table quality ${tier} (${reason})`);
+    setSessionQuality(tier);
+    // Only a slow-frame step down is remembered for next time; a lost context is a one-off.
+    if (reason === 'slow frames') setQualityStored(prev => (prev.choice === 'auto' ? { ...prev, learned: tier } : prev));
+  }, []);
+  const chooseQuality = useCallback((choice: QualityChoice) => {
+    setSessionQuality(null);
+    setQualityStored({ choice });
+  }, []);
   const [isCalmMode, setIsCalmMode] = useState<boolean>(() => {
     try {
       return safeLocalStorage.getItem('grammar_casino_calm_mode') === 'on';
@@ -573,6 +690,30 @@ export function App() {
     }
   }, [isProjectorMode]);
 
+  // Package V2 step 2: Table view (the Blender table behind the game screens) where the 3D table
+  // is on, outside Calm mode, on screens at least 1100 px wide; Classic view everywhere else.
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 0));
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const [tableViewFailed, setTableViewFailed] = useState(false);
+  const isTableView = !tableViewFailed && tableViewOn({ step, quality: qualityTier, calmMode: isCalmMode, width: viewportWidth });
+  useEffect(() => {
+    document.documentElement.dataset.view = isTableView ? 'table' : 'classic';
+  }, [isTableView]);
+  const handleTableUnavailable = useCallback((reason: string) => {
+    logEvent('perf', `Table view off (${reason}); using Classic view`);
+    setTableViewFailed(true);
+  }, []);
+
+  // Package V10: projector text grows on the screens the class reads from afar (see index.css).
+  useEffect(() => {
+    const table = step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER';
+    document.documentElement.dataset.screen = table ? 'table' : 'setup';
+  }, [step]);
+
   useEffect(() => {
     const savedTheme = safeLocalStorage.getItem('grammar_casino_theme');
     if (savedTheme === 'light') {
@@ -601,6 +742,33 @@ export function App() {
   useEffect(() => {
     try { safeLocalStorage.setItem(SFX_MUTED_STORAGE_KEY, String(isMuted)); } catch {}
   }, [isMuted]);
+
+  // Package V6: music plays after the first click, never with sound off or in Calm mode,
+  // fades between layers with the screen, and drops to 30% while the results are read.
+  const [musicVolume, setMusicVolume] = useState(() => readStoredMusicVolume());
+  const musicWanted = !isMuted && !isCalmMode && musicVolume > 0;
+  useEffect(() => {
+    musicEngine.setVolume(musicVolume);
+    try { safeLocalStorage.setItem(MUSIC_VOLUME_KEY, String(musicVolume)); } catch {}
+  }, [musicVolume]);
+  useEffect(() => {
+    if (!musicWanted) {
+      musicEngine.stop();
+      return;
+    }
+    const begin = () => musicEngine.start();
+    begin();
+    window.addEventListener('pointerdown', begin, { once: true });
+    window.addEventListener('keydown', begin, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', begin);
+      window.removeEventListener('keydown', begin);
+    };
+  }, [musicWanted]);
+  useEffect(() => {
+    musicEngine.setLayer(layerForStep(step));
+    musicEngine.duck(step === 'RESULTS' ? 0.3 : 1);
+  }, [step]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
@@ -639,6 +807,54 @@ export function App() {
     if (isMuted || !audioReady) return;
     soundEngine.play(sound, ...args);
   }, [isMuted, audioReady]);
+
+  // Package V9: the winner's ceremony. Entering game over plays "The vault opens", third place,
+  // second place, then the winner with the fanfare and the coin shower, then the class result.
+  // Calm mode, reduced motion and a game that was reloaded on the final screen skip to the end.
+  const [ceremonyStage, setCeremonyStage] = useState<CeremonyStage>(CEREMONY_DONE);
+  const ceremonyStageRef = useRef<CeremonyStage>(CEREMONY_DONE);
+  const ceremonyTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const ceremonyPrevStepRef = useRef(step);
+  const podiumSize = Math.min(3, players.length);
+  const ceremonyCtxRef = useRef({ playSound, isCalmMode, podiumSize, everyoneBust: false });
+  ceremonyCtxRef.current = { playSound, isCalmMode, podiumSize, everyoneBust: !winner && players.length > 0 && players.every(p => p.money <= 0) };
+  const enterCeremonyStage = useCallback((stage: CeremonyStage) => {
+    const ctx = ceremonyCtxRef.current;
+    const cue = cueForStage(stage, ctx.podiumSize);
+    if (cue === 'drumroll' && !ctx.isCalmMode) ctx.playSound('drumroll');
+    if (cue === 'step' && !ctx.isCalmMode) ctx.playSound('chipClink', 100);
+    if (cue === 'winner') {
+      ctx.playSound('gameOver');
+      setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+    }
+    ceremonyStageRef.current = stage;
+    setCeremonyStage(stage);
+  }, []);
+  const skipCeremony = useCallback(() => {
+    ceremonyTimersRef.current.forEach(clearTimeout);
+    ceremonyTimersRef.current = [];
+    if (ceremonyStageRef.current < 3) enterCeremonyStage(3);
+    enterCeremonyStage(CEREMONY_DONE);
+  }, [enterCeremonyStage]);
+  useEffect(() => {
+    const cameFrom = ceremonyPrevStepRef.current;
+    ceremonyPrevStepRef.current = step;
+    if (step !== 'GAME_OVER' || cameFrom === 'GAME_OVER') return;
+    const ctx = ceremonyCtxRef.current;
+    const reduced = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (ctx.isCalmMode || reduced || ctx.everyoneBust || ctx.podiumSize === 0) {
+      enterCeremonyStage(3);
+      enterCeremonyStage(CEREMONY_DONE);
+      return;
+    }
+    enterCeremonyStage(0);
+    ceremonyTimersRef.current = ceremonyTimes(ctx.podiumSize).map((at, i) => setTimeout(() => enterCeremonyStage((i + 1) as CeremonyStage), at));
+    return () => {
+      ceremonyTimersRef.current.forEach(clearTimeout);
+      ceremonyTimersRef.current = [];
+      ceremonyPrevStepRef.current = cameFrom; // so a remount (React strict mode) starts it again
+    };
+  }, [step, enterCeremonyStage]);
 
   const handleToggleSettingsDeckExpanded = useCallback(() => {
     playSound('click');
@@ -766,8 +982,9 @@ export function App() {
       isProcessing
     );
     const anyHintLoading = (Object.values(hints) as Hint[]).some(h => Boolean(h?.isLoading));
-    return anyModalOpen || anyHintLoading;
+    return anyModalOpen || anyHintLoading || isPaused || Boolean(resumeOffer);
   }, [
+    isPaused, resumeOffer,
     error, historyPlayer, mpRoomCode, showPowerUpModal, showTargetModal, showAvatarModal,
     showWheelModal, pendingLoadGame, showReportCardModal, showSettingsModal,
     showDeckConfigModal, showCloudModal, isLoading, isProcessing, hints
@@ -1107,7 +1324,9 @@ export function App() {
   useEffect(() => {
     if (!mpRoomCode || !isTurnTimerEnabled || step !== 'IN_GAME') return;
     if (mpRoundTimer.status !== 'running' || mpRoundTimer.held || mpRoundTimer.endsAt === undefined) return;
-    const endsAt = mpRoundTimer.endsAt;
+    // Package R3: the teacher's screen decides when time is up, and bets that arrive up to
+    // 1.5 s after the deadline (slow Wi-Fi) still count.
+    const endsAt = mpRoundTimer.endsAt + LATE_BET_GRACE_MS;
 
     const checkExpiry = () => {
       if (Date.now() >= endsAt) {
@@ -1252,7 +1471,7 @@ export function App() {
         powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
         sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
       }; 
-      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState))) {
+      if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(stampSave(gameState, Date.now())))) {
         console.warn('The browser would not save the game, so it is kept for this tab only.');
       }
       GeminiService.savePortableGame(gameState); 
@@ -1320,7 +1539,7 @@ export function App() {
         const randomAvatar = getRandomCharacterAvatar(prev.map(p => p.avatar));
         return [...prev, { 
           id: Date.now(), 
-          name: newPlayerName.trim(), 
+          name: safePlayerName(newPlayerName, prev.map(p => p.name)), 
           money: startingCash, 
           history: [], 
           avatar: randomAvatar, 
@@ -1344,9 +1563,9 @@ export function App() {
     setShowAvatarModal({ playerId });
   }, [playSound]);
   const handleUpdatePlayerName = useCallback((playerId: number, newName: string) => {
-    const trimmed = sanitizePlayerName(newName);
-    if (!trimmed) return;
+    if (!sanitizePlayerName(newName)) return;
     setPlayers(prev => {
+      const trimmed = safePlayerName(newName, prev.filter(p => p.id !== playerId).map(p => p.name));
       const oldPlayer = prev.find(p => p.id === playerId);
       const oldName = oldPlayer?.name;
       const updated = prev.map(p => p.id === playerId ? { ...p, name: trimmed } : p);
@@ -1368,6 +1587,22 @@ export function App() {
     }
   };
   const [settingsPart, setSettingsPart] = useState<1 | 2>(1);
+  // Package A4: screen changes go to the debug log.
+  useEffect(() => {
+    logEvent('step', step === 'SETTINGS' ? `Screen: SETTINGS part ${settingsPart}` : `Screen: ${step}`);
+    if (step === 'GAME_OVER') {
+      // Package A3: what this game cost in Firestore operations (this device's share).
+      const used = takeGameUsage();
+      const day = firestoreUsageToday();
+      if (used.reads || used.writes) logEvent('perf', `Firestore this game: ${used.reads} reads, ${used.writes} writes (today on this device: ${day.reads} reads, ${day.writes} writes)`);
+    }
+  }, [step, settingsPart]);
+  useEffect(() => {
+    logEvent('room', mpRoomCode ? `Live room ${mpRoomCode} open` : 'No live room');
+  }, [mpRoomCode]);
+  useEffect(() => {
+    logEvent('step', `Hand ${currentRound}`);
+  }, [currentRound]);
 
   const handleStartGame = () => { 
     if (players.length > 0) { 
@@ -1477,7 +1712,8 @@ export function App() {
       const activeUsedSubtypes = isSettingsPart2 ? [] : usedSubtypes;
       const available = allSubtypes.filter(s => !activeUsedSubtypes.includes(s));
       const pool = available.length > 0 ? available : allSubtypes;
-      const subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+      const dueLook = isSettingsPart2 ? undefined : secondLookFor(secondLookQueueRef.current, currentRoundRef.current + 1);
+      const subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
       const promise = GeminiService.generateSentence(
         targetSettings,
@@ -1518,6 +1754,8 @@ export function App() {
     setHighlightedPhrase(null);
     setIsCopied(false);
     setIsSentenceRevealed(false);
+    const targetRound = fetchTargetRoundRef.current ?? currentRoundRef.current + 1;
+    fetchTargetRoundRef.current = null;
     try {
         if (!currentSettings || !currentSettings.theme || !currentSettings.level || !currentSettings.topic) {
             throw new Error("Invalid settings provided to fetch a new sentence.");
@@ -1572,7 +1810,8 @@ export function App() {
           allSubtypesLen = allSubtypes.length;
           const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
           const pool = available.length > 0 ? available : allSubtypes;
-          subtype = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+          const dueLook = secondLookFor(secondLookQueueRef.current, targetRound);
+          subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
           const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
           generated = await GeminiService.generateSentence(
@@ -1585,6 +1824,11 @@ export function App() {
           );
         }
         
+        handSubtypeRef.current = subtype;
+        {
+          const due = secondLookFor(secondLookQueueRef.current, targetRound);
+          setSecondLookRound(due && subtype === due.subtype ? targetRound : null);
+        }
         if (subtype) {
           setUsedSubtypes(prev => {
             const next = [...prev, subtype!];
@@ -1626,14 +1870,10 @@ export function App() {
         }
 
         setCurrentSentence(generated);
-        const sentenceRecord = generated.leadInSentence
-          ? `${generated.leadInSentence} -> ${generated.correction || generated.text}`
-          : generated.correction && generated.text.includes('_____')
-          ? `${generated.text} (${generated.correction})`
-          : generated.text;
+        const sentenceRecord = sentenceRecordOf(generated);
         setPastSentences(prev => [...prev, sentenceRecord]);
         // Small delay to allow initial card render before flip
-        setTimeout(() => {
+        later(() => {
             setIsSentenceRevealed(true);
             playSound('flip');
         }, 300);
@@ -1684,6 +1924,19 @@ export function App() {
       mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
     };
     mixedFormatIndexRef.current = 0;
+    secondLookQueueRef.current = [];
+    setSecondLookRound(null);
+    safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
+      settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
+      customTopic,
+      customTheme,
+      gameMode,
+      totalRounds: numTotalRounds,
+      targetAmount: numTargetAmount,
+      startingCash,
+      turnTimerSeconds,
+      deck: selectedPowerUps,
+    }));
     setSettings(newSettings);
     setCurrentRound(1);
     setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
@@ -1716,7 +1969,7 @@ export function App() {
     // Pass undefined for forcedBatch so fetchNewSentence consumes the Round 1 sentence pre-fetched on Settings Part 2
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
     playSound('success');
-  }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
+  }, [settings, customTopic, customTheme, gameMode, totalRounds, targetAmount, startingCash, turnTimerSeconds, selectedPowerUps, fetchNewSentence, playSound, pastSentences, pastMistakes]);
   
   const handleGetHint = useCallback(async (playerId: number) => {
       if (!canPlayerAct(playerId)) return;
@@ -1885,6 +2138,7 @@ export function App() {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return;
+    if (!mayBuyPowerUps(player)) return;
     
     const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
@@ -2057,7 +2311,7 @@ export function App() {
               const idx = arr.findIndex(
                 pu =>
                   pu.target === playerId &&
-                  ['HALF_BAKED', 'SUB_ZERO', 'BET_CAP', 'HIGH_ROLLER'].includes(pu.type)
+                  BOOMERANG_REFLECTED_PLACED.includes(pu.type)
               );
               if (idx !== -1) {
                 reflectedCasterId = sId;
@@ -2159,7 +2413,7 @@ export function App() {
             setActivePowerUps(newActivePowerUps);
             setPlayers(ps => ps.map(p => {
                 if (p.id === playerId) {
-                    return { ...p, effects: p.effects.filter(e => e.type !== 'CRUCIO' && e.type !== 'SILENCED') };
+                    return { ...p, effects: clearNegativeEffects(p.effects) };
                 }
                 return p;
             }));
@@ -2340,7 +2594,7 @@ export function App() {
           const updated = ps.map(p => {
             if (p.id !== playerId && p.money > 0) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = hasPlainShield(pActive);
+              const isShielded = isProtectedFromWheelBounty(pActive);
               if (!isShielded) {
                 const take = Math.min(100, p.money);
                 stolen += take;
@@ -2357,7 +2611,7 @@ export function App() {
           players.forEach(p => {
             if (p.id !== playerId && nextBets[p.id]?.bet) {
               const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = hasPlainShield(pActive);
+              const isShielded = isProtectedFromWheelBounty(pActive);
               if (!isShielded) {
                 const remainingMoney = Math.max(0, p.money - 100);
                 if (Number(nextBets[p.id].bet) > remainingMoney) {
@@ -2438,6 +2692,8 @@ export function App() {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
     if (!player || player.money < POWERUP_COST) return; 
+    // A silenced player cannot buy, even if a phone sends the request anyway (G5 fix).
+    if (!mayBuyPowerUps(player)) return;
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
     const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
@@ -2510,10 +2766,8 @@ export function App() {
     setShowSettingsModal(false);
   }, []);
 
-  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
-    setSettings(newSettings);
-    setNextRoundSettings(null);
-    setShowSettingsModal(false);
+  // Deals a new sentence for the hand in play: bets, hints and power-ups of the hand are cleared.
+  const redealCurrentHand = useCallback((newSettings: Settings) => {
     setBets({});
     setHints({});
     setPowerUpsUsedThisRound({});
@@ -2540,8 +2794,23 @@ export function App() {
     });
     // Clear any in-flight next-round prefetch so redealing the current hand generates a fresh sentence
     prefetchRef.current = null;
+    fetchTargetRoundRef.current = currentRoundRef.current;
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
+
+  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
+    setSettings(newSettings);
+    setNextRoundSettings(null);
+    setShowSettingsModal(false);
+    redealCurrentHand(newSettings);
+  }, [redealCurrentHand]);
+
+  // Swap this sentence (package R8): a different sentence for the same hand, with what everyone
+  // spent on hints and power-ups during it given back. Settings chosen for the next hand stay.
+  const handleSwapSentence = useCallback(() => {
+    setPlayers(ps => refundHandSpending(ps, roundSpending));
+    redealCurrentHand(settings);
+  }, [roundSpending, settings, redealCurrentHand]);
 
   const handleTargetedPowerUp = useCallback((targetId: number, overridePlayerId?: number, overridePowerUpKey?: PowerUpKey) => {
     const playerId = overridePlayerId ?? showTargetModal?.playerId;
@@ -2579,17 +2848,7 @@ export function App() {
     if (!targetPlayer || !sourcePlayer) return;
 
     // Check if target has a concealed BOOMERANG trap active (reflects offensive power-ups)
-    const isOffensiveAttack = [
-      'THE_PUNISHER',
-      'PICKPOCKET',
-      'SUB_ZERO',
-      'BET_CAP',
-      'HIGH_ROLLER',
-      'HALF_BAKED',
-      'SWAP',
-      'CRUCIO',
-      'SILENCER',
-    ].includes(powerUpKey);
+    const isOffensiveAttack = isBoomerangReflected(powerUpKey);
     const targetHasBoomerang = isOffensiveAttack && targetActivePowerUps.some(pu => pu.type === 'BOOMERANG');
     const effectiveTargetId = targetHasBoomerang ? playerId : targetId;
     const effectiveTargetPlayer = targetHasBoomerang ? sourcePlayer : targetPlayer;
@@ -2945,11 +3204,18 @@ export function App() {
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
     mpEventHandlerRef.current = (event: HostEventPayload) => {
+      if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.playerId !== undefined) {
+        mpLastSeenRef.current[event.playerId] = Date.now();
+        const seenId = event.playerId;
+        setMpAwayIds(prev => (prev.includes(seenId) ? prev.filter(id => id !== seenId) : prev));
+      }
       if (event.type === 'STUDENT_JOINED' && event.seat) {
         const seat = event.seat;
-        const { playerId, name, avatar } = seat;
+        const { playerId, avatar } = seat;
         playSound('addPlayer');
         setPlayers(prev => {
+          // Package R6: classroom-safe and unique at the table ("Ana 2").
+          const name = safePlayerName(seat.name, prev.filter(p => p.id !== playerId).map(p => p.name));
           if (prev.some(p => p.id === playerId)) {
             return prev.map(p => p.id === playerId ? { ...p, name, avatar } : p);
           }
@@ -2978,7 +3244,9 @@ export function App() {
       } else if (event.type === 'STUDENT_RECONNECTED' && event.seat) {
         const seat = event.seat;
         const { playerId, name, avatar } = seat;
-        setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, name: name || p.name, avatar: avatar || p.avatar } : p));
+        setPlayers(prev => prev.map(p => p.id === playerId
+          ? { ...p, name: name ? safePlayerName(name, prev.filter(o => o.id !== playerId).map(o => o.name)) : p.name, avatar: avatar || p.avatar }
+          : p));
         setMpSeats(prev => ({
           ...prev,
           [playerId]: {
@@ -2996,6 +3264,7 @@ export function App() {
         setMpTakeoverRequests(prev => prev.filter(r => r.clientId !== closedClientId));
       } else if (event.type === 'STUDENT_DISCONNECTED' && event.playerId !== undefined) {
         const playerId = event.playerId;
+        logEvent('room', `Seat ${playerId} disconnected`);
         setMpSeats(prev => {
           if (!prev[playerId]) return prev;
           return {
@@ -3006,13 +3275,15 @@ export function App() {
       } else if (event.type === 'STUDENT_INTENT' && event.playerId !== undefined && event.intent) {
         const playerId = event.playerId;
         const intent = event.intent;
-        setMpSeats(prev => {
-          if (!prev[playerId]) return prev;
-          return {
-            ...prev,
-            [playerId]: { ...prev[playerId], lastSeen: Date.now() },
-          };
-        });
+        // Package R2: remember when the phone was heard from, without rebroadcasting the table.
+        mpLastSeenRef.current[playerId] = Date.now();
+        setMpAwayIds(prev => (prev.includes(playerId) ? prev.filter(id => id !== playerId) : prev));
+
+        // While the teacher has paused the hand, phones cannot bet, lock in or buy (package R8).
+        if (isPausedRef.current && intent.type !== 'UPDATE_PROFILE' && intent.type !== 'HEARTBEAT') {
+          logEvent('intent', `Seat ${playerId}: ${intent.type} ignored because the hand is paused`);
+          return;
+        }
 
         switch (intent.type) {
           case 'SET_BET': {
@@ -3110,9 +3381,16 @@ export function App() {
             }
             break;
           }
+          case 'FEEDBACK_REACTION': {
+            if (step !== 'RESULTS' || intent.round !== currentRound) break;
+            if (intent.value !== 'gotIt' && intent.value !== 'confused') break;
+            setHandReactions(prev => recordReaction(prev, intent.round, playerId, intent.value));
+            break;
+          }
           case 'UPDATE_PROFILE': {
             const cleanName = sanitizePlayerName(intent.name);
-            if (cleanName) handleUpdatePlayerName(playerId, cleanName);
+            // Names are set before the game; once hands are dealt a phone may only change its avatar (R6).
+            if (cleanName && (step === 'PLAYER_SETUP' || step === 'SETTINGS')) handleUpdatePlayerName(playerId, cleanName);
             if (isKnownAvatar(intent.avatar)) handleUpdateAvatar(playerId, intent.avatar.trim());
             break;
           }
@@ -3138,6 +3416,7 @@ export function App() {
     handleUpdatePlayerName,
     mpSeats,
     isPlayerFrozen,
+    currentRound,
   ]);
 
   const handleCreateMpRoom = useCallback(async () => {
@@ -3264,10 +3543,12 @@ export function App() {
       roundTimer: isTurnTimerEnabled ? mpRoundTimer : undefined,
       turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
       calmMode: isCalmMode,
+      paused: isPaused,
     });
     mpControllerRef.current.pushViews(views);
   }, [
     isCalmMode,
+    isPaused,
     mpRoomCode,
     mpRoomLocked,
     step,
@@ -3348,8 +3629,8 @@ export function App() {
       setProcessingStatus(
         `Verifying ${uniqueGroups.size} unique correction(s) across ${playersToVerify.length} player(s)...`
       );
-      await Promise.all(
-        Array.from(uniqueGroups.values()).map(async (group) => {
+      // Package R5: at most 4 AI checks at once, so a full class does not flood the AI.
+      await mapWithLimit(Array.from(uniqueGroups.values()), 4, async (group) => {
           try {
             const res = await GeminiService.verifyCorrection(
               currentSentence.text,
@@ -3369,28 +3650,31 @@ export function App() {
               };
             });
           }
-        })
-      );
+        });
     }
 
     setProcessingStatus('');
     return verifications;
   }, [activePlayers, isPlayerFrozen, isTurnTimerEnabled, mpRoomCode, hasPlayerPlacedBet, bets, currentSentence, activePowerUps]);
 
-  const revealResultsCore = useCallback(async () => {
+  const revealResultsCore = useCallback(async (force = false) => {
+    const unfrozenPlayersForAway = activePlayers.filter(p => !isPlayerFrozen(p.id)).map(p => p.id);
+    // "Reveal now" (package R8) reveals even when not everyone is in, like the early-reveal switch.
+    const revealOverride = teacherRevealOverride || force || (Boolean(mpRoomCode) && mpAwayIds.some(id => unfrozenPlayersForAway.includes(id)));
     const unfrozenPlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const qType: QuestionType = currentSentence?.questionType || 'binary';
 
     if (mpRoomCode) {
       const allMpReady = isEveryRoomPlayerReady({
-        playerIds: unfrozenPlayers.map(p => p.id),
+        // Away phones (package R2) do not hold up the reveal; they sit the hand out.
+        playerIds: unfrozenPlayers.filter(p => !mpAwayIds.includes(p.id)).map(p => p.id),
         bets,
         activePowerUps,
         questionType: qType,
         baseWord: currentSentence?.baseWord,
         seats: mpSeats,
       });
-      if (!allMpReady && !teacherRevealOverride) {
+      if (!allMpReady && !revealOverride) {
         setError({
           title: "Bets Not Locked In",
           message: "Every active player must lock in their wager before revealing results (or use Teacher Override)."
@@ -3399,7 +3683,7 @@ export function App() {
       }
     } else if (isTurnTimerEnabled) {
       const allLocked = unfrozenPlayers.every(p => turnTimers[p.id]?.status === 'locked');
-      if (!allLocked && !teacherRevealOverride) {
+      if (!allLocked && !revealOverride) {
         setError({ title: "Turns Still Active", message: "Every active player's turn must be locked before revealing results (or use Teacher Override)." });
         return;
       }
@@ -3414,7 +3698,7 @@ export function App() {
         return problem === null;
       });
 
-      if (!allValidBetsFinalized && !teacherRevealOverride) { 
+      if (!allValidBetsFinalized && !revealOverride) { 
         const promptMsg = hasUnchangedBaseWordPlayer
           ? `${hasUnchangedBaseWordPlayer} typed the unchanged base word "(${(currentSentence?.baseWord || '').toUpperCase()})". Players must transform the base word into a new grammatical form before revealing results!`
           : hasInvalidKwtPlayer
@@ -3445,6 +3729,8 @@ export function App() {
       return;
     }
 
+    const seatsBeforeReveal = mpSeats;
+    const turnTimersBeforeReveal = turnTimers;
     // Lock all active players' timers or multiplayer seats when results are revealed
     if (mpRoomCode) {
       setMpSeats(prev => {
@@ -3472,7 +3758,7 @@ export function App() {
 
     // Active participating players (excluding frozen players and players who sat out without placing a bet)
     const validPlayers = unfrozenPlayers.filter(p =>
-      (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !teacherRevealOverride
+      (isTurnTimerEnabled && !mpRoomCode) ? hasPlayerPlacedBet(p.id) : hasPlayerPlacedBet(p.id) || !revealOverride
     );
 
     playSound('drumroll');
@@ -3497,7 +3783,7 @@ export function App() {
           : [b.clozeAnswer];
 
         candidateWords.forEach(rawWord => {
-          const norm = (rawWord || '').trim().toLowerCase();
+          const norm = normalizeGapAnswer(rawWord);
           if (!norm) return;
           if (baseWordNorm && norm === baseWordNorm) {
             clozeWordVerifications[norm] = {
@@ -3534,7 +3820,7 @@ export function App() {
             currentSentence.baseWord
           );
           Object.entries(batchResults).forEach(([wordKey, res]) => {
-            clozeWordVerifications[wordKey.trim().toLowerCase()] = res;
+            clozeWordVerifications[normalizeGapAnswer(wordKey)] = res;
           });
         } catch (err) {
           console.error("Failed batched cloze verification:", err);
@@ -3552,7 +3838,7 @@ export function App() {
           : [b.clozeAnswer];
 
         candidatePhrases.forEach(rawPhrase => {
-          const norm = (rawPhrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          const norm = normalizeGapAnswer(rawPhrase);
           if (!norm) return;
           const detResult = GeminiService.evaluateKeyWordTransformationDeterministic(
             rawPhrase || '',
@@ -3592,7 +3878,7 @@ export function App() {
             currentSentence.mark2Parts
           );
           Object.entries(batchResults).forEach(([phraseKey, aiRes]) => {
-            const normKey = phraseKey.trim().toLowerCase().replace(/\s+/g, ' ');
+            const normKey = normalizeGapAnswer(phraseKey);
             const existing = clozeWordVerifications[normKey];
             const aiMarks: 0 | 1 | 2 = aiRes.marks === 2 ? 2 : aiRes.marks === 1 ? 1 : (aiRes.isCorrect ? 2 : 0);
             const existingMarks: 0 | 1 | 2 = existing?.marks ?? 0;
@@ -3612,7 +3898,7 @@ export function App() {
     }
 
     setProcessingStatus('Calculating results...');
-    const settlement = settleRound({
+    const settleInput: Parameters<typeof settleRound>[0] = {
       currentSentence,
       qType,
       players,
@@ -3626,18 +3912,19 @@ export function App() {
       acceptedSet,
       isTurnTimerEnabled,
       isMultiplayer: Boolean(mpRoomCode),
-      teacherRevealOverride,
+      teacherRevealOverride: revealOverride,
       hasPlayerPlacedBet,
       currentRound,
       roundSpending,
-    });
+    };
+    const settlement = settleRound(settleInput);
     settlement.sounds.forEach(({ sound, index }) => playSound(sound, index));
     const updatedPlayers = settlement.updatedPlayers;
     const someoneWentBust = updatedPlayers.some(p =>
       p.money <= 0 && (players.find(o => o.id === p.id)?.money ?? 0) > 0
     );
     if (someoneWentBust) {
-      window.setTimeout(() => playSound('bankrupt'), 950);
+      later(() => playSound('bankrupt'), 950);
     }
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
@@ -3664,11 +3951,32 @@ export function App() {
       return r.amountChanged > 0 && before > 0 && r.amountChanged >= before;
     });
     if (bigWin) {
-      window.setTimeout(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
+      later(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
     }
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
+    setRevealSnapshot({
+      input: settleInput,
+      output: settlement,
+      revealedAt: Date.now(),
+      round: currentRound,
+      seatsBefore: seatsBeforeReveal,
+      turnTimersBefore: turnTimersBeforeReveal,
+      teacherRevealOverrideBefore: teacherRevealOverride,
+      corrected: false,
+    });
+    setUndoClock(Date.now());
+    {
+      const numRounds = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+      secondLookQueueRef.current = scheduleSecondLook(secondLookQueueRef.current, {
+        round: currentRound,
+        subtype: handSubtypeRef.current,
+        bets: newRoundPlayerResults.length,
+        misses: newRoundPlayerResults.filter(r => !r.isWin).length,
+        handsLeft: gameMode === 'rounds' && !isNaN(numRounds) ? numRounds - currentRound : Infinity,
+      });
+    }
     if (currentSentence) {
       const historyRecord: RoundHistoryRecord = {
         round: currentRound,
@@ -3687,11 +3995,11 @@ export function App() {
     if (aiGradingFailed) {
       setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
     }
-  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
-  const handleRevealResults = useCallback(async () => {
-    const failure = await runAlwaysClearing(revealResultsCore, () => {
+  const handleRevealResults = useCallback(async (force?: unknown) => {
+    const failure = await runAlwaysClearing(() => revealResultsCore(force === true), () => {
       setIsProcessing(false);
       setProcessingStatus('');
     });
@@ -3701,6 +4009,181 @@ export function App() {
     }
   }, [revealResultsCore]);
   
+  // Package T2: keyboard shortcuts press the matching button on screen (utils/hotkeys.ts).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      const action = hotkeyAction({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        targetTag: target?.tagName,
+        targetEditable: Boolean(target?.isContentEditable),
+      });
+      if (!action) return;
+      if (action === 'help') {
+        e.preventDefault();
+        setShowHotkeyHelp(v => !v);
+        return;
+      }
+      if (action === 'debug-log') {
+        e.preventDefault();
+        setShowDebugLog(v => !v);
+        return;
+      }
+      const button = findHotkeyButton(document, action);
+      if (!button) return;
+      e.preventDefault();
+      button.click();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Full screen: entering it also turns on projector mode.
+  useEffect(() => {
+    const onChange = () => {
+      const on = Boolean(document.fullscreenElement);
+      setIsFullscreen(on);
+      if (on) setIsProjectorMode(true);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  const handleToggleFullscreen = useCallback(() => {
+    playSound('click');
+    try {
+      if (document.fullscreenElement) void document.exitFullscreen?.();
+      else void document.documentElement.requestFullscreen?.();
+    } catch {
+      // Some browsers refuse full screen; nothing else changes.
+    }
+  }, [playSound]);
+
+  // Keep the teacher's screen awake for the whole game (Screen Wake Lock, where supported).
+  const isGameRunning = step === 'IN_GAME' || step === 'RESULTS';
+  useEffect(() => {
+    if (!isGameRunning) return;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+    if (!nav.wakeLock) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const request = () => {
+      if (document.visibilityState !== 'visible') return;
+      nav.wakeLock!.request('screen').then(l => {
+        if (cancelled) void l.release().catch(() => {});
+        else lock = l;
+      }).catch(() => {});
+    };
+    request();
+    document.addEventListener('visibilitychange', request);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', request);
+      if (lock) void lock.release().catch(() => {});
+    };
+  }, [isGameRunning]);
+
+  // Package T5: keep the report of a game in this computer's list of finished games.
+  const archiveGame = useCallback((finishedAt: number) => {
+    if (!roundHistory.length) return;
+    const game: FinishedGame = {
+      id: `game_${roundHistory[0].timestamp ?? roundHistory[0].round}`,
+      finishedAt,
+      winnerName: winner?.name ?? null,
+      players: players.map(p => ({ id: p.id, name: p.name, money: p.money, avatar: p.avatar })),
+      roundHistory,
+      settings,
+      gameMode,
+      totalRounds,
+      targetAmount,
+    };
+    setFinishedGames(prev => {
+      const next = addFinishedGame(prev, game);
+      safeLocalStorage.setItem(FINISHED_GAMES_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [roundHistory, winner, players, settings, gameMode, totalRounds, targetAmount]);
+  useEffect(() => {
+    if (step === 'GAME_OVER') archiveGame(Date.now());
+    // Only when the game ends; archiveGame changes with every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  // Package R2: every 5 s, work out which phones are away (silent for 45 s, or disconnected).
+  useEffect(() => {
+    if (!mpRoomCode) {
+      setMpAwayIds(prev => (prev.length ? [] : prev));
+      return;
+    }
+    const check = () => {
+      const next = awaySeatIds(mpSeatsRef.current, mpLastSeenRef.current, Date.now());
+      setMpAwayIds(prev => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next));
+    };
+    check();
+    const id = window.setInterval(check, 5000);
+    return () => window.clearInterval(id);
+  }, [mpRoomCode]);
+
+  // A pause belongs to one hand: leaving the hand ends it.
+  useEffect(() => {
+    if (step !== 'IN_GAME') setIsPaused(false);
+  }, [step]);
+
+  // --- Package R8: fixing a reveal ---
+  const isRevealSnapshotCurrent = Boolean(revealSnapshot && revealSnapshot.round === currentRound && step === 'RESULTS');
+  const isUndoRevealOpen = isRevealSnapshotCurrent && canUndoReveal(revealSnapshot, undoClock, currentRound);
+  useEffect(() => {
+    if (!isUndoRevealOpen) return;
+    const id = window.setInterval(() => setUndoClock(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [isUndoRevealOpen]);
+
+  /** Shows a corrected ruling: new bankrolls, result rows and the hand's report-card entry. */
+  const applyCorrectedRuling = useCallback((next: RevealSnapshot) => {
+    setPlayers(next.output.updatedPlayers);
+    setRoundResults(next.output.roundResults);
+    setRoundHistory(prev => {
+      const last = prev[prev.length - 1];
+      if (!last || last.round !== next.round) return prev;
+      return [...prev.slice(0, -1), { ...last, playerResults: next.output.playerResults }];
+    });
+    setRevealSnapshot(next);
+  }, []);
+
+  // Undo reveal: back to the hand as it was before the reveal (bets, seats and timers included).
+  const handleUndoReveal = useCallback(() => {
+    const snap = revealSnapshot;
+    if (!snap || !canUndoReveal(snap, Date.now(), currentRound)) return;
+    playSound('click');
+    setPlayers(snap.input.players);
+    setRoundResults([]);
+    setRoundHistory(prev => (prev.length && prev[prev.length - 1].round === snap.round ? prev.slice(0, -1) : prev));
+    if (mpRoomCode) setMpSeats(snap.seatsBefore);
+    setTurnTimers(snap.turnTimersBefore);
+    setTeacherRevealOverride(snap.teacherRevealOverrideBefore);
+    setRevealSnapshot(null);
+    secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, snap.round);
+    setStep('IN_GAME');
+  }, [revealSnapshot, currentRound, playSound, mpRoomCode]);
+
+  const handleVoidHand = useCallback(() => {
+    if (!revealSnapshot) return;
+    secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, revealSnapshot.round);
+    GeminiService.forgetUnplayedSentence(currentSentence?.text);
+    applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
+    setShowRulingModal(false);
+  }, [revealSnapshot, applyCorrectedRuling, currentSentence]);
+
+  const handleAcceptAnswer = useCallback((answer: string) => {
+    if (!revealSnapshot) return;
+    applyCorrectedRuling(resettleWithAcceptedAnswer(revealSnapshot, answer));
+    setShowRulingModal(false);
+  }, [revealSnapshot, applyCorrectedRuling]);
+
   // A double click on "Deal the next hand" must not skip a hand (F4 fix 9).
   // The guard is released once the screen moves on or the new sentence arrives.
   const nextRoundGuardRef = useRef(createReentryGuard());
@@ -3710,14 +4193,15 @@ export function App() {
 
   const handleNextRound = useCallback(() => {
     if (!nextRoundGuardRef.current.tryEnter()) return;
+    // Package L3: an AI item joins the cloud bank only once it was played (a voided one was forgotten).
+    GeminiService.archivePlayedSentence(currentSentence?.text);
     const stillActivePlayers = players.filter(p => p.money > 0);
     // In a live room, bankrupt players get the $150 House Bailout, except in last player standing.
     const gameEndInput = { players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) };
     const { isGameOver, bailoutEnabled: isBailoutEnabled } = checkGameEnd(gameEndInput);
 
     if (isGameOver) {
-        playSound('gameOver');
-        setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+        // The fanfare and the coin shower wait for the winner's moment in the ceremony (V9).
         setWinner(pickWinnerAtGameEnd(gameEndInput));
         prefetchRef.current = null;
         setStep('GAME_OVER');
@@ -3780,11 +4264,10 @@ export function App() {
         fetchNewSentence(activeSettings, pastSentences, undefined, pastMistakes);
         setStep('IN_GAME');
     }
-  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats]);
+  }, [players, gameMode, currentRound, totalRounds, targetAmount, settings, nextRoundSettings, fetchNewSentence, playSound, selectedPowerUps, pastSentences, pastMistakes, mpRoomCode, mpSeats, currentSentence]);
 
   const handleEndGameEarly = useCallback(() => {
-    playSound('gameOver');
-    setJackpotEvent({ id: `game-over-${Date.now()}`, intensity: 1 });
+    playSound('click');
     setWinner(pickWinnerWhenEndedEarly({ players, gameMode, targetAmount }));
     prefetchRef.current = null;
     setStep('GAME_OVER');
@@ -3812,7 +4295,9 @@ export function App() {
     setPlayers([]);
     setNewPlayerName('');
     setSentenceBatch([]);
-    setSettings({
+    setHandReactions({});
+    const prefs = loadSetupPrefs();
+    setSettings(prefs.settings ?? {
       topic: GRAMMAR_TOPICS[0],
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
@@ -3821,11 +4306,11 @@ export function App() {
     });
     setMixedFormatSetupWarning(null);
     mixedFormatIndexRef.current = 0;
-    setCustomTopic('');
-    setCustomTheme('');
-    setGameMode('lastPlayer');
-    setTotalRounds(10);
-    setTargetAmount(DEFAULT_TARGET_AMOUNT);
+    setCustomTopic(prefs.customTopic ?? '');
+    setCustomTheme(prefs.customTheme ?? '');
+    setGameMode(prefs.gameMode ?? 'rounds');
+    setTotalRounds(prefs.totalRounds ?? 10);
+    setTargetAmount(prefs.targetAmount ?? DEFAULT_TARGET_AMOUNT);
     setCurrentRound(1);
     setCurrentSentence(null);
     setPastSentences([]); // Clear history on restart
@@ -3845,19 +4330,54 @@ export function App() {
     setIsCopied(false);
     setIsSentenceRevealed(false);
     setAvailablePowerUps(Object.keys(POWER_UPS) as PowerUpKey[]);
-    setSelectedPowerUps(Object.keys(POWER_UPS) as PowerUpKey[]); 
+    setSelectedPowerUps(prefs.deck ?? (Object.keys(POWER_UPS) as PowerUpKey[]));
     setNextRoundSettings(null);
     setRoundSpending({});
     setSimplifiedExplanation({ text: null, loading: false });
-    setStartingCash(INITIAL_PLAYER_MONEY);
+    setStartingCash(prefs.startingCash ?? INITIAL_PLAYER_MONEY);
     setIsEditingStartingCash(false);
-    setTempStartingCash(String(INITIAL_PLAYER_MONEY));
-    setTurnTimerSeconds(0);
+    setTempStartingCash(String(prefs.startingCash ?? INITIAL_PLAYER_MONEY));
+    setTurnTimerSeconds(prefs.turnTimerSeconds ?? 0);
     setTurnTimers({});
     setTeacherRevealOverride(false);
     setAutoStartNextTimer(true);
     if (playerNameInputRef.current) playerNameInputRef.current.focus();
   }, [playSound]);
+
+  // Package T1: "Play again" keeps the class at the table (and the room open, so phones stay
+  // seated), keeps the settings, and goes straight to the house rules: one more click deals.
+  const handlePlayAgainSameClass = useCallback(() => {
+    playSound('startGame');
+    prefetchRef.current = null;
+    setPlayers(prev => prev.map(p => ({ ...p, money: startingCash, history: [], winStreak: 0, effects: [] })));
+    setCurrentRound(1);
+    setCurrentSentence(null);
+    setRoundHistory([]);
+    setUsedSubtypes([]);
+    setBets({});
+    setHints({});
+    setRoundResults([]);
+    setWinner(null);
+    setError(null);
+    setIsProcessing(false);
+    setProcessingStatus('');
+    setPowerUpsUsedThisRound({});
+    setActivePowerUps({});
+    setHighlightedPhrase(null);
+    setIsSentenceRevealed(false);
+    setNextRoundSettings(null);
+    setRoundSpending({});
+    setSimplifiedExplanation({ text: null, loading: false });
+    setTurnTimers({});
+    setTeacherRevealOverride(false);
+    setMpStudentPendingTarget({});
+    setMpStudentPendingWheel({});
+    setMpStudentNotifications({});
+    setSentenceBatch([]);
+    setHandReactions({});
+    setSettingsPart(2);
+    setStep('SETTINGS');
+  }, [playSound, startingCash]);
 
   const handleLoadGameClick = useCallback(() => {
     if (fileInputRef.current) {
@@ -3889,7 +4409,7 @@ export function App() {
   const handleConfirmLoadGame = useCallback(() => {
     if (!pendingLoadGame) return;
     try {
-      const parsed = migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
+      const parsed: any = readSave(pendingLoadGame, () => getRandomCharacterAvatar()) || migrateSavedGame(pendingLoadGame, () => getRandomCharacterAvatar());
       
       setStep(parsed.step || 'PLAYER_SETUP');
       setPlayers(parsed.players || []);
@@ -3973,12 +4493,12 @@ export function App() {
   }, [startingCash, step, playSound]);
 
   const buildCurrentFullGameState = useCallback(() => {
-    return {
+    return stampSave({
       step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
       currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
       powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
       sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
-    };
+    }, Date.now());
   }, [
     step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
     currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
@@ -4121,7 +4641,7 @@ export function App() {
     if (!currentSentence) return;
     navigator.clipboard.writeText(currentSentence.text).then(() => {
         setIsCopied(true);
-        setTimeout(() => setIsCopied(false), 2000);
+        later(() => setIsCopied(false), 2000);
         playSound('click');
     }).catch(err => {
         console.error('Failed to copy text: ', err);
@@ -4204,6 +4724,7 @@ export function App() {
                         <span className="text-gc-small font-semibold text-gc-quiet">· {phonesConnected} connected</span>
                       </span>
                       <ActionButton
+                        data-hotkey="room"
                         onClick={() => setShowMpLobbyModal(true)}
                         playSound={playSound}
                         variant="ghost"
@@ -4453,6 +4974,24 @@ export function App() {
                           <span className="block text-gc-small text-gc-quiet">Load a class from the cloud, or see saved games</span>
                         </span>
                       </button>
+                      {finishedGames.length > 0 && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsLobbyMenuOpen(false);
+                            playSound('click');
+                            setShowPastReports(true);
+                          }}
+                          className="w-full px-3 py-2.5 rounded-gc-sm flex items-start gap-3 text-left hover:bg-gc-line/[0.07] cursor-pointer"
+                        >
+                          <BookOpen className="w-5 h-5 mt-0.5 shrink-0 text-gc-quiet" aria-hidden="true" />
+                          <span>
+                            <span className="block text-gc-body font-semibold text-gc-ink">Past reports ({finishedGames.length})</span>
+                            <span className="block text-gc-small text-gc-quiet">Reports of games finished on this computer</span>
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -4479,6 +5018,18 @@ export function App() {
               : gameMode === 'rounds'
                 ? `${totalRounds || '?'} hands`
                 : `First to $${Number(targetAmount || 0).toLocaleString()}`;
+          // Package T1: say what is missing next to the button, instead of only after a click.
+          const setupProblem = (() => {
+            if (settings.topic === 'My own choice' && !customTopic.trim()) return 'Type your own topic to go on.';
+            if (settings.theme === 'Custom ✍️' && !customTheme.trim()) return 'Type your own theme to go on.';
+            if (settingsPart === 2) {
+              const n = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
+              if (gameMode === 'rounds' && (isNaN(n) || n <= 0)) return 'Type a number of hands (1 or more) to deal.';
+              const t = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
+              if (gameMode === 'targetAmount' && (isNaN(t) || t < MIN_TARGET_AMOUNT)) return `Type a target of at least $${MIN_TARGET_AMOUNT.toLocaleString()} to deal.`;
+            }
+            return null;
+          })();
           const summaryChips = [
             resolvedTopicPreview,
             settings.level,
@@ -4561,7 +5112,7 @@ export function App() {
                       <TextInput
                         value={customTopic}
                         onChange={e => setCustomTopic(e.target.value)}
-                        placeholder="For example: School subjects, Places in town, Inversion"
+                        placeholder="We are studying… for example: unit 6, second conditional, travel"
                         aria-label="Your own topic"
                         className="h-12"
                       />
@@ -4803,17 +5354,41 @@ export function App() {
                     </p>
                   )}
                 </section>
+
+                {/* Package L4: the teacher's own sentences */}
+                <section className={sectionCls} aria-labelledby="setup-own">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 id="setup-own" className={sectionTitle}>Your own sentences <span className="text-gc-quiet font-semibold">(optional)</span></h2>
+                      <p className={sectionHint} data-testid="own-deck-status">
+                        {ownDeckItems.length
+                          ? `${ownDeck.name}: ${deckSummary(ownDeckItems)}. They are dealt first.`
+                          : 'Paste sentences from your lesson or your students\' writing. The game deals them first.'}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      {ownDeckItems.length > 0 && (
+                        <ActionButton onClick={() => { playSound('click'); setOwnDeck(d => ({ ...d, text: '' })); }} variant="ghost" className="h-11 px-4 text-gc-body font-semibold">
+                          Remove
+                        </ActionButton>
+                      )}
+                      <ActionButton onClick={() => { playSound('click'); setShowOwnDeck(true); }} variant="ghost" className="h-11 px-5 text-gc-body font-bold">
+                        {ownDeckItems.length ? 'Edit' : 'Add sentences'}
+                      </ActionButton>
+                    </div>
+                  </div>
+                </section>
               </div>
             ) : (
               <div className="space-y-4 animate-gc-fade">
                 {/* How to win */}
                 <section className={sectionCls} aria-labelledby="setup-win">
                   <h2 id="setup-win" className={sectionTitle}>How to win</h2>
-                  <p className={sectionHint}>When the game ends and who is the winner.</p>
+                  <p className={sectionHint}>When the game ends and who is the winner. A player who reaches $0 is bankrupt and out for good{mpRoomCode && gameMode !== 'lastPlayer' ? ', except in a live room, where they get a $150 House Bailout at the next hand' : ''}.</p>
                   <div className="mt-4 grid md:grid-cols-3 gap-2.5">
                     {([
-                      { mode: 'lastPlayer' as const, icon: '👑', title: 'Last player standing', text: 'Play until only one player has money left.' },
                       { mode: 'rounds' as const, icon: '⏳', title: 'Set number of hands', text: 'The most money after the last hand wins.' },
+                      { mode: 'lastPlayer' as const, icon: '👑', title: 'Last player standing', text: 'Play until only one player has money left.' },
                       { mode: 'targetAmount' as const, icon: '🎯', title: 'Target amount', text: 'The first player to reach the target wins.' },
                     ]).map(opt => {
                       const isSelected = gameMode === opt.mode;
@@ -4988,6 +5563,25 @@ export function App() {
               </div>
             )}
 
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-gc-cap text-gc-quiet">
+              <label className="inline-flex items-center gap-2">
+                3D table
+                <select
+                  value={qualityStored.choice}
+                  onChange={e => chooseQuality(e.target.value as QualityChoice)}
+                  data-testid="quality-choice"
+                  className="min-h-[44px] rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] px-2 text-gc-ink"
+                >
+                  <option value="auto">Automatic{qualityStored.choice === 'auto' ? ` (${qualityTier === 'off' ? 'off' : qualityTier})` : ''}</option>
+                  <option value="off">Off</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <span data-testid="settings-version">Grammar Casino {APP_VERSION} · Shift+L shows the debug log</span>
+            </div>
+
             {/* Summary and the next step, always in reach */}
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gc-line/[0.12] bg-gc-bg/90 backdrop-blur-md">
               <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -5011,9 +5605,13 @@ export function App() {
                 >
                   <span className="inline-flex items-center gap-1.5"><ArrowLeft className="w-4 h-4 shrink-0" aria-hidden="true" /><span className="hidden sm:inline">Back</span></span>
                 </ActionButton>
+                {setupProblem && (
+                  <p id="setup-problem" role="status" className="text-gc-small font-semibold text-gc-danger max-w-[16rem] text-right" data-testid="setup-problem">{setupProblem}</p>
+                )}
                 {settingsPart === 1 ? (
                   <ActionButton
                     onClick={handleAdvanceToSettingsPart2}
+                    aria-describedby={setupProblem ? 'setup-problem' : undefined}
                     variant="primary"
                     className="h-12 px-6 text-gc-body shrink-0"
                   >
@@ -5023,6 +5621,7 @@ export function App() {
                   <ActionButton
                     onClick={handleFinalizeSettings}
                     playSound={playSound}
+                    aria-describedby={setupProblem ? 'setup-problem' : undefined}
                     variant="primary"
                     className="h-12 px-6 text-gc-body shrink-0"
                   >
@@ -5041,7 +5640,7 @@ export function App() {
 
             // Who is in, and whether the answer may be revealed (game/revealGate.ts).
             const revealGate = getRevealGate({
-              playerIds: unfrozenActivePlayers.map(p => p.id),
+              playerIds: unfrozenActivePlayers.filter(p => !(mpRoomCode && mpAwayIds.includes(p.id))).map(p => p.id),
               bets,
               activePowerUps,
               questionType: currentQuestionType,
@@ -5335,7 +5934,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
                     {/* Back of the card: the sentence */}
                     <div className="card-reveal-back">
-                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-8 transition-[padding,background-color,box-shadow] duration-200 ${
+                      <div className={`sticky-sentence rounded-gc-lg px-4 sm:px-8 transition-[padding,background-color,box-shadow] duration-gc-fast ${
                         isSentenceHeaderStuck
                           ? 'stuck py-2.5 sm:py-3'
                           : 'gc-panel shadow-gc-2 relative py-5 sm:py-7 animate-gc-deal'
@@ -5351,7 +5950,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
-                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
                                   </span>
                                   {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
                                     <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
@@ -5376,6 +5975,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     <span>{isCopied ? 'Copied' : 'Copy'}</span>
                                   </button>
                                   <button 
+                                    data-hotkey="read"
                                     onClick={() =>
                                       speakText(
                                         currentQuestionType === 'keyWordTransformation'
@@ -5420,7 +6020,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             ) : (
                               <div className="flex justify-center">
                                 <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
                                 </span>
                               </div>
                             )}
@@ -5637,8 +6237,15 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                                 onClick={() => {
                                                   playSound('click');
                                                   setTurnTimerSeconds(secs);
-                                                  setTurnTimers({});
-                                                  setMpRoundTimer({ status: 'idle', remainingMs: secs * 1000 });
+                                                  // Package T2: a new timer length never unlocks a player who is already locked in.
+                                                  setTurnTimers(prev => {
+                                                    const kept: typeof prev = {};
+                                                    (Object.entries(prev) as [string, PlayerTurnTimer][]).forEach(([k, t]) => {
+                                                      if (t?.status === 'locked') kept[Number(k)] = t;
+                                                    });
+                                                    return kept;
+                                                  });
+                                                  setMpRoundTimer(prev => (prev.status === 'locked' ? prev : { status: 'idle', remainingMs: secs * 1000 }));
                                                   mpAutoStartedRoundRef.current = 0;
                                                 }}
                                                 className={`h-8 rounded-gc-sm border text-gc-small font-bold tabular-nums transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${
@@ -5827,6 +6434,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     <div className="flex items-center gap-3 flex-wrap">
                       <button
                         type="button"
+                        data-hotkey="room"
                         onClick={() => {
                           playSound('click');
                           setShowMpLobbyModal(true);
@@ -5836,6 +6444,9 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
                         <span>Room {mpRoomCode} · QR code</span>
                       </button>
+                      <span className="text-gc-small font-semibold text-gc-quiet tabular-nums" aria-live="polite">
+                        {presenceSummary(Object.keys(mpSeats).length, mpAwayIds.filter(id => mpSeats[id]).length)}
+                      </span>
 
                       <div className="text-gc-small text-gc-quiet flex items-center gap-2">
                         <span>Locked in:</span>
@@ -5878,12 +6489,14 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         ? mpSeat.lockedIn
                         : isBetCompleteForQuestionType(bets[player.id], currentQuestionType, hasSplit, currentSentence?.baseWord);
                       const isBankrupt = player.money <= 0;
+                      const isAway = Boolean(mpSeat && mpAwayIds.includes(player.id));
 
                       return (
                         <div
                           key={player.id}
+                          data-away={isAway ? 'true' : undefined}
                           className={`gc-surface rounded-gc shadow-gc-1 p-4 transition-all flex flex-col justify-between gap-3 animate-gc-slide-up ${
-                            isBankrupt ? 'opacity-60' : ''
+                            isBankrupt || isAway ? 'opacity-60 grayscale' : ''
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -5903,8 +6516,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                 <div className="text-gc-lead font-bold text-gc-ink truncate">
                                   {player.name}
                                 </div>
-                                <div className="text-gc-cap text-gc-quiet tabular-nums">
-                                  Seat {idx + 1} · {mpSeat ? 'on a phone' : 'at the table'}
+                                <div className="text-gc-cap text-gc-quiet tabular-nums inline-flex items-center gap-1">
+                                  Seat {idx + 1} · {isAway ? <><WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />away</> : mpSeat ? 'on a phone' : 'at the table'}
                                 </div>
                               </div>
                             </div>
@@ -5955,7 +6568,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               }`}
                             >
                               {isBankrupt ? (
-                                <span>{gameMode === 'lastPlayer' ? 'Out of money' : 'Out until the next hand'}</span>
+                                <span>{gameMode === 'lastPlayer' ? 'Bankrupt' : 'Out until the next hand'}</span>
                               ) : isFrozen ? (
                                 <span>Frozen this hand</span>
                               ) : isBetReady ? (
@@ -6014,7 +6627,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               aria-valuenow={betsReadyCount}
                             >
                               <span
-                                className="block h-full rounded-full bg-emerald-700 dark:bg-emerald-400 transition-[width] duration-500 ease-out"
+                                className="block h-full rounded-full bg-emerald-700 dark:bg-emerald-400 transition-[width] duration-gc-slow ease-gc-out"
                                 style={{ width: `${unfrozenActivePlayers.length ? Math.round((betsReadyCount / unfrozenActivePlayers.length) * 100) : 0}%` }}
                               />
                             </span>
@@ -6113,7 +6726,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             setIsSentenceHeaderStuck(true);
                             setOpenSeatPlayerId(id);
                           }}
-                          outLabel="Eliminated"
+                          outLabel="Bankrupt"
                           projectorMode={isProjectorMode}
                         />
                       )
@@ -6127,6 +6740,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
                   <div className={`rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
                     <ActionButton 
+                      data-hotkey="primary"
                       onClick={handleRevealResults} 
                       playSound={playSound} 
                       variant="primary"
@@ -6159,6 +6773,59 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       {teacherRevealOverride ? 'Early reveal is on. Turn it off' : 'Let me reveal before everyone is in'}
                     </button>
                   )}
+
+                  {/* Teacher controls (package R8): reveal now, pause, swap the sentence. */}
+                  {(mpRoomCode ? !allMpPlayersLocked : isTurnTimerEnabled ? !allActivePlayersLocked : !allValidBetsFinalized) && (
+                    <button
+                      type="button"
+                      disabled={isLoading || isProcessing || !currentSentence}
+                      onClick={() => {
+                        playSound('click');
+                        setConfirmAction({
+                          title: 'Reveal now?',
+                          message: 'The answer is revealed straight away. Players who have not placed a bet sit this hand out.',
+                          confirmLabel: 'Reveal now',
+                          onConfirm: () => { void handleRevealResults(true); },
+                        });
+                      }}
+                      data-hotkey="reveal-now"
+                      className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Teacher only: reveal the answer without waiting for everyone"
+                    >
+                      <Eye className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      Reveal now
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={isLoading || isProcessing}
+                    onClick={() => { playSound('click'); setIsPaused(true); }}
+                    data-hotkey="pause"
+                    className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Teacher only: stop the timers and the phones for a moment"
+                  >
+                    <Pause className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    Pause
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isLoading || isProcessing}
+                    onClick={() => {
+                      playSound('click');
+                      setConfirmAction({
+                        title: 'Swap this sentence?',
+                        message: 'A different sentence is dealt for this hand. Bets are cleared, and everyone gets back what they spent on hints and power-ups this hand.',
+                        confirmLabel: 'Swap the sentence',
+                        onConfirm: handleSwapSentence,
+                      });
+                    }}
+                    data-hotkey="swap"
+                    className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Teacher only: deal a different sentence for this hand"
+                  >
+                    <RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    Swap this sentence
+                  </button>
                 </div> 
               </div> 
             ); 
@@ -6401,6 +7068,56 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     </div>
                 </div>
 
+                {/* Package L5: what the class answered, and how many are still confused. */}
+                {(() => {
+                  const snap = isRevealSnapshotCurrent ? revealSnapshot : null;
+                  const qt = (currentSentence.questionType || 'binary') as QuestionType;
+                  const accepted = snap?.input.acceptedSet ?? buildAcceptedAnswerSet(currentSentence, qt).acceptedSet;
+                  const verdicts = snap?.input.clozeWordVerifications ?? {};
+                  const rows = answerSplit({
+                    qType: qt,
+                    bets,
+                    playerIds: (snap?.input.validPlayers ?? players).map(p => p.id),
+                    sentenceIsCorrect: currentSentence.isCorrect,
+                    options: currentSentence.options,
+                    isRightAnswer: (a) => {
+                      const k = normalizeGapAnswer(a);
+                      if (qt === 'multipleChoice') return k === normalizeGapAnswer(currentSentence.correctAnswer);
+                      if (qt === 'keyWordTransformation') return verdicts[k]?.marks === 2;
+                      return accepted.has(k) || Boolean(verdicts[k]?.isCorrect);
+                    },
+                  });
+                  const counts = reactionCounts(handReactions, currentRound);
+                  if (rows.length === 0 && counts.gotIt + counts.confused === 0) return null;
+                  const shown = rows.slice(0, 6);
+                  const top = Math.max(1, ...shown.map(r => r.count));
+                  return (
+                    <div className="gc-surface rounded-gc-lg p-6 mt-6 animate-gc-slide-up [animation-delay:1.1s]" data-testid="answer-split">
+                      <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+                        <h3 className="text-gc-title font-bold text-gc-ink">What the class answered</h3>
+                        {counts.gotIt + counts.confused > 0 && (
+                          <p className="text-gc-body font-semibold" data-testid="reaction-counts">
+                            <span className="text-gc-win">{counts.gotIt} got it</span>
+                            <span className="text-gc-quiet"> · </span>
+                            <span className={counts.confused > 0 ? 'text-gc-danger' : 'text-gc-quiet'}>{counts.confused} still confused</span>
+                          </p>
+                        )}
+                      </div>
+                      <ul className="space-y-2">
+                        {shown.map(r => (
+                          <li key={r.label} className="flex items-center gap-3">
+                            <span className={`w-48 shrink-0 truncate text-gc-lead font-semibold ${r.isRight ? 'text-gc-win' : 'text-gc-ink'}`}>{r.isRight ? '✓ ' : ''}{r.label}</span>
+                            <span className="flex-1 h-4 rounded-full bg-gc-line/[0.08] overflow-hidden" aria-hidden="true">
+                              <span className={`block h-full rounded-full ${r.isRight ? 'bg-gc-win/70' : 'bg-gc-quiet/50'}`} style={{ width: `${(r.count / top) * 100}%` }} />
+                            </span>
+                            <span className="w-16 text-right tabular-nums text-gc-lead font-bold">{r.count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
+
                 {/* Payouts */}
                 <div className="flex flex-wrap items-end justify-between gap-4 mt-10 mb-4 animate-gc-slide-up [animation-delay:1.25s]">
                   <div>
@@ -6559,6 +7276,27 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 
                 <div className="mt-8 flex flex-wrap justify-between items-center gap-4 pb-10 relative w-full">
                   <div className="flex-1 flex justify-start gap-2 flex-wrap">
+                    {isUndoRevealOpen && (
+                      <ActionButton
+                        data-hotkey="undo-reveal"
+                        onClick={handleUndoReveal}
+                        variant="secondary"
+                        className="h-10 px-4 text-gc-small font-semibold"
+                        title="Teacher only: go back to the hand as it was before the reveal"
+                      >
+                        <span className="inline-flex items-center gap-2"><RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />Undo reveal ({undoRevealSecondsLeft(revealSnapshot, undoClock)} s)</span>
+                      </ActionButton>
+                    )}
+                    {isRevealSnapshotCurrent && (
+                      <ActionButton
+                        onClick={() => { playSound('click'); setShowRulingModal(true); }}
+                        variant="ghost"
+                        className="h-10 px-4 text-gc-small font-semibold"
+                        title="Teacher only: void this hand or accept another answer"
+                      >
+                        Correct the ruling
+                      </ActionButton>
+                    )}
                     {roundHistory.length > 0 && (
                       <ActionButton
                         onClick={() => { playSound('click'); setShowReportCardModal(true); }}
@@ -6578,7 +7316,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to cloud</span>
                     </ActionButton>
                   </div>
-                  <ActionButton onClick={handleNextRound} playSound={playSound} variant="primary" className="min-h-[60px] text-gc-lead py-3 px-10">
+                  <ActionButton data-hotkey="primary" onClick={handleNextRound} playSound={playSound} variant="primary" className="min-h-[60px] text-gc-lead py-3 px-10">
                       <span className="inline-flex items-center gap-2.5">
                         {isGameOver ? 'See the final results' : 'Deal the next hand'}
                         <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
@@ -6620,33 +7358,47 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             { place: 1, block: 'h-36 sm:h-44', avatar: 'w-20 h-20 sm:w-28 sm:h-28 text-[44px] sm:text-[60px]', delay: '0s' },
             { place: 3, block: 'h-16 sm:h-20', avatar: 'w-14 h-14 sm:w-16 sm:h-16 text-[30px] sm:text-[34px]', delay: '0.45s' },
           ];
-          const confettiColours = ['#f1cf72', '#e2b04a', '#86efac', '#fda4af', '#a5e3ff', '#fffdf7'];
+          // Package V9: the ceremony reveals each part in turn; everything stays in the page
+          // (only faded), so screen readers and the buttons below never wait for it.
+          const stage = ceremonyStage;
+          const ceremonyOn = stage < CEREMONY_DONE;
+          const winnerShown = stage >= 3;
+          const reveal = (shown: boolean) => `transition-[opacity,transform] duration-gc-slow ease-gc-out ${shown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`;
+          const classLine = classResultLine(buildReport(roundHistory, players));
+          const saveMoment = () => {
+            playSound('click');
+            const places = podiumOrder
+              .map((p, idx) => (p ? { place: podiumStyle[idx].place, name: p.name, money: p.money } : null))
+              .filter((x): x is { place: number; name: string; money: number } => x !== null);
+            const url = drawMoment(places, winner ? `${winner.name} wins!` : 'Table closed', classLine);
+            if (!url) return;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `grammar-casino-${new Date().toISOString().slice(0, 10)}.png`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            logEvent('info', 'Saved the podium picture');
+          };
           return (
           <div className="relative w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-12 text-center animate-gc-fade">
-            {/* Confetti, once. Calm mode and reduced motion skip it. */}
-            {winner && !isCalmMode && (
-              <div className="gc-confetti pointer-events-none fixed inset-0 z-40 overflow-hidden" aria-hidden="true">
-                {Array.from({ length: 70 }, (_, i) => (
-                  <span
-                    key={i}
-                    className="absolute -top-4 block rounded-[2px] animate-gc-confetti"
-                    style={{
-                      left: `${(i * 37 + 11) % 100}%`,
-                      width: i % 3 === 0 ? 8 : 6,
-                      height: i % 3 === 0 ? 12 : 10,
-                      background: confettiColours[i % confettiColours.length],
-                      animationDelay: `${(i % 9) * 0.06}s`,
-                      animationDuration: `${1.6 + ((i * 13) % 9) / 10}s`,
-                      ['--gc-drift' as string]: `${((i * 53) % 120) - 60}px`,
-                    } as React.CSSProperties}
-                  />
-                ))}
-              </div>
-            )}
-
+            {/* Package V10: no HTML confetti here any more; the 3D coin shower and sparks celebrate
+                the winner (nothing on table Off, Calm mode or reduced motion). */}
             <p className="text-gc-small font-semibold text-gc-quiet">Final results</p>
-            <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">Table closed</h1>
-            <p className="mt-2 text-gc-lead text-gc-quiet text-balance">
+            <h1 className="font-logo text-gc-gold text-[38px] sm:text-[52px] leading-tight font-semibold tracking-[0.04em]">
+              {ceremonyOn && !winnerShown ? 'The vault opens…' : 'Table closed'}
+            </h1>
+            {ceremonyOn && (
+              <button
+                type="button"
+                onClick={() => { playSound('click'); skipCeremony(); }}
+                data-testid="ceremony-skip"
+                className="absolute right-4 top-4 h-11 px-4 rounded-full border border-gc-line/20 bg-gc-card/80 text-gc-small font-semibold text-gc-quiet hover:text-gc-ink cursor-pointer"
+              >
+                Skip
+              </button>
+            )}
+            <p className={`mt-2 text-gc-lead text-gc-quiet text-balance ${reveal(winnerShown)}`}>
               {winner ? (
                 <>
                   <b className="text-gc-ink">{winner.name}</b> wins with <b className="text-gc-money tabular-nums">${winner.money.toLocaleString()}</b>
@@ -6667,7 +7419,11 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                   const st = podiumStyle[idx];
                   const isFirst = st.place === 1;
                   return (
-                    <li key={p.id} className="w-24 sm:w-40 flex flex-col items-center animate-gc-rise" style={{ animationDelay: st.delay }}>
+                    <li
+                      key={p.id}
+                      className={`w-24 sm:w-40 flex flex-col items-center ${reveal(placeShown(st.place, stage))}`}
+                      data-shown={placeShown(st.place, stage) ? 'true' : 'false'}
+                    >
                       <span className="sr-only">Place {st.place}: </span>
                       {isFirst && winner && <span className="text-[30px] sm:text-[38px] leading-none mb-1" aria-hidden="true">👑</span>}
                       <span className={`${st.avatar} rounded-full bg-gc-card p-1 grid place-items-center leading-none ring-4 ${isFirst ? 'ring-gc-gold' : 'ring-gc-line/20'} shadow-gc-1`} aria-hidden="true">
@@ -6691,6 +7447,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
             {podium.length > 0 && !everyoneBust && <div className="h-px bg-gc-line/[0.14] max-w-xl mx-auto" aria-hidden="true" />}
 
+            {classLine && (
+              <p className={`mt-6 mx-auto max-w-2xl text-gc-lead font-semibold text-gc-ink text-balance ${reveal(stage >= CEREMONY_DONE)}`} data-testid="class-result">
+                {classLine}
+              </p>
+            )}
+
             {everyoneBust && (
               <div className="mt-8 mx-auto max-w-md gc-surface rounded-gc-lg p-8">
                 <div className="text-[56px] leading-none mb-3" aria-hidden="true">🏛️</div>
@@ -6700,12 +7462,20 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
 
             <div className="mt-8 flex flex-wrap justify-center items-center gap-3">
-              <ActionButton onClick={handleRestartGame} playSound={playSound} variant="primary" className="min-h-[60px] px-10 text-gc-lead">
+              <ActionButton onClick={handlePlayAgainSameClass} variant="primary" className="min-h-[60px] px-10 text-gc-lead" title="Same players and settings; the room stays open">
                 <span className="inline-flex items-center gap-2.5"><RotateCcw className="w-5 h-5 shrink-0" aria-hidden="true" />Play again</span>
+              </ActionButton>
+              <ActionButton onClick={handleRestartGame} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
+                New class
               </ActionButton>
               <ActionButton onClick={() => handleOpenCloudModal('reports')} playSound={playSound} variant="ghost" className="h-12 px-5 text-gc-body font-semibold">
                 <span className="inline-flex items-center gap-2"><CloudIcon className="w-4 h-4 shrink-0" aria-hidden="true" />Save to the cloud</span>
               </ActionButton>
+              {podium.length > 0 && !everyoneBust && (
+                <ActionButton onClick={saveMoment} variant="ghost" className="h-12 px-5 text-gc-body font-semibold" title="Download a picture of the podium (nicknames only) for the class group">
+                  Save this moment
+                </ActionButton>
+              )}
             </div>
 
             {/* The session report */}
@@ -6755,12 +7525,19 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
   return (
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
-      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-300 relative">
+      <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-gc-base relative">
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
+        {isTableView && (
+          <React.Suspense fallback={null}>
+            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} />
+          </React.Suspense>
+        )}
         <React.Suspense fallback={null}>
         <Tabletop3DOverlay
           active={step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER'}
           calmMode={isCalmMode}
+          quality={qualityTier}
+          onQualityChange={handleQualityChange}
           projectorMode={isProjectorMode}
           seatStates={seat3DStates}
           tossEvent={chipTossEvent}
@@ -6859,6 +7636,28 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
 
           <button
             type="button"
+            data-hotkey="fullscreen"
+            onClick={handleToggleFullscreen}
+            className="!hidden sm:!inline-flex w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer"
+            aria-pressed={isFullscreen}
+            aria-label={isFullscreen ? 'Leave full screen' : 'Full screen'}
+            title={isFullscreen ? 'Leave full screen (F)' : 'Full screen (F)'}
+          >
+            {isFullscreen ? <Minimize className="w-5 h-5" aria-hidden="true" /> : <Maximize className="w-5 h-5" aria-hidden="true" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { playSound('click'); setShowHotkeyHelp(true); }}
+            className="!hidden sm:!inline-flex w-11 h-11 inline-flex items-center justify-center rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard className="w-5 h-5" aria-hidden="true" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               playSound('click');
               setIsProjectorMode(prev => !prev);
@@ -6876,6 +7675,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           {audioReady && (
             <div className="group relative inline-flex items-center">
               <button
+                data-hotkey="mute"
                 onClick={() => {
                   const newMutedState = !isMuted;
                   setIsMuted(newMutedState);
@@ -6904,6 +7704,18 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     onKeyUp={() => soundEngine.play('chipClink', 100)}
                     className="w-28 accent-amber-500 cursor-pointer"
                     aria-label="Sound effects volume"
+                  />
+                  <span className="ml-2">Music</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={musicVolume}
+                    onChange={(e) => setMusicVolume(Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)))}
+                    className="w-24 accent-amber-500 cursor-pointer"
+                    aria-label="Music volume"
+                    title={isCalmMode ? 'Music is off in Calm mode' : 'Music volume (0 turns it off)'}
                   />
                 </label>
               )}
@@ -6987,6 +7799,142 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             </div> 
         </Modal>
       }
+      {resumeOffer && (
+        <Modal title="Welcome back" onClose={() => setResumeOffer(null)} playSound={playSound} hideOkButton>
+          <p className="text-gc-body text-gc-ink mb-5">An unfinished game is saved on this computer.</p>
+          <div className="flex flex-col gap-3">
+            <ActionButton onClick={() => setResumeOffer(null)} playSound={playSound} variant="primary" className="min-h-[52px] px-5 text-gc-body">
+              {resumeOffer.label}
+            </ActionButton>
+            <ActionButton
+              onClick={() => {
+                archiveGame(Date.now());
+                setResumeOffer(null);
+                handleRestartGame();
+              }}
+              playSound={playSound}
+              variant="secondary"
+              className="min-h-[44px] px-5"
+            >
+              Start fresh
+            </ActionButton>
+          </div>
+        </Modal>
+      )}
+      {showPastReports && (
+        <Modal title="Past reports" onClose={() => setShowPastReports(false)} playSound={playSound}>
+          <p className="text-gc-small text-gc-quiet mb-3">The last {finishedGames.length === 1 ? 'game' : `${finishedGames.length} games`} finished on this computer. Save a report to the cloud to keep it for good.</p>
+          <ul className="space-y-2">
+            {finishedGames.map(g => (
+              <li key={g.id}>
+                <button
+                  type="button"
+                  onClick={() => { playSound('click'); setShowPastReports(false); setPastReport(g); }}
+                  className="w-full min-h-[44px] text-left rounded-gc-sm border border-gc-line/[0.14] hover:border-gc-line/30 px-3 py-2 cursor-pointer text-gc-ink"
+                >
+                  <span className="block font-semibold">{new Date(g.finishedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="block text-gc-small text-gc-quiet">
+                    {g.players.length} players · {g.roundHistory.length} {g.roundHistory.length === 1 ? 'hand' : 'hands'}{g.winnerName ? ` · ${g.winnerName} won` : ''}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
+      {pastReport && (
+        <Modal title="Report card" onClose={() => setPastReport(null)} playSound={playSound}>
+          <div className="max-h-[78vh] overflow-y-auto pr-1 modal-content-scroll">
+            <GrammarReportCard
+              history={pastReport.roundHistory}
+              players={pastReport.players.map(p => ({ ...p, history: [], winStreak: 0, effects: [] }))}
+              winner={null}
+              playSound={playSound}
+              onRestartGame={() => setPastReport(null)}
+              settings={pastReport.settings}
+              gameMode={pastReport.gameMode as GameMode | undefined}
+              totalRounds={pastReport.totalRounds}
+              targetAmount={pastReport.targetAmount}
+            />
+          </div>
+        </Modal>
+      )}
+      {showOwnDeck && (
+        <OwnDeckModal
+          initialText={ownDeck.text}
+          initialName={ownDeck.name}
+          playSound={playSound}
+          onClose={() => setShowOwnDeck(false)}
+          onUse={(text, name) => { setOwnDeck({ text, name: name.trim() || 'My deck' }); setShowOwnDeck(false); }}
+        />
+      )}
+      {showDebugLog && <DebugLogModal onClose={() => setShowDebugLog(false)} playSound={playSound} />}
+      {showHotkeyHelp && (
+        <Modal title="Keyboard shortcuts" onClose={() => setShowHotkeyHelp(false)} playSound={playSound}>
+          <p className="text-gc-body text-gc-ink mb-4">A presenter clicker works too: its buttons send Page Down and Page Up.</p>
+          <p className="text-gc-small text-gc-quiet -mt-2 mb-4">Version {APP_VERSION}</p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-gc-body text-gc-ink">
+            {HOTKEY_HELP.map(h => (
+              <React.Fragment key={h.keys}>
+                <dt className="font-bold whitespace-nowrap">{h.keys}</dt>
+                <dd>{h.action}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        </Modal>
+      )}
+      {isPaused && step === 'IN_GAME' && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
+          <div className="w-full max-w-md rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-8 text-center space-y-5 text-gc-ink">
+            <Pause className="w-12 h-12 mx-auto text-gc-gold" aria-hidden="true" />
+            <h2 id="gc-pause-title" className="text-gc-h2 font-bold">Paused</h2>
+            <p className="text-gc-body">Timers are stopped{mpRoomCode ? ' and phones are on hold' : ''}. Nothing is lost.</p>
+            <ActionButton data-hotkey="pause" onClick={() => setIsPaused(false)} playSound={playSound} variant="primary" className="min-h-[52px] w-full text-gc-lead">
+              <span className="inline-flex items-center gap-2"><Play className="w-5 h-5 shrink-0" aria-hidden="true" />Resume the hand</span>
+            </ActionButton>
+          </div>
+        </div>
+      )}
+      {showRulingModal && revealSnapshot && (() => {
+        const answers = listAnswersToAccept(revealSnapshot);
+        const acceptable = canAcceptOtherAnswers(revealSnapshot.input);
+        return (
+          <Modal title="Correct the ruling" onClose={() => setShowRulingModal(false)} playSound={playSound} hideOkButton>
+            <div className="space-y-5 text-gc-ink">
+              <p className="text-gc-body">If this item was judged wrongly, fix it here. Bankrolls are worked out again from the moment before the reveal.</p>
+              {acceptable && (
+                <section aria-labelledby="gc-accept-heading" className="space-y-2">
+                  <h3 id="gc-accept-heading" className="text-gc-body font-bold">Accept this answer too</h3>
+                  {answers.length === 0 ? (
+                    <p className="text-gc-small text-gc-quiet">No other answer was given this hand.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {answers.map(a => (
+                        <li key={a.answer} className="flex items-center justify-between gap-3 rounded-gc-sm border border-gc-line/[0.14] px-3 py-2">
+                          <span className="min-w-0 break-words">
+                            <span className="font-semibold">“{a.answer}”</span>
+                            <span className="text-gc-small text-gc-quiet"> · {a.players === 1 ? '1 player' : `${a.players} players`}</span>
+                          </span>
+                          <ActionButton onClick={() => handleAcceptAnswer(a.answer)} playSound={playSound} variant="secondary" className="min-h-[44px] px-4 shrink-0">
+                            Accept
+                          </ActionButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
+              <section aria-labelledby="gc-void-heading" className="space-y-2">
+                <h3 id="gc-void-heading" className="text-gc-body font-bold">Void the hand</h3>
+                <p className="text-gc-small text-gc-quiet">Every stake is returned. Money spent on hints and power-ups stays spent.</p>
+                <ActionButton onClick={handleVoidHand} playSound={playSound} variant="danger" className="min-h-[44px] px-5">
+                  Void the hand
+                </ActionButton>
+              </section>
+            </div>
+          </Modal>
+        );
+      })()}
       {confirmAction && (
         <Modal title={confirmAction.title} onClose={() => setConfirmAction(null)} playSound={playSound} hideOkButton>
           <p className="text-gc-body text-gc-ink mb-5">{confirmAction.message}</p>
@@ -7231,6 +8179,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               setAvailablePowerUps([]);
             }
           }}
+          onSetDeck={(keys) => {
+            setSelectedPowerUps(keys);
+            if (step === 'IN_GAME') {
+              setAvailablePowerUps(keys);
+            }
+          }}
           playSound={playSound}
         />
       )}
@@ -7333,7 +8287,27 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           buildCurrentFullGameState={buildCurrentFullGameState}
           activeRosterId={activeCloudRoster?.id || null}
           activeRosterName={activeCloudRoster?.className || ''}
-          onLoadRoster={handleLoadCloudRoster}
+          onLoadRoster={(roster, mode) => {
+            // Package T5: loading a class during a game asks first, and keeps the game's report.
+            if (step === 'IN_GAME' || step === 'RESULTS') {
+              setConfirmAction({
+                title: 'Load this class now?',
+                message: 'The game in progress ends. Its report is kept under Past reports on this computer.',
+                confirmLabel: 'Load the class',
+                onConfirm: () => {
+                  archiveGame(Date.now());
+                  setRoundHistory([]);
+                  setRoundResults([]);
+                  setCurrentRound(1);
+                  setCurrentSentence(null);
+                  setBets({});
+                  handleLoadCloudRoster(roster, mode);
+                },
+              });
+              return;
+            }
+            handleLoadCloudRoster(roster, mode);
+          }}
           onLoadFullGameState={handleApplyCloudFullGameState}
           onActiveRosterUpdated={(roster: CloudRoster) => setActiveCloudRoster({ id: roster.id, className: roster.name })}
           playSound={playSound}

@@ -1,0 +1,79 @@
+// What the class answered this hand (package L5), for the projector after the reveal, so the
+// teacher sees the popular wrong answer. A split bet counts each of its two picks.
+import type { Bet, QuestionType } from '../types';
+import { normalizeGapAnswer } from '../utils/roundSettlement';
+
+export interface AnswerSplitRow {
+  label: string;
+  count: number;
+  isRight: boolean;
+}
+
+export interface AnswerSplitInput {
+  qType: QuestionType;
+  bets: Record<number, Bet | undefined>;
+  playerIds: number[];
+  /** Was the sentence valid (valid-or-flawed hands only)? */
+  sentenceIsCorrect?: boolean;
+  options?: string[];
+  /** Is this typed or chosen answer right? */
+  isRightAnswer: (answer: string) => boolean;
+}
+
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+function picksOf(qType: QuestionType, bet: Bet): string[] {
+  if (qType === 'binary') return bet.opinion ? [bet.opinion] : [];
+  if (qType === 'multipleChoice') {
+    const split = (bet.splitOptions || []).filter(Boolean);
+    return split.length ? split : bet.selectedOption ? [bet.selectedOption] : [];
+  }
+  const split = (bet.splitClozeAnswers || []).filter(Boolean) as string[];
+  return split.length ? split : bet.clozeAnswer ? [bet.clozeAnswer] : [];
+}
+
+/** Answers with how many players gave them, most popular first. */
+export function answerSplit(input: AnswerSplitInput): AnswerSplitRow[] {
+  const rows = new Map<string, AnswerSplitRow>();
+  input.playerIds.forEach((id) => {
+    const bet = input.bets[id];
+    if (!bet) return;
+    const seen = new Set<string>();
+    picksOf(input.qType, bet).forEach((raw) => {
+      const key = input.qType === 'binary' ? raw : normalizeGapAnswer(raw);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      let label: string;
+      let isRight: boolean;
+      if (input.qType === 'binary') {
+        label = raw === 'correct' ? 'Valid' : 'Flawed';
+        isRight = (raw === 'correct') === Boolean(input.sentenceIsCorrect);
+      } else if (input.qType === 'multipleChoice') {
+        const idx = (input.options || []).findIndex((o) => normalizeGapAnswer(o) === key);
+        label = idx >= 0 && LETTERS[idx] ? `${LETTERS[idx]}: ${raw.trim()}` : raw.trim();
+        isRight = input.isRightAnswer(raw);
+      } else {
+        label = raw.trim().replace(/\s+/g, ' ');
+        isRight = input.isRightAnswer(raw);
+      }
+      const cur = rows.get(key);
+      rows.set(key, { label: cur?.label ?? label, count: (cur?.count ?? 0) + 1, isRight: cur?.isRight ?? isRight });
+    });
+  });
+  return [...rows.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+// --- "Got it" / "Still confused" from the phones ---
+
+export type HandReaction = 'gotIt' | 'confused';
+export type HandReactions = Record<number, Record<number, HandReaction>>;
+
+export function recordReaction(state: HandReactions, round: number, playerId: number, value: HandReaction): HandReactions {
+  if (state[round]?.[playerId] === value) return state;
+  return { ...state, [round]: { ...(state[round] || {}), [playerId]: value } };
+}
+
+export function reactionCounts(state: HandReactions, round: number): { gotIt: number; confused: number } {
+  const values = Object.values(state[round] || {});
+  return { gotIt: values.filter((v) => v === 'gotIt').length, confused: values.filter((v) => v === 'confused').length };
+}

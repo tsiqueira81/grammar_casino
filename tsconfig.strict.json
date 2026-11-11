@@ -5,5 +5,5 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["game/**/*.ts", "utils/**/*.ts", "types.ts", "constants.ts"]
+  "include": ["game/**/*.ts", "utils/**/*.ts", "content/**/*.ts", "strings/**/*.ts", "types.ts", "constants.ts"]
 }

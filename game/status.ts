@@ -12,10 +12,7 @@ export function hasShieldProtection(ownPowerUps: readonly ActivePowerUp[] | unde
   return (ownPowerUps || []).some((pu) => pu.type === 'SHIELD' || pu.type === 'GUARDIAN_ANGEL');
 }
 
-/**
- * A plain Shield only. Kept separate because two places check only Shield today: the wheel's
- * Bounty prize (Guardian Angel does not protect against it) and the seat card's shield badge.
- */
+/** A plain Shield only (the seat card's shield badge). Guardian Angel also protects against the wheel's Bounty (G5 fix). */
 export function hasPlainShield(ownPowerUps: readonly ActivePowerUp[] | undefined): boolean {
   return (ownPowerUps || []).some((pu) => pu.type === 'SHIELD');
 }

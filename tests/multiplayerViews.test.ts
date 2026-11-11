@@ -192,3 +192,23 @@ describe('isPlayerUnderdog (bottom-half qualification)', () => {
   });
 });
 
+describe('pause (package R8)', () => {
+  const params = (step: 'IN_GAME' | 'RESULTS', paused: boolean) => ({
+    roomCode: 'TEST', roomLocked: false, step, currentRound: 1, gameMode: 'rounds' as const, totalRounds: 10,
+    targetAmount: 2000, settings: { topic: 'Tenses', level: 'B2', theme: 'General', challengeFormat: 'binary' } as any,
+    customTopic: '', customTheme: '', isLoading: false, isProcessing: false, players: [{ id: 1, name: 'Ana', money: 500, history: [], avatar: '🦊', winStreak: 0, effects: [] } as Player], seats: {},
+    bets: {}, hints: {}, activePowerUps: {}, powerUpsUsedThisRound: {}, availablePowerUps: [], currentSentence: null,
+    roundResults: [], winner: null, studentPendingTarget: {}, studentPendingWheel: {}, studentNotifications: {}, paused,
+  });
+
+  it('tells every phone the hand is paused, on the shared table', () => {
+    const views = buildAllPlayerViews(params('IN_GAME', true));
+    expect(views[1].paused).toBe(true);
+    expect(splitPlayerViews(views).table.paused).toBe(true);
+    expect(buildAllPlayerViews(params('IN_GAME', false))[1].paused).toBe(false);
+  });
+
+  it('only pauses a hand in play', () => {
+    expect(buildAllPlayerViews(params('RESULTS', true))[1].paused).toBe(false);
+  });
+});

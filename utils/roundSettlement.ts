@@ -12,7 +12,7 @@ import {
 } from '../types';
 import { JACKPOT_MULTIPLIER } from '../constants';
 import { isPlayerUnderdog } from './multiplayerProtocol';
-import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
+import { evaluateKeyWordTransformationDeterministic } from './kwtMarking';
 import { normalizeUkUsSpelling } from './offlineGrammarEngine';
 
 const GeminiService = { evaluateKeyWordTransformationDeterministic };
@@ -55,12 +55,21 @@ export interface SettleRoundOutput {
   sounds: { sound: 'win' | 'lose'; index: number }[];
 }
 
+/**
+ * How a typed gap answer is compared (package L5): case, outer and inner spaces and curly
+ * apostrophes or quotes never matter. Contractions are left alone on purpose: in a one-word gap,
+ * "couldn't" and "could not" are different answers.
+ */
+export function normalizeGapAnswer(raw: string | undefined): string {
+  return (raw || '').replace(/[’‘`]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 /** Lower-cased accepted answers for the gap formats (the unchanged base word never counts). */
 export function buildAcceptedAnswerSet(sentence: GeneratedSentence, qType: QuestionType): { acceptedSet: Set<string>; baseWordNorm: string } {
-  const baseWordNorm = qType === 'wordFormation' ? (sentence.baseWord || '').trim().toLowerCase() : '';
+  const baseWordNorm = qType === 'wordFormation' ? normalizeGapAnswer(sentence.baseWord) : '';
   const acceptedSet = new Set<string>();
   const addVariant = (raw: string) => {
-    const norm = raw.trim().toLowerCase();
+    const norm = normalizeGapAnswer(raw);
     if (!norm) return;
     if (baseWordNorm && norm === baseWordNorm) return;
     acceptedSet.add(norm);
@@ -126,7 +135,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
   };
 
   const getKwtPhraseMarks = (phrase: string | undefined): 0 | 1 | 2 => {
-    const norm = (phrase || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const norm = normalizeGapAnswer(phrase);
     if (!norm) return 0;
     const entry = clozeWordVerifications[norm];
     if (entry && entry.marks !== undefined) return entry.marks;
@@ -145,7 +154,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     if (qType === 'keyWordTransformation') {
       return getKwtPhraseMarks(word) >= 1;
     }
-    const norm = (word || '').trim().toLowerCase();
+    const norm = normalizeGapAnswer(word);
     if (!norm) return false;
     const canonical = normalizeUkUsSpelling(norm);
     if (baseWordNorm && (norm === baseWordNorm || canonical === normalizeUkUsSpelling(baseWordNorm))) return false;
@@ -473,7 +482,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
             const fbParts: string[] = [];
             const seenNorms = new Set<string>();
             [w1, w2].forEach(w => {
-              const norm = (w || '').trim().toLowerCase().replace(/\s+/g, ' ');
+              const norm = normalizeGapAnswer(w);
               if (norm && !seenNorms.has(norm) && clozeWordVerifications[norm]?.feedback) {
                 seenNorms.add(norm);
                 fbParts.push(clozeWordVerifications[norm].feedback);
@@ -525,7 +534,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
             const fbParts: string[] = [];
             const seenNorms = new Set<string>();
             [w1, w2].forEach(w => {
-              const norm = (w || '').trim().toLowerCase();
+              const norm = normalizeGapAnswer(w);
               if (norm && !seenNorms.has(norm) && clozeWordVerifications[norm]?.feedback) {
                 seenNorms.add(norm);
                 fbParts.push(clozeWordVerifications[norm].feedback);
@@ -647,14 +656,14 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
             const kwtMarks = getKwtPhraseMarks(playerBetData.clozeAnswer);
             marksAwarded = kwtMarks;
             playerGuessedCorrectly = kwtMarks >= 1;
-            const norm = playerBetData.clozeAnswer.trim().toLowerCase().replace(/\s+/g, ' ');
+            const norm = normalizeGapAnswer(playerBetData.clozeAnswer);
             if (clozeWordVerifications[norm]?.feedback) {
                 correctionFeedbackText = clozeWordVerifications[norm].feedback;
             }
         } else if (qType === 'openCloze' || qType === 'wordFormation') {
             if (!playerBetData?.clozeAnswer?.trim()) return;
             playerGuessedCorrectly = isClozeWordCorrect(playerBetData.clozeAnswer);
-            const norm = playerBetData.clozeAnswer.trim().toLowerCase();
+            const norm = normalizeGapAnswer(playerBetData.clozeAnswer);
             if (clozeWordVerifications[norm]?.feedback) {
                 correctionFeedbackText = clozeWordVerifications[norm].feedback;
             }

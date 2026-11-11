@@ -1,5 +1,5 @@
 import { safeLocalStorage } from '../utils/safeStorage';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
   HINT_COST,
@@ -18,9 +18,14 @@ import {
 import { StudentRoomController } from '../services/multiplayerService';
 import WheelModal from './WheelModal';
 import SentenceText from './SentenceText';
-import Modal from './Modal';
 import { StudentRoundTimerBar, useTurnCountdown } from './TurnTimer';
 import { diffWords } from '../utils/errorHighlight';
+import { canVibrate, haptic, hapticsEnabled, setHapticsEnabled } from '../utils/haptics';
+import CountUp from './CountUp';
+import { t } from '../strings/en';
+import PowerUpSheet, { type PowerUpSheetInfo } from './PowerUpSheet';
+import { generateFriendlyName } from '../utils/nameFilter';
+import { addClockSample, clockOffset, toLocalTimer } from '../utils/clockSync';
 import {
   AlertTriangle,
   ArrowRight,
@@ -35,9 +40,55 @@ import {
   Sparkles,
   Sun,
   X,
+  Vibrate,
+  VibrateOff,
 } from 'lucide-react';
 
+/** Package S5: how long a toast stays, and how many stack at once. */
+const TOAST_MS = 7000;
+const TOAST_LIMIT = 3;
+/** Effects on a player, shown as the power-up that caused them. */
+const EFFECT_CARD: Partial<Record<string, PowerUpKey>> = {
+  BLESSING: 'BLESSING',
+  CRUCIO: 'CRUCIO',
+  SILENCED: 'SILENCER',
+  SECOND_CHANCE: 'SECOND_CHANCE',
+  TEACHERS_PET: 'TEACHERS_PET',
+};
+/** The power-up a toast is about, found by its name in the title. */
+const powerUpInTitle = (title: string): PowerUpKey | undefined =>
+  (Object.keys(POWER_UPS) as PowerUpKey[]).find(k => title.toLowerCase().includes(POWER_UPS[k].name.toLowerCase()));
+
+/** Package S4: the short build before the phone shows the ruling. */
+const REVEAL_BUILD_MS = 1200;
+
 const STUDENT_SESSION_STORAGE_KEY = 'grammar_casino_student_session_v1';
+/** Package R2: a phone tells the teacher it is still there this often, while on screen. */
+const HEARTBEAT_EVERY_MS = 20_000;
+/** A lock-in the teacher has not confirmed yet is sent again after this long. */
+const LOCK_RETRY_MS = 3_000;
+/** Rooms this phone was removed from (package R6), with the time, kept for 12 hours. */
+const REMOVED_ROOMS_STORAGE_KEY = 'grammar_casino_removed_rooms_v1';
+const REMOVED_ROOM_MS = 12 * 60 * 60 * 1000;
+const REMOVED_MESSAGE = 'The teacher removed you from this room.';
+
+function readRemovedRooms(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(safeLocalStorage.getItem(REMOVED_ROOMS_STORAGE_KEY) || '{}');
+    const now = Date.now();
+    const fresh: Record<string, number> = {};
+    Object.entries(parsed || {}).forEach(([code, at]) => {
+      if (typeof at === 'number' && now - at < REMOVED_ROOM_MS) fresh[code] = at;
+    });
+    return fresh;
+  } catch {
+    return {};
+  }
+}
+
+function rememberRemovedRoom(code: string) {
+  safeLocalStorage.setItem(REMOVED_ROOMS_STORAGE_KEY, JSON.stringify({ ...readRemovedRooms(), [code]: Date.now() }));
+}
 
 interface SavedStudentSession {
   code: string;
@@ -80,7 +131,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
   const [localBet, setLocalBet] = useState<Bet>({});
-  const [activeToast, setActiveToast] = useState<{ title: string; message: string; icon?: string } | null>(null);
+  const localBetRef = useRef<Bet>({});
+  localBetRef.current = localBet;
+  // Package S5: power-up news arrives as toasts that stack and fade, never blocking a bet.
+  const [toasts, setToasts] = useState<{ id: string; title: string; message: string; icon?: string }[]>([]);
+  const dismissToast = useCallback((id: string) => setToasts(prev => prev.filter(t => t.id !== id)), []);
+  const [sheet, setSheet] = useState<PowerUpSheetInfo | null>(null);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfStatusToast, setPdfStatusToast] = useState<string | null>(null);
@@ -92,8 +148,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const controllerRef = useRef<StudentRoomController | null>(null);
   const seenNotificationIdRef = useRef<string | null>(null);
   const lastRoundRef = useRef<number>(-1);
+  const clockSamplesRef = useRef<number[]>([]);
+  // Package R2: is this phone online, and when did it last ask to lock in (until the host confirms).
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
+  const [lockSentAt, setLockSentAt] = useState<number | null>(null);
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const lastSentenceTextRef = useRef<string>('');
   const lastStepRef = useRef<string>('');
+  const [revealBuilding, setRevealBuilding] = useState(false);
 
   // Focus & scroll refs for incomplete lock-in warnings
   const answerSectionRef = useRef<HTMLDivElement>(null);
@@ -134,6 +196,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const handleViewUpdate = useCallback(
     (nextView: PlayerViewPayload) => {
       setView(nextView);
+      // Package R3: learn how far the teacher's clock is from this phone's.
+      if (typeof nextView.serverNow === 'number') {
+        clockSamplesRef.current = addClockSample(clockSamplesRef.current, nextView.serverNow, Date.now());
+        setClockOffsetMs(clockOffset(clockSamplesRef.current));
+      }
 
       const nextSentenceText = nextView.sentence?.text || '';
       const isNewRound = nextView.round !== lastRoundRef.current;
@@ -198,18 +265,26 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         });
       }
 
-      // Haptic feedback when transitioning to RESULTS
+      // Package S4: the phone's own reveal. A short build, then the ruling with sound and a
+      // vibration. Calm mode and reduced motion skip the build.
       if (lastStepRef.current !== nextView.step) {
-        if (nextView.step === 'RESULTS' && 'vibrate' in navigator) {
-          try {
-            const won = (nextView.myRoundResult?.amountChanged ?? 0) > 0;
-            navigator.vibrate(won ? [80, 50, 120] : [180]);
-          } catch {}
-        }
         if (nextView.step === 'RESULTS') {
           const delta = nextView.myRoundResult?.amountChanged ?? 0;
-          if (delta > 0) playSound('roundWin');
-          else if (delta < 0) playSound(nextView.me && nextView.me.money <= 0 ? 'bankrupt' : 'roundLose');
+          const land = () => {
+            setRevealBuilding(false);
+            if (delta > 0) { playSound('roundWin'); haptic('win'); }
+            else if (delta < 0) { playSound(nextView.me && nextView.me.money <= 0 ? 'bankrupt' : 'roundLose'); haptic('lose'); }
+          };
+          const calm =
+            Boolean(nextView.calmMode) ||
+            (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          if (calm || !nextView.myRoundResult) land();
+          else {
+            setRevealBuilding(true);
+            window.setTimeout(land, REVEAL_BUILD_MS);
+          }
+        } else {
+          setRevealBuilding(false);
         }
         lastStepRef.current = nextView.step;
       }
@@ -219,11 +294,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         nextView.lastNotification.id !== seenNotificationIdRef.current
       ) {
         seenNotificationIdRef.current = nextView.lastNotification.id;
-        setActiveToast({
-          title: nextView.lastNotification.title,
-          message: nextView.lastNotification.message,
-          icon: nextView.lastNotification.icon,
-        });
+        const note = nextView.lastNotification;
+        setToasts(prev => [...prev, { id: note.id, title: note.title, message: note.message, icon: note.icon }].slice(-TOAST_LIMIT));
+        window.setTimeout(() => setToasts(prev => prev.filter(t => t.id !== note.id)), TOAST_MS);
         playSound('powerUp');
       }
     },
@@ -246,6 +319,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     }
     if (!name) {
       setJoinError('Please enter your name to claim a seat.');
+      return;
+    }
+    if (readRemovedRooms()[code]) {
+      setJoinError(REMOVED_MESSAGE);
       return;
     }
 
@@ -274,10 +351,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         avatar,
         reconnectToken: tokenToUse,
         onViewUpdate: handleViewUpdate,
-        onKicked: () => {
+        onKicked: (reason?: 'removed' | 'closed') => {
           safeLocalStorage.removeItem(STUDENT_SESSION_STORAGE_KEY);
           setView(null);
-          setJoinError('You were removed from the room or the room was closed.');
+          if (reason === 'removed') {
+            rememberRemovedRoom(code);
+            setJoinError(REMOVED_MESSAGE);
+          } else {
+            setJoinError('You were removed from the room or the room was closed.');
+          }
         },
         onConnectionChange: setIsConnected,
         onWaitingForTeacher: setJoinWaitingMessage,
@@ -305,10 +387,95 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     controllerRef.current?.sendIntent(intent);
   }, []);
 
+  // Package L5: "Got it" / "Still confused" after the reveal, remembered for the hand.
+  const [myReaction, setMyReaction] = useState<{ round: number; value: 'gotIt' | 'confused' } | null>(null);
+  const sendReaction = useCallback((round: number, value: 'gotIt' | 'confused') => {
+    setMyReaction({ round, value });
+    sendIntent({ type: 'FEEDBACK_REACTION', round, value });
+  }, [sendIntent]);
+
+  // --- Package R2: presence, waking up, and lock-ins the teacher confirmed ---
+  const hasSeat = Boolean(view);
+  useEffect(() => {
+    if (!hasSeat) return;
+    const beat = () => {
+      if (document.visibilityState === 'visible') sendIntent({ type: 'HEARTBEAT' });
+    };
+    const id = window.setInterval(beat, HEARTBEAT_EVERY_MS);
+    return () => window.clearInterval(id);
+  }, [hasSeat, sendIntent]);
+
+  useEffect(() => {
+    if (!hasSeat) return;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+    let lock: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const keepAwake = () => {
+      if (!nav.wakeLock || document.visibilityState !== 'visible') return;
+      nav.wakeLock.request('screen').then(l => {
+        if (cancelled) void l.release().catch(() => {});
+        else lock = l;
+      }).catch(() => {});
+    };
+    // Back in the foreground: stay awake again, and tell the teacher at once.
+    const onReturn = () => {
+      setIsOnline(navigator.onLine !== false);
+      if (document.visibilityState !== 'visible') return;
+      keepAwake();
+      sendIntent({ type: 'HEARTBEAT' });
+    };
+    const onOffline = () => setIsOnline(false);
+    keepAwake();
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('online', onReturn);
+    window.addEventListener('pageshow', onReturn);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onReturn);
+      window.removeEventListener('online', onReturn);
+      window.removeEventListener('pageshow', onReturn);
+      window.removeEventListener('offline', onOffline);
+      if (lock) void lock.release().catch(() => {});
+    };
+  }, [hasSeat, sendIntent]);
+
+  // "Locked in" shows only once the teacher's screen confirms it; until then "Sending…",
+  // and the lock-in is sent again every 3 seconds.
+  const confirmedLock = Boolean(view?.lockedIn);
+  // Package S4: a short buzz when the teacher's screen confirms the lock-in.
+  const wasLockedRef = useRef(false);
+  useEffect(() => {
+    if (confirmedLock && !wasLockedRef.current && view?.step === 'IN_GAME') haptic('lock');
+    wasLockedRef.current = confirmedLock;
+  }, [confirmedLock, view?.step]);
+  useEffect(() => {
+    if (lockSentAt === null) return;
+    if (confirmedLock || view?.step !== 'IN_GAME') {
+      setLockSentAt(null);
+      return;
+    }
+    const id = window.setTimeout(() => {
+      sendIntent({ type: 'LOCK_IN', locked: true, bet: localBetRef.current });
+      setLockSentAt(Date.now());
+    }, LOCK_RETRY_MS);
+    return () => window.clearTimeout(id);
+  }, [lockSentAt, confirmedLock, view?.step, sendIntent]);
+  const isLockSending = lockSentAt !== null && !confirmedLock;
+  const isOffline = !isOnline || (hasSeat && !isConnected);
+
+  // The round deadline read on this phone's clock (package R3).
+  const roundTimer = useMemo(() => toLocalTimer(view?.roundTimer, clockOffsetMs), [view?.roundTimer, clockOffsetMs]);
   const { remainingMs: roundTimerRemainingMs } = useTurnCountdown(
-    view?.roundTimer,
+    roundTimer,
     view?.turnDurationMs || 0
   );
+  // Package S4: a tick each second in the last 5 seconds, while this phone has not locked in.
+  const secondsLeft = roundTimer?.status === 'running' ? Math.ceil(roundTimerRemainingMs / 1000) : 0;
+  useEffect(() => {
+    if (view?.step === 'IN_GAME' && !view?.lockedIn && secondsLeft >= 1 && secondsLeft <= 5) haptic('tick');
+  }, [secondsLeft, view?.step, view?.lockedIn]);
+  const [vibrationOn, setVibrationOn] = useState(() => hapticsEnabled());
 
   // The teacher's Calm mode turns this phone's motion off too.
   const calmFromTeacher = Boolean(view?.calmMode);
@@ -443,60 +610,31 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       !isBetCompleteForQuestionType(localBet, qType, hasSplitBet, view.sentence?.baseWord)
     ) {
       playSound('error');
-      if ('vibrate' in navigator) {
-        try {
-          navigator.vibrate([100, 50, 100]);
-        } catch {}
-      }
+      haptic('error');
 
       let message = '';
       let missingField: 'answer' | 'wager' | 'both' = 'both';
+      // Package S3: plain messages, from strings/en.ts.
+      const word = `"${(view.sentence?.baseWord || '').toUpperCase()}"`;
+      const split = hasSplitBet && (qType === 'multipleChoice' || qType === 'openCloze') ? 'Split' : '';
       if (isUnchangedBaseWord) {
         missingField = 'answer';
-        message = `Hold on! "${(view.sentence?.baseWord || '').toUpperCase()}" is the unchanged base word. Transform its form (e.g. add a prefix or suffix) before locking in!`;
+        message = t('lock.baseWordUnchanged', { word });
       } else if (isInvalidKwtAnswer) {
         missingField = 'answer';
-        message = `Hold on! Use 2 to 6 words and include the exact unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
+        message = t('lock.kwtRule', { word });
       } else if (!hasValidAnswer && !hasValidWager) {
         missingField = 'both';
-        if (qType === 'multipleChoice') {
-          message = hasSplitBet
-            ? 'Hold on! Pick 2 options (50/50) or tap 1 option twice for 100% (2×), and enter a wager amount before locking in.'
-            : 'Hold on! Choose an option (A–D) in Step 1 and enter a wager amount in Step 2 before locking in.';
-        } else if (qType === 'keyWordTransformation') {
-          message = `Hold on! Complete the gap in 2–6 words using "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" unchanged in Step 1 and enter a wager in Step 2.`;
-        } else if (qType === 'wordFormation') {
-          message = `Hold on! Transform (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) in Step 1 and enter a wager amount in Step 2 before locking in.`;
-        } else if (qType === 'openCloze') {
-          message = hasSplitBet
-            ? 'Hold on! Type at least 1 candidate word in Step 1 and enter a wager amount in Step 2 before locking in.'
-            : 'Hold on! Type the missing word in Step 1 and enter a wager amount in Step 2 before locking in.';
-        } else {
-          message = 'Hold on! Choose Valid or Flawed in Step 1 and enter a wager amount in Step 2 before locking in.';
-        }
+        message = t(`lock.needBoth.${qType}${split}` as Parameters<typeof t>[0], { word });
       } else if (!hasValidAnswer) {
         missingField = 'answer';
-        if (qType === 'multipleChoice') {
-          message = hasSplitBet
-            ? 'Step 1 Incomplete: Pick 2 options (50/50) or tap the same option twice for 100% (2×) before locking in!'
-            : 'Step 1 Incomplete: Please choose an option (A, B, C, or D) before locking in!';
-        } else if (qType === 'keyWordTransformation') {
-          message = `Step 1 Incomplete: Type 2 to 6 words including the unchanged key word "${(view.sentence?.baseWord || 'KEY').toUpperCase()}" before locking in!`;
-        } else if (qType === 'wordFormation') {
-          message = `Step 1 Incomplete: Please transform the base word (${(view.sentence?.baseWord || 'ROOT').toUpperCase()}) to fit the gap before locking in!`;
-        } else if (qType === 'openCloze') {
-          message = hasSplitBet
-            ? 'Step 1 Incomplete: Please type at least 1 candidate word before locking in!'
-            : 'Step 1 Incomplete: Please type the missing word before locking in!';
-        } else {
-          message = 'Step 1 Incomplete: Please choose Valid (✓) or Flawed (✕) before locking in!';
-        }
+        message = t(`lock.needAnswer.${qType}${split}` as Parameters<typeof t>[0], { word });
       } else {
         missingField = 'wager';
         message =
           view.isHighRoller && view.minBetAmount > 0
-            ? `🔥 High Roller Fever Active: Your minimum wager this round is $${view.minBetAmount.toLocaleString()} (50% of your bankroll)!`
-            : 'Step 2 Incomplete: Please enter a wager amount ($1 or more, or tap a quick chip) before locking in!';
+            ? t('lock.highRollerMin', { amount: `$${view.minBetAmount.toLocaleString()}` })
+            : t('lock.needBet');
       }
 
       setLockWarning({ message, missingField });
@@ -531,6 +669,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     playSound('lockIn');
     sendIntent({ type: 'SET_FULL_BET', bet: localBet });
     sendIntent({ type: 'LOCK_IN', locked: true, bet: localBet });
+    setLockSentAt(Date.now());
   };
 
   // Enter on an answer field moves to the next missing control, or locks in when all is done.
@@ -633,8 +772,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               if (e.key === 'Enter') handleJoinRoom();
             }}
             placeholder="First name"
-            className={`${fieldClass} h-14 mb-5 px-4 text-lg font-semibold`}
+            className={`${fieldClass} h-14 mb-2 px-4 text-lg font-semibold`}
           />
+          <button
+            type="button"
+            onClick={() => setPlayerNameInput(generateFriendlyName())}
+            className="mb-5 min-h-[44px] px-3 -ml-3 text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer hover:text-gc-ink"
+          >
+            Give me a name
+          </button>
 
           <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Choose & customize your character</span>
           <div role="group" aria-labelledby="gc-join-avatar">
@@ -661,6 +807,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 </>
               )}
             </button>
+            <p className="m-0 text-center text-gc-cap text-gc-quiet" data-testid="join-privacy">
+              No account, no email: just a nickname, kept on this phone.{' '}
+              <a href="/privacy.html" target="_blank" rel="noopener" className="inline-flex items-center min-h-[44px] min-w-[44px] px-2 underline underline-offset-4 text-gc-quiet hover:text-gc-ink">
+                Privacy
+              </a>
+            </p>
             <button
               type="button"
               onClick={onExitStudentMode}
@@ -722,7 +874,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     return (localBet.clozeAnswer || '').trim();
   })();
   const isReadyToLock = Boolean(pickText) && betAmountNum > 0;
-  const lockLabel = isReadyToLock
+  const lockLabel = isOffline
+    ? 'Offline: waiting for the connection'
+    : isLockSending
+    ? 'Sending…'
+    : isReadyToLock
     ? `Lock in ${money(betAmountNum)} on ${pickText}`
     : !pickText
       ? qType === 'binary'
@@ -737,7 +893,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     <button
       type="button"
       onClick={handleToggleLockIn}
-      className={`w-full min-h-[52px] py-2.5 px-5 rounded-full text-gc-body font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
+      disabled={isOffline || isLockSending}
+      className={`w-full min-h-[52px] disabled:opacity-70 disabled:cursor-not-allowed py-2.5 px-5 rounded-full text-gc-body font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
         isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet'
       }`}
     >
@@ -755,6 +912,21 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
 
   return (
     <div className="game-container min-h-[100dvh] text-gc-ink flex flex-col pb-28">
+      {/* Package R2: a clear banner while the phone is offline. */}
+      {isOffline && (
+        <div role="status" className="sticky top-0 z-40 w-full px-4 py-3 bg-gc-loss text-white text-gc-body font-bold text-center">
+          You're offline. Reconnecting… Your bet stays on this phone.
+        </div>
+      )}
+      {/* Package R8: the teacher paused the hand. Nothing can be changed until it resumes. */}
+      {view.paused && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-black/75 backdrop-blur-sm" role="alert" aria-live="assertive">
+          <div className="w-full max-w-sm rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-6 text-center space-y-3">
+            <p className="text-gc-h2 font-bold">Paused</p>
+            <p className="text-gc-body">Your teacher paused the game. Your bet is safe. Wait a moment.</p>
+          </div>
+        </div>
+      )}
       {/* Top bar: who you are, the room and hand, your balance */}
       <header className="sticky top-0 z-30 min-h-16 pt-[env(safe-area-inset-top)] px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-gc-bg/85 backdrop-blur-md border-b border-gc-line/[0.1] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -772,7 +944,6 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <div className="text-[12.5px] font-semibold text-gc-quiet tabular-nums flex items-center gap-1.5 leading-tight">
               <span>Room {view.roomCode}</span>
               {view.step === 'IN_GAME' || view.step === 'RESULTS' ? <span>· Hand {view.round}</span> : null}
-              {!isConnected && <span>· Reconnecting</span>}
             </div>
           </div>
         </div>
@@ -786,6 +957,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <div className="h-9 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] inline-flex items-center text-gc-body font-extrabold text-gc-money tabular-nums">
             {money(view.me.money)}
           </div>
+          {canVibrate() && (
+            <button
+              type="button"
+              onClick={() => { setHapticsEnabled(!vibrationOn); setVibrationOn(!vibrationOn); }}
+              className="w-11 h-11 rounded-full grid place-items-center text-gc-quiet cursor-pointer"
+              aria-label={vibrationOn ? 'Turn vibration off' : 'Turn vibration on'}
+              aria-pressed={vibrationOn}
+              title={vibrationOn ? 'Vibration is on' : 'Vibration is off'}
+            >
+              {vibrationOn ? <Vibrate className="w-[18px] h-[18px]" aria-hidden="true" /> : <VibrateOff className="w-[18px] h-[18px]" aria-hidden="true" />}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleLeaveRoom}
@@ -867,7 +1050,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             {/* Shared round timer, when the teacher turned it on */}
             {(view.turnDurationMs ?? 0) > 0 && (
               <StudentRoundTimerBar
-                timer={view.roundTimer}
+                timer={roundTimer}
                 turnDurationMs={view.turnDurationMs || 0}
                 lockedIn={isPlayerLocked}
               />
@@ -981,13 +1164,36 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   )}
 
                   {/* Power-ups and effects on this player */}
-                  {(view.myActivePowerUps.length > 0 || view.isBetCapped || view.isHighRoller) && (
+                  {(view.myActivePowerUps.length > 0 || view.isBetCapped || view.isHighRoller || (view.me.effects || []).some(e => EFFECT_CARD[e.type])) && (
                     <div className="mt-3 pt-3 border-t border-gc-line/[0.1] flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
                       {view.myActivePowerUps.map((pu, idx) => (
-                        <span key={idx} className="px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-800 dark:text-purple-200">
+                        <button
+                          type="button"
+                          key={idx}
+                          onClick={() => setSheet({ key: pu.type })}
+                          className="min-h-[32px] px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-800 dark:text-purple-200 cursor-pointer"
+                          aria-label={`${POWER_UPS[pu.type]?.name}: what does it do?`}
+                        >
                           {POWER_UPS[pu.type]?.icon} {POWER_UPS[pu.type]?.name}
-                        </span>
+                        </button>
                       ))}
+                      {(view.me.effects || []).map((e, idx) => {
+                        const key = EFFECT_CARD[e.type];
+                        if (!key || view.myActivePowerUps.some(pu => pu.type === key)) return null;
+                        const harmful = e.type === 'CRUCIO' || e.type === 'SILENCED';
+                        return (
+                          <button
+                            type="button"
+                            key={`effect-${idx}`}
+                            onClick={() => setSheet({ key, handsLeft: e.roundsLeft })}
+                            className={`min-h-[32px] px-2.5 py-1 rounded-full cursor-pointer ${harmful ? 'bg-gc-loss/15 text-gc-loss' : 'bg-gc-win/15 text-gc-win'}`}
+                            aria-label={`${POWER_UPS[key].name}: what does it do?`}
+                          >
+                            {POWER_UPS[key].icon} {POWER_UPS[key].name}
+                            {e.roundsLeft > 0 ? ` · ${e.roundsLeft}` : ''}
+                          </button>
+                        );
+                      })}
                       {view.isBetCapped && (
                         <span className="px-2.5 py-1 rounded-full bg-gc-loss/15 text-gc-loss">
                           🧢 Bets up to ${view.betCapAmount}
@@ -1056,7 +1262,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                               <span className="tabular-nums text-gc-info shrink-0">{item.percent}%</span>
                             </div>
                             <div className="w-full h-1.5 rounded-full bg-gc-line/[0.1] overflow-hidden">
-                              <div className="h-full bg-gc-info rounded-full transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} />
+                              <div className="h-full bg-gc-info rounded-full transition-all duration-gc-base" style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} />
                             </div>
                           </div>
                         ))}
@@ -1223,7 +1429,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                         ? 'border-amber-500/70 bg-amber-500/[0.04]'
                                         : fieldOk
                                     } min-h-[52px] px-4 font-sentence italic text-gc-lead`}
+                                    aria-describedby="gc-phone-correction-privacy"
                                   />
+                                  <p id="gc-phone-correction-privacy" className="mt-1 mb-0 text-gc-cap text-gc-quiet">
+                                    Do not type personal information.
+                                  </p>
                                   {hasDoubleOrNothing && !localBet.userCorrection?.trim() && (
                                     <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
                                       ⚠️ Heads up: With Double or Nothing active, locking in Flawed without a valid correction results in a −1.5× loss.
@@ -1600,6 +1810,35 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           const s = view.sentence;
           const correctionSegments =
             s && !isClozeRound && !s.isCorrect && s.correction ? diffWords(s.text, s.correction).corrected : null;
+          // Package L5: the student's own answer beside the right one, and other accepted answers.
+          const myAnswer = view.myRoundResult?.playerAnswerDisplay?.trim();
+          const gapKey = (a: string) => a.replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
+          const alsoAccepted = isClozeRound && s
+            ? [...new Map((s.acceptedAnswers || []).filter(a => a && gapKey(a) !== gapKey(s.correctAnswer || '')).map(a => [gapKey(a), a.trim()])).values()]
+            : [];
+          const reacted = myReaction && myReaction.round === view.round ? myReaction.value : null;
+          // Package S4: place before and after this hand, and the gap to the next place.
+          const standings = [...view.peers].sort((a, b) => b.money - a.money);
+          const changeByName = new Map(view.allRoundResults.map(r => [r.name, r.amountChanged]));
+          // Places count ties as shared ("joint 2nd" is just 2nd): one more than the players ahead.
+          const myMoneyBefore = view.me.money - change;
+          const placeNow = 1 + view.peers.filter(p => p.money > view.me.money).length;
+          const placeBefore = 1 + view.peers.filter(p => p.id !== view.me.id && p.money - (changeByName.get(p.name) ?? 0) > myMoneyBefore).length;
+          const ahead = [...standings].reverse().find(p => p.money > view.me.money) ?? null;
+          const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
+          const moved = view.round > 1 ? placeBefore - placeNow : 0;
+          const placeText = standings.length > 1
+            ? `${moved > 0 ? `Up ${moved} place${moved === 1 ? '' : 's'}, now` : moved < 0 ? `Down ${-moved} place${moved === -1 ? '' : 's'}, now` : 'You are'} ${ordinal(placeNow)} of ${standings.length}.`
+              + (ahead ? ` ${t('results.toPass', { amount: money(ahead.money - view.me.money + 1), name: ahead.name })}` : ` ${t('results.lead')}`)
+            : null;
+          if (revealBuilding) {
+            return (
+              <div className="pt-16 flex flex-col items-center text-center animate-gc-fade" role="status" aria-live="polite" data-testid="reveal-build">
+                <div className="w-[120px] h-[120px] rounded-full grid place-items-center bg-gc-gold/15 text-gc-money animate-gc-ring text-[44px]" aria-hidden="true">🂠</div>
+                <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">{t('results.build')}</h1>
+              </div>
+            );
+          }
           return (
             <div className="space-y-4 animate-gc-fade">
               {/* Gold coins rain down on a win (reduced motion and calm mode skip it via index.css). */}
@@ -1646,8 +1885,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                     {money(change)}
                   </p>
                   <p className="m-0 mt-3 text-[17px] text-gc-quiet">
-                    Balance <b className="text-gc-money tabular-nums">{money(view.me.money)}</b>
+                    Balance <b className="text-gc-money tabular-nums"><CountUp from={view.me.money - change} to={view.me.money} delayMs={300} format={money} /></b>
                   </p>
+                  {placeText && <p className="m-0 mt-1 text-[15px] font-semibold text-gc-ink" data-testid="my-place">{placeText}</p>}
                   <div className="mt-2 flex flex-wrap justify-center gap-1.5 text-gc-cap font-semibold">
                     {view.myRoundResult.outcomeText && !/^(win|lose)$/i.test(view.myRoundResult.outcomeText.trim()) && (
                       <span className="px-2.5 py-1 rounded-full bg-gc-line/[0.07] text-gc-quiet">{view.myRoundResult.outcomeText}</span>
@@ -1691,12 +1931,44 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                       &rdquo;
                     </p>
                   )}
+                  {alsoAccepted.length > 0 && (
+                    <p className="m-0 text-gc-small text-gc-quiet">{t('results.alsoRight', { answers: alsoAccepted.join(', ') })}</p>
+                  )}
+                  {!isClozeRound && !s.isCorrect && s.errorPhrase && (
+                    <p className="m-0 text-gc-small text-gc-quiet">
+                      {t('results.mistake')}<b className="text-gc-ink">{s.errorPhrase}</b>
+                      {s.mistakeType ? ` (${s.mistakeType})` : ''}
+                    </p>
+                  )}
+                  {myAnswer && (
+                    <p className="m-0 text-[15px] text-gc-ink" data-testid="my-answer">
+                      <span className="font-bold">{t('results.yourAnswer')}</span>
+                      {myAnswer}
+                    </p>
+                  )}
                   {s.explanation && (
                     <p className="m-0 pt-2 border-t border-gc-line/[0.1] text-[15px] leading-relaxed text-gc-ink">
-                      <span className="font-bold">Why: </span>
+                      <span className="font-bold">{t('results.why')}</span>
                       {s.explanation}
                     </p>
                   )}
+                  <div className="pt-2 flex gap-2" role="group" aria-label={t('results.didThisMakeSense')}>
+                    {([['gotIt', t('results.gotIt')], ['confused', t('results.stillConfused')]] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={reacted === value}
+                        onClick={() => sendReaction(view.round, value)}
+                        className={`flex-1 min-h-[48px] rounded-full text-[16px] font-bold border transition-colors ${
+                          reacted === value
+                            ? value === 'gotIt' ? 'bg-gc-win/20 border-gc-win text-gc-win' : 'bg-gc-danger/15 border-gc-danger text-gc-danger'
+                            : 'border-gc-line/[0.2] text-gc-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1704,10 +1976,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <div className="gc-surface rounded-[20px] px-[18px] py-4 animate-gc-slide-up [animation-delay:0.6s]">
                 <h2 className="m-0 mb-1 text-gc-small font-bold text-gc-quiet">Standings</h2>
                 <ol className="m-0 p-0 list-none divide-y divide-gc-line/[0.1]">
-                  {[...view.peers]
-                    .sort((a, b) => b.money - a.money)
+                  {standings
                     .map((p, idx) => (
-                      <li key={p.id} className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold' : 'font-semibold'}`}>
+                      <li
+                        key={p.id}
+                        ref={p.id === view.me.id && standings.length > 8 ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}
+                        aria-current={p.id === view.me.id ? 'true' : undefined}
+                        className={`py-2.5 flex items-center justify-between gap-3 ${p.id === view.me.id ? 'font-extrabold bg-gc-gold/10 -mx-2 px-2 rounded-lg' : 'font-semibold'}`}
+                      >
                         <span className="flex items-center gap-2.5 min-w-0">
                           <span className="w-6 text-gc-cap text-gc-quiet tabular-nums">{idx + 1}</span>
                           <PlayerAvatar value={p.avatar} size="xs" />
@@ -1719,7 +1995,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 </ol>
               </div>
 
-              <p className="text-center text-gc-small text-gc-quiet pt-1 text-balance">The next hand appears here when the teacher deals it.</p>
+              <p className="text-center text-gc-small text-gc-quiet pt-1 text-balance">{t('results.nextHand')}</p>
             </div>
           );
         })()}
@@ -1892,7 +2168,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             <button
               type="button"
               onClick={handleToggleLockIn}
-              className={`w-full min-h-[58px] py-3 px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
+              disabled={isOffline || isLockSending}
+              className={`w-full min-h-[58px] disabled:opacity-70 disabled:cursor-not-allowed py-3 px-5 rounded-full text-lg font-extrabold flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] transition-all ${
                 isReadyToLock ? 'gc-btn-primary' : 'bg-gc-card/95 border border-gc-line/[0.16] text-gc-quiet shadow-gc-1'
               }`}
             >
@@ -1981,24 +2258,30 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
         />
       )}
 
-      {/* Power-up news for this player */}
-      {activeToast && (
-        <Modal
-          title={activeToast.title}
-          onClose={() => setActiveToast(null)}
-          playSound={playSound}
-          hideCloseButton
-        >
-          <div className="text-center py-4">
-            <div className="text-7xl mb-5 flex justify-center" aria-hidden="true">
-              <span>{activeToast.icon || '✨'}</span>
+      {/* Power-up news for this player (package S5): toasts that stack and fade, never blocking */}
+      <div className="fixed top-2 inset-x-0 z-40 px-3 flex flex-col items-center gap-2 pointer-events-none" role="status" aria-live="polite" data-testid="toasts">
+        {toasts.map(toast => {
+          const key = powerUpInTitle(toast.title);
+          return (
+            <div key={toast.id} className="pointer-events-auto w-full max-w-md gc-surface rounded-[18px] shadow-lg px-4 py-3 flex items-start gap-3 animate-gc-slide-up" data-testid="toast">
+              <span className="text-[28px] leading-none" aria-hidden="true">{toast.icon || '✨'}</span>
+              <div className="min-w-0 flex-1">
+                <p className="m-0 text-[16px] font-extrabold text-gc-ink">{toast.title}</p>
+                <p className="m-0 text-[15px] text-gc-ink whitespace-pre-line">{toast.message}</p>
+                {key && (
+                  <button type="button" onClick={() => { setSheet({ key }); dismissToast(toast.id); }} className="mt-1 min-h-[32px] text-[14px] font-bold text-gc-info underline underline-offset-4 cursor-pointer">
+                    {t('powerUp.whatDoesItDo')}
+                  </button>
+                )}
+              </div>
+              <button type="button" onClick={() => dismissToast(toast.id)} className="w-9 h-9 shrink-0 grid place-items-center rounded-full text-gc-quiet cursor-pointer" aria-label={t('powerUp.dismiss')}>
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
             </div>
-            <p className="text-lg sm:text-xl text-gc-ink font-medium leading-relaxed whitespace-pre-line">
-              {activeToast.message}
-            </p>
-          </div>
-        </Modal>
-      )}
+          );
+        })}
+      </div>
+      {sheet && <PowerUpSheet info={sheet} onClose={() => setSheet(null)} />}
     </div>
   );
 };
