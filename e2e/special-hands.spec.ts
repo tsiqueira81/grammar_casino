@@ -191,3 +191,48 @@ test('a right answer on the Spotlight hand earns a free power-up draw', async ({
   await expect(card(page, 'Ana').getByTestId('draw-price')).toHaveText('Free');
   await expect(card(page, 'Bruno').getByTestId('draw-price')).toHaveText('-$50');
 });
+
+test('the Fix it hand deals a flawed sentence and shows the class corrections without names', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno']);
+  await page.getByRole('button', { name: 'Set up the game' }).click();
+  await page.getByRole('button', { name: /^Valid or flawed/ }).click();
+  await page.getByRole('button', { name: 'Next: house rules' }).click();
+  await page.getByRole('button', { name: /Set number of hands/ }).click();
+  await page.locator('input[type="number"]:visible').first().fill('8');
+  const special = page.getByRole('switch', { name: 'Special hands' });
+  if ((await special.getAttribute('aria-checked')) !== 'true') await special.click();
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+
+  const fullCards = page.getByRole('button', { name: 'Full cards' });
+  // Hands 1 to 5: quick bets.
+  for (let hand = 1; hand <= 5; hand++) {
+    if (await fullCards.isVisible()) await fullCards.click();
+    for (const name of ['Ana', 'Bruno']) {
+      const c = card(page, name);
+      await c.getByRole('button', { name: /^Valid/ }).first().click();
+      await c.getByPlaceholder('Your bet').fill('10');
+    }
+    await clickButton(page, /^Reveal the answer/);
+    await clickButton(page, 'Deal the next hand');
+  }
+
+  // Hand 6 of 8 is Fix it: a flawed sentence, and both players type a correction.
+  await expect(page.getByTestId('special-hand-card')).toContainText('Fix it');
+  await expect(page.locator('p.font-sentence').first()).toContainText('He have finished');
+  if (await fullCards.isVisible()) await fullCards.click();
+  const fixes = { Ana: 'He has finished his homework already.', Bruno: 'He had finished his homework already.' };
+  for (const [name, fix] of Object.entries(fixes)) {
+    const c = card(page, name);
+    await c.getByRole('button', { name: /^Flawed/ }).first().click();
+    await c.getByPlaceholder('Your bet').fill('10');
+    await c.getByRole('textbox', { name: /Rewrite the sentence/ }).fill(fix);
+  }
+  await clickButton(page, /^Reveal the answer/);
+  const list = page.getByTestId('fixit-corrections');
+  await expect(list).toContainText(fixes.Ana);
+  await expect(list).toContainText(fixes.Bruno);
+  await expect(list).not.toContainText('Ana');
+  await expect(list).not.toContainText('Bruno');
+});

@@ -114,7 +114,7 @@ import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
 import { DEMO_BOT_COUNT } from './game/demoBots';
 import { isE2eMode } from './utils/e2eContent';
 import { classListMatch } from './game/classList';
-import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, spotlightRoundFor, type SpecialHand } from './game/specialHands';
+import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, spotlightRoundFor, fixItRoundFor, classCorrections, type SpecialHand } from './game/specialHands';
 import { phaseAnnouncement } from './game/announce';
 import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
@@ -350,6 +350,7 @@ export function App() {
   // Package G6 Spotlight: misses per grammar point, the Spotlight hand, and free draws earned there.
   const missTallyRef = useRef<MissTally>({});
   const spotlightRoundRef = useRef<number | null>(null);
+  const fixItRoundRef = useRef<number | null>(null);
   const [freeDraws, setFreeDraws] = useState<FreeDraws>({});
   const handSubtypeRef = useRef<string | null>(null);
   /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
@@ -875,9 +876,11 @@ export function App() {
     totalRounds: Number(totalRounds),
     secondLookRound,
     questionType: currentSentence?.questionType,
+    sentenceIsCorrect: currentSentence ? currentSentence.isCorrect : null,
   });
   const specialHandLabel = specialHandLabelFor(currentSpecialHand);
   spotlightRoundRef.current = specialHandsOn && gameMode === 'rounds' ? spotlightRoundFor(Number(totalRounds)) : null;
+  fixItRoundRef.current = specialHandsOn && gameMode === 'rounds' ? fixItRoundFor(Number(totalRounds)) : null;
   // Package L9: "Say it" after each reveal, off unless the teacher turns it on.
   const [sayItOn, setSayItOn] = useState<boolean>(() => safeLocalStorage.getItem(SAY_IT_KEY) === 'on');
   useEffect(() => {
@@ -1992,7 +1995,9 @@ export function App() {
         let resolvedQuestionType: QuestionType = 'binary';
         let forceCorrect = true;
 
-        if (!forcedBatch && prefetchRef.current?.key === expectedKey) {
+        // Package G6 Fix it: that hand is always a flawed Valid-or-flawed sentence, made fresh.
+        const isFixItHand = fixItRoundRef.current === targetRound;
+        if (!forcedBatch && !isFixItHand && prefetchRef.current?.key === expectedKey) {
           const activePrefetch = prefetchRef.current;
           prefetchRef.current = null;
           try {
@@ -2015,13 +2020,15 @@ export function App() {
 
         if (!generated) {
           const rotationOrder: QuestionType[] = getEffectiveMixedFormats(currentSettings.mixedFormats);
-          resolvedQuestionType = formatSetting === 'mixed'
-            ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
-            : formatSetting;
+          resolvedQuestionType = isFixItHand
+            ? 'binary'
+            : formatSetting === 'mixed'
+              ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
+              : formatSetting;
 
           const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
-          forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
-          if (resolvedQuestionType === 'binary') {
+          forceCorrect = isFixItHand ? false : resolvedQuestionType === 'binary' ? currentBatch[0] : true;
+          if (resolvedQuestionType === 'binary' && !isFixItHand) {
             setSentenceBatch(currentBatch.slice(1));
           }
 
@@ -5773,7 +5780,7 @@ export function App() {
                                 <span>
                                   <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
                                   <span className="block text-gc-small text-gc-quiet">
-                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times. Halfway through, a Valid-or-flawed sentence is read aloud, not shown, until the reveal.
+                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times. Halfway through, a Valid-or-flawed sentence is read aloud, not shown, until the reveal. In longer games, a Spotlight hand repeats the most-missed point, and a Fix it hand asks everyone to correct a sentence.
                                   </span>
                                 </span>
                                 <button
@@ -7371,6 +7378,33 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         <span aria-hidden="true">🗣️ </span>Say it: turn to a partner and say the right sentence aloud.
                       </div>
                       <div className={`mt-1.5 font-sentence italic text-gc-ink ${isProjectorMode ? 'text-2xl sm:text-3xl font-semibold' : 'text-gc-lead sm:text-2xl'}`}>&ldquo;{said}&rdquo;</div>
+                    </div>
+                  );
+                })()}
+
+                {currentSpecialHand === 'fixIt' && (() => {
+                  const record = roundHistory.find(r => r.round === currentRound);
+                  const list = classCorrections(record?.playerResults || []);
+                  return (
+                    <div data-testid="fixit-corrections" className="mt-4 px-5 sm:px-8 py-4 rounded-gc-lg gc-surface text-left animate-gc-slide-up">
+                      <h3 className="text-gc-body font-extrabold text-gc-ink">
+                        <span aria-hidden="true">🛠️ </span>The class&rsquo;s corrections
+                      </h3>
+                      {list.length === 0 ? (
+                        <p className="mt-1 text-gc-small text-gc-quiet">Nobody typed a correction this time.</p>
+                      ) : (
+                        <ul className="mt-2 space-y-1.5">
+                          {list.map((c, i) => (
+                            <li key={i} className="flex items-start gap-2.5">
+                              <span className={`mt-0.5 shrink-0 inline-flex items-center h-6 px-2 rounded-full text-gc-cap font-bold ${c.accepted ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-line/[0.08] text-gc-quiet'}`}>
+                                {c.accepted ? 'Accepted' : 'Not quite'}
+                              </span>
+                              <span className={`font-sentence italic text-gc-ink ${isProjectorMode ? 'text-2xl' : 'text-gc-lead'}`}>&ldquo;{c.text}&rdquo;</span>
+                              {c.count > 1 && <span className="mt-1 text-gc-cap text-gc-quiet tabular-nums shrink-0">×{c.count}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   );
                 })()}

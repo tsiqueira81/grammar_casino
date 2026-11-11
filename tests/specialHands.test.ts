@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listeningRoundFor, payoutMultiplierFor, scaleWin, specialHandFor, specialHandLabelFor, spotlightRoundFor } from '../game/specialHands';
+import { classCorrections, fixItRoundFor, listeningRoundFor, payoutMultiplierFor, scaleWin, specialHandFor, specialHandLabelFor, spotlightRoundFor } from '../game/specialHands';
 import { addMisses, grantFreeDraws, mostMissedPoint, revokeFreeDraws, spendFreeDraw } from '../game/spacing';
 
 const base = { enabled: true, gameMode: 'rounds', round: 1, totalRounds: 10, secondLookRound: null as number | null };
@@ -72,4 +72,35 @@ describe('Spotlight (package G6)', () => {
     expect(spendFreeDraw(draws, 3)).toBe(draws);
     expect(revokeFreeDraws(grantFreeDraws({}, [1], 4), 4)[1]).toEqual([]);
   });
+});
+
+describe('Fix it (package G6)', () => {
+  it('falls two hands before the end of a game of 8 or more, on a flawed Valid-or-flawed sentence', () => {
+    expect(fixItRoundFor(10)).toBe(8);
+    expect(fixItRoundFor(7)).toBeNull();
+    expect(specialHandFor({ ...base, round: 8, sentenceIsCorrect: false })).toBe('fixIt');
+    expect(specialHandFor({ ...base, round: 8, sentenceIsCorrect: true })).toBeNull();
+    expect(specialHandFor({ ...base, round: 8, sentenceIsCorrect: false, questionType: 'openCloze' })).toBeNull();
+    for (let n = 8; n <= 40; n++) {
+      const f = fixItRoundFor(n);
+      expect([spotlightRoundFor(n), listeningRoundFor(n), n]).not.toContain(f);
+    }
+  });
+  it('lists the corrections without names, accepted ones first, each once', () => {
+    const list = classCorrections([
+      { userCorrection: 'He has finished.', correctionFeedback: 'Rejected for bonus. ...' },
+      { userCorrection: 'He has finished his homework already.', correctionFeedback: 'Accepted! Bonus' },
+      { userCorrection: 'he has finished his homework already', correctionFeedback: 'Accepted!' },
+      { userCorrection: '  ' },
+      {},
+    ]);
+    expect(list).toEqual([
+      { text: 'He has finished his homework already.', accepted: true, count: 2 },
+      { text: 'He has finished.', accepted: false, count: 1 },
+    ]);
+  });
+});
+
+it('puts Fix it before a second look on the same hand', () => {
+  expect(specialHandFor({ ...base, round: 8, secondLookRound: 8, sentenceIsCorrect: false })).toBe('fixIt');
 });
