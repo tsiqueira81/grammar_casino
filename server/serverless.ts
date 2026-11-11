@@ -1,0 +1,112 @@
+import { handleGeminiRequest } from './aiHandler';
+
+/**
+ * Serverless Web Request -> Express API dispatcher for Netlify Functions & Cloudflare Workers (`/api/*`).
+ */
+export async function dispatchServerlessApi(
+  webReq: globalThis.Request,
+  clientIp: string = "127.0.0.1",
+  env?: Record<string, any>
+): Promise<globalThis.Response> {
+  if (env && typeof env === "object") {
+    for (const [k, v] of Object.entries(env)) {
+      if (typeof v === "string" && v.length > 0) {
+        process.env[k] = v;
+      }
+    }
+  }
+  const url = new URL(webReq.url);
+  let parsedBody: any = {};
+  if (webReq.method !== "GET" && webReq.method !== "HEAD") {
+    try {
+      parsedBody = await webReq.json();
+    } catch {
+      parsedBody = {};
+    }
+  }
+
+  const headersObj: Record<string, string> = {};
+  webReq.headers.forEach((value, key) => {
+    headersObj[key.toLowerCase()] = value;
+  });
+  if (!headersObj["x-forwarded-for"] && clientIp) {
+    headersObj["x-forwarded-for"] = clientIp;
+  }
+
+  const queryObj: Record<string, string> = {};
+  url.searchParams.forEach((value, key) => {
+    queryObj[key] = value;
+  });
+
+  return await new Promise<globalThis.Response>((resolve) => {
+    let statusCode = 200;
+    const respHeaders: Record<string, string> = {
+      "content-type": "application/json; charset=utf-8",
+    };
+
+    const mockReq: any = {
+      method: webReq.method,
+      url: url.pathname + url.search,
+      path: url.pathname,
+      headers: headersObj,
+      body: parsedBody,
+      query: queryObj,
+      params: {},
+      socket: { remoteAddress: clientIp },
+    };
+
+    const mockRes: any = {
+      status(code: number) {
+        statusCode = code;
+        return mockRes;
+      },
+      setHeader(name: string, value: string) {
+        respHeaders[name.toLowerCase()] = String(value);
+        return mockRes;
+      },
+      json(payload: any) {
+        resolve(
+          new globalThis.Response(JSON.stringify(payload), {
+            status: statusCode,
+            headers: respHeaders,
+          })
+        );
+        return mockRes;
+      },
+      send(payload: any) {
+        const bodyStr = typeof payload === "string" ? payload : JSON.stringify(payload);
+        resolve(
+          new globalThis.Response(bodyStr, {
+            status: statusCode,
+            headers: respHeaders,
+          })
+        );
+        return mockRes;
+      },
+    };
+
+    if (url.pathname === "/api/gemini" && webReq.method === "POST") {
+      handleGeminiRequest(mockReq, mockRes).catch((err) => {
+        resolve(
+          new globalThis.Response(
+            JSON.stringify({ fallback: true, error: err?.message || "Serverless handler error." }),
+            { status: 200, headers: respHeaders }
+          )
+        );
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/health") {
+      mockRes.json({ status: "ok", app: "grammar-casino" });
+      return;
+    }
+
+    resolve(
+      new globalThis.Response(JSON.stringify({ error: `Not found: ${url.pathname}` }), {
+        status: 404,
+        headers: respHeaders,
+      })
+    );
+  });
+}
