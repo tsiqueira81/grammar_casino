@@ -6631,6 +6631,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         <button
                           type="button"
                           onClick={() => handleTimerStart(nextIdlePlayer.id)}
+                          data-hotkey="timer"
                           className="h-9 px-4 rounded-full text-gc-small font-bold gc-btn-primary hover:brightness-105 active:scale-95 transition-all cursor-pointer"
                         >
                           ▶ Start {nextIdlePlayer.name}'s turn
@@ -6695,6 +6696,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           playSound('click');
                           setMpHideProjectorBets(v => !v);
                         }}
+                        data-hotkey="hide-bets"
                         aria-pressed={mpHideProjectorBets}
                         className={`h-9 px-3.5 rounded-full text-gc-small font-semibold border transition-colors cursor-pointer flex items-center gap-1.5 ${
                           mpHideProjectorBets

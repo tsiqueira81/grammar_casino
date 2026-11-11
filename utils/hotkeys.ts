@@ -13,7 +13,10 @@ export type HotkeyAction =
   | 'room'
   | 'fullscreen'
   | 'help'
-  | 'debug-log';
+  | 'debug-log'
+  | 'timer'
+  | 'add-time'
+  | 'hide-bets';
 
 /** The shortcut list, as shown in the help overlay. */
 export const HOTKEY_HELP: { keys: string; action: string }[] = [
@@ -22,6 +25,9 @@ export const HOTKEY_HELP: { keys: string; action: string }[] = [
   { keys: 'S', action: 'Swap this sentence' },
   { keys: 'R', action: 'Reveal now' },
   { keys: 'Z or Page Up', action: 'Undo reveal' },
+  { keys: 'T', action: 'Start or resume the timer' },
+  { keys: '+', action: 'Add time to the running timer' },
+  { keys: 'H', action: 'Hide or show the bets on the projector (live room)' },
   { keys: 'L', action: 'Read the sentence aloud' },
   { keys: 'M', action: 'Sound on or off' },
   { keys: 'Q', action: 'Show the room and its join code' },
@@ -51,6 +57,9 @@ const LETTERS: Record<string, HotkeyAction> = {
   m: 'mute',
   q: 'room',
   f: 'fullscreen',
+  t: 'timer',
+  '+': 'add-time',
+  h: 'hide-bets',
 };
 
 /** Which action a key press asks for, or null when it should be left alone. */

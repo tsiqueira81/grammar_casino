@@ -185,7 +185,7 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
           <span className="text-gc-cap font-semibold text-gc-quiet">Turn timer</span>
           <span className={`text-gc-small font-bold truncate ${labelClass}`}>{label}</span>
         </div>
-        <span className={`text-gc-title tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
+        <span data-testid="turn-timer-remaining" className={`text-gc-title tabular-nums font-extrabold tracking-tight ${clockClass}`} aria-live="off">
           {formatClock(remainingMs)}
         </span>
       </div>
@@ -195,6 +195,7 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
           <button
             type="button"
             onClick={onStart}
+            data-hotkey="timer"
             disabled={status === 'idle' && !!blockedByName}
             title={status === 'idle' && blockedByName ? `Finish ${blockedByName}'s turn first` : status === 'paused' ? 'Resume the countdown' : 'Start this player\'s betting turn'}
             className={btnPrimary}
@@ -211,7 +212,7 @@ export const TurnTimerControls: React.FC<TurnTimerControlsProps> = ({
         )}
         {(status === 'running' || status === 'paused') && (
           <>
-            <button type="button" onClick={onAddTime} title={`Add ${bonusSeconds} seconds`} className={btnGhost}>
+            <button type="button" data-hotkey="add-time" onClick={onAddTime} title={`Add ${bonusSeconds} seconds`} className={btnGhost}>
               <Plus className={iconCls} aria-hidden="true" />
               {bonusSeconds} s
             </button>
@@ -377,7 +378,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
 
           <div className="flex flex-wrap items-center gap-2">
             {(status === 'idle' || status === 'paused') && !allPlayersLocked && (
-              <button type="button" onClick={onStart} className={btnPrimary}>
+              <button type="button" data-hotkey="timer" onClick={onStart} className={btnPrimary}>
                 <Play className={iconCls} fill="currentColor" aria-hidden="true" />
                 {status === 'paused' ? 'Resume' : 'Start timer'}
               </button>
@@ -392,6 +393,7 @@ export const MultiplayerRoundTimerFrame: React.FC<MultiplayerRoundTimerFrameProp
               <button
                 type="button"
                 onClick={onAddTime}
+                data-hotkey="add-time"
                 title={`Add ${bonusSeconds} seconds to the round timer`}
                 className={btnGhost}
               >

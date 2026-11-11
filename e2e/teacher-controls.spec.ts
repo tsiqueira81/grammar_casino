@@ -129,3 +129,33 @@ test('shortcuts pause, swap, reveal now and undo with the keyboard', async ({ pa
 
   expect(errors).toEqual([]);
 });
+
+test('T starts the timer and + adds time (package T2)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana', 'Bruno']);
+  await setUpMixedGame(page, { drop: ['Open cloze', 'Word formation', 'Key word'], hands: 1 });
+  await page.getByRole('button', { name: /^60 s/ }).click();
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+  await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+
+  await page.keyboard.press('t');
+  await expect(page.getByRole('button', { name: /^▶ Start Ana's turn/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Full cards' }).click();
+  await page.locator('body').click({ position: { x: 5, y: 300 } });
+  await expect(card(page, 'Ana').locator('[title="Pause the countdown"]')).toBeVisible();
+  const timeText = card(page, 'Ana').getByTestId('turn-timer-remaining');
+  const seconds = async () => {
+    const m = (await timeText.innerText()).match(/(\d+):(\d+)/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+  };
+  const before = await seconds();
+  await page.keyboard.press('+');
+  await expect.poll(seconds).toBeGreaterThan(before + 5);
+
+  expect(errors).toEqual([]);
+});
+

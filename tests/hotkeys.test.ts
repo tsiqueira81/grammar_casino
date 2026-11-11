@@ -36,6 +36,12 @@ describe('hotkeyAction (package T2)', () => {
     expect(hotkeyAction({ key: 'f', metaKey: true })).toBeNull();
   });
 
+  it('starts the timer, adds time and hides the bets (package T2)', () => {
+    expect(hotkeyAction({ key: 't' })).toBe('timer');
+    expect(hotkeyAction({ key: '+', shiftKey: true })).toBe('add-time');
+    expect(hotkeyAction({ key: 'H' })).toBe('hide-bets');
+  });
+
   it('lists every shortcut in the help', () => {
     expect(HOTKEY_HELP.length).toBeGreaterThanOrEqual(10);
   });
