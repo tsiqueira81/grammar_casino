@@ -13,7 +13,7 @@ test('an unfinished game offers to resume, and a finished game keeps its report'
   await expect(sentence(page)).toContainText(/Lisbon|homework/);
   const before = await sentence(page).innerText();
 
-  // The teacher comes back two hours later. The save is aged as the page opens again, because
+  // The teacher comes back two hours later (just after midnight that is yesterday, so the day shows too). The save is aged as the page opens again, because
   // the game also saves while the page closes (package F6: saves wait for a quiet second).
   await page.addInitScript(() => {
     if (sessionStorage.getItem('gc-test-aged')) return;
@@ -27,7 +27,7 @@ test('an unfinished game offers to resume, and a finished game keeps its report'
   await page.reload();
   const welcome = page.getByRole('dialog', { name: 'Welcome back' });
   await expect(welcome).toBeVisible();
-  await welcome.getByRole('button', { name: /^Resume the game from \d\d:\d\d \(hand 1 of 1\)$/ }).click();
+  await welcome.getByRole('button', { name: /^Resume the game from (\w+ \d+ \w+, )?\d\d:\d\d \(hand 1 of 1\)$/ }).click();
   await expect(welcome).toHaveCount(0);
   await expect(sentence(page)).toHaveText(before);
 

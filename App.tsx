@@ -6615,19 +6615,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     <Volume2 className="w-3 h-3 shrink-0" aria-hidden="true" />
                                     <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                   </button>
-                                  <select
-                                    value={orpheusVoice}
-                                    onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                                    aria-label="Orpheus TTS voice for challenge sentence"
-                                    title="Select Orpheus English voice"
-                                    className="h-7 px-2 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                                  >
-                                    {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                                      <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                                        {v.label} ({v.gender})
-                                      </option>
-                                    ))}
-                                  </select>
                                   <button
                                     type="button"
                                     onClick={handleToggleSettingsDeckExpanded}
@@ -6677,19 +6664,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                         <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                                         <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                       </button>
-                                      <select
-                                        value={orpheusVoice}
-                                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                                        aria-label="Orpheus TTS voice"
-                                        title="Select Orpheus English voice"
-                                        className="h-8 px-2.5 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                                      >
-                                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                                            {v.label} ({v.gender})
-                                          </option>
-                                        ))}
-                                      </select>
                                   </div>
                                 )}
 
@@ -7794,19 +7768,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           <Volume2 className="w-4 h-4 shrink-0" aria-hidden="true" />
                           {isSpeaking ? 'Speaking…' : 'Listen'}
                       </button>
-                      <select
-                        value={orpheusVoice}
-                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                        aria-label="Orpheus TTS voice for explanation"
-                        title="Select Orpheus English voice"
-                        className={`${chipButton} pr-3 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn`}
-                      >
-                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                            Voice: {v.label} ({v.gender})
-                          </option>
-                        ))}
-                      </select>
                       {currentSentence?.explanation && (
                         <button 
                             onClick={handleSimplifyExplanation} 
@@ -8547,8 +8508,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               playSound('click');
               handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId);
             }}
-            aria-label="Croupier TTS voice"
-            title="Select Orpheus English TTS voice (used for challenge sentences and grammar explanations)"
+            aria-label="Reading voice"
+            title="The voice that reads sentences and explanations aloud (one setting for the whole game)"
             className="h-11 px-2.5 rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink text-gc-cap font-semibold shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
           >
             {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
