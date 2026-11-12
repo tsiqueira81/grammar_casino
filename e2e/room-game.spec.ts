@@ -74,6 +74,8 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
   await expect(eva.locator('html')).not.toHaveClass(/gc-text-zoom/);
   await eva.getByRole('switch', { name: /Plain font/ }).click();
   await expect(eva.locator('html')).toHaveClass(/gc-plain-font/);
+  // Less motion stays on for Eva: her result screen must hold still (package S4).
+  await eva.getByRole('switch', { name: /Less motion/ }).click();
   await eva.getByTestId('comfort-panel').getByRole('button', { name: 'Done' }).click();
   await expect(phones[0].locator('html')).not.toHaveClass(/gc-plain-font/);
 
@@ -137,6 +139,11 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     // Package L5: the phone shows the student's own answer beside the right one.
     await expect(phone.getByTestId('my-answer')).toContainText(players[i].option);
   }
+
+  // Package S4: with Less motion on, nothing on Eva's result screen keeps moving.
+  // (Without it, the same screen runs coin, pop and slide animations at this moment.)
+  const evaMoving = await eva.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').map(a => (a as CSSAnimation).animationName || 'animation'));
+  expect(evaMoving).toEqual([]);
 
   // Package S4: each phone says where it stands and how far it is to the next place.
   await expect(phones[2].getByTestId('my-place')).toHaveText('You are 1st of 3. You are in the lead.');
