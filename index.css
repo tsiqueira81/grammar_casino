@@ -89,6 +89,83 @@ html.gc-less-motion *, html.gc-less-motion *::before, html.gc-less-motion *::aft
   scroll-behavior: auto !important;
 }
 
+/* 3D characters (PlayerAvatar). The picture is 130% of the round frame and sits on its bottom edge:
+   below the frame's middle it is cut to the circle, above it ears and hats may poke out. The strip
+   holds 4 frames (open, blink, happy, wink); steps move between them, so eyes never slide. */
+.gc-av3d {
+  position: absolute;
+  left: -15%;
+  bottom: 0;
+  width: 130%;
+  height: 130%;
+  pointer-events: none;
+}
+.gc-av3d-pop {
+  -webkit-mask-image: radial-gradient(circle closest-side at 50% 61.54%, #000 97%, transparent 100%), linear-gradient(#000, #000);
+  -webkit-mask-size: 100% 100%, 92% 61.54%;
+  -webkit-mask-position: 0 0, 50% 0;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: radial-gradient(circle closest-side at 50% 61.54%, #000 97%, transparent 100%), linear-gradient(#000, #000);
+  mask-size: 100% 100%, 92% 61.54%;
+  mask-position: 0 0, 50% 0;
+  mask-repeat: no-repeat;
+}
+.gc-av3d-clip {
+  -webkit-mask-image: radial-gradient(circle closest-side at 50% 61.54%, #000 97%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at 50% 61.54%, #000 97%, transparent 100%);
+}
+.gc-av3d-bob {
+  position: absolute;
+  inset: 0;
+  animation: gc-av-bob 3.4s ease-in-out infinite alternate;
+  animation-delay: var(--gc-av-bob-delay, 0s);
+}
+.gc-av3d-frames {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.gc-av3d-frames img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 400%;
+  max-width: none;
+  height: 100%;
+  animation: gc-av-life var(--gc-av-dur, 9s) step-end infinite;
+  animation-delay: var(--gc-av-delay, 0s);
+}
+.gc-av3d-alt .gc-av3d-frames img { animation-name: gc-av-life-alt; }
+.gc-av3d-happy .gc-av3d-frames img { animation: none; transform: translateX(-50%); }
+.gc-av3d-happy .gc-av3d-bob { animation: gc-av-hop 0.9s ease-in-out infinite alternate; }
+.gc-av3d-flair {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+@keyframes gc-av-life {
+  0% { transform: translateX(0); }
+  34% { transform: translateX(-25%); }
+  36% { transform: translateX(0); }
+  62% { transform: translateX(-50%); }
+  74% { transform: translateX(0); }
+  93% { transform: translateX(-25%); }
+  95% { transform: translateX(0); }
+}
+@keyframes gc-av-life-alt {
+  0% { transform: translateX(0); }
+  22% { transform: translateX(-25%); }
+  24% { transform: translateX(0); }
+  55% { transform: translateX(-75%); }
+  63% { transform: translateX(0); }
+  88% { transform: translateX(-25%); }
+  90% { transform: translateX(0); }
+}
+@keyframes gc-av-bob { from { transform: translateY(0); } to { transform: translateY(-2.5%); } }
+@keyframes gc-av-hop { from { transform: translateY(0); } to { transform: translateY(-7%); } }
+
 /* Package S6: comfort settings on a student's phone. */
 html.gc-text-zoom body {
   zoom: var(--gc-phone-zoom, 1);

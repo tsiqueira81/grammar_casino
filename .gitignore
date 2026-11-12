@@ -60,3 +60,6 @@ Thumbs.db
 # Playwright
 test-results/
 playwright-report/
+
+# Character list exported for the Blender avatar build (npm run avatars)
+scripts/assets/.characters.json
