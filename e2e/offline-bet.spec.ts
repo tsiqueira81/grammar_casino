@@ -41,9 +41,11 @@ test('a bet made offline is sent again, or the phone says it did not arrive', as
     await expect(phone.getByRole('status').filter({ hasText: "You're offline" })).toBeVisible();
   };
   const goOnline = async () => {
+    // The network comes back as a whole: the phone may resend the moment it sees it is online,
+    // so the test stops dropping first rather than after the banner goes.
+    dropping = false;
     await context.setOffline(false);
     await expect(phone.getByRole('status').filter({ hasText: "You're offline" })).toHaveCount(0, { timeout: 10_000 });
-    dropping = false;
   };
 
   await phone.goto(`${E2E_URL}&room=${code}`);

@@ -43,9 +43,12 @@ export interface PendingBet {
   /** The sentence it was for: a swapped sentence makes the old answer meaningless. */
   sentence: string;
   bet: Bet;
-  /** Sent again once already after the phone came back. */
-  resent: boolean;
+  /** When it was last sent again after the phone came back (null: not yet). */
+  resentAt: number | null;
 }
+
+/** A resend the teacher's screen still does not show is tried again after this long. */
+export const RESEND_AGAIN_MS = 3000;
 
 function clean(s: string | undefined): string {
   return (s || '').trim().toLowerCase();
@@ -90,7 +93,8 @@ export function sameBet(a: Bet | undefined, b: Bet | undefined): boolean {
 export function settlePendingBet(
   pending: PendingBet | null,
   view: { round: number; step: string; myBet?: Bet; sentence?: { text?: string } | null },
-  offline: boolean
+  offline: boolean,
+  now: number
 ): { pending: PendingBet | null; action: 'none' | 'resend' | 'lost' } {
   if (!pending || offline) return { pending, action: 'none' };
   if (isEmptyBet(pending.bet)) return { pending: null, action: 'none' };
@@ -100,7 +104,9 @@ export function settlePendingBet(
   }
   if (view.round === pending.round && sameBet(pending.bet, view.myBet)) return { pending: null, action: 'none' };
   if (view.round === pending.round && view.step === 'IN_GAME') {
-    return pending.resent ? { pending, action: 'none' } : { pending: { ...pending, resent: true }, action: 'resend' };
+    // A wobbly classroom connection can lose the resend too, so it is tried again (not on every view).
+    if (pending.resentAt !== null && now - pending.resentAt < RESEND_AGAIN_MS) return { pending, action: 'none' };
+    return { pending: { ...pending, resentAt: now }, action: 'resend' };
   }
   return { pending: null, action: 'lost' };
 }

@@ -1,48 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { CloudRostersTab } from './cloud/CloudRostersTab';
+import { CloudReportsTab } from './cloud/CloudReportsTab';
+import { CloudSentencesTab } from './cloud/CloudSentencesTab';
 import { useFocusTrap } from '../utils/useFocusTrap';
 import { motion } from 'motion/react';
-import {
-  AlertTriangle,
-  Check,
-  Cloud,
-  Lock,
-  RefreshCw,
-  Trash2,
-  X,
-} from 'lucide-react';
-import {
-  CEFRLevel,
-  GameMode,
-  Player,
-  QuestionType,
-  RoundHistoryRecord,
-  Settings,
-  SoundEffect,
-} from '../types';
-import { CEFR_LEVELS, GRAMMAR_TOPICS } from '../constants';
+import { AlertTriangle, Check, Cloud, Lock, RefreshCw, X } from 'lucide-react';
+import { CEFRLevel, GameMode, Player, QuestionType, RoundHistoryRecord, Settings, SoundEffect } from '../types';
 import ActionButton from './ActionButton';
-import GrammarReportCard from './GrammarReportCard';
-import { PlayerAvatar } from './PlayerAvatar';
 import type { BuiltInSeedItem } from '../services/fallbackSentences';
 import { generateSentence } from '../services/geminiService';
-import {
-  archiveSentenceToCloudBank,
-  CloudCuratedSentence,
-  CloudRoster,
-  CloudSessionReport,
-  deleteCloudCuratedSentence,
-  deleteCloudRoster,
-  deleteCloudSessionReport,
-  getMissingBuiltInCloudSeedCount,
-  listCloudRosters,
-  listCloudSessionReports,
-  saveCloudRoster,
-  saveCloudSessionReport,
-  seedBuiltInBankToCloud,
-  signInTeacherWithGoogle,
-  syncCloudSentenceBank,
-} from '../services/firebaseService';
-import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
+import { archiveSentenceToCloudBank, CloudCuratedSentence, CloudRoster, CloudSessionReport, deleteCloudCuratedSentence, deleteCloudRoster, deleteCloudSessionReport, getMissingBuiltInCloudSeedCount, listCloudRosters, listCloudSessionReports, saveCloudRoster, saveCloudSessionReport, seedBuiltInBankToCloud, signInTeacherWithGoogle, syncCloudSentenceBank } from '../services/firebaseService';
 
 export type CloudManagerTab = 'rosters' | 'reports' | 'sentences';
 
@@ -679,746 +646,92 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
               )}
 
               {/* TAB 1: CLASSROOM ROSTERS */}
-              {activeTab === 'rosters' && (
-                <div className="space-y-5">
-                  {activeRosterObj && players.length > 0 && (
-                    <div className="p-4 rounded-gc bg-gc-win/10 border border-gc-win/30 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-gc-cap font-bold text-gc-win">Active classroom roster loaded</p>
-                        <p className="text-gc-body font-bold text-gc-ink">
-                          {activeRosterObj.name} ({players.length} students seated)
-                        </p>
-                      </div>
-                      <ActionButton
-                        onClick={() => handleUpdateExistingRoster(activeRosterObj)}
-                        playSound={playSound}
-                        variant="primary"
-                        disabled={isSavingRoster}
-                        className="h-10 px-4 text-gc-small"
-                      >
-                        {isSavingRoster ? 'Syncing…' : 'Sync current bankrolls'}
-                      </ActionButton>
-                    </div>
-                  )}
-
-                  {/* Save Current Table as New Roster */}
-                  <div className={`${cardCls} space-y-3`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-gc-body font-bold text-gc-ink">
-                          Save seated table as a Cloud roster
-                        </h3>
-                        <p className="text-gc-small text-gc-quiet">
-                          Save your current {players.length} seated student{players.length === 1 ? '' : 's'} (names, avatars, and bankrolls) for future classes.
-                        </p>
-                      </div>
-                      <span className="h-7 px-2.5 inline-flex items-center rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-cap font-bold text-gc-ink tabular-nums">
-                        {players.length} seated
-                      </span>
-                    </div>
-
-                    {players.length === 0 ? (
-                      <p className="text-gc-small text-gc-quiet">
-                        Add students to the table first (or have them join via QR code) to save them as a reusable class roster.
-                      </p>
-                    ) : (
-                      <form onSubmit={handleCreateNewRoster} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 pt-1">
-                        <input
-                          type="text"
-                          value={newRosterName}
-                          onChange={(e) => setNewRosterName(e.target.value)}
-                          placeholder="Class name (e.g. Period 2 — B2 Upper Intermediate)"
-                          maxLength={80}
-                          className={`sm:col-span-5 ${inputCls}`}
-                        />
-                        <input
-                          type="text"
-                          value={newRosterNotes}
-                          onChange={(e) => setNewRosterNotes(e.target.value)}
-                          placeholder="Optional notes (e.g. Mon/Wed class)"
-                          maxLength={120}
-                          className={`sm:col-span-4 ${inputCls}`}
-                        />
-                        <div className="sm:col-span-3 flex">
-                          <ActionButton
-                            type="submit"
-                            playSound={playSound}
-                            variant="primary"
-                            disabled={!newRosterName.trim() || isSavingRoster}
-                            className="w-full h-11 px-4 text-gc-small"
-                          >
-                            {isSavingRoster ? 'Saving…' : 'Save roster'}
-                          </ActionButton>
-                        </div>
-                      </form>
-                    )}
-                  </div>
-
-                  {/* Resume Mode Option Toggle */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                    <p className="text-gc-small font-bold text-gc-ink">
-                      Saved classroom rosters ({rosters.length})
-                    </p>
-                    <label className="flex items-center gap-2 text-gc-small text-gc-quiet cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={bailoutZeroOnResume}
-                        onChange={(e) => setBailoutZeroOnResume(e.target.checked)}
-                        className="rounded border-gc-line/30 accent-amber-500 w-4 h-4 cursor-pointer"
-                      />
-                      <span>When resuming saved bankrolls, bail out $0 students to $150</span>
-                    </label>
-                  </div>
-
-                  {/* Rosters List */}
-                  {rosters.length === 0 ? (
-                    <div className={`${cardCls} py-8 text-center space-y-1.5`}>
-                      <p className="text-gc-body font-bold text-gc-ink">No Cloud rosters saved yet</p>
-                      <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
-                        Seat your students at the table and save them above to load your class in one click on any device.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {rosters.map((roster) => {
-                        const isActive = roster.id === activeRosterId;
-                        return (
-                          <div
-                            key={roster.id}
-                            className={`p-4 rounded-gc border transition-colors space-y-3 ${
-                              isActive
-                                ? 'bg-gc-win/[0.06] border-gc-win/40'
-                                : 'bg-gc-line/[0.04] border-gc-line/[0.12] hover:border-gc-line/25'
-                            }`}
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="text-gc-body font-bold text-gc-ink">{roster.name}</h4>
-                                  {isActive && (
-                                    <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-win/15 text-gc-win text-gc-cap font-bold">
-                                      Active roster
-                                    </span>
-                                  )}
-                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-quiet text-gc-cap font-bold tabular-nums">
-                                    {roster.playerCount} students
-                                  </span>
-                                </div>
-                                {roster.notes && (
-                                  <p className="text-gc-small text-gc-quiet mt-0.5">{roster.notes}</p>
-                                )}
-                                <p className="text-gc-cap text-gc-quiet tabular-nums mt-1">
-                                  Updated {new Date(roster.updatedAt).toLocaleString()} &middot; Fresh stack: $
-                                  {roster.startingCash.toLocaleString()}
-                                </p>
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-2">
-                                <ActionButton
-                                  type="button"
-                                  onClick={() => {
-                                    playSound('startGame');
-                                    onLoadRoster(roster, 'fresh', bailoutZeroOnResume);
-                                    onClose();
-                                  }}
-                                  variant="ghost"
-                                  className="h-10 px-3.5 text-gc-small font-bold"
-                                  title={`Load ${roster.name} with everyone reset to $${startingCash.toLocaleString()}`}
-                                >
-                                  Fresh start (${startingCash})
-                                </ActionButton>
-
-                                <ActionButton
-                                  type="button"
-                                  onClick={() => {
-                                    playSound('startGame');
-                                    onLoadRoster(roster, 'saved', bailoutZeroOnResume);
-                                    onClose();
-                                  }}
-                                  variant="primary"
-                                  className="h-10 px-3.5 text-gc-small font-bold"
-                                  title="Load students with their exact saved bankrolls and win streaks"
-                                >
-                                  Resume bankrolls
-                                </ActionButton>
-
-                                {players.length > 0 && (
-                                  <ActionButton
-                                    type="button"
-                                    onClick={() => handleUpdateExistingRoster(roster)}
-                                    disabled={isSavingRoster}
-                                    variant="ghost"
-                                    className="h-10 px-3 text-gc-small font-bold"
-                                    title="Overwrite this roster with the current table's players and bankrolls"
-                                  >
-                                    Update
-                                  </ActionButton>
-                                )}
-
-                                {confirmDeleteRosterId === roster.id ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <ActionButton
-                                      type="button"
-                                      onClick={() => handleDeleteRoster(roster.id)}
-                                      variant="danger"
-                                      className="h-9 px-3 text-gc-cap font-bold"
-                                    >
-                                      Confirm
-                                    </ActionButton>
-                                    <ActionButton
-                                      type="button"
-                                      onClick={() => setConfirmDeleteRosterId(null)}
-                                      variant="ghost"
-                                      className="h-9 px-2.5 text-gc-cap font-bold"
-                                    >
-                                      Cancel
-                                    </ActionButton>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteRosterId(roster.id)}
-                                    className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
-                                    title="Delete roster"
-                                    aria-label={`Delete roster ${roster.name}`}
-                                  >
-                                    <Trash2 className="w-4 h-4" aria-hidden="true" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Student Bankrolls Preview Pills */}
-                            <div className="flex flex-wrap gap-1.5 pt-2 border-t border-gc-line/[0.1]">
-                              {roster.players.map((p, i) => (
-                                <span
-                                  key={`${p.id}_${i}`}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gc-bg/60 border border-gc-line/[0.14] text-gc-cap"
-                                >
-                                  <PlayerAvatar value={p.avatar} size="xs" />
-                                  <span className="font-bold text-gc-ink">{p.name}</span>
-                                  <span className="tabular-nums font-bold text-gc-win">
-                                    ${p.money.toLocaleString()}
-                                  </span>
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <CloudRostersTab
+                activeTab={activeTab}
+                activeRosterObj={activeRosterObj}
+                players={players}
+                handleUpdateExistingRoster={handleUpdateExistingRoster}
+                playSound={playSound}
+                isSavingRoster={isSavingRoster}
+                cardCls={cardCls}
+                handleCreateNewRoster={handleCreateNewRoster}
+                newRosterName={newRosterName}
+                setNewRosterName={setNewRosterName}
+                inputCls={inputCls}
+                newRosterNotes={newRosterNotes}
+                setNewRosterNotes={setNewRosterNotes}
+                rosters={rosters}
+                bailoutZeroOnResume={bailoutZeroOnResume}
+                setBailoutZeroOnResume={setBailoutZeroOnResume}
+                activeRosterId={activeRosterId}
+                onLoadRoster={onLoadRoster}
+                onClose={onClose}
+                startingCash={startingCash}
+                confirmDeleteRosterId={confirmDeleteRosterId}
+                handleDeleteRoster={handleDeleteRoster}
+                setConfirmDeleteRosterId={setConfirmDeleteRosterId}
+              />
 
               {/* TAB 2: SESSION REPORTS & CLOUD SAVES */}
-              {activeTab === 'reports' && (
-                <div className="space-y-5">
-                  {viewingReport ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-2 pb-3 border-b border-gc-line/[0.12]">
-                        <div>
-                          <p className="text-gc-cap font-semibold text-gc-quiet tabular-nums">
-                            Archived session report &middot; {new Date(viewingReport.createdAt).toLocaleString()}
-                          </p>
-                          <h3 className="text-gc-lead font-bold text-gc-ink">{viewingReport.title}</h3>
-                        </div>
-                        <ActionButton
-                          onClick={() => setViewingReport(null)}
-                          playSound={playSound}
-                          variant="ghost"
-                          className="h-10 px-4 text-gc-small font-bold"
-                        >
-                          &larr; All sessions
-                        </ActionButton>
-                      </div>
-
-                      <GrammarReportCard
-                        history={viewingReport.roundHistory}
-                        players={viewingReport.players.map((p) => ({
-                          id: p.id,
-                          name: p.name,
-                          avatar: p.avatar,
-                          money: p.money,
-                          winStreak: p.winStreak,
-                          history: [],
-                          effects: [],
-                        }))}
-                        winner={
-                          viewingReport.winnerName
-                            ? {
-                                id: 1,
-                                name: viewingReport.winnerName,
-                                avatar: viewingReport.winnerAvatar,
-                                money: viewingReport.winnerMoney,
-                                winStreak: 0,
-                                history: [],
-                                effects: [],
-                              }
-                            : null
-                        }
-                        playSound={playSound}
-                        onRestartGame={() => setViewingReport(null)}
-                        settings={{
-                          topic: viewingReport.topic,
-                          level: (viewingReport.level as CEFRLevel) || 'B1',
-                          theme: viewingReport.theme,
-                        }}
-                        gameMode={(viewingReport.gameMode as GameMode) || 'rounds'}
-                        totalRounds={viewingReport.roundsPlayed}
-                        targetAmount={targetAmount}
-                      />
-                    </div>
-                  ) : (
-                    <>
-                      {/* Save Current Session to Cloud */}
-                      <div className={`${cardCls} space-y-3`}>
-                        <div>
-                          <h3 className="text-gc-body font-bold text-gc-ink">
-                            Save current session report &amp; table state
-                          </h3>
-                          <p className="text-gc-small text-gc-quiet">
-                            Archives the Grammar Report Card ({roundHistory.length} hand{roundHistory.length === 1 ? '' : 's'} played) and full resumable table state to Firestore.
-                          </p>
-                        </div>
-
-                        {players.length === 0 ? (
-                          <p className="text-gc-small text-gc-quiet">
-                            Start a game or seat players first to save a session report.
-                          </p>
-                        ) : (
-                          <form onSubmit={handleSaveCurrentSessionReport} className="flex flex-col sm:flex-row gap-2.5">
-                            <input
-                              type="text"
-                              value={newReportTitle}
-                              onChange={(e) => setNewReportTitle(e.target.value)}
-                              placeholder={`Optional title (default: ${settings.topic} (${settings.level}) — Today)`}
-                              maxLength={120}
-                              className={`flex-1 ${inputCls}`}
-                            />
-                            <ActionButton
-                              type="submit"
-                              playSound={playSound}
-                              variant="primary"
-                              disabled={isSavingReport}
-                              className="h-11 px-5 text-gc-small font-bold shrink-0"
-                            >
-                              {isSavingReport ? 'Saving…' : 'Save session'}
-                            </ActionButton>
-                          </form>
-                        )}
-                      </div>
-
-                      {/* Reports List */}
-                      {reports.length === 0 ? (
-                        <div className={`${cardCls} py-8 text-center space-y-1.5`}>
-                          <p className="text-gc-body font-bold text-gc-ink">No Cloud session reports yet</p>
-                          <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
-                            Save a session during or after a game to review full Grammar Report Cards and resume mid-game tables from any computer.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {reports.map((report) => (
-                            <div
-                              key={report.id}
-                              className={`${cardCls} flex flex-wrap items-center justify-between gap-4`}
-                            >
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="text-gc-body font-bold text-gc-ink">{report.title}</h4>
-                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-cap font-bold text-gc-ink">
-                                    {report.topic} &middot; {report.level}
-                                  </span>
-                                  <span className="h-6 px-2 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-quiet tabular-nums">
-                                    {report.roundsPlayed} hands &middot; {report.playerCount} players
-                                  </span>
-                                </div>
-                                <p className="text-gc-small text-gc-quiet">
-                                  Leader: <strong className="text-gc-ink">{report.winnerAvatar} {report.winnerName}</strong> (${report.winnerMoney.toLocaleString()}) &middot;{' '}
-                                  <span className="tabular-nums">{new Date(report.createdAt).toLocaleString()}</span>
-                                </p>
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-2">
-                                <ActionButton
-                                  type="button"
-                                  onClick={() => {
-                                    playSound('click');
-                                    setViewingReport(report);
-                                  }}
-                                  variant="ghost"
-                                  className="h-10 px-3.5 text-gc-small font-bold"
-                                >
-                                  Report card
-                                </ActionButton>
-
-                                {report.fullGameState && (
-                                  <ActionButton
-                                    type="button"
-                                    onClick={() => {
-                                      playSound('startGame');
-                                      onLoadFullGameState(report.fullGameState);
-                                      onClose();
-                                    }}
-                                    variant="primary"
-                                    className="h-10 px-3.5 text-gc-small font-bold"
-                                    title="Resume this saved game table state"
-                                  >
-                                    Resume table
-                                  </ActionButton>
-                                )}
-
-                                {confirmDeleteReportId === report.id ? (
-                                  <div className="flex items-center gap-1.5">
-                                    <ActionButton
-                                      type="button"
-                                      onClick={() => handleDeleteReport(report.id)}
-                                      variant="danger"
-                                      className="h-9 px-3 text-gc-cap font-bold"
-                                    >
-                                      Confirm
-                                    </ActionButton>
-                                    <ActionButton
-                                      type="button"
-                                      onClick={() => setConfirmDeleteReportId(null)}
-                                      variant="ghost"
-                                      className="h-9 px-2.5 text-gc-cap font-bold"
-                                    >
-                                      Cancel
-                                    </ActionButton>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteReportId(report.id)}
-                                    className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
-                                    title="Delete session report"
-                                    aria-label={`Delete report ${report.title}`}
-                                  >
-                                    <Trash2 className="w-4 h-4" aria-hidden="true" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+              <CloudReportsTab
+                activeTab={activeTab}
+                viewingReport={viewingReport}
+                setViewingReport={setViewingReport}
+                playSound={playSound}
+                targetAmount={targetAmount}
+                cardCls={cardCls}
+                roundHistory={roundHistory}
+                players={players}
+                handleSaveCurrentSessionReport={handleSaveCurrentSessionReport}
+                newReportTitle={newReportTitle}
+                setNewReportTitle={setNewReportTitle}
+                settings={settings}
+                inputCls={inputCls}
+                isSavingReport={isSavingReport}
+                reports={reports}
+                onLoadFullGameState={onLoadFullGameState}
+                onClose={onClose}
+                confirmDeleteReportId={confirmDeleteReportId}
+                handleDeleteReport={handleDeleteReport}
+                setConfirmDeleteReportId={setConfirmDeleteReportId}
+              />
 
               {/* TAB 3: AUTO-GROWING CLOUD SENTENCE BANK */}
-              {activeTab === 'sentences' && (
-                <div className="space-y-4">
-                  <div className={`${cardCls} space-y-3.5`}>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-gc-body font-bold text-gc-ink">
-                          Auto-growing Cloud &amp; Offline sentence bank
-                        </h3>
-                        <p className="text-gc-small text-gc-quiet">
-                          Uses incremental delta-syncing so large banks of 1,000+ sentences cost almost zero daily Firestore reads.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className="h-7 px-3 inline-flex items-center rounded-full bg-gc-line/[0.08] text-gc-cap font-bold text-gc-ink tabular-nums"
-                          title={`Right/Wrong: ${staticCounts.binaryCount} · MC/Open Cloze: ${staticCounts.clozeCount} · Word Form: ${staticCounts.wordFormationCount} · Key Word: ${staticCounts.keyWordTransformationCount}`}
-                        >
-                          Built-in Offline: {staticCounts.totalCount}
-                        </span>
-                        <span className="h-7 px-3 inline-flex items-center rounded-full bg-gc-win/15 border border-gc-win/30 text-gc-cap font-bold text-gc-win tabular-nums">
-                          Firestore Cloud: {sentences.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Format Breakdown & One-Click Cloud Seeder */}
-                    <div className="pt-2.5 border-t border-gc-line/[0.1] flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-1.5 text-gc-cap text-gc-quiet tabular-nums">
-                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
-                          ⚖️ Binary: <strong>{staticCounts.binaryCount}</strong>
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
-                          🔠/✍️ Cloze: <strong>{staticCounts.clozeCount}</strong>
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
-                          🧬 Word Form: <strong>{staticCounts.wordFormationCount}</strong>
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-gc-bg/60 border border-gc-line/[0.12]">
-                          🔑 Key Word: <strong>{staticCounts.keyWordTransformationCount}</strong>
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <ActionButton
-                          type="button"
-                          onClick={handleSeedBuiltInToCloud}
-                          playSound={playSound}
-                          variant={missingBuiltInSeedCount > 0 ? 'primary' : 'ghost'}
-                          disabled={isSeedingBuiltIn || isBatchGenerating || missingBuiltInSeedCount === 0}
-                          className="h-9 px-3.5 text-gc-cap font-bold"
-                          title="Batch-upload all built-in curated sentences to Firestore curated_sentences"
-                        >
-                          {isSeedingBuiltIn && seedProgress
-                            ? `Pushing to Cloud (${seedProgress.done}/${seedProgress.total})…`
-                            : missingBuiltInSeedCount > 0
-                              ? `⬆️ Push Built-in Bank to Cloud (+${missingBuiltInSeedCount})`
-                              : '✓ All Built-in Sentences in Cloud'}
-                        </ActionButton>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* AI Batch Generator into Cloud Bank */}
-                  <div className={`${cardCls} space-y-2.5`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <h4 className="text-gc-small font-bold text-gc-ink">
-                          ✨ Batch-Populate Cloud Bank with AI (Groq GPT-OSS 120B)
-                        </h4>
-                        <p className="text-gc-cap text-gc-quiet">
-                          Generate a fresh batch of verified Cambridge-style sentences and archive them directly to Firestore for offline play.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1">
-                      <select
-                        value={batchTopic}
-                        onChange={(e) => setBatchTopic(e.target.value)}
-                        disabled={isBatchGenerating}
-                        aria-label="Batch generation grammar topic"
-                        className={`sm:col-span-3 ${inputCls}`}
-                      >
-                        {GRAMMAR_TOPICS.filter((t) => t !== 'My own choice').map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                        <option value="Passive Voice">Passive Voice</option>
-                      </select>
-
-                      <select
-                        value={batchLevel}
-                        onChange={(e) => setBatchLevel(e.target.value as CEFRLevel)}
-                        disabled={isBatchGenerating}
-                        aria-label="Batch generation CEFR level"
-                        className={`sm:col-span-2 ${inputCls}`}
-                      >
-                        {CEFR_LEVELS.map((l) => (
-                          <option key={l} value={l}>
-                            Level {l}
-                          </option>
-                        ))}
-                      </select>
-
-                      <select
-                        value={batchFormat}
-                        onChange={(e) => setBatchFormat(e.target.value as QuestionType)}
-                        disabled={isBatchGenerating}
-                        aria-label="Batch generation format"
-                        className={`sm:col-span-3 ${inputCls}`}
-                      >
-                        <option value="binary">⚖️ Right or Wrong</option>
-                        <option value="multipleChoice">🔠 Multiple-Choice Gap</option>
-                        <option value="openCloze">✍️ Open Cloze</option>
-                        <option value="wordFormation">🧬 Word Formation</option>
-                        <option value="keyWordTransformation">🔑 Key Word Transformation</option>
-                      </select>
-
-                      <select
-                        value={batchCount}
-                        onChange={(e) => setBatchCount(Number(e.target.value))}
-                        disabled={isBatchGenerating}
-                        aria-label="Number of sentences to generate"
-                        className={`sm:col-span-2 ${inputCls}`}
-                      >
-                        <option value={3}>3 sentences</option>
-                        <option value={5}>5 sentences</option>
-                        <option value={8}>8 sentences</option>
-                      </select>
-
-                      <div className="sm:col-span-2 flex">
-                        <ActionButton
-                          type="button"
-                          onClick={handleBatchGenerateWithAi}
-                          playSound={playSound}
-                          variant="primary"
-                          disabled={isBatchGenerating || isSeedingBuiltIn}
-                          className="w-full h-11 px-3 text-gc-cap font-bold"
-                        >
-                          {isBatchGenerating && batchProgress
-                            ? `${batchProgress.done}/${batchProgress.total}…`
-                            : 'Generate'}
-                        </ActionButton>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Filter Bar */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-                    <input
-                      type="text"
-                      value={sentenceSearch}
-                      onChange={(e) => setSentenceSearch(e.target.value)}
-                      placeholder="Search sentence or rule…"
-                      className={inputCls}
-                    />
-                    <select
-                      value={sentenceTopicFilter}
-                      onChange={(e) => setSentenceTopicFilter(e.target.value)}
-                      className={inputCls}
-                    >
-                      <option value="ALL">All topics</option>
-                      {GRAMMAR_TOPICS.filter((t) => t !== 'My own choice').map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                      <option value="Passive Voice">Passive Voice</option>
-                    </select>
-                    <select
-                      value={sentenceLevelFilter}
-                      onChange={(e) => setSentenceLevelFilter(e.target.value)}
-                      className={inputCls}
-                    >
-                      <option value="ALL">All CEFR levels</option>
-                      {CEFR_LEVELS.map((l) => (
-                        <option key={l} value={l}>
-                          {l}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={sentenceFormatFilter}
-                      onChange={(e) => setSentenceFormatFilter(e.target.value)}
-                      className={inputCls}
-                    >
-                      <option value="ALL">All formats</option>
-                      <option value="binary">⚖️ Right or Wrong</option>
-                      <option value="multipleChoice">🔠 Multiple-Choice Gap</option>
-                      <option value="openCloze">✍️ Open Cloze</option>
-                      <option value="wordFormation">🧬 Word Formation</option>
-                      <option value="keyWordTransformation">🔑 Key Word Transformation</option>
-                    </select>
-                  </div>
-
-                  {/* Cloud Sentences List */}
-                  {filteredSentences.length === 0 ? (
-                    <div className={`${cardCls} py-8 text-center space-y-1.5`}>
-                      <p className="text-gc-body font-bold text-gc-ink">
-                        {sentences.length === 0
-                          ? 'No Cloud AI sentences archived yet'
-                          : 'No sentences match your filter'}
-                      </p>
-                      <p className="text-gc-small text-gc-quiet max-w-md mx-auto">
-                        {sentences.length === 0
-                          ? 'Generated sentences will automatically appear here when you are signed in.'
-                          : 'Try clearing your search or selecting "All topics" and "All CEFR levels".'}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5 max-h-[48vh] overflow-y-auto pr-1 modal-content-scroll">
-                      {filteredSentences.map((item) => {
-                        const isCloze =
-                          isGapType(item.questionType);
-                        return (
-                          <div
-                            key={item.id}
-                            className={`${cardCls} flex items-start justify-between gap-3`}
-                          >
-                            <div className="space-y-1.5 min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-1.5 text-gc-cap font-bold tabular-nums">
-                                <span className="px-2 py-0.5 rounded-full bg-gc-gold/15 border border-gc-gold/40 text-gc-ink">
-                                  {item.topic} &middot; {item.level}
-                                </span>
-                                <span className="px-2 py-0.5 rounded-full bg-gc-line/[0.08] text-gc-quiet">
-                                  {item.questionType === 'spotError' || item.questionType === 'wordOrder'
-                                    ? questionTypeLabel(item.questionType)
-                                    : isOptionType(item.questionType)
-                                    ? '🔠 MC Cloze'
-                                    : item.questionType === 'openCloze'
-                                      ? '✍️ Open Cloze'
-                                      : item.questionType === 'wordFormation'
-                                        ? `🧬 Word Form (${item.baseWord || 'ROOT'})`
-                                        : item.questionType === 'keyWordTransformation'
-                                          ? `🔑 Key Word (${item.baseWord || 'KEY'})`
-                                          : '⚖️ Right or Wrong'}
-                                </span>
-                                {isCloze ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-gc-win/15 text-gc-win">
-                                    Answer: &ldquo;{item.correctAnswer}&rdquo;
-                                  </span>
-                                ) : (
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full ${
-                                      item.isCorrect
-                                        ? 'bg-gc-win/15 text-gc-win'
-                                        : 'bg-gc-loss/15 text-gc-loss'
-                                    }`}
-                                  >
-                                    {item.isCorrect ? '✓ Right' : '✕ Wrong'}
-                                  </span>
-                                )}
-                              </div>
-
-                              <p className="text-gc-body font-semibold text-gc-ink">
-                                &ldquo;{item.text}&rdquo;
-                              </p>
-
-                              {(!item.isCorrect || isCloze) && item.correction && (
-                                <p className="text-gc-small text-gc-win font-medium">
-                                  <strong>Correct form:</strong> &ldquo;{item.correction}&rdquo;
-                                </p>
-                              )}
-
-                              <p className="text-gc-small text-gc-quiet leading-relaxed">
-                                {item.explanation}
-                              </p>
-                            </div>
-
-                            <div className="shrink-0">
-                              {confirmDeleteSentenceId === item.id ? (
-                                <div className="flex flex-col gap-1">
-                                  <ActionButton
-                                    type="button"
-                                    onClick={() => handleDeleteSentence(item.id)}
-                                    variant="danger"
-                                    className="h-8 px-2.5 text-gc-cap font-bold"
-                                  >
-                                    Delete
-                                  </ActionButton>
-                                  <ActionButton
-                                    type="button"
-                                    onClick={() => setConfirmDeleteSentenceId(null)}
-                                    variant="ghost"
-                                    className="h-8 px-2 text-gc-cap font-bold"
-                                  >
-                                    Cancel
-                                  </ActionButton>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteSentenceId(item.id)}
-                                  className="w-9 h-9 rounded-full border border-gc-loss/30 hover:border-gc-loss bg-gc-loss/10 text-gc-loss grid place-items-center transition-colors cursor-pointer"
-                                  title="Remove sentence from Cloud Sentence Bank"
-                                  aria-label="Remove sentence"
-                                >
-                                  <Trash2 className="w-4 h-4" aria-hidden="true" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
+              <CloudSentencesTab
+                activeTab={activeTab}
+                cardCls={cardCls}
+                staticCounts={staticCounts}
+                sentences={sentences}
+                handleSeedBuiltInToCloud={handleSeedBuiltInToCloud}
+                playSound={playSound}
+                missingBuiltInSeedCount={missingBuiltInSeedCount}
+                isSeedingBuiltIn={isSeedingBuiltIn}
+                isBatchGenerating={isBatchGenerating}
+                seedProgress={seedProgress}
+                batchTopic={batchTopic}
+                setBatchTopic={setBatchTopic}
+                inputCls={inputCls}
+                batchLevel={batchLevel}
+                setBatchLevel={setBatchLevel}
+                batchFormat={batchFormat}
+                setBatchFormat={setBatchFormat}
+                batchCount={batchCount}
+                setBatchCount={setBatchCount}
+                handleBatchGenerateWithAi={handleBatchGenerateWithAi}
+                batchProgress={batchProgress}
+                sentenceSearch={sentenceSearch}
+                setSentenceSearch={setSentenceSearch}
+                sentenceTopicFilter={sentenceTopicFilter}
+                setSentenceTopicFilter={setSentenceTopicFilter}
+                sentenceLevelFilter={sentenceLevelFilter}
+                setSentenceLevelFilter={setSentenceLevelFilter}
+                sentenceFormatFilter={sentenceFormatFilter}
+                setSentenceFormatFilter={setSentenceFormatFilter}
+                filteredSentences={filteredSentences}
+                confirmDeleteSentenceId={confirmDeleteSentenceId}
+                handleDeleteSentence={handleDeleteSentence}
+                setConfirmDeleteSentenceId={setConfirmDeleteSentenceId}
+              />
             </div>
           </>
         )}
