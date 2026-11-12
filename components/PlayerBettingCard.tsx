@@ -1,18 +1,17 @@
 import { hasPlainShield, isSilencedThisHand } from '../game/status';
+import { BetCardHeader } from './betting/BetCardHeader';
+import { BetOptionAnswer } from './betting/BetOptionAnswer';
+import { BetTypedAnswer } from './betting/BetTypedAnswer';
+import { BetSplitAnswer } from './betting/BetSplitAnswer';
+import { BetBinaryAnswer } from './betting/BetBinaryAnswer';
+import { BetCardSide } from './betting/BetCardSide';
 import React, { useRef } from 'react';
-import { ANSWER_INPUT_PROPS } from '../utils/answerInputProps';
-import { AlertTriangle, Check, Lock, Pencil, Snowflake, X } from 'lucide-react';
-import { Player, Bet, Hint, SoundEffect, ActivePowerUp, PowerUpKey, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
-import ActionButton from './ActionButton';
-import TextInput from './TextInput';
-import PowerUpTooltip from './PowerUpTooltip';
-import { QuickChipTray, WagerChipsDisplay } from './ChipStacks';
-import { TimerAvatarRing, TurnTimerControls, useTurnCountdown } from './TurnTimer';
-import { HINT_COST, POWERUP_COST, BET_CAP_AMOUNT, POWER_UPS } from '../constants';
+import { AlertTriangle, Lock, Snowflake } from 'lucide-react';
+import { Player, Bet, Hint, SoundEffect, ActivePowerUp, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
+import { TurnTimerControls, useTurnCountdown } from './TurnTimer';
+import { BET_CAP_AMOUNT } from '../constants';
 import { isValidKeyWordTransformationPhrase, AudiencePollSummary } from '../utils/multiplayerProtocol';
-import { PlayerAvatar } from './PlayerAvatar';
 import { isOptionType, isTypedAnswerType, isWordAnswerType } from '../game/questionTypes';
-import { WordTilePicker } from './NewFormatSentence';
 
 interface PlayerBettingCardProps {
   player: Player;
@@ -601,358 +600,61 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         </div>
       )}
       
-      {/* VIP Player Station Header */}
-      <div className="flex flex-wrap justify-between items-center gap-4 mb-5 pb-5 border-b border-gc-line/[0.12] relative">
-        <div className="flex items-center gap-3.5">
-          <div className="relative">
-            {showTimer && !isFrozen && (
-              <TimerAvatarRing fraction={fraction} isWarning={isWarning} status={timerStatus} held={turnTimer?.held} />
-            )}
-            <button
-              type="button"
-              onClick={() => onChangeAvatar?.(player.id)}
-              disabled={!onChangeAvatar}
-              className={`w-14 h-14 rounded-full border-2 border-gc-turn/70 p-0.5 relative bg-gc-line/[0.08] flex items-center justify-center group/avatar transition-transform duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/50 ${
-                onChangeAvatar ? 'cursor-pointer hover:scale-105 active:scale-95' : ''
-              }`}
-              title={onChangeAvatar ? `Click to customize ${player.name}'s character` : undefined}
-              aria-label={`Change avatar for ${player.name}`}
-            >
-              <PlayerAvatar
-                value={player.avatar}
-                size="lg"
-                className="w-full h-full transition-transform group-hover/avatar:scale-105"
-              />
-              {onChangeAvatar && (
-                <span className="absolute -bottom-1 -right-1 z-20 w-5 h-5 bg-gc-gold text-gc-on-gold text-[10px] rounded-full flex items-center justify-center shadow-md opacity-90 group-hover/avatar:opacity-100 group-hover/avatar:scale-110 transition-all font-sans font-bold select-none">
-                  🎭
-                </span>
-              )}
-            </button>
-            {hasSecondChance && (
-              <PowerUpTooltip
-                powerUpKey="SECOND_CHANCE"
-                className="absolute -top-1 -right-1 z-10"
-                placement="top"
-              >
-                <div className="text-base bg-gc-card border border-gc-gold/60 rounded-full w-6 h-6 flex items-center justify-center shadow-gc-1 cursor-help">
-                  👼
-                </div>
-              </PowerUpTooltip>
-            )}
-          </div>
-          <div>
-            {isEditingName ? (
-              <div className="flex items-center gap-1.5 py-0.5">
-                <input
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  onBlur={handleNameSave}
-                  onKeyDown={handleNameKeyDown}
-                  autoFocus
-                  maxLength={24}
-                  className="text-gc-lead font-bold text-gc-ink bg-gc-line/[0.05] border-b-2 border-gc-gold px-2 py-0.5 w-36 sm:w-44 focus:outline-none rounded-t-md"
-                  placeholder="Player name"
-                />
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handleNameSave();
-                  }}
-                  className="w-8 h-8 rounded-full bg-gc-win/15 hover:bg-gc-win/25 text-gc-win flex items-center justify-center cursor-pointer"
-                  title="Save name"
-                  aria-label="Save name"
-                >
-                  <Check className="w-4 h-4" strokeWidth={3} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setIsEditingName(false);
-                    setTempName(player.name);
-                  }}
-                  className="w-8 h-8 rounded-full bg-gc-line/[0.08] hover:bg-gc-line/[0.14] text-gc-quiet flex items-center justify-center cursor-pointer"
-                  title="Cancel"
-                  aria-label="Cancel"
-                >
-                  <X className="w-4 h-4" strokeWidth={3} aria-hidden="true" />
-                </button>
-              </div>
-            ) : (
-              <div
-                onClick={handleNameClick}
-                className={`group/name flex items-center gap-2 ${onUpdateName ? 'cursor-pointer' : ''}`}
-                title={onUpdateName ? "Click to edit name" : undefined}
-              >
-                <h3 className={`text-gc-title font-sans font-extrabold transition-colors ${
-                  powerUpUsedThisRound ? 'text-purple-700 dark:text-purple-300' : 'text-gc-ink'
-                } ${onUpdateName ? 'group-hover/name:text-gc-money' : ''}`}>
-                  {player.name}
-                </h3>
-                {onUpdateName && (
-                  <Pencil className="w-4 h-4 text-gc-quiet opacity-0 group-hover/name:opacity-100 transition-opacity" aria-hidden="true" />
-                )}
-              </div>
-            )}
-             <div className="flex items-center gap-2 text-gc-small text-gc-quiet mt-1 flex-wrap empty:hidden">
-                {player.winStreak > 1 && (
-                  <span className="px-2 py-0.5 rounded-full bg-gc-gold/15 text-gc-money font-bold text-gc-cap whitespace-nowrap">
-                    🔥 {player.winStreak} in a row
-                  </span>
-                )}
-                {usedPowerUps.length > 0 && (
-                  <div className="flex gap-1 items-center">
-                    {usedPowerUps.map((usage, i) => {
-                      const target = usage.targetId ? players.find(p => p.id === usage.targetId) : undefined;
-                      return (
-                        <PowerUpTooltip
-                          key={i}
-                          powerUpKey={usage.key}
-                          targetName={target?.name}
-                          placement="top"
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-             </div>
-          </div>
-        </div>
-
-        {/* Bankroll Vault Plaque */}
-        <div className="flex flex-col items-end ml-auto">
-           <div className="px-4 py-2 rounded-gc-sm bg-gc-line/[0.06] border border-gc-line/[0.12] flex flex-col items-end">
-             <span className="text-gc-cap font-semibold text-gc-quiet">
-               Balance
-             </span>
-             {isEditingMoney ? (
-               <div className="flex items-center justify-end mt-0.5">
-                 <span className="text-gc-title tabular-nums font-extrabold text-gc-money mr-1">$</span>
-                 <input 
-                   type="number"
-                   value={tempMoney}
-                   onChange={(e) => setTempMoney(e.target.value)}
-                   onBlur={handleMoneySave}
-                   onKeyDown={handleMoneyKeyDown}
-                   onWheel={(e) => e.currentTarget.blur()}
-                   autoFocus
-                   className="text-gc-title tabular-nums font-extrabold text-gc-money bg-transparent border-b-2 border-gc-gold w-24 text-right focus:outline-none p-0 appearance-none rounded-none"
-                 />
-               </div>
-             ) : (
-               <div 
-                 className={`text-gc-title font-sans tabular-nums font-extrabold text-gc-money ${onUpdateMoney ? 'cursor-pointer hover:brightness-125 transition-all' : ''}`}
-                 onClick={handleMoneyClick}
-                 title={onUpdateMoney ? "Click to change this player's balance" : ""}
-               >
-                 ${player.money.toLocaleString()}
-               </div>
-             )}
-           </div>
-
-           {targetAmount && targetAmount > 0 && (
-             <div 
-               className={`text-gc-cap tabular-nums mt-1.5 flex items-center gap-1.5 justify-end ${player.money >= targetAmount ? 'text-gc-win font-bold' : 'font-semibold text-gc-quiet'}`}
-               title={`Target goal: $${targetAmount.toLocaleString()}`}
-             >
-               <span>Target ${targetAmount.toLocaleString()}</span>
-               <span className={`px-2 py-0.5 rounded-full font-bold ${player.money >= targetAmount ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-line/[0.07] text-gc-ink'}`}>
-                 {Math.min(999, Math.round((player.money / targetAmount) * 100))}%
-               </span>
-             </div>
-           )}
-           
-           <div className="flex flex-wrap gap-1.5 mt-2 justify-end">
-              {hasSafetyNet && (
-                <PowerUpTooltip powerUpKey="SAFETY_NET" placement="bottom">
-                  <span className="px-2 py-0.5 bg-sky-500/15 border border-sky-400/60 text-sky-900 dark:text-sky-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🦺</span>
-                    <span>Safety Net</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasImmunity && (
-                <PowerUpTooltip powerUpKey="IMMUNITY_IDOL" placement="bottom">
-                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-400/60 text-amber-900 dark:text-amber-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🗿</span>
-                    <span>Immune</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasJackpot && (
-                <PowerUpTooltip powerUpKey="JACKPOT" placement="bottom">
-                  <span className="px-2 py-0.5 bg-purple-500/20 border border-purple-400/60 text-purple-900 dark:text-purple-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🎰</span>
-                    <span>Jackpot</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasShield && (
-                <PowerUpTooltip powerUpKey="SHIELD" placement="bottom">
-                  <span className="px-2 py-0.5 bg-blue-500/20 border border-blue-400/60 text-blue-900 dark:text-blue-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🛡️</span>
-                    <span>Shield</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasSplitBet && (
-                <PowerUpTooltip powerUpKey="SPLIT_BET" placement="bottom">
-                  <span className="px-2 py-0.5 bg-indigo-500/20 border border-indigo-400/60 text-indigo-900 dark:text-indigo-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>⚖️</span>
-                    <span>Split</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasBlessing && (
-                <PowerUpTooltip powerUpKey="BLESSING" placement="bottom">
-                  <span className="px-2 py-0.5 bg-pink-500/20 border border-pink-400/60 text-pink-900 dark:text-pink-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>💖</span>
-                    <span>Blessed ({player.effects.find(e => e.type === 'BLESSING')?.roundsLeft || 0}r)</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasCrucio && (
-                <PowerUpTooltip powerUpKey="CRUCIO" placement="bottom">
-                  <span className="px-2 py-0.5 bg-slate-500/20 border border-slate-400/60 text-slate-800 dark:text-slate-300 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>⛓️</span>
-                    <span>Cursed</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {isSilenced && (
-                <PowerUpTooltip powerUpKey="SILENCER" placement="bottom">
-                  <span className="px-2 py-0.5 bg-slate-500/20 border border-slate-400/60 text-slate-800 dark:text-slate-300 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🤐</span>
-                    <span>Silenced</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasTeachersPet && (
-                <PowerUpTooltip powerUpKey="TEACHERS_PET" placement="bottom">
-                  <span className="px-2 py-0.5 bg-red-500/20 border border-red-400/60 text-red-900 dark:text-red-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🍎</span>
-                    <span>Pet ({Math.min(player.winStreak, 3)}/3)</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasSavings && (
-                <PowerUpTooltip powerUpKey="SAVINGS_ACCOUNT" placement="bottom">
-                  <span className="px-2 py-0.5 bg-emerald-500/20 border border-emerald-400/60 text-emerald-900 dark:text-emerald-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🏦</span>
-                    <span>Savings</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasCorrectionBounty && (
-                <PowerUpTooltip powerUpKey="CORRECTION_BOUNTY" placement="bottom">
-                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-400/60 text-amber-900 dark:text-amber-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>📝</span>
-                    <span>Bounty</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasLoneWolf && (
-                <PowerUpTooltip powerUpKey="LONE_WOLF" placement="bottom">
-                  <span className="px-2 py-0.5 bg-slate-500/20 border border-slate-400/60 text-slate-800 dark:text-slate-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🐺</span>
-                    <span>Lone Wolf</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {isBetCapped && (
-                <PowerUpTooltip icon="🧢" name="Bet Cap" description={`Bet capped at a maximum of $${effectiveBetCap} this round.`} placement="bottom">
-                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500 text-amber-900 dark:text-amber-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110 shadow-sm animate-pulse">
-                    <span>🧢</span>
-                    <span>Capped (${effectiveBetCap})</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {isHighRoller && (
-                <PowerUpTooltip icon="🔥" name="High Roller" description={`Forced minimum bet of $${effectiveMinBet.toLocaleString()} (50% of bankroll) this round.`} placement="bottom">
-                  <span className="px-2 py-0.5 bg-orange-500/25 border border-orange-500 text-orange-950 dark:text-orange-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110 shadow-sm animate-pulse">
-                    <span>🔥</span>
-                    <span>High Roller (Min ${effectiveMinBet})</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasScalpel && (
-                <PowerUpTooltip powerUpKey="SCALPEL" placement="bottom">
-                  <span className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-400/60 text-cyan-900 dark:text-cyan-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>✂️</span>
-                    <span>50/50 Scalpel</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasCopycat && (
-                <PowerUpTooltip powerUpKey="COPYCAT" placement="bottom">
-                  <span className="px-2 py-0.5 bg-violet-500/20 border border-violet-400/60 text-violet-900 dark:text-violet-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🪞</span>
-                    <span>Copycat</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasBloodPact && (
-                <PowerUpTooltip powerUpKey="BLOOD_PACT" placement="bottom">
-                  <span className="px-2 py-0.5 bg-rose-500/20 border border-rose-400/60 text-rose-900 dark:text-rose-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🤝</span>
-                    <span>Blood Pact</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasCrowdSurfer && (
-                <PowerUpTooltip powerUpKey="CROWD_SURFER" placement="bottom">
-                  <span className="px-2 py-0.5 bg-teal-500/20 border border-teal-400/60 text-teal-900 dark:text-teal-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>📢</span>
-                    <span>Crowd Surfer</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasDoubleOrNothing && (
-                <PowerUpTooltip powerUpKey="DOUBLE_OR_NOTHING" placement="bottom">
-                  <span className="px-2 py-0.5 bg-amber-500/25 border border-amber-400 text-amber-950 dark:text-[#fef08a] text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🎲</span>
-                    <span>3× or -1.5×</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasBoomerang && (
-                <PowerUpTooltip powerUpKey="BOOMERANG" placement="bottom">
-                  <span className="px-2 py-0.5 bg-lime-500/20 border border-lime-400/60 text-lime-900 dark:text-lime-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🪃</span>
-                    <span>Boomerang</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasAudiencePoll && (
-                <PowerUpTooltip powerUpKey="AUDIENCE_POLL" placement="bottom">
-                  <span className="px-2 py-0.5 bg-sky-500/20 border border-sky-400/60 text-sky-900 dark:text-sky-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>📊</span>
-                    <span>Ask the Table</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasUnderdog && (
-                <PowerUpTooltip powerUpKey="UNDERDOG" placement="bottom">
-                  <span className="px-2 py-0.5 bg-orange-500/20 border border-orange-400/60 text-orange-900 dark:text-orange-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🚀</span>
-                    <span>Underdog (2.5×)</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-              {hasScavenger && (
-                <PowerUpTooltip powerUpKey="SCAVENGER" placement="bottom">
-                  <span className="px-2 py-0.5 bg-amber-600/20 border border-amber-500/60 text-amber-950 dark:text-amber-200 text-gc-cap font-semibold rounded-full flex items-center gap-1 cursor-help hover:brightness-110">
-                    <span>🦅</span>
-                    <span>Scavenger (25%)</span>
-                  </span>
-                </PowerUpTooltip>
-              )}
-           </div>
-        </div>
-      </div>
+      <BetCardHeader
+        showTimer={showTimer}
+        isFrozen={isFrozen}
+        fraction={fraction}
+        isWarning={isWarning}
+        timerStatus={timerStatus}
+        turnTimer={turnTimer}
+        onChangeAvatar={onChangeAvatar}
+        player={player}
+        hasSecondChance={hasSecondChance}
+        isEditingName={isEditingName}
+        tempName={tempName}
+        setTempName={setTempName}
+        handleNameSave={handleNameSave}
+        handleNameKeyDown={handleNameKeyDown}
+        setIsEditingName={setIsEditingName}
+        handleNameClick={handleNameClick}
+        onUpdateName={onUpdateName}
+        powerUpUsedThisRound={powerUpUsedThisRound}
+        usedPowerUps={usedPowerUps}
+        players={players}
+        isEditingMoney={isEditingMoney}
+        tempMoney={tempMoney}
+        setTempMoney={setTempMoney}
+        handleMoneySave={handleMoneySave}
+        handleMoneyKeyDown={handleMoneyKeyDown}
+        onUpdateMoney={onUpdateMoney}
+        handleMoneyClick={handleMoneyClick}
+        targetAmount={targetAmount}
+        hasSafetyNet={hasSafetyNet}
+        hasImmunity={hasImmunity}
+        hasJackpot={hasJackpot}
+        hasShield={hasShield}
+        hasSplitBet={hasSplitBet}
+        hasBlessing={hasBlessing}
+        hasCrucio={hasCrucio}
+        isSilenced={isSilenced}
+        hasTeachersPet={hasTeachersPet}
+        hasSavings={hasSavings}
+        hasCorrectionBounty={hasCorrectionBounty}
+        hasLoneWolf={hasLoneWolf}
+        isBetCapped={isBetCapped}
+        effectiveBetCap={effectiveBetCap}
+        isHighRoller={isHighRoller}
+        effectiveMinBet={effectiveMinBet}
+        hasScalpel={hasScalpel}
+        hasCopycat={hasCopycat}
+        hasBloodPact={hasBloodPact}
+        hasCrowdSurfer={hasCrowdSurfer}
+        hasDoubleOrNothing={hasDoubleOrNothing}
+        hasBoomerang={hasBoomerang}
+        hasAudiencePoll={hasAudiencePoll}
+        hasUnderdog={hasUnderdog}
+        hasScavenger={hasScavenger}
+      />
 
       {/* Betting Turn Clock (teacher controls) */}
       {showTimer && !isFrozen && (
@@ -1034,918 +736,144 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         <div className="lg:col-span-7 space-y-4">
           {isOptionType(questionType) ? (
             <>
-              {/* Multiple-Choice Cloze (4 Options: A, B, C, D) */}
-              {hasSplitBet && (() => {
-                const splitOpts = Array.isArray(bet?.splitOptions) ? bet!.splitOptions! : [];
-                const isDoubleStacked = splitOpts.length === 2 && splitOpts[0] === splitOpts[1];
-                return (
-                  <div className="p-3.5 rounded-gc bg-indigo-500/10 border border-indigo-500/30 dark:border-indigo-300/30 flex flex-wrap items-center justify-between gap-2 text-gc-small text-gc-ink">
-                    <div className="flex items-center gap-2 font-bold">
-                      <span aria-hidden="true">⚖️</span>
-                      <span>
-                        {isDoubleStacked
-                          ? 'Split bet: all of it on one option (pays 2×)'
-                          : 'Split bet: pick two options, or tap one twice to put it all there'}
-                      </span>
-                    </div>
-                    <span className={`tabular-nums text-gc-cap font-bold px-2.5 py-1 rounded-full ${
-                      isDoubleStacked
-                        ? 'bg-gc-gold/15 text-gc-money'
-                        : 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-200'
-                    }`}>
-                      {isDoubleStacked
-                        ? `All on one · $${actualBetAmount.toLocaleString()}`
-                        : `${splitOpts.length} of 2 picked · $${Math.floor(actualBetAmount / 2).toLocaleString()} each`}
-                    </span>
-                  </div>
-                );
-              })()}
-
-              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl transition-all ${highlightAnswerMissing ? 'ring-2 ring-rose-500 p-1.5 bg-rose-500/5' : ''}`}>
-                {(() => {
-                  const optionItems = options.length > 0 ? options : ['Option A', 'Option B', 'Option C', 'Option D'];
-                  const firstUnpickedIdx = Math.max(
-                    0,
-                    optionItems.findIndex(o =>
-                      hasSplitBet
-                        ? !(Array.isArray(bet?.splitOptions) && bet!.splitOptions!.includes(o))
-                        : bet?.selectedOption !== o
-                    )
-                  );
-                  const eliminatedSet = new Set(
-                    (scalpelHint?.eliminatedOptions || []).map(o => o.trim().toLowerCase())
-                  );
-                  return optionItems.map((opt, idx) => {
-                    const letter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
-                    const isEliminatedOpt = eliminatedSet.has(opt.trim().toLowerCase());
-                    const optPickCount = hasSplitBet && Array.isArray(bet?.splitOptions)
-                      ? bet!.splitOptions!.filter(o => o === opt).length
-                      : 0;
-                    const isStacked2x = hasSplitBet && optPickCount === 2;
-                    const splitPicked = hasSplitBet && optPickCount > 0;
-                    const singlePicked = !hasSplitBet && bet?.selectedOption === opt;
-                    const isPicked = hasSplitBet ? splitPicked : singlePicked;
-
-                    return (
-                      <button
-                        key={`${letter}-${opt}`}
-                        ref={idx === firstUnpickedIdx ? firstOptionBtnRef : undefined}
-                        type="button"
-                        disabled={isBlocked || isEliminatedOpt}
-                        onClick={() => {
-                          if (isBlocked || isEliminatedOpt) return;
-                          if (hasSplitBet) {
-                            const currentList = Array.isArray(bet?.splitOptions) ? [...bet!.splitOptions!] : [];
-                            const countForOpt = currentList.filter(o => o === opt).length;
-                            if (countForOpt === 2) {
-                              // 3rd click on a 2x stacked option clears it
-                              onBetChange(player.id, 'splitOptions', []);
-                            } else if (countForOpt === 1 && currentList.length === 1) {
-                              // 2nd click on the same single option stacks 100% (2x)
-                              onBetChange(player.id, 'splitOptions', [opt, opt]);
-                            } else if (countForOpt === 1 && currentList.length === 2) {
-                              // Clicking one of two distinct options deselects it
-                              onBetChange(player.id, 'splitOptions', currentList.filter(o => o !== opt));
-                            } else if (currentList.length < 2) {
-                              // 1st click on an unpicked option
-                              onBetChange(player.id, 'splitOptions', [...currentList, opt]);
-                            } else {
-                              // Replacing second slot when 2 picks already exist
-                              onBetChange(player.id, 'splitOptions', [currentList[0], opt]);
-                            }
-                          } else {
-                            onBetChange(player.id, 'selectedOption', opt);
-                          }
-                        }}
-                        className={`relative overflow-hidden min-h-[64px] py-3 px-4 rounded-gc font-sans transition-colors duration-gc-fast border-2 flex items-center justify-between gap-3 select-none group/opt text-left focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40 ${
-                          isEliminatedOpt
-                            ? 'opacity-50 cursor-not-allowed bg-gc-line/[0.04] border-gc-loss/30 text-gc-quiet line-through'
-                            : isPicked
-                              ? hasSplitBet
-                                ? isStacked2x
-                                  ? 'cursor-pointer bg-gc-gold/15 border-gc-gold text-gc-ink animate-gc-pulse'
-                                  : 'cursor-pointer bg-indigo-500/10 border-indigo-500 dark:border-indigo-300 text-gc-ink animate-gc-pulse'
-                                : 'cursor-pointer bg-gc-gold/15 border-gc-gold text-gc-ink animate-gc-pulse'
-                              : 'cursor-pointer bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink hover:border-gc-gold/60'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={`w-9 h-9 rounded-full flex items-center justify-center font-sans tabular-nums font-extrabold text-gc-body border shrink-0 ${
-                            isPicked
-                              ? hasSplitBet
-                                ? isStacked2x
-                                  ? 'bg-gc-gold text-gc-on-gold border-transparent'
-                                  : 'bg-indigo-600 dark:bg-indigo-300 text-white dark:text-indigo-950 border-transparent'
-                                : 'bg-gc-gold text-gc-on-gold border-transparent'
-                              : 'bg-gc-line/[0.08] border-gc-line/[0.14] text-gc-quiet'
-                          }`}>
-                            {letter}
-                          </span>
-                          <span className={`text-gc-lead font-sentence italic font-semibold truncate ${isEliminatedOpt ? 'line-through' : ''}`}>
-                            {opt}
-                          </span>
-                        </div>
-                        {isEliminatedOpt ? (
-                          <span className="text-gc-cap font-bold px-2.5 py-1 rounded-full bg-gc-loss/15 text-gc-loss shrink-0 no-underline">
-                            ✂️ Cut
-                          </span>
-                        ) : isPicked ? (
-                          <span className={`text-gc-cap tabular-nums font-bold px-2.5 py-1 rounded-full shrink-0 ${
-                            hasSplitBet
-                              ? isStacked2x
-                                ? 'bg-gc-gold text-gc-on-gold'
-                                : 'bg-indigo-600 dark:bg-indigo-300 text-white dark:text-indigo-950'
-                              : 'bg-gc-gold text-gc-on-gold'
-                          }`}>
-                            {hasSplitBet ? (isStacked2x ? '100% (2×)' : '50%') : 'Your pick'}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* Wager Input & All-In Control */}
-              <div className="space-y-2">
-                <div className="flex gap-2.5">
-                  <div className="relative flex-1">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gc-money font-sans tabular-nums font-extrabold text-gc-title select-none">$</span>
-                    <TextInput
-                      ref={wagerInputRef}
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={String(betAmount)}
-                      onChange={handleBetAmountChange}
-                      placeholder={isBetCapped ? `Up to $${effectiveBetCap}` : "Your bet"}
-                      disabled={isBlocked || player.money === 0}
-                      className={`w-full pl-9 pr-4 text-gc-title font-sans tabular-nums font-extrabold text-gc-money h-14 placeholder:text-gc-body placeholder:font-semibold ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
-                    />
-                  </div>
-                  <ActionButton
-                    onClick={handleAllIn}
-                    disabled={isBlocked || player.money === 0}
-                    variant="ghost"
-                    className="h-14 px-5 text-gc-body font-bold whitespace-nowrap"
-                  >
-                    {isBetCapped && effectiveBetCap < player.money ? `Max ($${effectiveBetCap})` : 'All in'}
-                  </ActionButton>
-                </div>
-
-                {isBetCapped && (
-                  <div className="text-gc-small font-semibold text-gc-money flex items-center gap-1.5 px-3 py-2 bg-gc-gold/15 rounded-gc-sm">
-                    <span>🧢</span>
-                    <span>Bet cap: you can bet up to ${effectiveBetCap} this hand.</span>
-                  </div>
-                )}
-                {isHighRoller && (
-                  <div className="text-gc-small font-semibold text-gc-loss flex items-center gap-1.5 px-3 py-2 bg-gc-loss/15 rounded-gc-sm">
-                    <span>🔥</span>
-                    <span>High roller: you must bet at least ${effectiveMinBet.toLocaleString()} (half your balance).</span>
-                  </div>
-                )}
-              </div>
-
-              <QuickChipTray
-                currentBet={actualBetAmount}
-                playerMoney={player.money}
-                maxBet={isBetCapped ? effectiveBetCap : undefined}
-                onAddAmount={handleAddQuickChip}
-                onClear={handleClearBet}
-                onAllIn={handleAllIn}
-                disabled={isBlocked}
+              <BetOptionAnswer
+                hasSplitBet={hasSplitBet}
+                bet={bet}
+                actualBetAmount={actualBetAmount}
+                highlightAnswerMissing={highlightAnswerMissing}
+                options={options}
+                scalpelHint={scalpelHint}
+                firstOptionBtnRef={firstOptionBtnRef}
+                isBlocked={isBlocked}
+                onBetChange={onBetChange}
+                player={player}
+                wagerInputRef={wagerInputRef}
+                betAmount={betAmount}
+                handleBetAmountChange={handleBetAmountChange}
+                isBetCapped={isBetCapped}
+                effectiveBetCap={effectiveBetCap}
+                highlightWagerMissing={highlightWagerMissing}
+                handleAllIn={handleAllIn}
+                isHighRoller={isHighRoller}
+                effectiveMinBet={effectiveMinBet}
+                handleAddQuickChip={handleAddQuickChip}
+                handleClearBet={handleClearBet}
                 playSound={playSound}
               />
-
-              {actualBetAmount > 0 && (
-                <WagerChipsDisplay
-                  amount={actualBetAmount}
-                  label={
-                    hasSplitBet
-                      ? Array.isArray(bet?.splitOptions) && bet!.splitOptions!.length === 2 && bet!.splitOptions![0] === bet!.splitOptions![1]
-                        ? "Your split bet (all on one)"
-                        : "Your split bet (half each)"
-                      : "Your bet"
-                  }
-                />
-              )}
             </>
           ) : (isTypedAnswerType(questionType)) ? (
             <>
-              {/* Open Cloze, Word Formation & Key Word Transformation */}
-              {questionType === 'wordFormation' && baseWord && (
-                <div className="p-3.5 rounded-gc bg-gc-gold/10 border border-gc-gold/40 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span aria-hidden="true">🧬</span>
-                    <span className="text-gc-small font-bold text-gc-ink">
-                      Change the form of this word
-                    </span>
-                  </div>
-                  <span className="px-3.5 py-1 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-body tracking-wider">
-                    ({baseWord.toUpperCase()})
-                  </span>
-                </div>
-              )}
-              {questionType === 'keyWordTransformation' && baseWord && (
-                <div className="p-3.5 rounded-gc bg-gc-gold/10 border border-gc-gold/40 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span aria-hidden="true">🔑</span>
-                    <div>
-                      <div className="text-gc-small font-bold text-gc-ink">
-                        Key word (don't change it)
-                      </div>
-                      <div className="text-gc-cap text-gc-quiet">
-                        Use 2 to 6 words. One mark pays 1×, two marks pay 2×.
-                      </div>
-                    </div>
-                  </div>
-                  <span className="px-3.5 py-1 rounded-full bg-gc-gold text-gc-on-gold font-extrabold text-gc-body tracking-wider">
-                    {baseWord.toUpperCase()}
-                  </span>
-                </div>
-              )}
-              {scalpelHint?.clozeMask && (
-                <div className="p-3.5 rounded-gc bg-gc-info/10 border border-gc-info/35 flex items-center justify-between gap-2 text-gc-small text-gc-ink">
-                  <span className="font-bold flex items-center gap-1.5">
-                    <span aria-hidden="true">✂️</span>
-                    <span>Scalpel clue</span>
-                  </span>
-                  <span className="tabular-nums font-extrabold text-gc-body px-3 py-0.5 rounded-full bg-gc-info/15 text-gc-info tracking-wider">
-                    {scalpelHint.clozeMask}
-                  </span>
-                </div>
-              )}
-              {hasSplitBet ? (() => {
-                const w1 = (bet?.splitClozeAnswers?.[0] || '').trim();
-                const w2 = (bet?.splitClozeAnswers?.[1] || '').trim();
-                const isSingleOrSameWord =
-                  (Boolean(w1) && !w2) ||
-                  (!w1 && Boolean(w2)) ||
-                  (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
-                return (
-                  <div className={`p-4 sm:p-5 rounded-gc bg-indigo-500/[0.07] border border-indigo-500/30 dark:border-indigo-300/30 space-y-3 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500' : ''}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-gc-small font-bold text-gc-ink flex items-center gap-1.5">
-                        <span aria-hidden="true">⚖️</span>
-                        <span>
-                          {questionType === 'keyWordTransformation'
-                            ? 'Split bet: one answer (all of it) or two answers (half each)'
-                            : 'Split bet: one word (all of it) or two words (half each)'}
-                        </span>
-                      </span>
-                      <span className={`text-gc-cap tabular-nums font-bold px-2.5 py-1 rounded-full ${
-                        isSingleOrSameWord
-                          ? 'bg-gc-gold/15 text-gc-money'
-                          : 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-200'
-                      }`}>
-                        {isSingleOrSameWord
-                          ? `All on one · $${actualBetAmount.toLocaleString()}`
-                          : `$${Math.floor(actualBetAmount / 2).toLocaleString()} on each`}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-gc-cap font-semibold text-gc-quiet mb-1">
-                          {isSingleOrSameWord && Boolean(w1) && !w2
-                            ? 'First answer (all of the bet)'
-                            : 'First answer (half)'}
-                        </label>
-                        <input
-                          ref={splitWord1InputRef}
-                          type="text"
-                          {...ANSWER_INPUT_PROPS}
-                          value={bet?.splitClozeAnswers?.[0] || ''}
-                          onChange={(e) => {
-                            if (isBlocked) return;
-                            const val =
-                              (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
-                                ? e.target.value.replace(/\s{2,}/g, ' ')
-                                : e.target.value.replace(/\s+/g, '');
-                            const second = bet?.splitClozeAnswers?.[1] || '';
-                            onBetChange(player.id, 'splitClozeAnswers', [val, second]);
-                          }}
-                          disabled={isBlocked}
-                          placeholder={
-                            questionType === 'keyWordTransformation' && baseWord
-                              ? `2 to 6 words with ${baseWord.toUpperCase()}`
-                              : questionType === 'wordFormation' && baseWord
-                                ? `A new form of ${baseWord.toUpperCase()}`
-                                : 'One word'
-                          }
-                          maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
-                          className="w-full h-12 px-4 rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-lead"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-gc-cap font-semibold text-gc-quiet mb-1">
-                          {isSingleOrSameWord && Boolean(w2) && !w1
-                            ? 'Second answer (all of the bet)'
-                            : isSingleOrSameWord && Boolean(w1) && Boolean(w2)
-                            ? 'Second answer (same word, all of the bet)'
-                            : 'Second answer (optional, half)'}
-                        </label>
-                        <input
-                          ref={splitWord2InputRef}
-                          type="text"
-                          {...ANSWER_INPUT_PROPS}
-                          value={bet?.splitClozeAnswers?.[1] || ''}
-                          onChange={(e) => {
-                            if (isBlocked) return;
-                            const first = bet?.splitClozeAnswers?.[0] || '';
-                            const val =
-                              (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
-                                ? e.target.value.replace(/\s{2,}/g, ' ')
-                                : e.target.value.replace(/\s+/g, '');
-                            onBetChange(player.id, 'splitClozeAnswers', [first, val]);
-                          }}
-                          disabled={isBlocked}
-                          placeholder={
-                            questionType === 'keyWordTransformation'
-                              ? 'Leave empty to bet it all on the first'
-                              : 'Leave empty to bet it all on the first'
-                          }
-                          maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
-                          className="w-full h-12 px-4 rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-lead"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })() : (
-                <div className={`p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-2.5 ${highlightAnswerMissing || isUnchangedBaseWord || isInvalidKwtPhrase ? 'ring-2 ring-rose-500 !border-rose-500' : ''}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-gc-small font-bold text-gc-ink flex items-center gap-1.5">
-                      <span>
-                        {questionType === 'keyWordTransformation'
-                          ? '🔑'
-                          : questionType === 'wordFormation'
-                            ? '🧬'
-                            : '✍️'}
-                      </span>
-                      <span>
-                        {questionType === 'keyWordTransformation'
-                          ? `Fill the gap using ${(baseWord || 'KEY').toUpperCase()}`
-                          : questionType === 'wordOrder'
-                            ? 'Put the words in order'
-                            : questionType === 'wordFormation'
-                            ? `Change ${(baseWord || 'ROOT').toUpperCase()} to fit the gap`
-                            : 'Type the missing word'}
-                      </span>
-                    </label>
-                    <span className="text-gc-cap font-semibold text-gc-quiet shrink-0">
-                      {questionType === 'keyWordTransformation' ? '2 to 6 words' : questionType === 'wordOrder' ? 'The whole sentence' : 'One word'}
-                    </span>
-                  </div>
-                  <input
-                    ref={clozeWordInputRef}
-                    type="text"
-                    {...ANSWER_INPUT_PROPS}
-                    value={bet?.clozeAnswer || ''}
-                    onChange={(e) => {
-                      if (isBlocked) return;
-                      const val =
-                        (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
-                          ? e.target.value.replace(/\s{2,}/g, ' ')
-                          : e.target.value.replace(/\s+/g, '');
-                      onBetChange(player.id, 'clozeAnswer', val);
-                    }}
-                    disabled={isBlocked}
-                    placeholder={
-                      questionType === 'keyWordTransformation' && baseWord
-                        ? `2 to 6 words, including ${baseWord.toUpperCase()}`
-                        : questionType === 'wordFormation' && baseWord
-                          ? `A new form of ${baseWord.toUpperCase()}`
-                          : questionType === 'wordOrder'
-                            ? 'Tap the words, or type the sentence'
-                            : 'The missing word'
-                    }
-                    maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
-                    className="w-full h-14 px-4 rounded-gc-sm bg-gc-card/60 border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 placeholder:not-italic placeholder:font-sans placeholder:text-gc-body focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-title"
-                  />
-                  {questionType === 'wordOrder' && options.length > 0 && (
-                    <WordTilePicker
-                      tiles={options}
-                      value={bet?.clozeAnswer || ''}
-                      disabled={isBlocked}
-                      onChange={(next) => onBetChange(player.id, 'clozeAnswer', next)}
-                    />
-                  )}
-                  {questionType === 'keyWordTransformation' && (() => {
-                    const check = inspectKwtPhrase(bet?.clozeAnswer);
-                    if (!check.trimmed) return null;
-                    return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-gc-cap">
-                        <span
-                          className={`px-2.5 py-1 rounded-full font-bold ${
-                            check.hasKeyWord
-                              ? 'bg-gc-win/15 text-gc-win'
-                              : 'bg-gc-loss/15 text-gc-loss'
-                          }`}
-                        >
-                          {check.hasKeyWord
-                            ? `✓ Key word ${(baseWord || 'KEY').toUpperCase()} is in`
-                            : `Use ${(baseWord || 'KEY').toUpperCase()} without changing it`}
-                        </span>
-                        <span
-                          className={`px-2.5 py-1 rounded-full tabular-nums font-bold ${
-                            check.isValidCount
-                              ? 'bg-gc-win/15 text-gc-win'
-                              : 'bg-gc-gold/15 text-gc-money'
-                          }`}
-                        >
-                          {check.wordCount} of 2 to 6 words
-                        </span>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-              {isUnchangedBaseWord && (
-                <div className="px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/50 text-gc-ink text-gc-small font-semibold flex items-center gap-2.5 animate-gc-slide-up">
-                  <AlertTriangle className="w-5 h-5 shrink-0 text-gc-loss" aria-hidden="true" />
-                  <span>
-                    That's the base word as it is (<strong>{(baseWord || '').toUpperCase()}</strong>). Change its form, for example with a prefix or suffix, before you lock in.
-                  </span>
-                </div>
-              )}
-
-              {/* Wager Input & All-In Control */}
-              <div className="space-y-2">
-                <div className="flex gap-2.5">
-                  <div className="relative flex-1">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gc-money font-sans tabular-nums font-extrabold text-gc-title select-none">$</span>
-                    <TextInput
-                      ref={wagerInputRef}
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={String(betAmount)}
-                      onChange={handleBetAmountChange}
-                      placeholder={isBetCapped ? `Up to $${effectiveBetCap}` : "Your bet"}
-                      disabled={isBlocked || player.money === 0}
-                      className={`w-full pl-9 pr-4 text-gc-title font-sans tabular-nums font-extrabold text-gc-money h-14 placeholder:text-gc-body placeholder:font-semibold ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
-                    />
-                  </div>
-                  <ActionButton
-                    onClick={handleAllIn}
-                    disabled={isBlocked || player.money === 0}
-                    variant="ghost"
-                    className="h-14 px-5 text-gc-body font-bold whitespace-nowrap"
-                  >
-                    {isBetCapped && effectiveBetCap < player.money ? `Max ($${effectiveBetCap})` : 'All in'}
-                  </ActionButton>
-                </div>
-
-                {isBetCapped && (
-                  <div className="text-gc-small font-semibold text-gc-money flex items-center gap-1.5 px-3 py-2 bg-gc-gold/15 rounded-gc-sm">
-                    <span>🧢</span>
-                    <span>Bet cap: you can bet up to ${effectiveBetCap} this hand.</span>
-                  </div>
-                )}
-                {isHighRoller && (
-                  <div className="text-gc-small font-semibold text-gc-loss flex items-center gap-1.5 px-3 py-2 bg-gc-loss/15 rounded-gc-sm">
-                    <span>🔥</span>
-                    <span>High roller: you must bet at least ${effectiveMinBet.toLocaleString()} (half your balance).</span>
-                  </div>
-                )}
-              </div>
-
-              <QuickChipTray
-                currentBet={actualBetAmount}
-                playerMoney={player.money}
-                maxBet={isBetCapped ? effectiveBetCap : undefined}
-                onAddAmount={handleAddQuickChip}
-                onClear={handleClearBet}
-                onAllIn={handleAllIn}
-                disabled={isBlocked}
+              <BetTypedAnswer
+                questionType={questionType}
+                baseWord={baseWord}
+                scalpelHint={scalpelHint}
+                hasSplitBet={hasSplitBet}
+                bet={bet}
+                highlightAnswerMissing={highlightAnswerMissing}
+                isUnchangedBaseWord={isUnchangedBaseWord}
+                isInvalidKwtPhrase={isInvalidKwtPhrase}
+                actualBetAmount={actualBetAmount}
+                splitWord1InputRef={splitWord1InputRef}
+                isBlocked={isBlocked}
+                onBetChange={onBetChange}
+                player={player}
+                splitWord2InputRef={splitWord2InputRef}
+                clozeWordInputRef={clozeWordInputRef}
+                options={options}
+                inspectKwtPhrase={inspectKwtPhrase}
+                wagerInputRef={wagerInputRef}
+                betAmount={betAmount}
+                handleBetAmountChange={handleBetAmountChange}
+                isBetCapped={isBetCapped}
+                effectiveBetCap={effectiveBetCap}
+                highlightWagerMissing={highlightWagerMissing}
+                handleAllIn={handleAllIn}
+                isHighRoller={isHighRoller}
+                effectiveMinBet={effectiveMinBet}
+                handleAddQuickChip={handleAddQuickChip}
+                handleClearBet={handleClearBet}
                 playSound={playSound}
               />
-
-              {actualBetAmount > 0 && (() => {
-                const w1 = (bet?.splitClozeAnswers?.[0] || '').trim();
-                const w2 = (bet?.splitClozeAnswers?.[1] || '').trim();
-                const isSingleOrSame =
-                  (Boolean(w1) && !w2) ||
-                  (!w1 && Boolean(w2)) ||
-                  (Boolean(w1) && Boolean(w2) && w1.toLowerCase() === w2.toLowerCase());
-                return (
-                  <WagerChipsDisplay
-                    amount={actualBetAmount}
-                    label={
-                      hasSplitBet
-                        ? isSingleOrSame
-                          ? "Your split bet (all on one)"
-                          : "Your split bet (half each)"
-                        : "Your bet"
-                    }
-                  />
-                );
-              })()}
             </>
           ) : hasSplitBet ? (
-            <div className="p-5 rounded-gc bg-indigo-500/[0.07] border border-indigo-500/30 dark:border-indigo-300/30 relative overflow-hidden">
-              <div className="flex justify-between items-center mb-4 relative z-10">
-                 <h4 className="text-gc-lead font-bold text-gc-ink flex items-center gap-2"><span aria-hidden="true">⚖️</span> Split bet</h4>
-                 <span className="text-gc-cap text-gc-quiet">Put some on Valid and some on Flawed</span>
-              </div>
-              
-              <div className="mb-5 relative z-10">
-                 <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gc-money tabular-nums font-extrabold text-gc-title select-none">$</span>
-                    <TextInput 
-                        ref={wagerInputRef}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={String(betAmount)}
-                        onChange={handleBetAmountChange}
-                        placeholder={isBetCapped ? `Up to $${effectiveBetCap}` : "Your whole bet"}
-                        disabled={isBlocked || player.money === 0}
-                        className={`pl-9 pr-28 text-gc-title tabular-nums font-extrabold text-gc-money h-14 placeholder:text-gc-body placeholder:font-semibold ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAllIn}
-                      disabled={isBlocked || player.money === 0}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 h-9 px-3.5 rounded-full text-gc-small font-bold bg-gc-line/[0.07] border border-gc-line/[0.16] text-gc-ink hover:border-gc-line/30 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isBetCapped && effectiveBetCap < player.money ? `Up to $${effectiveBetCap}` : 'All in'}
-                    </button>
-                 </div>
-
-                 <div className="mt-3 space-y-2.5 relative z-10">
-                   <QuickChipTray
-                     currentBet={actualBetAmount}
-                     playerMoney={player.money}
-                     maxBet={isBetCapped ? effectiveBetCap : undefined}
-                     onAddAmount={handleAddQuickChip}
-                     onClear={handleClearBet}
-                     onAllIn={handleAllIn}
-                     disabled={isBlocked}
-                     playSound={playSound}
-                   />
-                   {actualBetAmount > 0 && (
-                     <WagerChipsDisplay amount={actualBetAmount} label="Your split bet" />
-                   )}
-                 </div>
-              </div>
-
-              <div className="mb-2 flex justify-between text-gc-small font-bold relative z-10">
-                <span className="text-gc-loss">Flawed {100 - splitPercent}%</span>
-                <span className="text-gc-win">Valid {splitPercent}%</span>
-              </div>
-              
-              <input 
-                type="range" 
-                min="0" 
-                max="100" 
-                value={splitPercent} 
-                onChange={(e) => onBetChange(player.id, 'splitCorrectPercent', parseInt(e.target.value))}
-                aria-label="How much goes on Valid"
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer mb-4 relative z-10"
-                disabled={isBlocked}
-              />
-              
-              <div className="flex justify-between gap-3 relative z-10">
-                 <div className="flex-1 bg-gc-loss/10 border border-gc-loss/30 rounded-gc-sm p-3 text-center">
-                    <div className="text-gc-cap font-semibold text-gc-loss">On Flawed</div>
-                    <div className="text-gc-title tabular-nums text-gc-loss font-extrabold">${splitIncorrectAmount.toLocaleString()}</div>
-                 </div>
-                 <div className="flex-1 bg-gc-win/10 border border-gc-win/30 rounded-gc-sm p-3 text-center">
-                    <div className="text-gc-cap font-semibold text-gc-win">On Valid</div>
-                    <div className="text-gc-title tabular-nums text-gc-win font-extrabold">${splitCorrectAmount.toLocaleString()}</div>
-                 </div>
-              </div>
-
-               {/* Correction Input for Split Bet */}
-               {splitPercent < 100 && (
-                 <div className="mt-4 animate-fade-in text-left relative z-10">
-                    <label className="block text-gc-small font-bold text-gc-ink mb-1.5">
-                      {hasDoubleOrNothing ? (
-                        <span className="text-amber-600 dark:text-amber-400 font-extrabold">
-                          🎲 Double or Nothing: correction required for 3× win
-                        </span>
-                      ) : (
-                        'Bonus: write the corrected sentence'
-                      )}
-                    </label>
-                    <textarea 
-                      value={bet?.userCorrection || ''}
-                      {...ANSWER_INPUT_PROPS}
-                      onChange={handleCorrectionChange}
-                      onDoubleClick={() => {
-                        if (!isBlocked && currentSentenceText) {
-                          playSound('click');
-                          onBetChange(player.id, 'userCorrection', currentSentenceText);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        const now = Date.now();
-                        if (now - lastCorrectionTapRef.current <= 350) {
-                          lastCorrectionTapRef.current = 0;
-                          if (!isBlocked && currentSentenceText) {
-                            playSound('click');
-                            onBetChange(player.id, 'userCorrection', currentSentenceText);
-                          }
-                        } else {
-                          lastCorrectionTapRef.current = now;
-                        }
-                      }}
-                      disabled={isBlocked}
-                      placeholder={
-                        hasDoubleOrNothing
-                          ? 'Write the corrected sentence (leaving this blank or wrong on a Flawed sentence loses 1.5× your bet)...'
-                          : 'Write the corrected sentence (double-click or double-tap to copy the original)'
-                      }
-                      className={`w-full bg-gc-line/[0.05] border rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-20 text-gc-body ${
-                        hasDoubleOrNothing && !bet?.userCorrection?.trim()
-                          ? 'border-amber-500/60 bg-amber-500/[0.04]'
-                          : 'border-gc-line/[0.2]'
-                      }`}
-                    />
-                    {hasDoubleOrNothing && !bet?.userCorrection?.trim() && (
-                      <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
-                        ⚠️ Heads up: With Double or Nothing active, flagging a Flawed sentence without a valid correction results in a −1.5× loss.
-                      </p>
-                    )}
-                 </div>
-              )}
-            </div>
+            <BetSplitAnswer
+              wagerInputRef={wagerInputRef}
+              betAmount={betAmount}
+              handleBetAmountChange={handleBetAmountChange}
+              isBetCapped={isBetCapped}
+              effectiveBetCap={effectiveBetCap}
+              isBlocked={isBlocked}
+              player={player}
+              highlightWagerMissing={highlightWagerMissing}
+              handleAllIn={handleAllIn}
+              actualBetAmount={actualBetAmount}
+              handleAddQuickChip={handleAddQuickChip}
+              handleClearBet={handleClearBet}
+              playSound={playSound}
+              splitPercent={splitPercent}
+              onBetChange={onBetChange}
+              splitIncorrectAmount={splitIncorrectAmount}
+              splitCorrectAmount={splitCorrectAmount}
+              hasDoubleOrNothing={hasDoubleOrNothing}
+              bet={bet}
+              handleCorrectionChange={handleCorrectionChange}
+              currentSentenceText={currentSentenceText}
+              lastCorrectionTapRef={lastCorrectionTapRef}
+            />
           ) : (
             <>
-              {/* Valid / Flawed: two big buttons that fill with green or red when picked */}
-              <div className={`grid grid-cols-2 gap-3.5 rounded-gc transition-all ${highlightAnswerMissing ? 'ring-2 ring-rose-500 p-1.5 bg-rose-500/5' : ''}`}>
-                <button
-                  ref={firstOpinionBtnRef}
-                  type="button"
-                  onClick={() => handleOpinionClick('correct')}
-                  disabled={isBlocked}
-                  aria-pressed={bet?.opinion === 'correct'}
-                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400/40 disabled:cursor-not-allowed ${
-                    bet?.opinion === 'correct'
-                      ? 'bg-gc-win/15 border-emerald-700 dark:border-emerald-400 text-gc-win animate-gc-pulse'
-                      : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink hover:border-emerald-600/60 dark:hover:border-emerald-400/60'
-                  }`}
-                >
-                  <Check className="w-7 h-7 shrink-0" strokeWidth={2.6} aria-hidden="true" />
-                  <span className="text-left">
-                    <span className="block text-gc-lead sm:text-[22px] font-extrabold leading-tight">Valid</span>
-                    <span className="block text-gc-small font-semibold text-gc-quiet">Grammatically correct</span>
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleOpinionClick('incorrect')}
-                  disabled={isBlocked}
-                  aria-pressed={bet?.opinion === 'incorrect'}
-                  className={`min-h-[96px] px-4 py-3 rounded-gc border-2 flex items-center justify-center gap-3.5 cursor-pointer select-none transition-colors duration-gc-fast focus:outline-none focus-visible:ring-4 focus-visible:ring-rose-400/40 disabled:cursor-not-allowed ${
-                    bet?.opinion === 'incorrect'
-                      ? 'bg-gc-loss/15 border-rose-700 dark:border-rose-400 text-gc-loss animate-gc-pulse'
-                      : 'bg-gc-line/[0.06] border-gc-line/[0.14] text-gc-ink hover:border-rose-600/60 dark:hover:border-rose-400/60'
-                  }`}
-                >
-                  <X className="w-7 h-7 shrink-0" strokeWidth={2.6} aria-hidden="true" />
-                  <span className="text-left">
-                    <span className="block text-gc-lead sm:text-[22px] font-extrabold leading-tight">Flawed</span>
-                    <span className="block text-gc-small font-semibold text-gc-quiet">Contains an error</span>
-                  </span>
-                </button>
-              </div>
-              
-              {/* Wager Input & All-In Control */}
-              <div className="space-y-2">
-                <div className="flex gap-2.5">
-                   <div className="relative flex-1">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gc-money font-sans tabular-nums font-extrabold text-gc-title select-none">$</span>
-                      <TextInput 
-                          ref={wagerInputRef}
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={String(betAmount)}
-                          onChange={handleBetAmountChange}
-                          placeholder={isBetCapped ? `Up to $${effectiveBetCap}` : "Your bet"}
-                          disabled={isBlocked || player.money === 0}
-                          className={`w-full pl-9 pr-4 text-gc-title font-sans tabular-nums font-extrabold text-gc-money h-14 placeholder:text-gc-body placeholder:font-semibold ${highlightWagerMissing ? '!border-rose-500 ring-2 ring-rose-500/50' : ''}`}
-                      />
-                   </div>
-                   <ActionButton
-                      onClick={handleAllIn}
-                      disabled={isBlocked || player.money === 0}
-                      variant="ghost"
-                      className="h-14 px-5 text-gc-body font-bold whitespace-nowrap"
-                   >
-                      {isBetCapped && effectiveBetCap < player.money ? `Max ($${effectiveBetCap})` : 'All in'}
-                   </ActionButton>
-                </div>
-
-                {isBetCapped && (
-                  <div className="text-gc-small font-semibold text-gc-money flex items-center gap-1.5 px-3 py-2 bg-gc-gold/15 rounded-gc-sm">
-                    <span>🧢</span>
-                    <span>Bet cap: you can bet up to ${effectiveBetCap} this hand.</span>
-                  </div>
-                )}
-                {isHighRoller && (
-                  <div className="text-gc-small font-semibold text-gc-loss flex items-center gap-1.5 px-3 py-2 bg-gc-loss/15 rounded-gc-sm">
-                    <span>🔥</span>
-                    <span>High roller: you must bet at least ${effectiveMinBet.toLocaleString()} (half your balance).</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Quick Chip Tray for rapid betting */}
-              <QuickChipTray
-                currentBet={actualBetAmount}
-                playerMoney={player.money}
-                maxBet={isBetCapped ? effectiveBetCap : undefined}
-                onAddAmount={handleAddQuickChip}
-                onClear={handleClearBet}
-                onAllIn={handleAllIn}
-                disabled={isBlocked}
+              <BetBinaryAnswer
+                highlightAnswerMissing={highlightAnswerMissing}
+                firstOpinionBtnRef={firstOpinionBtnRef}
+                handleOpinionClick={handleOpinionClick}
+                isBlocked={isBlocked}
+                bet={bet}
+                wagerInputRef={wagerInputRef}
+                betAmount={betAmount}
+                handleBetAmountChange={handleBetAmountChange}
+                isBetCapped={isBetCapped}
+                effectiveBetCap={effectiveBetCap}
+                player={player}
+                highlightWagerMissing={highlightWagerMissing}
+                handleAllIn={handleAllIn}
+                isHighRoller={isHighRoller}
+                effectiveMinBet={effectiveMinBet}
+                actualBetAmount={actualBetAmount}
+                handleAddQuickChip={handleAddQuickChip}
+                handleClearBet={handleClearBet}
                 playSound={playSound}
+                hasDoubleOrNothing={hasDoubleOrNothing}
+                currentSentenceText={currentSentenceText}
+                onBetChange={onBetChange}
+                handleCorrectionChange={handleCorrectionChange}
+                lastCorrectionTapRef={lastCorrectionTapRef}
               />
-
-              {/* Physical Wager Chips Display */}
-              {actualBetAmount > 0 && (
-                <WagerChipsDisplay amount={actualBetAmount} label="Your bet" />
-              )}
-
-              {/* Correction Input */}
-              {bet?.opinion === 'incorrect' && (
-                 <div className="animate-fade-in pt-1">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-gc-small font-bold text-gc-ink">
-                        {hasDoubleOrNothing ? (
-                          <span className="text-amber-600 dark:text-amber-400 font-extrabold">
-                            🎲 Double or Nothing: correction required for 3× win
-                          </span>
-                        ) : (
-                          'Bonus: write the corrected sentence'
-                        )}
-                      </label>
-                      {currentSentenceText && !isBlocked && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            playSound('click');
-                            onBetChange(player.id, 'userCorrection', currentSentenceText);
-                          }}
-                          className="text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 cursor-pointer"
-                        >
-                          Copy the sentence here
-                        </button>
-                      )}
-                    </div>
-                    <textarea 
-                      value={bet?.userCorrection || ''}
-                      {...ANSWER_INPUT_PROPS}
-                      onChange={handleCorrectionChange}
-                      onDoubleClick={() => {
-                        if (!isBlocked && currentSentenceText) {
-                          playSound('click');
-                          onBetChange(player.id, 'userCorrection', currentSentenceText);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        const now = Date.now();
-                        if (now - lastCorrectionTapRef.current <= 350) {
-                          lastCorrectionTapRef.current = 0;
-                          if (!isBlocked && currentSentenceText) {
-                            playSound('click');
-                            onBetChange(player.id, 'userCorrection', currentSentenceText);
-                          }
-                        } else {
-                          lastCorrectionTapRef.current = now;
-                        }
-                      }}
-                      disabled={isBlocked}
-                      placeholder={
-                        hasDoubleOrNothing
-                          ? 'Write the corrected sentence (leaving this blank or wrong on a Flawed sentence loses 1.5× your bet)...'
-                          : 'Rewrite the sentence without the mistake for a bonus (double-click or double-tap to copy it here)'
-                      }
-                      className={`w-full bg-gc-line/[0.05] border rounded-gc-sm px-4 py-3 text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors resize-none font-sentence italic h-24 text-gc-lead ${
-                        hasDoubleOrNothing && !bet?.userCorrection?.trim()
-                          ? 'border-amber-500/60 bg-amber-500/[0.04]'
-                          : 'border-gc-line/[0.2]'
-                      }`}
-                    />
-                    {hasDoubleOrNothing && !bet?.userCorrection?.trim() && (
-                      <p className="mt-1.5 text-gc-cap font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-gc-sm px-2.5 py-1.5">
-                        ⚠️ Heads up: With Double or Nothing active, choosing Flawed without a valid correction results in a −1.5× loss.
-                      </p>
-                    )}
-                 </div>
-              )}
             </>
           )}
         </div>
 
-        {/* Right column: help and power-ups */}
-        <div className="lg:col-span-5 flex flex-col justify-between gap-3.5 border-t lg:border-t-0 lg:border-l border-gc-line/[0.12] pt-4 lg:pt-0 lg:pl-6">
-          <div className="space-y-3">
-            <h4 className="text-gc-small font-bold text-gc-quiet">
-              Help and power-ups
-            </h4>
-
-            <button
-              type="button"
-              onClick={() => onGetHint(player.id)}
-              disabled={player.money < HINT_COST || !!hint || isBlocked}
-              className="w-full flex items-center gap-3 p-3.5 rounded-gc bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-ink text-left transition-colors hover:border-gc-line/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40"
-            >
-              <span className="w-10 h-10 rounded-gc-sm bg-gc-info/15 grid place-items-center text-xl shrink-0" aria-hidden="true">💡</span>
-              <span className="min-w-0">
-                <span className="block text-gc-body font-bold">Croupier's whisper</span>
-                <span className="block text-gc-small text-gc-quiet">A small grammar clue</span>
-              </span>
-              <span className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">-${HINT_COST}</span>
-            </button>
-
-            {hint && (
-              <div className="rounded-gc bg-gc-info/15 text-gc-info p-3.5 text-gc-body font-semibold animate-gc-slide-up">
-                <div className="text-gc-cap font-bold mb-1 opacity-80">Hint</div>
-                {hint.isLoading ? (
-                  <span className="animate-pulse">Finding a hint…</span>
-                ) : (
-                  hint.text
-                )}
-              </div>
-            )}
-            
-            <PowerUpTooltip
-              icon={isSilenced ? "🤐" : "🃏"}
-              name={isSilenced ? "Silenced" : "Draw a power-up"}
-              description={isSilenced ? "You are silenced this round and cannot draw or use power-ups." : "Draw a random power-up card to gain an edge or disrupt rivals."}
-              placement="top"
-              className="w-full"
-            >
-              <button
-                type="button"
-                onClick={() => onGetPowerUp(player.id)}
-                disabled={(player.money < POWERUP_COST && !hasFreeDraw) || isBlocked || powerUpUsedThisRound || isSilenced}
-                className="w-full flex items-center gap-3 p-3.5 rounded-gc bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-ink text-left transition-colors hover:border-gc-line/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40"
-                title={isSilenced ? "You are silenced this round" : undefined}
-              >
-                <span className="w-10 h-10 rounded-gc-sm bg-purple-500/15 grid place-items-center text-xl shrink-0" aria-hidden="true">{isSilenced ? '🤐' : '🃏'}</span>
-                <span className="min-w-0">
-                  <span className="block text-gc-body font-bold">
-                    {isSilenced ? 'Silenced' : powerUpUsedThisRound ? 'Power-up drawn' : 'Draw a power-up'}
-                  </span>
-                  <span className="block text-gc-small text-gc-quiet">
-                    {isSilenced ? 'No power-ups this hand' : powerUpUsedThisRound ? 'One per hand' : 'A card from the house shoe'}
-                  </span>
-                </span>
-                {!isSilenced && (
-                  <span data-testid="draw-price" className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">{hasFreeDraw ? 'Free' : `-$${POWERUP_COST}`}</span>
-                )}
-              </button>
-            </PowerUpTooltip>
-          </div>
-
-          {/* Bottom Status Indicator */}
-          <div className="pt-3 border-t border-gc-line/[0.12] flex items-center justify-between gap-3 text-gc-small text-gc-quiet">
-            <span>Status</span>
-            {isEliminated ? (
-              <span className="text-gc-loss font-bold">Out of money</span>
-            ) : isFrozen ? (
-              <span className="text-gc-info font-bold">Frozen this hand</span>
-            ) : isSatOut ? (
-              <span className="text-gc-loss font-bold">Sat out (no bet)</span>
-            ) : isTurnLocked ? (
-              <span className="text-gc-win font-bold">Locked in</span>
-            ) : timerEnabled && timerStatus === 'idle' ? (
-              <span>Waiting for their turn</span>
-            ) : isUnchangedBaseWord ? (
-              <span className="text-gc-loss font-bold">
-                Change the word ({(baseWord || '').toUpperCase()})
-              </span>
-            ) : isInvalidKwtPhrase ? (
-              <span className="text-gc-loss font-bold">
-                Use 2–6 words with {(baseWord || 'KEY').toUpperCase()}
-              </span>
-            ) : (
-              isOptionType(questionType)
-                ? (typeof bet?.bet === 'number' && (hasSplitBet ? (bet?.splitOptions?.length || 0) >= 1 : Boolean(bet?.selectedOption)))
-                : questionType === 'keyWordTransformation'
-                  ? (typeof bet?.bet === 'number' && (hasSplitBet
-                      ? (isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[0], baseWord) && (!bet?.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))) ||
-                        (!bet?.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))
-                      : isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord)))
-                  : (isWordAnswerType(questionType))
-                    ? (typeof bet?.bet === 'number' && (hasSplitBet ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim()) : Boolean(bet?.clozeAnswer?.trim())))
-                    : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number'))
-            ) ? (
-              <span className="text-gc-win font-bold">
-                Bet placed
-              </span>
-            ) : (
-              <span>Waiting for a bet</span>
-            )}
-          </div>
-        </div>
+        <BetCardSide
+          onGetHint={onGetHint}
+          player={player}
+          hint={hint}
+          isBlocked={isBlocked}
+          isSilenced={isSilenced}
+          onGetPowerUp={onGetPowerUp}
+          hasFreeDraw={hasFreeDraw}
+          powerUpUsedThisRound={powerUpUsedThisRound}
+          isEliminated={isEliminated}
+          isFrozen={isFrozen}
+          isSatOut={isSatOut}
+          isTurnLocked={isTurnLocked}
+          timerEnabled={timerEnabled}
+          timerStatus={timerStatus}
+          isUnchangedBaseWord={isUnchangedBaseWord}
+          baseWord={baseWord}
+          isInvalidKwtPhrase={isInvalidKwtPhrase}
+          questionType={questionType}
+          bet={bet}
+          hasSplitBet={hasSplitBet}
+        />
       </div>
     </div>
   );
