@@ -3,6 +3,7 @@
 import { useGame } from '../state/gameStore';
 import { APP_VERSION } from '../utils/debugLog';
 import { type QualityChoice, type QualityTier } from '../show/quality';
+import { type TableLook } from '../show/tableView';
 import { deckSummary } from '../game/teacherDeck';
 import React from 'react';
 import { GeneratedSentence, PowerUpKey, SoundEffect, QuestionType } from '../types';
@@ -41,6 +42,8 @@ export interface SetupScreenProps {
   setShowDeckConfigModal: React.Dispatch<React.SetStateAction<boolean>>;
   qualityStored: StoredQuality;
   chooseQuality: (choice: QualityChoice) => void;
+  tableLook: TableLook;
+  chooseTableLook: (look: TableLook) => void;
   qualityTier: QualityTier;
   handleFinalizeSettings: () => void;
 }
@@ -72,6 +75,8 @@ export function SetupScreen({
   setShowDeckConfigModal,
   qualityStored,
   chooseQuality,
+  tableLook,
+  chooseTableLook,
   qualityTier,
   handleFinalizeSettings,
 }: SetupScreenProps) {
@@ -771,6 +776,19 @@ export function SetupScreen({
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
+        </select>
+      </label>
+      <label className="inline-flex items-center gap-2">
+        Table look
+        <select
+          value={tableLook}
+          onChange={e => chooseTableLook(e.target.value as TableLook)}
+          data-testid="table-look"
+          title="Classic: the flat felt with the player cards in a grid. 3D table room: the wooden table and room behind the game (wide screens only)."
+          className="min-h-[44px] rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] px-2 text-gc-ink"
+        >
+          <option value="classic">Classic</option>
+          <option value="table">3D table room</option>
         </select>
       </label>
       <span data-testid="settings-version">Grammar Casino {APP_VERSION} · Shift+L shows the debug log</span>

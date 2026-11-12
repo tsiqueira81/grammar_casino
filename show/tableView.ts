@@ -1,12 +1,18 @@
 // Package V2 step 2: "Table view" puts the Blender table (public/models/table.glb and room.glb)
-// behind the game screens. "Classic view" (the flat felt) stays automatic on 3D Off, in Calm
-// mode and on screens under 1100 pixels wide.
+// behind the game screens. Since 2026-11-12 it is opt-in: the teacher preferred "Classic view" (the
+// flat felt with the player cards in a grid), so that is the default, and Table view is chosen in
+// the settings. Classic view also stays on 3D Off, in Calm mode and on screens under 1100 px wide.
 import type { QualityTier } from './quality';
 
 export const TABLE_VIEW_MIN_WIDTH = 1100;
 export const TABLE_SCREENS = ['IN_GAME', 'RESULTS', 'GAME_OVER'] as const;
 
-export function tableViewOn(opts: { step: string; quality: QualityTier; calmMode: boolean; width: number }): boolean {
+/** Where the teacher's choice of table look is kept ('table' or 'classic'; missing means classic). */
+export const TABLE_LOOK_KEY = 'grammar_casino_table_look';
+export type TableLook = 'classic' | 'table';
+
+export function tableViewOn(opts: { look: TableLook; step: string; quality: QualityTier; calmMode: boolean; width: number }): boolean {
+  if (opts.look !== 'table') return false;
   if (!(TABLE_SCREENS as readonly string[]).includes(opts.step)) return false;
   if (opts.quality === 'off' || opts.calmMode) return false;
   return opts.width >= TABLE_VIEW_MIN_WIDTH;

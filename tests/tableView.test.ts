@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { TABLE_VIEW_MIN_WIDTH, seatAnchorIndex, tableViewOn } from '../show/tableView';
 
 describe('Table view (package V2 step 2)', () => {
-  const base = { step: 'IN_GAME', quality: 'medium' as const, calmMode: false, width: 1920 };
+  const base = { look: 'table' as const, step: 'IN_GAME', quality: 'medium' as const, calmMode: false, width: 1920 };
 
   it('shows the 3D table on the game screens of a wide screen', () => {
     for (const step of ['IN_GAME', 'RESULTS', 'GAME_OVER']) expect(tableViewOn({ ...base, step })).toBe(true);
+  });
+
+  it('is Classic view unless the teacher chose Table view', () => {
+    expect(tableViewOn({ ...base, look: 'classic' })).toBe(false);
   });
 
   it('keeps Classic view on setup screens, 3D Off, Calm mode and narrow screens', () => {

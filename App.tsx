@@ -22,7 +22,7 @@ import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSav
 import { base64ToBytes, pcmToAudioBuffer } from './utils/ttsAudio';
 /** Package T5: reports of the last 20 finished games on this computer. */
 const FINISHED_GAMES_STORAGE_KEY = 'grammar_casino_finished_games_v1';
-import { tableViewOn } from './show/tableView';
+import { TABLE_LOOK_KEY, tableViewOn, type TableLook } from './show/tableView';
 import { CEREMONY_DONE, ceremonyTimes, cueForStage, type CeremonyStage } from './game/ceremony';
 import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHandSpending } from './game/flow';
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
@@ -677,8 +677,23 @@ export function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+  const [tableLook, setTableLook] = useState<TableLook>(() => {
+    try {
+      return safeLocalStorage.getItem(TABLE_LOOK_KEY) === 'table' ? 'table' : 'classic';
+    } catch {
+      return 'classic';
+    }
+  });
+  const chooseTableLook = useCallback((look: TableLook) => {
+    setTableLook(look);
+    try {
+      safeLocalStorage.setItem(TABLE_LOOK_KEY, look);
+    } catch {
+      // Storage can be blocked (private window); the choice still holds for this visit.
+    }
+  }, []);
   const [tableViewFailed, setTableViewFailed] = useState(false);
-  const isTableView = !tableViewFailed && tableViewOn({ step, quality: qualityTier, calmMode: isCalmMode, width: viewportWidth });
+  const isTableView = !tableViewFailed && tableViewOn({ look: tableLook, step, quality: qualityTier, calmMode: isCalmMode, width: viewportWidth });
   useEffect(() => {
     document.documentElement.dataset.view = isTableView ? 'table' : 'classic';
   }, [isTableView]);
@@ -5108,6 +5123,8 @@ export function App() {
               setShowDeckConfigModal={setShowDeckConfigModal}
               qualityStored={qualityStored}
               chooseQuality={chooseQuality}
+              tableLook={tableLook}
+              chooseTableLook={chooseTableLook}
               qualityTier={qualityTier}
               handleFinalizeSettings={handleFinalizeSettings}
             />
