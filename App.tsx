@@ -73,6 +73,8 @@ import { lookForTheme } from './show/looks';
 import { gameClockText, handsLeftNote } from './game/gameLength';
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { AWARDS_KEY } from './game/awards';
+import { useStore } from 'zustand';
+import { createGameStore, GameStoreContext } from './state/gameStore';
 import { flightPalette, type PowerUpFlightEvent } from './show/flight';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
@@ -138,8 +140,21 @@ const OWN_DECK_KEY = 'grammar_casino_own_deck_v1';
 const initialPrefs = initialGameState ? {} : loadSetupPrefs();
 
 export function App() {
-  const [step, setStep] = useState<Step>(initialGameState?.step || 'PLAYER_SETUP');
-  const [players, setPlayers] = useState<Player[]>(initialGameState?.players || []);
+  // Package F6: the game in play lives in one store (state/gameStore.ts), made once from the saved game.
+  const [gameStore] = useState(() => createGameStore({
+    step: initialGameState?.step || 'PLAYER_SETUP',
+    players: initialGameState?.players || [],
+    currentRound: initialGameState?.currentRound || 1,
+    currentSentence: initialGameState?.currentSentence || null,
+    bets: initialGameState?.bets || {},
+    hints: initialGameState?.hints || {},
+    roundResults: initialGameState?.roundResults || [],
+    winner: initialGameState?.winner || null,
+    roundHistory: initialGameState?.roundHistory || [],
+  }));
+  const { setStep, setPlayers, setCurrentRound, setCurrentSentence, setBets, setHints, setRoundResults, setWinner, setRoundHistory } = gameStore.getState();
+  const step = useStore(gameStore, s => s.step);
+  const players = useStore(gameStore, s => s.players);
   const [newPlayerName, setNewPlayerName] = useState('');
   const playerNameInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -170,7 +185,7 @@ export function App() {
   const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || initialPrefs.gameMode || 'rounds');
   const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || initialPrefs.totalRounds || 10);
   const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT);
-  const [currentRound, setCurrentRound] = useState(initialGameState?.currentRound || 1);
+  const currentRound = useStore(gameStore, s => s.currentRound);
   const currentRoundRef = useRef(currentRound);
   currentRoundRef.current = currentRound;
   // Package L6: missed grammar points come back two hands later ("a second look").
@@ -185,11 +200,11 @@ export function App() {
   const fetchTargetRoundRef = useRef<number | null>(null);
   const [secondLookRound, setSecondLookRound] = useState<number | null>(null);
   
-  const [currentSentence, setCurrentSentence] = useState<GeneratedSentence | null>(initialGameState?.currentSentence || null);
+  const currentSentence = useStore(gameStore, s => s.currentSentence);
   const [pastSentences, setPastSentences] = useState<string[]>(initialGameState?.pastSentences || []);
   const [pastMistakes, setPastMistakes] = useState<string[]>(initialGameState?.pastMistakes || []);
   const [sentenceBatch, setSentenceBatch] = useState<boolean[]>(initialGameState?.sentenceBatch || []);
-  const [roundHistory, setRoundHistory] = useState<RoundHistoryRecord[]>(initialGameState?.roundHistory || []);
+  const roundHistory = useStore(gameStore, s => s.roundHistory);
   const [showReportCardModal, setShowReportCardModal] = useState(false);
 
   const newBatch = () => {
@@ -205,10 +220,10 @@ export function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   
-  const [bets, setBets] = useState<Record<number, Bet>>(initialGameState?.bets || {});
-  const [hints, setHints] = useState<Record<number, Hint>>(initialGameState?.hints || {});
-  const [roundResults, setRoundResults] = useState<RoundResultInfo[]>(initialGameState?.roundResults || []);
-  const [winner, setWinner] = useState<Player | null>(initialGameState?.winner || null);
+  const bets = useStore(gameStore, s => s.bets);
+  const hints = useStore(gameStore, s => s.hints);
+  const roundResults = useStore(gameStore, s => s.roundResults);
+  const winner = useStore(gameStore, s => s.winner);
   const [error, setError] = useState<GameError | null>(null);
   
   const [isMuted, setIsMuted] = useState(() => {
@@ -5277,6 +5292,7 @@ export function App() {
   }
 
   return (
+    <GameStoreContext.Provider value={gameStore}>
     <MotionConfig reducedMotion={isCalmMode ? 'always' : 'user'}>
       <div className="game-container felt-noise min-h-screen text-slate-800 dark:text-slate-100 flex flex-col justify-start items-center p-2 md:p-4 selection:bg-amber-500 selection:text-black font-sans transition-colors duration-gc-base relative">
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
@@ -6162,5 +6178,6 @@ export function App() {
         />
       )}
     </MotionConfig>
+    </GameStoreContext.Provider>
   );
 }
