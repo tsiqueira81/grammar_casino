@@ -27,6 +27,7 @@ import {
 } from './roomBackend';
 import { isE2eMode } from '../utils/e2eContent';
 import { nextFlushAt } from '../utils/flushPlan';
+import { logEvent } from '../utils/debugLog';
 import { cleanName as cleanPlayerName, generateFriendlyName, isBlockedName } from '../utils/nameFilter';
 
 /** Package R6: at most this many seats in one room. */
@@ -274,6 +275,8 @@ export class HostRoomController {
     this.hostToken = hostToken;
     this.transport = transport;
     this.link = transport === 'do' ? doHostLink(code, hostToken) : firestoreHostLink(code);
+    // Shift+L shows which room server this class is on (Cloudflare, or Firebase as the fallback).
+    logEvent('room', `Room ${code} runs on ${transport === 'do' ? 'the Cloudflare room server' : localServerAvailable ? 'the local relay' : 'Firebase'}`);
     this.localServerAvailable = localServerAvailable;
     this.onEventCallback = onEvent;
     this.onConnectionChange = onConnectionChange;
@@ -456,7 +459,10 @@ export class HostRoomController {
         const token = generateToken('host');
         const claim = await claimDoRoom(code, token);
         if (claim === 'ok') return new HostRoomController(code, token, false, onEvent, onConnectionChange, undefined, 'do');
-        if (claim === 'unavailable') break;
+        if (claim === 'unavailable') {
+          logEvent('room', 'The Cloudflare room server could not be reached; using Firebase');
+          break;
+        }
       }
     }
     // Browser tests (?e2e=1 on the dev server) use the local relay; everything else uses Firestore.
