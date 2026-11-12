@@ -111,6 +111,7 @@ import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from '.
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { AWARDS_KEY, computeAwards } from './game/awards';
 import { sentenceStatus } from './game/aiStatus';
+import { flightPalette, type PowerUpFlightEvent } from './show/flight';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
 import FirstRunCoach from './components/FirstRunCoach';
@@ -766,11 +767,20 @@ export function App() {
     }
   });
   const [activeCutIn, setActiveCutIn] = useState<BroadcastCutInPayload | null>(null);
+  useEffect(() => {
+    if (activeCutIn || showPowerUpModal || !pendingFlightRef.current) return;
+    const flight = pendingFlightRef.current;
+    pendingFlightRef.current = null;
+    setPowerUpFlightEvent(flight);
+  }, [activeCutIn, showPowerUpModal]);
   const [chipTossEvent, setChipTossEvent] = useState<ChipTossEvent | null>(null);
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
   const [jackpotEvent, setJackpotEvent] = useState<JackpotEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
   const [shoeDealEvent, setShoeDealEvent] = useState<ShoeDealEvent | null>(null);
+  const [powerUpFlightEvent, setPowerUpFlightEvent] = useState<PowerUpFlightEvent | null>(null);
+  // The flight waits until the cut-in and the power-up message are closed, so it is seen on the felt.
+  const pendingFlightRef = useRef<PowerUpFlightEvent | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
@@ -3446,6 +3456,17 @@ export function App() {
         attackerSeatIndex: attackerIdx,
         defenderSeatIndex: defenderIdx,
         totalSeats: Math.max(1, activePlayers.length),
+      });
+    } else {
+      // Package V4: the card flies across the felt to the player it was used on.
+      pendingFlightRef.current = ({
+        id: `${playerId}-${targetId}-${powerUpKey}-${Date.now()}`,
+        fromPlayerId: playerId,
+        toPlayerId: targetId,
+        fromSeatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
+        toSeatIndex: Math.max(0, activePlayers.findIndex(p => p.id === targetId)),
+        totalSeats: Math.max(1, activePlayers.length),
+        palette: flightPalette(powerUpKey),
       });
     }
     const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${plainDescriptionOf(powerUpKey)}`;
@@ -8273,6 +8294,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
           shoeEvent={shoeDealEvent}
+          flightEvent={powerUpFlightEvent}
           jackpotEvent={jackpotEvent}
           potTotal={step === 'IN_GAME' || step === 'RESULTS' ? potNow : 0}
           behindInterface={isTableView}

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BUDGET, FrameGuard, TIER_SETTINGS, type QualityTier } from '../show/quality';
 import { POT_CENTER, POT_CHIP_CAP, potSlot } from '../show/pot';
+import type { PowerUpFlightEvent } from '../show/flight';
 import { TOTEM_NODES, totemScreenPoint, totemsFor, type TotemKind } from '../show/totems';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
@@ -77,6 +78,8 @@ export interface Tabletop3DOverlayProps {
   sweepEvent: PotSweepEvent | null;
   boomerangEvent: BoomerangArcEvent | null;
   shoeEvent?: ShoeDealEvent | null;
+  /** Package V4: a targeted power-up flies from one player to another. */
+  flightEvent?: PowerUpFlightEvent | null;
   jackpotEvent?: JackpotEvent | null;
   onChipImpactSound?: (denomination: number) => void;
   /** Package V3: every bet still on the table this hand. 0 clears the pot. */
@@ -119,6 +122,8 @@ interface DealtCard {
   arc: THREE.QuadraticBezierCurve3;
   elapsed: number;
   scale: number;
+  /** Package V4: the colours of the burst where the card lands (a targeted power-up). */
+  palette?: number[];
 }
 
 interface SeatTotem {
@@ -271,6 +276,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   sweepEvent,
   boomerangEvent,
   shoeEvent,
+  flightEvent,
   jackpotEvent,
   seatStates,
   onChipImpactSound,
@@ -314,6 +320,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     cardTemplate: THREE.Object3D | null;
     dealtCards: DealtCard[];
     lastProcessedShoeId: string | null;
+    lastProcessedFlightId: string | null;
     lastProcessedTossId: string | null;
     lastProcessedSweepId: string | null;
     lastProcessedBoomerangId: string | null;
@@ -448,6 +455,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       cardTemplate: null as THREE.Object3D | null,
       dealtCards: [] as DealtCard[],
       lastProcessedShoeId: null as string | null,
+      lastProcessedFlightId: null as string | null,
       lastProcessedTossId: null as string | null,
       lastProcessedSweepId: null as string | null,
       lastProcessedBoomerangId: null as string | null,
@@ -762,7 +770,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
             continue;
           }
           c.mesh.scale.setScalar(c.scale * Math.max(0.001, 1 - k));
-          if (k < dt / DEAL_FADE_SEC + 0.001) stateObj.spawnSparks(c.mesh.position, 12, [0xe9d5ff, 0xfde68a, 0xffffff], 0.7);
+          if (k < dt / DEAL_FADE_SEC + 0.001) stateObj.spawnSparks(c.mesh.position, c.palette ? 22 : 12, c.palette ?? [0xe9d5ff, 0xfde68a, 0xffffff], c.palette ? 0.9 : 0.7);
         }
       }
 
@@ -1187,6 +1195,30 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     ctx.dealtCards.push({ mesh, slideFrom, arc: new THREE.QuadraticBezierCurve3(mouth, mid, target), elapsed: 0, scale: CARD_SCALE });
     ctx.wake();
   }, [shoeEvent, calmMode]);
+
+  // Package V4: a targeted power-up card flies from the player who used it to the one it hits.
+  useEffect(() => {
+    if (!flightEvent || calmMode) return;
+    const ctx = sceneRef.current;
+    if (!ctx || ctx.lastProcessedFlightId === flightEvent.id) return;
+    ctx.lastProcessedFlightId = flightEvent.id;
+    if (!ctx.cardTemplate) return;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const seatPoint = (playerId: number, seatIndex: number) => {
+      const el = document.querySelector(`[data-seat-player="${playerId}"]`);
+      return (el ? seatPointFromScreen(el.getBoundingClientRect(), viewport, ctx.camera, 0.3) : null) ?? getSeatWorldPosition(seatIndex, flightEvent.totalSeats);
+    };
+    const from = seatPoint(flightEvent.fromPlayerId, flightEvent.fromSeatIndex);
+    const to = seatPoint(flightEvent.toPlayerId, flightEvent.toSeatIndex);
+    const mid = from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(0, 1.6, 0));
+    const mesh = ctx.cardTemplate.clone(true);
+    mesh.scale.setScalar(CARD_SCALE);
+    mesh.position.copy(from);
+    ctx.scene.add(mesh);
+    // No slide out of the shoe: slideFrom is the start of the arc.
+    ctx.dealtCards.push({ mesh, slideFrom: from.clone(), arc: new THREE.QuadraticBezierCurve3(from, mid, to), elapsed: DEAL_SLIDE_SEC, scale: CARD_SCALE, palette: flightEvent.palette });
+    ctx.wake();
+  }, [flightEvent, calmMode]);
 
   // Handle 3D Boomerang Parabolic Reflection Flight
   useEffect(() => {
