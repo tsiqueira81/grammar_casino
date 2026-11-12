@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { RoundHistoryRecord, Player, Settings, GameMode } from '../types';
 import { getAlternativeAcceptedAnswers } from './roundSettlement';
-import { buildReport } from '../game/report';
+import { buildReport, formatSeconds } from '../game/report';
 import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
 
 export interface GeneratePDFOptions {
@@ -405,6 +405,33 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
   // @ts-expect-error autoTable adds lastAutoTable to doc
   currentY = doc.lastAutoTable.finalY + 8;
+
+  // Package L7: what the class said it found hard, and how long hands took.
+  const classNotes: string[] = [];
+  report.stillConfused.slice(0, 5).forEach((c) => {
+    classNotes.push(`Hand ${c.round}: ${c.confused} still confused${c.gotIt ? `, ${c.gotIt} got it` : ''}. "${cleanText(c.text)}"`);
+  });
+  if (report.pace) {
+    classNotes.push(`Time per hand, deal to reveal: ${formatSeconds(report.pace.averageSeconds)} on average.` +
+      (report.pace.slowest.length ? ` Slowest: ${report.pace.slowest.map((s) => `hand ${s.round} (${formatSeconds(s.seconds)})`).join(', ')}.` : ''));
+  }
+  if (classNotes.length) {
+    ensureSpace(14);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...colors.casinoGreen);
+    doc.text('WHAT THE CLASS FOUND HARD, AND THE PACE', marginX, currentY);
+    currentY += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...colors.slateDark);
+    classNotes.forEach((note) => {
+      const lines = wrapText(note, contentWidth, 7.5, 'normal');
+      ensureSpace(lines.length * 3.6 + 1);
+      currentY = drawWrappedLines(lines, marginX, currentY, 3.6) + 1;
+    });
+    currentY += 5;
+  }
 
   // ==========================================
   // 5. DETAILED SENTENCE-BY-SENTENCE BREAKDOWN
