@@ -132,6 +132,27 @@ jobs:
           name: dist
           path: dist
 
+      # Package R4: the live-room Worker (one Durable Object per room). The Cloudflare token must
+      # allow Workers (Account > Workers Scripts > Edit). If it cannot be published, the site still
+      # is, and rooms keep using Firestore (the game falls back by itself).
+      - name: Deploy the room server
+        id: rooms
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "f49491d571ea9dcd9e2bda13cdc59c87"
+        run: npx wrangler deploy --config room-worker/wrangler.toml
+
+      - name: Say whether the room server was published
+        if: always()
+        run: |
+          if [ "${{ steps.rooms.outcome }}" = "success" ]; then
+            echo "Room server published (grammarcasino-rooms)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::The room server could not be published. The Cloudflare token probably lacks Account > Workers Scripts > Edit. Live rooms keep using Firestore."
+            echo "The room server could not be published: give the Cloudflare token Account > Workers Scripts > Edit. Live rooms keep using Firestore." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy the preview
         id: deploy
         env:
