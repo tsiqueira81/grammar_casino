@@ -5,7 +5,8 @@
 // so they are safe in effect and callback dependency lists.
 import { createContext, useContext } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
-import type { Bet, GeneratedSentence, Hint, Player, RoundHistoryRecord, RoundResultInfo, Step } from '../types';
+import type { ActivePowerUp, Bet, GameMode, GeneratedSentence, Hint, Player, PlayerTurnTimer, PowerUpKey, RoundHistoryRecord, RoundResultInfo, Settings, Step, UsedPowerUp } from '../types';
+import type { FreeDraws } from '../game/spacing';
 
 export interface GameState {
   step: Step;
@@ -17,6 +18,21 @@ export interface GameState {
   roundResults: RoundResultInfo[];
   winner: Player | null;
   roundHistory: RoundHistoryRecord[];
+  settings: Settings;
+  gameMode: GameMode;
+  totalRounds: number | string;
+  targetAmount: number | string;
+  freeDraws: FreeDraws;
+  isSentenceRevealed: boolean;
+  powerUpsUsedThisRound: Record<number, UsedPowerUp[]>;
+  activePowerUps: Record<number, ActivePowerUp[]>;
+  highlightedPhrase: string | null;
+  availablePowerUps: PowerUpKey[];
+  selectedPowerUps: PowerUpKey[];
+  roundSpending: Record<number, number>;
+  turnTimers: Record<number, PlayerTurnTimer>;
+  teacherRevealOverride: boolean;
+  isPaused: boolean;
 }
 
 export type Update<T> = T | ((prev: T) => T);
@@ -28,7 +44,13 @@ export type GameStoreState = GameState & GameSetters;
 export type GameStore = StoreApi<GameStoreState>;
 
 export const GAME_STATE_KEYS = [
+  // The table and the hand.
   'step', 'players', 'currentRound', 'currentSentence', 'bets', 'hints', 'roundResults', 'winner', 'roundHistory',
+  'isSentenceRevealed', 'highlightedPhrase', 'teacherRevealOverride', 'isPaused', 'turnTimers',
+  // The game's settings and mode.
+  'settings', 'gameMode', 'totalRounds', 'targetAmount',
+  // Power-ups.
+  'freeDraws', 'powerUpsUsedThisRound', 'activePowerUps', 'availablePowerUps', 'selectedPowerUps', 'roundSpending',
 ] as const satisfies readonly (keyof GameState)[];
 
 const setterName = (key: string) => `set${key[0].toUpperCase()}${key.slice(1)}`;

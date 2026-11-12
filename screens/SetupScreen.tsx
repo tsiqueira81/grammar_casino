@@ -5,7 +5,7 @@ import { APP_VERSION } from '../utils/debugLog';
 import { type QualityChoice, type QualityTier } from '../show/quality';
 import { deckSummary } from '../game/teacherDeck';
 import React from 'react';
-import { Settings, GeneratedSentence, PowerUpKey, GameMode, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
+import { GeneratedSentence, PowerUpKey, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
 import { POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, MIN_TARGET_AMOUNT, TURN_TIMER_OPTIONS, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import { ArrowLeft, ArrowRight, Check, AlertTriangle, Info } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -15,18 +15,13 @@ import { getCefrTopicRuleSpec } from '../utils/cefrGrammarMatrix';
 import type { StoredQuality } from '../show/quality';
 
 export interface SetupScreenProps {
-  settings: Settings;
   customTopic: string;
   customTheme: string;
-  gameMode: GameMode;
-  totalRounds: string | number;
-  targetAmount: string | number;
   settingsPart: 2 | 1;
   turnTimerSeconds: number;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
   setSettingsPart: React.Dispatch<React.SetStateAction<2 | 1>>;
   handleAdvanceToSettingsPart2: () => void;
-  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
   setCustomTopic: React.Dispatch<any>;
   setCustomTheme: React.Dispatch<any>;
   setMixedFormatSetupWarning: React.Dispatch<React.SetStateAction<string>>;
@@ -36,15 +31,11 @@ export interface SetupScreenProps {
   setOwnDeck: React.Dispatch<React.SetStateAction<{ text: string; name: string; }>>;
   setShowOwnDeck: React.Dispatch<React.SetStateAction<boolean>>;
   mpRoomCode: string;
-  setGameMode: React.Dispatch<React.SetStateAction<GameMode>>;
-  setTotalRounds: React.Dispatch<React.SetStateAction<string | number>>;
   setTurnTimerSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setTurnTimers: React.Dispatch<React.SetStateAction<Record<number, PlayerTurnTimer>>>;
   setMpRoundTimer: React.Dispatch<React.SetStateAction<PlayerTurnTimer>>;
   mpAutoStartedRoundRef: React.RefObject<number>;
   specialHandsOn: boolean;
   setSpecialHandsOn: React.Dispatch<React.SetStateAction<boolean>>;
-  setTargetAmount: React.Dispatch<React.SetStateAction<string | number>>;
   autoStartNextTimer: boolean;
   setAutoStartNextTimer: React.Dispatch<React.SetStateAction<boolean>>;
   adaptiveLevelOn: boolean;
@@ -53,7 +44,6 @@ export interface SetupScreenProps {
   setAwardsOn: React.Dispatch<React.SetStateAction<boolean>>;
   sayItOn: boolean;
   setSayItOn: React.Dispatch<React.SetStateAction<boolean>>;
-  selectedPowerUps: PowerUpKey[];
   setShowDeckConfigModal: React.Dispatch<React.SetStateAction<boolean>>;
   qualityStored: StoredQuality;
   chooseQuality: (choice: QualityChoice) => void;
@@ -62,18 +52,13 @@ export interface SetupScreenProps {
 }
 
 export function SetupScreen({
-  settings,
   customTopic,
   customTheme,
-  gameMode,
-  totalRounds,
-  targetAmount,
   settingsPart,
   turnTimerSeconds,
   playSound,
   setSettingsPart,
   handleAdvanceToSettingsPart2,
-  setSettings,
   setCustomTopic,
   setCustomTheme,
   setMixedFormatSetupWarning,
@@ -83,15 +68,11 @@ export function SetupScreen({
   setOwnDeck,
   setShowOwnDeck,
   mpRoomCode,
-  setGameMode,
-  setTotalRounds,
   setTurnTimerSeconds,
-  setTurnTimers,
   setMpRoundTimer,
   mpAutoStartedRoundRef,
   specialHandsOn,
   setSpecialHandsOn,
-  setTargetAmount,
   autoStartNextTimer,
   setAutoStartNextTimer,
   adaptiveLevelOn,
@@ -100,7 +81,6 @@ export function SetupScreen({
   setAwardsOn,
   sayItOn,
   setSayItOn,
-  selectedPowerUps,
   setShowDeckConfigModal,
   qualityStored,
   chooseQuality,
@@ -110,6 +90,16 @@ export function SetupScreen({
   // Package F6: the game in play comes from the store, not through props.
   const players = useGame(s => s.players);
   const setStep = useGame(s => s.setStep);
+  const settings = useGame(s => s.settings);
+  const gameMode = useGame(s => s.gameMode);
+  const totalRounds = useGame(s => s.totalRounds);
+  const targetAmount = useGame(s => s.targetAmount);
+  const selectedPowerUps = useGame(s => s.selectedPowerUps);
+  const setTurnTimers = useGame(s => s.setTurnTimers);
+  const setSettings = useGame(s => s.setSettings);
+  const setGameMode = useGame(s => s.setGameMode);
+  const setTotalRounds = useGame(s => s.setTotalRounds);
+  const setTargetAmount = useGame(s => s.setTargetAmount);
   const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Your own topic") : settings.topic;
   const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
   const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];

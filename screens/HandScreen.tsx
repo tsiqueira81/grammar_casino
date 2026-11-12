@@ -3,11 +3,10 @@
 import { useGame } from '../state/gameStore';
 import { getRevealGate } from '../game/revealGate';
 import { presenceSummary } from '../game/presence';
-import { type FreeDraws } from '../game/spacing';
 import { isFrozenBySubZero } from '../game/status';
 import React from 'react';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
-import { Player, Settings, Bet, PowerUpKey, ActivePowerUp, GameMode, SoundEffect, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
+import { Player, Settings, Bet, PowerUpKey, ActivePowerUp, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
 import { POWER_UPS, TURN_TIMER_OPTIONS, CHALLENGE_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS } from '../constants';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Lock, LockOpen, Smartphone, Volume2, Pencil, RotateCcw, Eye, Pause, WifiOff, Flag, Clock } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -32,24 +31,17 @@ export interface HandScreenProps {
   isPlayerFrozen: (playerId: number) => boolean;
   mpRoomCode: string;
   mpAwayIds: number[];
-  activePowerUps: Record<number, ActivePowerUp[]>;
   isTurnTimerEnabled: boolean;
   mpSeats: Record<number, MultiplayerSeat>;
-  turnTimers: Record<number, PlayerTurnTimer>;
-  teacherRevealOverride: boolean;
   hasPlayerPlacedBet: (playerId: number) => boolean;
   handleMpUnlockPlayer: (playerId: number) => void;
-  freeDraws: FreeDraws;
   handleBetChange: (playerId: number, field: keyof Bet, value: any, ignoreLock?: boolean) => void;
   handleGetHint: (playerId: number) => Promise<void>;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
   handleBuyRandomPowerUp: (playerId: number) => void;
-  powerUpsUsedThisRound: Record<number, UsedPowerUp[]>;
   handleUpdatePlayerMoney: (playerId: number, newAmount: number) => void;
   handleOpenAvatarModal: (playerId: number) => void;
   handleUpdatePlayerName: (playerId: number, newName: string) => void;
-  gameMode: GameMode;
-  targetAmount: string | number;
   turnDurationMs: number;
   canPlayerAct: (playerId: number) => boolean;
   handleTimerStart: (playerId: number) => void;
@@ -60,13 +52,10 @@ export interface HandScreenProps {
   openSeatPlayerId: number;
   isSentenceHeaderStuck: boolean;
   isProjectorMode: boolean;
-  settings: Settings;
   nextRoundSettings: Settings;
   desktopStatus: GeminiService.DesktopStatus;
   sentenceHeaderRef: React.RefObject<HTMLDivElement>;
-  isSentenceRevealed: boolean;
   isLoading: boolean;
-  totalRounds: string | number;
   specialHandLabel: string;
   secondLookRound: number;
   handsLeftLabel: string;
@@ -78,12 +67,9 @@ export interface HandScreenProps {
   isSettingsDeckExpanded: boolean;
   isSentenceHiddenForListening: boolean;
   setListenShownRound: React.Dispatch<React.SetStateAction<number>>;
-  highlightedPhrase: string;
-  selectedPowerUps: PowerUpKey[];
   turnTimerSeconds: number;
   handleOpenSettingsModal: (tab?: SettingsModalTab) => void;
   setTurnTimerSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setTurnTimers: React.Dispatch<React.SetStateAction<Record<number, PlayerTurnTimer>>>;
   setMpRoundTimer: React.Dispatch<React.SetStateAction<PlayerTurnTimer>>;
   mpAutoStartedRoundRef: React.RefObject<number>;
   handleToggleAllPowerUps: (activateAll: boolean) => void;
@@ -112,11 +98,8 @@ export interface HandScreenProps {
   isProcessing: boolean;
   handleRevealResults: (force?: unknown) => Promise<void>;
   processingStatus: string;
-  setTeacherRevealOverride: React.Dispatch<React.SetStateAction<boolean>>;
   setConfirmAction: React.Dispatch<React.SetStateAction<{ title: string; message: string; confirmLabel: string; onConfirm: () => void; }>>;
-  setIsPaused: React.Dispatch<React.SetStateAction<boolean>>;
   handleSwapSentence: () => void;
-  setTotalRounds: React.Dispatch<React.SetStateAction<string | number>>;
   gameClock: string;
 }
 
@@ -125,24 +108,17 @@ export function HandScreen({
   isPlayerFrozen,
   mpRoomCode,
   mpAwayIds,
-  activePowerUps,
   isTurnTimerEnabled,
   mpSeats,
-  turnTimers,
-  teacherRevealOverride,
   hasPlayerPlacedBet,
   handleMpUnlockPlayer,
-  freeDraws,
   handleBetChange,
   handleGetHint,
   playSound,
   handleBuyRandomPowerUp,
-  powerUpsUsedThisRound,
   handleUpdatePlayerMoney,
   handleOpenAvatarModal,
   handleUpdatePlayerName,
-  gameMode,
-  targetAmount,
   turnDurationMs,
   canPlayerAct,
   handleTimerStart,
@@ -153,13 +129,10 @@ export function HandScreen({
   openSeatPlayerId,
   isSentenceHeaderStuck,
   isProjectorMode,
-  settings,
   nextRoundSettings,
   desktopStatus,
   sentenceHeaderRef,
-  isSentenceRevealed,
   isLoading,
-  totalRounds,
   specialHandLabel,
   secondLookRound,
   handsLeftLabel,
@@ -171,12 +144,9 @@ export function HandScreen({
   isSettingsDeckExpanded,
   isSentenceHiddenForListening,
   setListenShownRound,
-  highlightedPhrase,
-  selectedPowerUps,
   turnTimerSeconds,
   handleOpenSettingsModal,
   setTurnTimerSeconds,
-  setTurnTimers,
   setMpRoundTimer,
   mpAutoStartedRoundRef,
   handleToggleAllPowerUps,
@@ -205,11 +175,8 @@ export function HandScreen({
   isProcessing,
   handleRevealResults,
   processingStatus,
-  setTeacherRevealOverride,
   setConfirmAction,
-  setIsPaused,
   handleSwapSentence,
-  setTotalRounds,
   gameClock,
 }: HandScreenProps) {
   // Package F6: the game in play comes from the store, not through props.
@@ -218,6 +185,22 @@ export function HandScreen({
   const currentSentence = useGame(s => s.currentSentence);
   const bets = useGame(s => s.bets);
   const hints = useGame(s => s.hints);
+  const isSentenceRevealed = useGame(s => s.isSentenceRevealed);
+  const highlightedPhrase = useGame(s => s.highlightedPhrase);
+  const teacherRevealOverride = useGame(s => s.teacherRevealOverride);
+  const turnTimers = useGame(s => s.turnTimers);
+  const settings = useGame(s => s.settings);
+  const gameMode = useGame(s => s.gameMode);
+  const totalRounds = useGame(s => s.totalRounds);
+  const targetAmount = useGame(s => s.targetAmount);
+  const freeDraws = useGame(s => s.freeDraws);
+  const powerUpsUsedThisRound = useGame(s => s.powerUpsUsedThisRound);
+  const activePowerUps = useGame(s => s.activePowerUps);
+  const selectedPowerUps = useGame(s => s.selectedPowerUps);
+  const setTeacherRevealOverride = useGame(s => s.setTeacherRevealOverride);
+  const setIsPaused = useGame(s => s.setIsPaused);
+  const setTurnTimers = useGame(s => s.setTurnTimers);
+  const setTotalRounds = useGame(s => s.setTotalRounds);
     const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
     const isClozeRound = isGapType(currentQuestionType);

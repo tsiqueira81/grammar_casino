@@ -9,13 +9,9 @@ import { CEREMONY_DONE, drawMoment, placeShown, type CeremonyStage } from '../ga
 import { buildReport, classResultLine } from '../game/report';
 import { computeAwards } from '../game/awards';
 import { logEvent } from '../utils/debugLog';
-import type { GameMode, Settings, SoundEffect } from '../types';
+import type { SoundEffect } from '../types';
 
 export interface GameOverScreenProps {
-  settings: Settings;
-  gameMode: GameMode;
-  totalRounds: number | string;
-  targetAmount: number | string;
   startingCash: number;
   awardsOn: boolean;
   ceremonyStage: CeremonyStage;
@@ -27,10 +23,6 @@ export interface GameOverScreenProps {
 }
 
 export function GameOverScreen({
-  settings,
-  gameMode,
-  totalRounds,
-  targetAmount,
   startingCash,
   awardsOn,
   ceremonyStage,
@@ -44,6 +36,10 @@ export function GameOverScreen({
   const players = useGame(s => s.players);
   const winner = useGame(s => s.winner);
   const roundHistory = useGame(s => s.roundHistory);
+  const settings = useGame(s => s.settings);
+  const gameMode = useGame(s => s.gameMode);
+  const totalRounds = useGame(s => s.totalRounds);
+  const targetAmount = useGame(s => s.targetAmount);
   const ranked = [...players].sort((a, b) => b.money - a.money);
   if (winner) {
     const wi = ranked.findIndex(p => p.id === winner.id);

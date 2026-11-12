@@ -5,7 +5,7 @@ import { answerSplit, reactionCounts, type HandReactions } from '../game/answerS
 import { checkGameEnd } from '../game/flow';
 import { undoRevealSecondsLeft, type RevealSnapshot } from '../game/ruling';
 import React from 'react';
-import { Settings, GameMode, SoundEffect, QuestionType } from '../types';
+import { Settings, SoundEffect, QuestionType } from '../types';
 import { CHALLENGE_FORMATS } from '../constants';
 import { ArrowDown, ArrowRight, ArrowUp, Cloud as CloudIcon, Save, Volume2, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -20,12 +20,8 @@ import { isGapType, isOptionType, isTypedAnswerType } from '../game/questionType
 import { renderTextSegments } from '../components/TextSegments';
 
 export interface ResultsScreenProps {
-  targetAmount: string | number;
-  gameMode: GameMode;
-  totalRounds: string | number;
   mpRoomCode: string;
   nextRoundSettings: Settings;
-  settings: Settings;
   isProjectorMode: boolean;
   levelNotice: { round: number; text: string; };
   sayItOn: boolean;
@@ -53,12 +49,8 @@ export interface ResultsScreenProps {
 }
 
 export function ResultsScreen({
-  targetAmount,
-  gameMode,
-  totalRounds,
   mpRoomCode,
   nextRoundSettings,
-  settings,
   isProjectorMode,
   levelNotice,
   sayItOn,
@@ -91,6 +83,10 @@ export function ResultsScreen({
   const bets = useGame(s => s.bets);
   const roundResults = useGame(s => s.roundResults);
   const roundHistory = useGame(s => s.roundHistory);
+  const settings = useGame(s => s.settings);
+  const gameMode = useGame(s => s.gameMode);
+  const totalRounds = useGame(s => s.totalRounds);
+  const targetAmount = useGame(s => s.targetAmount);
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     const {
       isGameOver,

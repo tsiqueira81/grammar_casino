@@ -4,6 +4,10 @@ import { createGameStore, type GameState } from '../state/gameStore';
 const initial = (): GameState => ({
   step: 'PLAYER_SETUP', players: [], currentRound: 1, currentSentence: null,
   bets: {}, hints: {}, roundResults: [], winner: null, roundHistory: [],
+  isSentenceRevealed: false, highlightedPhrase: null, teacherRevealOverride: false, isPaused: false, turnTimers: {},
+  settings: { topic: 'Past simple', level: 'B1', theme: 'Space', challengeFormat: 'binary' } as GameState['settings'],
+  gameMode: 'rounds', totalRounds: 10, targetAmount: 1000,
+  freeDraws: {}, powerUpsUsedThisRound: {}, activePowerUps: {}, availablePowerUps: [], selectedPowerUps: [], roundSpending: {},
 });
 
 describe('game store (package F6)', () => {

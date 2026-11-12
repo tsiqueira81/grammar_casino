@@ -15,7 +15,7 @@ import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
 import { parseDeckText, sentenceRecordOf } from './game/teacherDeck';
-import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type FreeDraws, type MissTally, type SecondLook } from './game/spacing';
+import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type MissTally, type SecondLook } from './game/spacing';
 import { answerSplit, reactionCounts, recordReaction, roomSplitLine, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
@@ -30,7 +30,7 @@ import { checkBet, isBetComplete } from './game/betValidity';
 import { hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { clampBetInput, getBetLimits } from './game/betLimits';
-import { Player, Settings, GeneratedSentence, Bet, Hint, GameError, PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload, GameMode, SoundEffect, UsedPowerUp, WheelItem, RoundHistoryRecord, PlayerTurnTimer, QuestionType, ChallengeFormat } from './types';
+import { Player, Settings, GeneratedSentence, Bet, Hint, GameError, PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload, GameMode, SoundEffect, WheelItem, RoundHistoryRecord, PlayerTurnTimer, QuestionType, ChallengeFormat } from './types';
 import { POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, THEMES, LOCAL_STORAGE_KEY, INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT, getSubtypesForTopic, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS, ALL_QUESTION_TYPES, DEFAULT_MIXED_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS } from './constants';
 import { ArrowLeft, Cloud as CloudIcon, Moon, Projector, Smartphone, Sun, Volume2, VolumeX, Wind, Pause, Play, Maximize, Minimize, Keyboard, Bot } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
@@ -151,40 +151,71 @@ export function App() {
     roundResults: initialGameState?.roundResults || [],
     winner: initialGameState?.winner || null,
     roundHistory: initialGameState?.roundHistory || [],
+    settings: (() => {
+      const saved = initialGameState?.settings;
+      if (saved) {
+        return {
+          ...saved,
+          challengeFormat: saved.challengeFormat || 'binary',
+          mixedFormats: getEffectiveMixedFormats(saved.mixedFormats),
+        };
+      }
+      return initialPrefs.settings ?? {
+        topic: GRAMMAR_TOPICS[0],
+        level: CEFR_LEVELS[2],
+        theme: THEMES[0],
+        challengeFormat: 'binary',
+        mixedFormats: DEFAULT_MIXED_FORMATS,
+      };
+    })(),
+    gameMode: initialGameState?.gameMode || initialPrefs.gameMode || 'rounds',
+    totalRounds: initialGameState?.totalRounds || initialPrefs.totalRounds || 10,
+    targetAmount: initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT,
+    freeDraws: {},
+    isSentenceRevealed: false,
+    powerUpsUsedThisRound: initialGameState?.powerUpsUsedThisRound || {},
+    activePowerUps: initialGameState?.activePowerUps || {},
+    highlightedPhrase: initialGameState?.highlightedPhrase || null,
+    availablePowerUps: (() => {
+      const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+      if (initialGameState?.availablePowerUps) {
+        const saved = initialGameState.availablePowerUps as PowerUpKey[];
+        const missing = allKeys.filter(k => !saved.includes(k));
+        return [...saved, ...missing];
+      }
+      return allKeys;
+    })(),
+    selectedPowerUps: (() => {
+      const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
+      if (initialGameState?.selectedPowerUps) {
+        const saved = initialGameState.selectedPowerUps as PowerUpKey[];
+        const missing = allKeys.filter(k => !saved.includes(k));
+        return [...saved, ...missing];
+      }
+      return initialPrefs.deck ?? allKeys;
+    })(),
+    roundSpending: initialGameState?.roundSpending || {},
+    turnTimers: initialGameState?.turnTimers || {},
+    teacherRevealOverride: initialGameState?.teacherRevealOverride || false,
+    isPaused: false,
   }));
-  const { setStep, setPlayers, setCurrentRound, setCurrentSentence, setBets, setHints, setRoundResults, setWinner, setRoundHistory } = gameStore.getState();
+  const { setStep, setPlayers, setCurrentRound, setCurrentSentence, setBets, setHints, setRoundResults, setWinner, setRoundHistory, setSettings, setGameMode, setTotalRounds, setTargetAmount, setFreeDraws, setIsSentenceRevealed, setPowerUpsUsedThisRound, setActivePowerUps, setHighlightedPhrase, setAvailablePowerUps, setSelectedPowerUps, setRoundSpending, setTurnTimers, setTeacherRevealOverride, setIsPaused } = gameStore.getState();
   const step = useStore(gameStore, s => s.step);
   const players = useStore(gameStore, s => s.players);
   const [newPlayerName, setNewPlayerName] = useState('');
   const playerNameInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [settings, setSettings] = useState<Settings>(() => {
-    const saved = initialGameState?.settings;
-    if (saved) {
-      return {
-        ...saved,
-        challengeFormat: saved.challengeFormat || 'binary',
-        mixedFormats: getEffectiveMixedFormats(saved.mixedFormats),
-      };
-    }
-    return initialPrefs.settings ?? {
-      topic: GRAMMAR_TOPICS[0],
-      level: CEFR_LEVELS[2],
-      theme: THEMES[0],
-      challengeFormat: 'binary',
-      mixedFormats: DEFAULT_MIXED_FORMATS,
-    };
-  });
+  const settings = useStore(gameStore, s => s.settings);
   const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
   const [customTopic, setCustomTopic] = useState(initialGameState?.customTopic || initialPrefs.customTopic || '');
   const [customTheme, setCustomTheme] = useState(initialGameState?.customTheme || initialPrefs.customTheme || '');
   const mixedFormatIndexRef = useRef(0);
   
   // Package G3: a new game starts in "Most money after N hands", the gentlest start for a class.
-  const [gameMode, setGameMode] = useState<GameMode>(initialGameState?.gameMode || initialPrefs.gameMode || 'rounds');
-  const [totalRounds, setTotalRounds] = useState<number | string>(initialGameState?.totalRounds || initialPrefs.totalRounds || 10);
-  const [targetAmount, setTargetAmount] = useState<number | string>(initialGameState?.targetAmount || initialPrefs.targetAmount || DEFAULT_TARGET_AMOUNT);
+  const gameMode = useStore(gameStore, s => s.gameMode);
+  const totalRounds = useStore(gameStore, s => s.totalRounds);
+  const targetAmount = useStore(gameStore, s => s.targetAmount);
   const currentRound = useStore(gameStore, s => s.currentRound);
   const currentRoundRef = useRef(currentRound);
   currentRoundRef.current = currentRound;
@@ -194,7 +225,7 @@ export function App() {
   const missTallyRef = useRef<MissTally>({});
   const spotlightRoundRef = useRef<number | null>(null);
   const fixItRoundRef = useRef<number | null>(null);
-  const [freeDraws, setFreeDraws] = useState<FreeDraws>({});
+  const freeDraws = useStore(gameStore, s => s.freeDraws);
   const handSubtypeRef = useRef<string | null>(null);
   /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
   const fetchTargetRoundRef = useRef<number | null>(null);
@@ -254,34 +285,18 @@ export function App() {
   const [ttsAudioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 }));
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-  const [isSentenceRevealed, setIsSentenceRevealed] = useState(false);
+  const isSentenceRevealed = useStore(gameStore, s => s.isSentenceRevealed);
   
   const [historyPlayer, setHistoryPlayer] = useState<Player | null>(null);
   // powerUpsUsedThisRound tracks usage history for current round per player.
-  const [powerUpsUsedThisRound, setPowerUpsUsedThisRound] = useState<Record<number, UsedPowerUp[]>>(initialGameState?.powerUpsUsedThisRound || {});
-  const [activePowerUps, setActivePowerUps] = useState<Record<number, ActivePowerUp[]>>(initialGameState?.activePowerUps || {}); // PlayerId -> PowerUps[]
+  const powerUpsUsedThisRound = useStore(gameStore, s => s.powerUpsUsedThisRound);
+  const activePowerUps = useStore(gameStore, s => s.activePowerUps); // PlayerId -> PowerUps[]
   const [showPowerUpModal, setShowPowerUpModal] = useState<ShowPowerUpModalPayload | null>(null);
   const [showTargetModal, setShowTargetModal] = useState<ShowTargetModalPayload | null>(null);
-  const [highlightedPhrase, setHighlightedPhrase] = useState<string | null>(initialGameState?.highlightedPhrase || null);
-  const [availablePowerUps, setAvailablePowerUps] = useState<PowerUpKey[]>(() => {
-    const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
-    if (initialGameState?.availablePowerUps) {
-      const saved = initialGameState.availablePowerUps as PowerUpKey[];
-      const missing = allKeys.filter(k => !saved.includes(k));
-      return [...saved, ...missing];
-    }
-    return allKeys;
-  });
-  const [selectedPowerUps, setSelectedPowerUps] = useState<PowerUpKey[]>(() => {
-    const allKeys = Object.keys(POWER_UPS) as PowerUpKey[];
-    if (initialGameState?.selectedPowerUps) {
-      const saved = initialGameState.selectedPowerUps as PowerUpKey[];
-      const missing = allKeys.filter(k => !saved.includes(k));
-      return [...saved, ...missing];
-    }
-    return initialPrefs.deck ?? allKeys;
-  });
-  const [roundSpending, setRoundSpending] = useState<Record<number, number>>(initialGameState?.roundSpending || {}); // PlayerId -> amount spent
+  const highlightedPhrase = useStore(gameStore, s => s.highlightedPhrase);
+  const availablePowerUps = useStore(gameStore, s => s.availablePowerUps);
+  const selectedPowerUps = useStore(gameStore, s => s.selectedPowerUps);
+  const roundSpending = useStore(gameStore, s => s.roundSpending); // PlayerId -> amount spent
 
   const [isSentenceHeaderStuck, setIsSentenceHeaderStuck] = useState(false);
   const sentenceHeaderRef = useRef<HTMLDivElement>(null);
@@ -315,14 +330,14 @@ export function App() {
     if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
     return initialPrefs.turnTimerSeconds ?? 0;
   });
-  const [turnTimers, setTurnTimers] = useState<Record<number, PlayerTurnTimer>>(initialGameState?.turnTimers || {});
+  const turnTimers = useStore(gameStore, s => s.turnTimers);
   const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
   const mpAutoStartedRoundRef = useRef<number>(0);
   const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
-  const [teacherRevealOverride, setTeacherRevealOverride] = useState<boolean>(initialGameState?.teacherRevealOverride || false);
+  const teacherRevealOverride = useStore(gameStore, s => s.teacherRevealOverride);
   // Package R8: the teacher paused the hand. Timers stop, phones show a pause card and take no input.
   const later = useLaterTimers();
-  const [isPaused, setIsPaused] = useState(false);
+  const isPaused = useStore(gameStore, s => s.isPaused);
   const isPausedRef = useRef(false);
   // Package R2: when each phone was last heard from, and who is away (nothing for 45 s).
   const mpLastSeenRef = useRef<Record<number, number>>({});
@@ -5053,18 +5068,13 @@ export function App() {
         case 'SETTINGS':
           return (
             <SetupScreen
-              settings={settings}
               customTopic={customTopic}
               customTheme={customTheme}
-              gameMode={gameMode}
-              totalRounds={totalRounds}
-              targetAmount={targetAmount}
               settingsPart={settingsPart}
               turnTimerSeconds={turnTimerSeconds}
               playSound={playSound}
               setSettingsPart={setSettingsPart}
               handleAdvanceToSettingsPart2={handleAdvanceToSettingsPart2}
-              setSettings={setSettings}
               setCustomTopic={setCustomTopic}
               setCustomTheme={setCustomTheme}
               setMixedFormatSetupWarning={setMixedFormatSetupWarning}
@@ -5074,15 +5084,11 @@ export function App() {
               setOwnDeck={setOwnDeck}
               setShowOwnDeck={setShowOwnDeck}
               mpRoomCode={mpRoomCode}
-              setGameMode={setGameMode}
-              setTotalRounds={setTotalRounds}
               setTurnTimerSeconds={setTurnTimerSeconds}
-              setTurnTimers={setTurnTimers}
               setMpRoundTimer={setMpRoundTimer}
               mpAutoStartedRoundRef={mpAutoStartedRoundRef}
               specialHandsOn={specialHandsOn}
               setSpecialHandsOn={setSpecialHandsOn}
-              setTargetAmount={setTargetAmount}
               autoStartNextTimer={autoStartNextTimer}
               setAutoStartNextTimer={setAutoStartNextTimer}
               adaptiveLevelOn={adaptiveLevelOn}
@@ -5091,7 +5097,6 @@ export function App() {
               setAwardsOn={setAwardsOn}
               sayItOn={sayItOn}
               setSayItOn={setSayItOn}
-              selectedPowerUps={selectedPowerUps}
               setShowDeckConfigModal={setShowDeckConfigModal}
               qualityStored={qualityStored}
               chooseQuality={chooseQuality}
@@ -5106,24 +5111,17 @@ export function App() {
               isPlayerFrozen={isPlayerFrozen}
               mpRoomCode={mpRoomCode}
               mpAwayIds={mpAwayIds}
-              activePowerUps={activePowerUps}
               isTurnTimerEnabled={isTurnTimerEnabled}
               mpSeats={mpSeats}
-              turnTimers={turnTimers}
-              teacherRevealOverride={teacherRevealOverride}
               hasPlayerPlacedBet={hasPlayerPlacedBet}
               handleMpUnlockPlayer={handleMpUnlockPlayer}
-              freeDraws={freeDraws}
               handleBetChange={handleBetChange}
               handleGetHint={handleGetHint}
               playSound={playSound}
               handleBuyRandomPowerUp={handleBuyRandomPowerUp}
-              powerUpsUsedThisRound={powerUpsUsedThisRound}
               handleUpdatePlayerMoney={handleUpdatePlayerMoney}
               handleOpenAvatarModal={handleOpenAvatarModal}
               handleUpdatePlayerName={handleUpdatePlayerName}
-              gameMode={gameMode}
-              targetAmount={targetAmount}
               turnDurationMs={turnDurationMs}
               canPlayerAct={canPlayerAct}
               handleTimerStart={handleTimerStart}
@@ -5134,13 +5132,10 @@ export function App() {
               openSeatPlayerId={openSeatPlayerId}
               isSentenceHeaderStuck={isSentenceHeaderStuck}
               isProjectorMode={isProjectorMode}
-              settings={settings}
               nextRoundSettings={nextRoundSettings}
               desktopStatus={desktopStatus}
               sentenceHeaderRef={sentenceHeaderRef}
-              isSentenceRevealed={isSentenceRevealed}
               isLoading={isLoading}
-              totalRounds={totalRounds}
               specialHandLabel={specialHandLabel}
               secondLookRound={secondLookRound}
               handsLeftLabel={handsLeftLabel}
@@ -5152,12 +5147,9 @@ export function App() {
               isSettingsDeckExpanded={isSettingsDeckExpanded}
               isSentenceHiddenForListening={isSentenceHiddenForListening}
               setListenShownRound={setListenShownRound}
-              highlightedPhrase={highlightedPhrase}
-              selectedPowerUps={selectedPowerUps}
               turnTimerSeconds={turnTimerSeconds}
               handleOpenSettingsModal={handleOpenSettingsModal}
               setTurnTimerSeconds={setTurnTimerSeconds}
-              setTurnTimers={setTurnTimers}
               setMpRoundTimer={setMpRoundTimer}
               mpAutoStartedRoundRef={mpAutoStartedRoundRef}
               handleToggleAllPowerUps={handleToggleAllPowerUps}
@@ -5186,23 +5178,16 @@ export function App() {
               isProcessing={isProcessing}
               handleRevealResults={handleRevealResults}
               processingStatus={processingStatus}
-              setTeacherRevealOverride={setTeacherRevealOverride}
               setConfirmAction={setConfirmAction}
-              setIsPaused={setIsPaused}
               handleSwapSentence={handleSwapSentence}
-              setTotalRounds={setTotalRounds}
               gameClock={gameClock}
             />
           );
         case 'RESULTS':
           return (
             <ResultsScreen
-              targetAmount={targetAmount}
-              gameMode={gameMode}
-              totalRounds={totalRounds}
               mpRoomCode={mpRoomCode}
               nextRoundSettings={nextRoundSettings}
-              settings={settings}
               isProjectorMode={isProjectorMode}
               levelNotice={levelNotice}
               sayItOn={sayItOn}
@@ -5232,10 +5217,6 @@ export function App() {
         case 'GAME_OVER':
           return (
             <GameOverScreen
-              settings={settings}
-              gameMode={gameMode}
-              totalRounds={totalRounds}
-              targetAmount={targetAmount}
               startingCash={startingCash}
               awardsOn={awardsOn}
               ceremonyStage={ceremonyStage}
