@@ -504,11 +504,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [betLostRound, setBetLostRound] = useState<number | null>(null);
   useEffect(() => {
     if (!isOffline || !view || view.step !== 'IN_GAME') return;
-    pendingBetRef.current = { round: view.round, sentence: view.sentence?.text || '', bet: localBet, resent: false };
+    pendingBetRef.current = { round: view.round, sentence: view.sentence?.text || '', bet: localBet, resentAt: null };
   }, [isOffline, localBet, view?.round, view?.step, view?.sentence?.text]);
   useEffect(() => {
     if (!view) return;
-    const { pending, action } = settlePendingBet(pendingBetRef.current, view, isOffline);
+    const { pending, action } = settlePendingBet(pendingBetRef.current, view, isOffline, Date.now());
     const bet = pendingBetRef.current?.bet;
     pendingBetRef.current = pending;
     if (action === 'resend' && bet) sendIntent({ type: 'SET_FULL_BET', bet });
