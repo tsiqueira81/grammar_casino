@@ -20,7 +20,8 @@ I have lived here _____ 2010. [since]
 I have lived here _____ two years. [for | since, during, while]
 The children laughed _____. (HAPPY) [happily]
 spot: He don't like coffee in the morning. -> He doesn't like coffee in the morning.
-order: We have never been to Paris.`;
+order: We have never been to Paris.
+key: I started working here in 2019. | BEEN | I _____ here since 2019. [have been working]`;
 
 function loadSaved(): SavedDeck[] {
   return parseSavedDecks(safeLocalStorage.getItem(SAVED_DECKS_KEY));
@@ -83,7 +84,7 @@ export const OwnDeckModal: React.FC<{
       <p className="text-gc-small text-gc-quiet mb-2">
         One sentence per line. They are dealt first, in this order; after them the game goes on with its own sentences.
         For a mistake, write the sentence, then <b>-&gt;</b> and the correction. For a gap, write _____ and the answer in [brackets].
-        Start a line with <b>spot:</b> for Spot the error, or <b>order:</b> for Word order.
+        Start a line with <b>spot:</b> for Spot the error, <b>order:</b> for Word order, or <b>key:</b> for a key word transformation (first sentence | KEY WORD | second sentence with _____ [answer]).
       </p>
       <textarea
         value={text}

@@ -10,6 +10,9 @@
 //   The children laughed _____. (HAPPY) [happily] word formation: the base word in capitals
 //   spot: She go to school. -> She goes to school.  Spot the error (a mistake line, cut into A to D)
 //   order: She goes to school every day.          Word order (4 to 10 words, shuffled into tiles)
+//   key: I started here in 2019. | BEEN | I _____ here since 2019. [have been working]
+//                                                 key word transformation: first sentence | KEY WORD |
+//                                                 second sentence with a gap [2 to 6 words, more after /]
 //   # a line starting with # is a note and is skipped
 import { validateItem } from '../content/schema';
 import { WORD_ORDER_MAX_WORDS, toSpotError, toWordOrder } from './newFormats';
@@ -134,6 +137,38 @@ function parseLine(raw: string): GeneratedSentence | string {
   } as GeneratedSentence;
 }
 
+/** Key word transformation (package L4): "first sentence | KEY | gapped sentence [answer / other]". */
+function parseKeyWordLine(line: string): GeneratedSentence | string {
+  const parts = line.split('|').map(clean);
+  if (parts.length !== 3) return 'key: needs the first sentence | the KEY WORD | the second sentence with _____ and [the answer]';
+  const [leadIn, keyRaw, rest] = parts;
+  const key = keyRaw.replace(/[^A-Za-z'-]/g, '').toUpperCase();
+  if (!leadIn) return 'key: needs the first sentence before the first |';
+  if (!key || /\s/.test(keyRaw)) return 'key: the KEY WORD between the two | is one word';
+  const bracket = rest.match(/\[([^\]]+)\]\s*$/);
+  if (!/_{2,}/.test(rest)) return 'key: the second sentence needs a gap: _____';
+  if (!bracket) return 'key: put the answer in brackets at the end, for example [has been working]';
+  const text = clean(rest.slice(0, bracket.index).replace(/_{2,}/, GAP));
+  const answers = bracket[1].split('/').map(clean).filter(Boolean);
+  if (!answers.length) return 'key: write the answer in the brackets';
+  const words = answers[0].split(' ');
+  const mid = Math.ceil(words.length / 2);
+  return {
+    text,
+    isCorrect: true,
+    correction: text.replace(GAP, answers[0]),
+    correctAnswer: answers[0],
+    acceptedAnswers: answers,
+    leadInSentence: leadIn,
+    baseWord: key,
+    mark1Parts: [words.slice(0, mid).join(' ')],
+    mark2Parts: [words.slice(mid).join(' ') || words[0]],
+    grammarPhrase: answers[0],
+    explanation: `With ${key}: "${answers[0]}".`,
+    questionType: 'keyWordTransformation',
+  } as GeneratedSentence;
+}
+
 /** The same tiles every time for the same sentence, so a saved deck replays the same way. */
 function seededRand(seed: string): () => number {
   let h = hash(seed) || 1;
@@ -158,9 +193,10 @@ export function parseDeckText(text: string): ParsedDeck {
       return;
     }
     // Package L8 types: "spot:" and "order:" before an ordinary line.
-    const prefix = line.match(/^(spot|order)\s*:\s*/i);
-    const kind = prefix ? (prefix[1].toLowerCase() as 'spot' | 'order') : null;
-    const base = parseLine(prefix ? line.slice(prefix[0].length) : line);
+    const prefix = line.match(/^(spot|order|key)\s*:\s*/i);
+    const kind = prefix ? (prefix[1].toLowerCase() as 'spot' | 'order' | 'key') : null;
+    const body = prefix ? line.slice(prefix[0].length) : line;
+    const base = kind === 'key' ? parseKeyWordLine(body) : parseLine(body);
     if (typeof base === 'string') {
       problems.push({ line: i + 1, text: line, problem: base });
       return;

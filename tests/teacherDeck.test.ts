@@ -132,3 +132,35 @@ describe('Spot the error and Word order lines (L8)', () => {
     expect(deckSummary(deck.items)).toBe('2 sentences: 1 spot the error, 1 word order');
   });
 });
+
+describe('key word transformation lines (package L4)', () => {
+  const deck = parseDeckText(
+    [
+      'key: I started working here in 2019. | BEEN | I _____ here since 2019. [have been working / have been employed]',
+      'key: It is a pity I cannot swim. | WISH | I _____ swim.',
+      'key: only two parts | WORD',
+      'key: She is too young to vote. | OLD | She _____ to vote. [is not old enough / isn\'t old enough]',
+    ].join('\n')
+  );
+
+  it('reads the first sentence, the key word, the gap and the answers', () => {
+    const kwt = deck.items[0];
+    expect(kwt).toMatchObject({
+      questionType: 'keyWordTransformation',
+      leadInSentence: 'I started working here in 2019.',
+      baseWord: 'BEEN',
+      text: 'I _____ here since 2019.',
+      correctAnswer: 'have been working',
+      acceptedAnswers: ['have been working', 'have been employed'],
+    });
+    expect(kwt.mark1Parts).toEqual(['have been']);
+    expect(kwt.mark2Parts).toEqual(['working']);
+    expect(deck.items[1].baseWord).toBe('OLD');
+  });
+
+  it('names the problem with a line that does not fit', () => {
+    expect(deck.problems.map((p) => p.line)).toEqual([2, 3]);
+    expect(deck.problems[0].problem).toMatch(/brackets/);
+    expect(deck.problems[1].problem).toMatch(/^key: needs the first sentence \|/);
+  });
+});
