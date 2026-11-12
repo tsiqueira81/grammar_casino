@@ -13,6 +13,8 @@ export default {
     './constants.ts',
     './types.ts',
     './components/**/*.{ts,tsx}',
+    './screens/**/*.{ts,tsx}',
+    './student/**/*.{ts,tsx}',
     './services/**/*.{ts,tsx}',
     './utils/**/*.{ts,tsx}',
   ],
