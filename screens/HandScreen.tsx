@@ -74,7 +74,6 @@ export interface HandScreenProps {
   openSeatRef: React.RefObject<HTMLDivElement>;
   setOpenSeatPlayerId: React.Dispatch<React.SetStateAction<number>>;
   setIsSentenceHeaderStuck: React.Dispatch<React.SetStateAction<boolean>>;
-  isTableView: boolean;
   currentSpecialHand: SpecialHand;
   handleRevealResults: (force?: unknown) => Promise<void>;
   setConfirmAction: React.Dispatch<React.SetStateAction<{ title: string; message: string; confirmLabel: string; onConfirm: () => void; }>>;
@@ -134,7 +133,6 @@ export function HandScreen({
   openSeatRef,
   setOpenSeatPlayerId,
   setIsSentenceHeaderStuck,
-  isTableView,
   currentSpecialHand,
   handleRevealResults,
   setConfirmAction,
@@ -530,7 +528,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           nextSeatPlayer={nextSeatPlayer}
           renderPlayerSeat={renderPlayerSeat}
           isProjectorMode={isProjectorMode}
-          isTableView={isTableView}
           currentSpecialHand={currentSpecialHand}
         />
         <HandControlBar

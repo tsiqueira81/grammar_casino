@@ -30,7 +30,6 @@ export interface HandTableProps {
   nextSeatPlayer: Player;
   renderPlayerSeat: (player: Player) => React.JSX.Element;
   isProjectorMode: boolean;
-  isTableView: boolean;
   currentSpecialHand: SpecialHand;
 }
 
@@ -53,7 +52,6 @@ export function HandTable({
   nextSeatPlayer,
   renderPlayerSeat,
   isProjectorMode,
-  isTableView,
   currentSpecialHand,
 }: HandTableProps) {
   const mpRoomCode = useGame(s => s.mpRoomCode);
@@ -324,7 +322,6 @@ export function HandTable({
                 }}
                 outLabel="Bankrupt"
                 projectorMode={isProjectorMode}
-                arc={isTableView}
                 hideMoney={currentSpecialHand === 'finalTable'}
               />
             )

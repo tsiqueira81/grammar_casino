@@ -16,18 +16,12 @@ export interface TierSettings {
   maxCoins: number;
   /** Chips drawn for one bet (the rest are left out; the amount is unchanged). */
   maxChipsPerToss: number;
-  /**
-   * Package V7: the finishing light on the still table (High only): a soft bloom on the brightest
-   * gold, a vignette, and one 1024 shadow map from the lamp. 0 means none.
-   */
-  shadowMapSize: number;
-  bloom: boolean;
 }
 
 export const TIER_SETTINGS: Record<Exclude<QualityTier, 'off'>, TierSettings> = {
-  low: { pixelRatio: 1, antialias: false, maxSparks: 120, maxCoins: 24, maxChipsPerToss: 4, shadowMapSize: 0, bloom: false },
-  medium: { pixelRatio: 1.5, antialias: true, maxSparks: 420, maxCoins: 72, maxChipsPerToss: 12, shadowMapSize: 0, bloom: false },
-  high: { pixelRatio: 2, antialias: true, maxSparks: 420, maxCoins: 72, maxChipsPerToss: 12, shadowMapSize: 1024, bloom: true },
+  low: { pixelRatio: 1, antialias: false, maxSparks: 120, maxCoins: 24, maxChipsPerToss: 4 },
+  medium: { pixelRatio: 1.5, antialias: true, maxSparks: 420, maxCoins: 72, maxChipsPerToss: 12 },
+  high: { pixelRatio: 2, antialias: true, maxSparks: 420, maxCoins: 72, maxChipsPerToss: 12 },
 };
 
 /** Budgets for the development overlay (Shift+D). */
