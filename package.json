@@ -18,7 +18,7 @@
     "bots": "tsx scripts/bots.ts",
     "size": "node scripts/check-bundle-size.mjs",
     "audit:content": "tsx scripts/content/audit.ts",
-    "assets": "python3 scripts/assets/build_table.py --out public/models/ && node scripts/assets/preview.mjs"
+    "avatars": "tsx scripts/assets/export_characters.ts > scripts/assets/.characters.json && python3 scripts/assets/build_avatars.py scripts/assets/.characters.json public/avatars3d"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",

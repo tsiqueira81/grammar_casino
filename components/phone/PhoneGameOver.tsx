@@ -116,7 +116,7 @@ export function PhoneGameOver({
               <div className="gc-surface rounded-[20px] p-6 text-center space-y-3">
                 <div className="text-4xl" aria-hidden="true">👑</div>
                 <div className="w-20 h-20 mx-auto rounded-full border-[3px] border-gc-gold p-1 bg-gc-line/[0.08] grid place-items-center">
-                  <PlayerAvatar value={view.winner.avatar} size="xl" className="w-full h-full" animated />
+                  <PlayerAvatar value={view.winner.avatar} size="xl" className="w-full h-full" animated mood="happy" />
                 </div>
                 <div>
                   <div className="text-gc-small font-bold text-gc-money">{isMeChampion ? 'You won the game!' : 'The winner'}</div>

@@ -23,6 +23,8 @@ interface PlayerAvatarProps {
   value: string | undefined | null;
   size?: PlayerAvatarSize;
   animated?: boolean;
+  /** 'happy' holds the 3D character's smile (e.g. the winner); otherwise it blinks and smiles now and then. */
+  mood?: 'idle' | 'happy';
   className?: string;
 }
 
@@ -332,6 +334,70 @@ function renderCharacterSvg(ch: CharacterAvatarDefinition, flair: FlairId) {
   );
 }
 
+// ============================================================================
+// 3D CHARACTERS (Blender renders, scripts/assets/build_avatars.py)
+// ============================================================================
+
+/** Sprite strips: 4 frames side by side (open, blink, happy, wink). `s/` holds the half-size set. */
+const AVATAR_3D_BASE = '/avatars3d/';
+const SMALL_3D_SIZES: ReadonlySet<PlayerAvatarSize> = new Set(['xs', 'sm', 'md']);
+
+export function character3DUrl(id: string, size: PlayerAvatarSize): string {
+  return `${AVATAR_3D_BASE}${SMALL_3D_SIZES.has(size) ? 's/' : ''}${id}.webp`;
+}
+
+export function flair3DUrl(flair: FlairId, size: PlayerAvatarSize): string {
+  return `${AVATAR_3D_BASE}${SMALL_3D_SIZES.has(size) ? 's/' : ''}flair_${flair}.webp`;
+}
+
+const Character3D: React.FC<{
+  ch: CharacterAvatarDefinition;
+  flair: FlairId;
+  size: PlayerAvatarSize;
+  mood: 'idle' | 'happy';
+}> = ({ ch, flair, size, mood }) => {
+  const [failed, setFailed] = useState(false);
+  // Each avatar gets its own rhythm so a table of 35 never blinks in unison.
+  const seed = useMemo(() => Math.random(), []);
+
+  if (failed) {
+    return (
+      <span className="w-[88%] h-[88%] block">{renderCharacterSvg(ch, flair)}</span>
+    );
+  }
+
+  const style = {
+    '--gc-av-dur': `${(8 + seed * 4).toFixed(2)}s`,
+    '--gc-av-delay': `-${(seed * 12).toFixed(2)}s`,
+    '--gc-av-bob-delay': `-${(seed * 3.4).toFixed(2)}s`,
+  } as React.CSSProperties;
+
+  return (
+    <span
+      className={`gc-av3d ${size === 'xs' ? 'gc-av3d-clip' : 'gc-av3d-pop'} ${seed < 0.35 ? 'gc-av3d-alt' : ''} ${
+        mood === 'happy' ? 'gc-av3d-happy' : ''
+      }`}
+      style={style}
+      data-character={ch.id}
+    >
+      <span className="gc-av3d-bob">
+        <span className="gc-av3d-frames">
+          <img
+            src={character3DUrl(ch.id, size)}
+            alt=""
+            draggable={false}
+            decoding="async"
+            onError={() => setFailed(true)}
+          />
+        </span>
+        {flair !== 'none' && (
+          <img className="gc-av3d-flair" src={flair3DUrl(flair, size)} alt="" draggable={false} decoding="async" />
+        )}
+      </span>
+    </span>
+  );
+};
+
 function renderFlairSvg(flair: FlairId) {
   if (flair === 'none') return null;
 
@@ -435,6 +501,7 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
   value,
   size = 'md',
   animated = false,
+  mood = 'idle',
   className = '',
 }) => {
   const parsed = useMemo(() => parseAvatarString(value), [value]);
@@ -445,6 +512,8 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
     parsed.kind === 'emoji' &&
     !(value || '').startsWith('emoji:') &&
     parsed.flair.id === 'none';
+
+  const isCharacter = parsed.kind === 'character' && !!parsed.character;
 
   if (isPlainLegacyEmoji) {
     return (
@@ -459,7 +528,9 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
 
   return (
     <span
-      className={`relative inline-flex items-center justify-center rounded-full shrink-0 overflow-hidden select-none ${sz.box} ${
+      className={`relative inline-flex items-center justify-center rounded-full shrink-0 select-none ${
+        isCharacter ? '' : 'overflow-hidden'
+      } ${sz.box} ${
         animated ? 'transition-transform duration-gc-base hover:scale-105' : ''
       } ${className}`}
       style={{
@@ -469,9 +540,7 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
       aria-hidden="true"
     >
       {parsed.kind === 'character' && parsed.character ? (
-        <span className="w-[88%] h-[88%] block">
-          {renderCharacterSvg(parsed.character, parsed.flair.id)}
-        </span>
+        <Character3D ch={parsed.character} flair={parsed.flair.id} size={size} mood={mood} />
       ) : (
         <span className="relative flex items-center justify-center w-full h-full">
           <span className={`${sz.emoji} leading-none filter drop-shadow-sm`}>

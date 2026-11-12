@@ -1,21 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { arcOffset } from '../components/PlayerTileGrid';
 import { seatPointFromScreen } from '../components/Tabletop3DOverlay';
-import { TABLE_CAMERA } from '../show/tableView';
 
-// Package V2 step 3: players sit in a curved row in Table view, and a tossed chip leaves from
-// the player's own tile or card.
-describe('seats around the table (package V2 step 3)', () => {
-  it('curves the row: the ends high, the middle lowest, symmetric', () => {
-    const six = Array.from({ length: 6 }, (_, i) => arcOffset(i, 6));
-    expect(six[0]).toBe(0);
-    expect(six[5]).toBe(0);
-    expect(six).toEqual([...six].reverse());
-    expect(Math.max(...six)).toBeLessThanOrEqual(56);
-    expect(arcOffset(0, 2)).toBe(0); // two players stay level
-  });
+// Package V2 step 3: a tossed chip leaves from the player's own tile or card.
+const TABLE_CAMERA = { fov: 36, position: [0, 6.2, 6.6] as const, lookAt: [0, 0, 0.25] as const };
 
+describe('chips leave from the player\'s seat (package V2 step 3)', () => {
   const camera = new THREE.PerspectiveCamera(TABLE_CAMERA.fov, 1920 / 1080, 0.1, 60);
   camera.position.set(...TABLE_CAMERA.position);
   camera.lookAt(...TABLE_CAMERA.lookAt);

@@ -86,8 +86,6 @@ export interface Tabletop3DOverlayProps {
   potTotal?: number;
   /** Package V8: the theme's spark colours (gold by default). */
   sparkPalette?: number[];
-  /** Table view: the chips are drawn on the felt under the game screens (which let the felt show through). */
-  behindInterface?: boolean;
 }
 
 interface RigidChipBody {
@@ -281,7 +279,6 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   seatStates,
   onChipImpactSound,
   potTotal = 0,
-  behindInterface = false,
   sparkPalette,
 }) => {
   const sparkPaletteRef = useRef<number[]>(GOLD_PALETTE);
@@ -1286,7 +1283,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         ref={containerRef}
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none overflow-hidden"
-        style={{ zIndex: behindInterface ? -1 : 12 }}
+        style={{ zIndex: 12 }}
       />
       {budgetText && (
         <div className="fixed left-2 bottom-2 z-[90] px-2 py-1 rounded bg-black/75 text-white font-mono text-[11px] pointer-events-none" data-testid="budget-overlay">

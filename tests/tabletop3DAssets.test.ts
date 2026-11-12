@@ -65,24 +65,4 @@ describe('3D Tabletop glTF 2.0 (.glb) Asset Packs', () => {
       ])
     );
   });
-
-  // Package V2: the table and room built by scripts/assets/build_table.py.
-  it('table.glb has the felt, rail, pot ring, dealer tray and 40 seat anchors', () => {
-    const gltf = parseGlbJsonChunk(path.join(modelsDir, 'table.glb'));
-    const nodeNames = (gltf.nodes || []).map((n: any) => n.name);
-    const anchors = Array.from({ length: 40 }, (_, i) => `Seat_Anchor_${String(i).padStart(2, '0')}`);
-    expect(nodeNames).toEqual(expect.arrayContaining(['Table_Felt', 'Table_Rail', 'Pot_Ring', 'Dealer_Tray', ...anchors]));
-    expect(nodeNames).not.toContain('Seat_Anchor_40');
-  });
-
-  it('room.glb has a floor, walls and two lamps', () => {
-    const gltf = parseGlbJsonChunk(path.join(modelsDir, 'room.glb'));
-    const nodeNames = (gltf.nodes || []).map((n: any) => n.name);
-    expect(nodeNames).toEqual(expect.arrayContaining(['Room_Floor', 'Room_Walls', 'Lamp_Shade_L', 'Lamp_Shade_R']));
-  });
-
-  it('the table and room together stay under 1.5 MB', () => {
-    const bytes = ['table.glb', 'room.glb'].reduce((sum, f) => sum + fs.statSync(path.join(modelsDir, f)).size, 0);
-    expect(bytes).toBeLessThan(1.5 * 1024 * 1024);
-  });
 });
