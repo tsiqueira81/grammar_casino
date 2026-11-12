@@ -12,7 +12,6 @@ import { logEvent } from '../utils/debugLog';
 import type { SoundEffect } from '../types';
 
 export interface GameOverScreenProps {
-  startingCash: number;
   awardsOn: boolean;
   ceremonyStage: CeremonyStage;
   onSkipCeremony: () => void;
@@ -23,7 +22,6 @@ export interface GameOverScreenProps {
 }
 
 export function GameOverScreen({
-  startingCash,
   awardsOn,
   ceremonyStage,
   onSkipCeremony,
@@ -40,6 +38,7 @@ export function GameOverScreen({
   const gameMode = useGame(s => s.gameMode);
   const totalRounds = useGame(s => s.totalRounds);
   const targetAmount = useGame(s => s.targetAmount);
+  const startingCash = useGame(s => s.startingCash);
   const ranked = [...players].sort((a, b) => b.money - a.money);
   if (winner) {
     const wi = ranked.findIndex(p => p.id === winner.id);

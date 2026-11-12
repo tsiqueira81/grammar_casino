@@ -13,16 +13,12 @@ import { MultiplayerSeat } from '../utils/multiplayerProtocol';
 import { DEMO_BOT_COUNT } from '../game/demoBots';
 
 export interface LobbyScreenProps {
-  mpSeats: Record<number, MultiplayerSeat>;
   playerNameInputRef: React.RefObject<HTMLInputElement>;
   newPlayerName: string;
   setNewPlayerName: React.Dispatch<React.SetStateAction<string>>;
   handlePlayerNameKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   handleAddPlayer: () => void;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
-  mpRoomCode: string;
-  mpHostConnected: boolean;
-  isDemoRoom: boolean;
   setShowMpLobbyModal: React.Dispatch<React.SetStateAction<boolean>>;
   handleCreateMpRoom: () => Promise<void>;
   startDemoRoom: () => void;
@@ -34,7 +30,6 @@ export interface LobbyScreenProps {
   setTempStartingCash: React.Dispatch<React.SetStateAction<string>>;
   handleSaveStartingCash: () => void;
   setIsEditingStartingCash: React.Dispatch<React.SetStateAction<boolean>>;
-  startingCash: number;
   handleOpenAvatarModal: (playerId: number) => void;
   editingPlayerIdInSetup: number;
   editingPlayerNameInSetup: string;
@@ -56,16 +51,12 @@ export interface LobbyScreenProps {
 }
 
 export function LobbyScreen({
-  mpSeats,
   playerNameInputRef,
   newPlayerName,
   setNewPlayerName,
   handlePlayerNameKeyDown,
   handleAddPlayer,
   playSound,
-  mpRoomCode,
-  mpHostConnected,
-  isDemoRoom,
   setShowMpLobbyModal,
   handleCreateMpRoom,
   startDemoRoom,
@@ -77,7 +68,6 @@ export function LobbyScreen({
   setTempStartingCash,
   handleSaveStartingCash,
   setIsEditingStartingCash,
-  startingCash,
   handleOpenAvatarModal,
   editingPlayerIdInSetup,
   editingPlayerNameInSetup,
@@ -99,6 +89,11 @@ export function LobbyScreen({
 }: LobbyScreenProps) {
   // Package F6: the game in play comes from the store, not through props.
   const players = useGame(s => s.players);
+  const startingCash = useGame(s => s.startingCash);
+  const mpRoomCode = useGame(s => s.mpRoomCode);
+  const mpHostConnected = useGame(s => s.mpHostConnected);
+  const mpSeats = useGame(s => s.mpSeats);
+  const isDemoRoom = useGame(s => s.isDemoRoom);
   const phonesConnected = Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length;
   return (
   <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-8 animate-gc-fade">

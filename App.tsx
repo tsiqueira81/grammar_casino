@@ -16,7 +16,7 @@ import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
 import { parseDeckText, sentenceRecordOf } from './game/teacherDeck';
 import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type MissTally, type SecondLook } from './game/spacing';
-import { answerSplit, reactionCounts, recordReaction, roomSplitLine, type HandReactions } from './game/answerSplit';
+import { answerSplit, reactionCounts, recordReaction, roomSplitLine } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 import { base64ToBytes, pcmToAudioBuffer } from './utils/ttsAudio';
@@ -151,6 +151,29 @@ export function App() {
     roundResults: initialGameState?.roundResults || [],
     winner: initialGameState?.winner || null,
     roundHistory: initialGameState?.roundHistory || [],
+    secondLookRound: null,
+    isLoading: false,
+    isProcessing: false,
+    processingStatus: '',
+    startingCash: initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY,
+    nextRoundSettings: initialGameState?.nextRoundSettings || null,
+    turnTimerSeconds: (() => {
+      const saved = initialGameState?.turnTimerSeconds;
+      if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
+      return initialPrefs.turnTimerSeconds ?? 0;
+    })(),
+    mpRoundTimer: { status: 'idle' },
+    mpAwayIds: [],
+    autoStartNextTimer: initialGameState?.autoStartNextTimer ?? true,
+    mpRoomCode: null,
+    mpRoomLocked: false,
+    mpHostConnected: false,
+    mpSeats: {},
+    mpHideProjectorBets: true,
+    isDemoRoom: false,
+    revealSnapshot: null,
+    handReactions: {},
+    listenShownRound: null,
     settings: (() => {
       const saved = initialGameState?.settings;
       if (saved) {
@@ -199,7 +222,7 @@ export function App() {
     teacherRevealOverride: initialGameState?.teacherRevealOverride || false,
     isPaused: false,
   }));
-  const { setStep, setPlayers, setCurrentRound, setCurrentSentence, setBets, setHints, setRoundResults, setWinner, setRoundHistory, setSettings, setGameMode, setTotalRounds, setTargetAmount, setFreeDraws, setIsSentenceRevealed, setPowerUpsUsedThisRound, setActivePowerUps, setHighlightedPhrase, setAvailablePowerUps, setSelectedPowerUps, setRoundSpending, setTurnTimers, setTeacherRevealOverride, setIsPaused } = gameStore.getState();
+  const { setStep, setPlayers, setCurrentRound, setCurrentSentence, setBets, setHints, setRoundResults, setWinner, setRoundHistory, setSettings, setGameMode, setTotalRounds, setTargetAmount, setFreeDraws, setIsSentenceRevealed, setPowerUpsUsedThisRound, setActivePowerUps, setHighlightedPhrase, setAvailablePowerUps, setSelectedPowerUps, setRoundSpending, setTurnTimers, setTeacherRevealOverride, setIsPaused, setSecondLookRound, setIsLoading, setIsProcessing, setProcessingStatus, setStartingCash, setNextRoundSettings, setTurnTimerSeconds, setMpRoundTimer, setMpAwayIds, setAutoStartNextTimer, setMpRoomCode, setMpRoomLocked, setMpHostConnected, setMpSeats, setMpHideProjectorBets, setIsDemoRoom, setRevealSnapshot, setHandReactions, setListenShownRound } = gameStore.getState();
   const step = useStore(gameStore, s => s.step);
   const players = useStore(gameStore, s => s.players);
   const [newPlayerName, setNewPlayerName] = useState('');
@@ -229,7 +252,7 @@ export function App() {
   const handSubtypeRef = useRef<string | null>(null);
   /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
   const fetchTargetRoundRef = useRef<number | null>(null);
-  const [secondLookRound, setSecondLookRound] = useState<number | null>(null);
+  const secondLookRound = useStore(gameStore, s => s.secondLookRound);
   
   const currentSentence = useStore(gameStore, s => s.currentSentence);
   const [pastSentences, setPastSentences] = useState<string[]>(initialGameState?.pastSentences || []);
@@ -247,9 +270,9 @@ export function App() {
     return batch;
   };
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState('');
+  const isLoading = useStore(gameStore, s => s.isLoading);
+  const isProcessing = useStore(gameStore, s => s.isProcessing);
+  const processingStatus = useStore(gameStore, s => s.processingStatus);
   
   const bets = useStore(gameStore, s => s.bets);
   const hints = useStore(gameStore, s => s.hints);
@@ -305,7 +328,7 @@ export function App() {
   const [showAvatarModal, setShowAvatarModal] = useState<{ playerId: number } | null>(null);
   const [editingPlayerIdInSetup, setEditingPlayerIdInSetup] = useState<number | null>(null);
   const [editingPlayerNameInSetup, setEditingPlayerNameInSetup] = useState('');
-  const [startingCash, setStartingCash] = useState<number>(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY);
+  const startingCash = useStore(gameStore, s => s.startingCash);
   const [isEditingStartingCash, setIsEditingStartingCash] = useState(false);
   const [isLobbyMenuOpen, setIsLobbyMenuOpen] = useState(false);
   const [tempStartingCash, setTempStartingCash] = useState<string>(String(initialGameState?.startingCash ?? initialPrefs.startingCash ?? INITIAL_PLAYER_MONEY));
@@ -316,7 +339,7 @@ export function App() {
   const [showDeckConfigModal, setShowDeckConfigModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsModalTab, setSettingsModalTab] = useState<SettingsModalTab>('topic');
-  const [nextRoundSettings, setNextRoundSettings] = useState<Settings | null>(initialGameState?.nextRoundSettings || null);
+  const nextRoundSettings = useStore(gameStore, s => s.nextRoundSettings);
   const [isSettingsDeckExpanded, setIsSettingsDeckExpanded] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return safeLocalStorage.getItem('grammar_casino_expand_settings_deck') === 'true';
@@ -325,13 +348,9 @@ export function App() {
   });
 
   // --- Betting Turn Timer State ---
-  const [turnTimerSeconds, setTurnTimerSeconds] = useState<number>(() => {
-    const saved = initialGameState?.turnTimerSeconds;
-    if (typeof saved === 'number' && TURN_TIMER_OPTIONS.includes(saved)) return saved;
-    return initialPrefs.turnTimerSeconds ?? 0;
-  });
+  const turnTimerSeconds = useStore(gameStore, s => s.turnTimerSeconds);
   const turnTimers = useStore(gameStore, s => s.turnTimers);
-  const [mpRoundTimer, setMpRoundTimer] = useState<PlayerTurnTimer>({ status: 'idle' });
+  const mpRoundTimer = useStore(gameStore, s => s.mpRoundTimer);
   const mpAutoStartedRoundRef = useRef<number>(0);
   const mpTimerAutoPausedByAllLockedRef = useRef<boolean>(false);
   const teacherRevealOverride = useStore(gameStore, s => s.teacherRevealOverride);
@@ -341,7 +360,7 @@ export function App() {
   const isPausedRef = useRef(false);
   // Package R2: when each phone was last heard from, and who is away (nothing for 45 s).
   const mpLastSeenRef = useRef<Record<number, number>>({});
-  const [mpAwayIds, setMpAwayIds] = useState<number[]>([]);
+  const mpAwayIds = useStore(gameStore, s => s.mpAwayIds);
   // Package T5: "Resume or start fresh" when an unfinished game is opened again later
   // (not when a live room is reopening by itself), and the reports of finished games.
   const [resumeOffer, setResumeOffer] = useState(() => (loadSavedHostRoom() ? null : getResumeOffer(initialGameState, Date.now())));
@@ -370,7 +389,7 @@ export function App() {
   }, [ownDeckItems, ownDeck]);
   const [isFullscreen, setIsFullscreen] = useState(() => typeof document !== 'undefined' && Boolean(document.fullscreenElement));
   isPausedRef.current = isPaused;
-  const [autoStartNextTimer, setAutoStartNextTimer] = useState<boolean>(initialGameState?.autoStartNextTimer ?? true);
+  const autoStartNextTimer = useStore(gameStore, s => s.autoStartNextTimer);
   const turnDurationMs = turnTimerSeconds * 1000;
   const isTurnTimerEnabled = turnTimerSeconds > 0;
 
@@ -382,10 +401,10 @@ export function App() {
     return '';
   });
   const [isStudentControllerMode, setIsStudentControllerMode] = useState<boolean>(() => Boolean(initialUrlRoomCode));
-  const [mpRoomCode, setMpRoomCode] = useState<string | null>(null);
-  const [mpRoomLocked, setMpRoomLocked] = useState<boolean>(false);
-  const [mpHostConnected, setMpHostConnected] = useState<boolean>(false);
-  const [mpSeats, setMpSeats] = useState<Record<number, MultiplayerSeat>>({});
+  const mpRoomCode = useStore(gameStore, s => s.mpRoomCode);
+  const mpRoomLocked = useStore(gameStore, s => s.mpRoomLocked);
+  const mpHostConnected = useStore(gameStore, s => s.mpHostConnected);
+  const mpSeats = useStore(gameStore, s => s.mpSeats);
   const mpSeatsRef = useRef(mpSeats);
   mpSeatsRef.current = mpSeats;
   // Phones asking to play as a name that is already seated on another device (teacher decides).
@@ -396,7 +415,7 @@ export function App() {
   const [showMpLobbyModal, setShowMpLobbyModal] = useState<boolean>(false);
   // Shown for a few seconds after a reload reopened the live room.
   const [mpResumeNotice, setMpResumeNotice] = useState<string | null>(null);
-  const [mpHideProjectorBets, setMpHideProjectorBets] = useState<boolean>(true);
+  const mpHideProjectorBets = useStore(gameStore, s => s.mpHideProjectorBets);
   // Single-screen table layout: defaults to compact grid.
   const [tableLayoutPref, setTableLayoutPref] = useState<'grid' | 'cards'>('grid');
   const [openSeatPlayerId, setOpenSeatPlayerId] = useState<number | null>(null);
@@ -409,7 +428,7 @@ export function App() {
   const mpControllerRef = useRef<HostRoomLike | null>(null);
   // Package T7: a demo room with bots. While it runs nothing is saved, so ending it (a page
   // reload) brings back exactly what was there before.
-  const [isDemoRoom, setIsDemoRoom] = useState(false);
+  const isDemoRoom = useStore(gameStore, s => s.isDemoRoom);
   const [showCoach, setShowCoach] = useState(false);
   const isDemoRef = useRef(false);
   const mpEventHandlerRef = useRef<(ev: HostEventPayload) => void>(() => {});
@@ -426,9 +445,9 @@ export function App() {
   const [teacherGoogleEmail, setTeacherGoogleEmail] = useState<string | null>(null);
   // A yes/no question before an action that cannot be undone (F4 fix 10)
   // Package R8: the table just before the last reveal, for Undo reveal and Correct the ruling.
-  const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
+  const revealSnapshot = useStore(gameStore, s => s.revealSnapshot);
   // Package L5: "Got it" / "Still confused" from the phones, per hand.
-  const [handReactions, setHandReactions] = useState<HandReactions>({});
+  const handReactions = useStore(gameStore, s => s.handReactions);
   // Package T3: the teacher's phone as a remote (one per room).
   const [remotePair, setRemotePair] = useState<{ code: string; key: string; seatId: number | null } | null>(() => {
     try {
@@ -817,7 +836,7 @@ export function App() {
   }, [adaptiveLevelOn, step, roundHistory, currentRound, levelNotice, gameMode, totalRounds, nextRoundSettings, settings]);
   // Listening hand: the sentence stays hidden on the projector and the phones until the reveal,
   // unless the teacher shows it (the round number it was shown for).
-  const [listenShownRound, setListenShownRound] = useState<number | null>(null);
+  const listenShownRound = useStore(gameStore, s => s.listenShownRound);
   const isSentenceHiddenForListening =
     currentSpecialHand === 'listening' && step === 'IN_GAME' && listenShownRound !== currentRound;
   const [specialHandCard, setSpecialHandCard] = useState<{ hand: SpecialHand; round: number } | null>(null);
@@ -5023,16 +5042,12 @@ export function App() {
         case 'PLAYER_SETUP':
           return (
             <LobbyScreen
-              mpSeats={mpSeats}
               playerNameInputRef={playerNameInputRef}
               newPlayerName={newPlayerName}
               setNewPlayerName={setNewPlayerName}
               handlePlayerNameKeyDown={handlePlayerNameKeyDown}
               handleAddPlayer={handleAddPlayer}
               playSound={playSound}
-              mpRoomCode={mpRoomCode}
-              mpHostConnected={mpHostConnected}
-              isDemoRoom={isDemoRoom}
               setShowMpLobbyModal={setShowMpLobbyModal}
               handleCreateMpRoom={handleCreateMpRoom}
               startDemoRoom={startDemoRoom}
@@ -5044,7 +5059,6 @@ export function App() {
               setTempStartingCash={setTempStartingCash}
               handleSaveStartingCash={handleSaveStartingCash}
               setIsEditingStartingCash={setIsEditingStartingCash}
-              startingCash={startingCash}
               handleOpenAvatarModal={handleOpenAvatarModal}
               editingPlayerIdInSetup={editingPlayerIdInSetup}
               editingPlayerNameInSetup={editingPlayerNameInSetup}
@@ -5071,7 +5085,6 @@ export function App() {
               customTopic={customTopic}
               customTheme={customTheme}
               settingsPart={settingsPart}
-              turnTimerSeconds={turnTimerSeconds}
               playSound={playSound}
               setSettingsPart={setSettingsPart}
               handleAdvanceToSettingsPart2={handleAdvanceToSettingsPart2}
@@ -5083,14 +5096,9 @@ export function App() {
               ownDeck={ownDeck}
               setOwnDeck={setOwnDeck}
               setShowOwnDeck={setShowOwnDeck}
-              mpRoomCode={mpRoomCode}
-              setTurnTimerSeconds={setTurnTimerSeconds}
-              setMpRoundTimer={setMpRoundTimer}
               mpAutoStartedRoundRef={mpAutoStartedRoundRef}
               specialHandsOn={specialHandsOn}
               setSpecialHandsOn={setSpecialHandsOn}
-              autoStartNextTimer={autoStartNextTimer}
-              setAutoStartNextTimer={setAutoStartNextTimer}
               adaptiveLevelOn={adaptiveLevelOn}
               setAdaptiveLevelOn={setAdaptiveLevelOn}
               awardsOn={awardsOn}
@@ -5109,10 +5117,7 @@ export function App() {
             <HandScreen
               activePlayers={activePlayers}
               isPlayerFrozen={isPlayerFrozen}
-              mpRoomCode={mpRoomCode}
-              mpAwayIds={mpAwayIds}
               isTurnTimerEnabled={isTurnTimerEnabled}
-              mpSeats={mpSeats}
               hasPlayerPlacedBet={hasPlayerPlacedBet}
               handleMpUnlockPlayer={handleMpUnlockPlayer}
               handleBetChange={handleBetChange}
@@ -5132,12 +5137,9 @@ export function App() {
               openSeatPlayerId={openSeatPlayerId}
               isSentenceHeaderStuck={isSentenceHeaderStuck}
               isProjectorMode={isProjectorMode}
-              nextRoundSettings={nextRoundSettings}
               desktopStatus={desktopStatus}
               sentenceHeaderRef={sentenceHeaderRef}
-              isLoading={isLoading}
               specialHandLabel={specialHandLabel}
-              secondLookRound={secondLookRound}
               handsLeftLabel={handsLeftLabel}
               handleCopySentence={handleCopySentence}
               isCopied={isCopied}
@@ -5146,26 +5148,17 @@ export function App() {
               handleToggleSettingsDeckExpanded={handleToggleSettingsDeckExpanded}
               isSettingsDeckExpanded={isSettingsDeckExpanded}
               isSentenceHiddenForListening={isSentenceHiddenForListening}
-              setListenShownRound={setListenShownRound}
-              turnTimerSeconds={turnTimerSeconds}
               handleOpenSettingsModal={handleOpenSettingsModal}
-              setTurnTimerSeconds={setTurnTimerSeconds}
-              setMpRoundTimer={setMpRoundTimer}
               mpAutoStartedRoundRef={mpAutoStartedRoundRef}
               handleToggleAllPowerUps={handleToggleAllPowerUps}
               setShowDeckConfigModal={setShowDeckConfigModal}
               handleTogglePowerUpInDeck={handleTogglePowerUpInDeck}
-              mpRoundTimer={mpRoundTimer}
-              autoStartNextTimer={autoStartNextTimer}
-              setAutoStartNextTimer={setAutoStartNextTimer}
               handleMpRoundTimerStart={handleMpRoundTimerStart}
               handleMpRoundTimerPause={handleMpRoundTimerPause}
               handleMpRoundTimerAddTime={handleMpRoundTimerAddTime}
               handleMpRoundTimerLockNow={handleMpRoundTimerLockNow}
               handleMpRoundTimerReset={handleMpRoundTimerReset}
               setShowMpLobbyModal={setShowMpLobbyModal}
-              setMpHideProjectorBets={setMpHideProjectorBets}
-              mpHideProjectorBets={mpHideProjectorBets}
               effectiveTableLayout={effectiveTableLayout}
               potNow={potNow}
               lastPotShown={lastPotShown}
@@ -5175,9 +5168,7 @@ export function App() {
               setIsSentenceHeaderStuck={setIsSentenceHeaderStuck}
               isTableView={isTableView}
               currentSpecialHand={currentSpecialHand}
-              isProcessing={isProcessing}
               handleRevealResults={handleRevealResults}
-              processingStatus={processingStatus}
               setConfirmAction={setConfirmAction}
               handleSwapSentence={handleSwapSentence}
               gameClock={gameClock}
@@ -5186,8 +5177,6 @@ export function App() {
         case 'RESULTS':
           return (
             <ResultsScreen
-              mpRoomCode={mpRoomCode}
-              nextRoundSettings={nextRoundSettings}
               isProjectorMode={isProjectorMode}
               levelNotice={levelNotice}
               sayItOn={sayItOn}
@@ -5197,8 +5186,6 @@ export function App() {
               isSpeaking={isSpeaking}
               handleSimplifyExplanation={handleSimplifyExplanation}
               isRevealSnapshotCurrent={isRevealSnapshotCurrent}
-              revealSnapshot={revealSnapshot}
-              handReactions={handReactions}
               handleSaveGameClick={handleSaveGameClick}
               playSound={playSound}
               handleOpenAvatarModal={handleOpenAvatarModal}
@@ -5217,7 +5204,6 @@ export function App() {
         case 'GAME_OVER':
           return (
             <GameOverScreen
-              startingCash={startingCash}
               awardsOn={awardsOn}
               ceremonyStage={ceremonyStage}
               onSkipCeremony={skipCeremony}

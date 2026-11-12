@@ -1,11 +1,11 @@
 // The hand results screen (package F7: moved out of App.tsx without changes).
 
 import { useGame } from '../state/gameStore';
-import { answerSplit, reactionCounts, type HandReactions } from '../game/answerSplit';
+import { answerSplit, reactionCounts } from '../game/answerSplit';
 import { checkGameEnd } from '../game/flow';
-import { undoRevealSecondsLeft, type RevealSnapshot } from '../game/ruling';
+import { undoRevealSecondsLeft } from '../game/ruling';
 import React from 'react';
-import { Settings, SoundEffect, QuestionType } from '../types';
+import { SoundEffect, QuestionType } from '../types';
 import { CHALLENGE_FORMATS } from '../constants';
 import { ArrowDown, ArrowRight, ArrowUp, Cloud as CloudIcon, Save, Volume2, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -20,8 +20,6 @@ import { isGapType, isOptionType, isTypedAnswerType } from '../game/questionType
 import { renderTextSegments } from '../components/TextSegments';
 
 export interface ResultsScreenProps {
-  mpRoomCode: string;
-  nextRoundSettings: Settings;
   isProjectorMode: boolean;
   levelNotice: { round: number; text: string; };
   sayItOn: boolean;
@@ -31,8 +29,6 @@ export interface ResultsScreenProps {
   isSpeaking: boolean;
   handleSimplifyExplanation: () => Promise<void>;
   isRevealSnapshotCurrent: boolean;
-  revealSnapshot: RevealSnapshot;
-  handReactions: HandReactions;
   handleSaveGameClick: () => Promise<void>;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
   handleOpenAvatarModal: (playerId: number) => void;
@@ -49,8 +45,6 @@ export interface ResultsScreenProps {
 }
 
 export function ResultsScreen({
-  mpRoomCode,
-  nextRoundSettings,
   isProjectorMode,
   levelNotice,
   sayItOn,
@@ -60,8 +54,6 @@ export function ResultsScreen({
   isSpeaking,
   handleSimplifyExplanation,
   isRevealSnapshotCurrent,
-  revealSnapshot,
-  handReactions,
   handleSaveGameClick,
   playSound,
   handleOpenAvatarModal,
@@ -87,6 +79,10 @@ export function ResultsScreen({
   const gameMode = useGame(s => s.gameMode);
   const totalRounds = useGame(s => s.totalRounds);
   const targetAmount = useGame(s => s.targetAmount);
+  const revealSnapshot = useGame(s => s.revealSnapshot);
+  const handReactions = useGame(s => s.handReactions);
+  const nextRoundSettings = useGame(s => s.nextRoundSettings);
+  const mpRoomCode = useGame(s => s.mpRoomCode);
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     const {
       isGameOver,

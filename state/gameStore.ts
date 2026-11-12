@@ -7,6 +7,9 @@ import { createContext, useContext } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
 import type { ActivePowerUp, Bet, GameMode, GeneratedSentence, Hint, Player, PlayerTurnTimer, PowerUpKey, RoundHistoryRecord, RoundResultInfo, Settings, Step, UsedPowerUp } from '../types';
 import type { FreeDraws } from '../game/spacing';
+import type { HandReactions } from '../game/answerSplit';
+import type { RevealSnapshot } from '../game/ruling';
+import type { MultiplayerSeat } from '../utils/multiplayerProtocol';
 
 export interface GameState {
   step: Step;
@@ -18,6 +21,25 @@ export interface GameState {
   roundResults: RoundResultInfo[];
   winner: Player | null;
   roundHistory: RoundHistoryRecord[];
+  secondLookRound: number | null;
+  isLoading: boolean;
+  isProcessing: boolean;
+  processingStatus: string;
+  startingCash: number;
+  nextRoundSettings: Settings | null;
+  turnTimerSeconds: number;
+  mpRoundTimer: PlayerTurnTimer;
+  mpAwayIds: number[];
+  autoStartNextTimer: boolean;
+  mpRoomCode: string | null;
+  mpRoomLocked: boolean;
+  mpHostConnected: boolean;
+  mpSeats: Record<number, MultiplayerSeat>;
+  mpHideProjectorBets: boolean;
+  isDemoRoom: boolean;
+  revealSnapshot: RevealSnapshot | null;
+  handReactions: HandReactions;
+  listenShownRound: number | null;
   settings: Settings;
   gameMode: GameMode;
   totalRounds: number | string;
@@ -46,11 +68,15 @@ export type GameStore = StoreApi<GameStoreState>;
 export const GAME_STATE_KEYS = [
   // The table and the hand.
   'step', 'players', 'currentRound', 'currentSentence', 'bets', 'hints', 'roundResults', 'winner', 'roundHistory',
-  'isSentenceRevealed', 'highlightedPhrase', 'teacherRevealOverride', 'isPaused', 'turnTimers',
+  'isSentenceRevealed', 'highlightedPhrase', 'teacherRevealOverride', 'isPaused', 'turnTimers', 'revealSnapshot', 'handReactions',
+  // The hand's pace, and what the screen is busy with.
+  'secondLookRound', 'listenShownRound', 'turnTimerSeconds', 'autoStartNextTimer', 'isLoading', 'isProcessing', 'processingStatus',
   // The game's settings and mode.
-  'settings', 'gameMode', 'totalRounds', 'targetAmount',
+  'settings', 'nextRoundSettings', 'gameMode', 'totalRounds', 'targetAmount', 'startingCash',
   // Power-ups.
   'freeDraws', 'powerUpsUsedThisRound', 'activePowerUps', 'availablePowerUps', 'selectedPowerUps', 'roundSpending',
+  // The live room.
+  'mpRoomCode', 'mpRoomLocked', 'mpHostConnected', 'mpSeats', 'mpAwayIds', 'mpRoundTimer', 'mpHideProjectorBets', 'isDemoRoom',
 ] as const satisfies readonly (keyof GameState)[];
 
 const setterName = (key: string) => `set${key[0].toUpperCase()}${key.slice(1)}`;

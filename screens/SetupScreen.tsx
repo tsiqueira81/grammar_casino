@@ -5,7 +5,7 @@ import { APP_VERSION } from '../utils/debugLog';
 import { type QualityChoice, type QualityTier } from '../show/quality';
 import { deckSummary } from '../game/teacherDeck';
 import React from 'react';
-import { GeneratedSentence, PowerUpKey, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
+import { GeneratedSentence, PowerUpKey, SoundEffect, QuestionType } from '../types';
 import { POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, MIN_TARGET_AMOUNT, TURN_TIMER_OPTIONS, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import { ArrowLeft, ArrowRight, Check, AlertTriangle, Info } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -18,7 +18,6 @@ export interface SetupScreenProps {
   customTopic: string;
   customTheme: string;
   settingsPart: 2 | 1;
-  turnTimerSeconds: number;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
   setSettingsPart: React.Dispatch<React.SetStateAction<2 | 1>>;
   handleAdvanceToSettingsPart2: () => void;
@@ -30,14 +29,9 @@ export interface SetupScreenProps {
   ownDeck: { text: string; name: string; };
   setOwnDeck: React.Dispatch<React.SetStateAction<{ text: string; name: string; }>>;
   setShowOwnDeck: React.Dispatch<React.SetStateAction<boolean>>;
-  mpRoomCode: string;
-  setTurnTimerSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setMpRoundTimer: React.Dispatch<React.SetStateAction<PlayerTurnTimer>>;
   mpAutoStartedRoundRef: React.RefObject<number>;
   specialHandsOn: boolean;
   setSpecialHandsOn: React.Dispatch<React.SetStateAction<boolean>>;
-  autoStartNextTimer: boolean;
-  setAutoStartNextTimer: React.Dispatch<React.SetStateAction<boolean>>;
   adaptiveLevelOn: boolean;
   setAdaptiveLevelOn: React.Dispatch<React.SetStateAction<boolean>>;
   awardsOn: boolean;
@@ -55,7 +49,6 @@ export function SetupScreen({
   customTopic,
   customTheme,
   settingsPart,
-  turnTimerSeconds,
   playSound,
   setSettingsPart,
   handleAdvanceToSettingsPart2,
@@ -67,14 +60,9 @@ export function SetupScreen({
   ownDeck,
   setOwnDeck,
   setShowOwnDeck,
-  mpRoomCode,
-  setTurnTimerSeconds,
-  setMpRoundTimer,
   mpAutoStartedRoundRef,
   specialHandsOn,
   setSpecialHandsOn,
-  autoStartNextTimer,
-  setAutoStartNextTimer,
   adaptiveLevelOn,
   setAdaptiveLevelOn,
   awardsOn,
@@ -100,6 +88,12 @@ export function SetupScreen({
   const setGameMode = useGame(s => s.setGameMode);
   const setTotalRounds = useGame(s => s.setTotalRounds);
   const setTargetAmount = useGame(s => s.setTargetAmount);
+  const turnTimerSeconds = useGame(s => s.turnTimerSeconds);
+  const autoStartNextTimer = useGame(s => s.autoStartNextTimer);
+  const mpRoomCode = useGame(s => s.mpRoomCode);
+  const setTurnTimerSeconds = useGame(s => s.setTurnTimerSeconds);
+  const setAutoStartNextTimer = useGame(s => s.setAutoStartNextTimer);
+  const setMpRoundTimer = useGame(s => s.setMpRoundTimer);
   const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Your own topic") : settings.topic;
   const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
   const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];

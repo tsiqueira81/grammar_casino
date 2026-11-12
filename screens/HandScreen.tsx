@@ -18,7 +18,7 @@ import { MultiplayerRoundTimerFrame } from '../components/TurnTimer';
 import SentenceText from '../components/SentenceText';
 import PowerUpTooltip from '../components/PowerUpTooltip';
 import { SettingsModalTab } from '../components/RoundSettingsModal';
-import { MultiplayerSeat, isBetCompleteForQuestionType, buildAudiencePollSummary } from '../utils/multiplayerProtocol';
+import { isBetCompleteForQuestionType, buildAudiencePollSummary } from '../utils/multiplayerProtocol';
 import * as GeminiService from '../services/geminiService';
 import { sentenceStatus } from '../game/aiStatus';
 import { type SpecialHand } from '../game/specialHands';
@@ -29,10 +29,7 @@ import { STICKY_TOP_PX } from './layout';
 export interface HandScreenProps {
   activePlayers: Player[];
   isPlayerFrozen: (playerId: number) => boolean;
-  mpRoomCode: string;
-  mpAwayIds: number[];
   isTurnTimerEnabled: boolean;
-  mpSeats: Record<number, MultiplayerSeat>;
   hasPlayerPlacedBet: (playerId: number) => boolean;
   handleMpUnlockPlayer: (playerId: number) => void;
   handleBetChange: (playerId: number, field: keyof Bet, value: any, ignoreLock?: boolean) => void;
@@ -52,12 +49,9 @@ export interface HandScreenProps {
   openSeatPlayerId: number;
   isSentenceHeaderStuck: boolean;
   isProjectorMode: boolean;
-  nextRoundSettings: Settings;
   desktopStatus: GeminiService.DesktopStatus;
   sentenceHeaderRef: React.RefObject<HTMLDivElement>;
-  isLoading: boolean;
   specialHandLabel: string;
-  secondLookRound: number;
   handsLeftLabel: string;
   handleCopySentence: () => void;
   isCopied: boolean;
@@ -66,26 +60,17 @@ export interface HandScreenProps {
   handleToggleSettingsDeckExpanded: () => void;
   isSettingsDeckExpanded: boolean;
   isSentenceHiddenForListening: boolean;
-  setListenShownRound: React.Dispatch<React.SetStateAction<number>>;
-  turnTimerSeconds: number;
   handleOpenSettingsModal: (tab?: SettingsModalTab) => void;
-  setTurnTimerSeconds: React.Dispatch<React.SetStateAction<number>>;
-  setMpRoundTimer: React.Dispatch<React.SetStateAction<PlayerTurnTimer>>;
   mpAutoStartedRoundRef: React.RefObject<number>;
   handleToggleAllPowerUps: (activateAll: boolean) => void;
   setShowDeckConfigModal: React.Dispatch<React.SetStateAction<boolean>>;
   handleTogglePowerUpInDeck: (key: PowerUpKey) => void;
-  mpRoundTimer: PlayerTurnTimer;
-  autoStartNextTimer: boolean;
-  setAutoStartNextTimer: React.Dispatch<React.SetStateAction<boolean>>;
   handleMpRoundTimerStart: () => void;
   handleMpRoundTimerPause: () => void;
   handleMpRoundTimerAddTime: () => void;
   handleMpRoundTimerLockNow: () => void;
   handleMpRoundTimerReset: () => void;
   setShowMpLobbyModal: React.Dispatch<React.SetStateAction<boolean>>;
-  setMpHideProjectorBets: React.Dispatch<React.SetStateAction<boolean>>;
-  mpHideProjectorBets: boolean;
   effectiveTableLayout: "grid" | "cards";
   potNow: number;
   lastPotShown: React.RefObject<number>;
@@ -95,9 +80,7 @@ export interface HandScreenProps {
   setIsSentenceHeaderStuck: React.Dispatch<React.SetStateAction<boolean>>;
   isTableView: boolean;
   currentSpecialHand: SpecialHand;
-  isProcessing: boolean;
   handleRevealResults: (force?: unknown) => Promise<void>;
-  processingStatus: string;
   setConfirmAction: React.Dispatch<React.SetStateAction<{ title: string; message: string; confirmLabel: string; onConfirm: () => void; }>>;
   handleSwapSentence: () => void;
   gameClock: string;
@@ -106,10 +89,7 @@ export interface HandScreenProps {
 export function HandScreen({
   activePlayers,
   isPlayerFrozen,
-  mpRoomCode,
-  mpAwayIds,
   isTurnTimerEnabled,
-  mpSeats,
   hasPlayerPlacedBet,
   handleMpUnlockPlayer,
   handleBetChange,
@@ -129,12 +109,9 @@ export function HandScreen({
   openSeatPlayerId,
   isSentenceHeaderStuck,
   isProjectorMode,
-  nextRoundSettings,
   desktopStatus,
   sentenceHeaderRef,
-  isLoading,
   specialHandLabel,
-  secondLookRound,
   handsLeftLabel,
   handleCopySentence,
   isCopied,
@@ -143,26 +120,17 @@ export function HandScreen({
   handleToggleSettingsDeckExpanded,
   isSettingsDeckExpanded,
   isSentenceHiddenForListening,
-  setListenShownRound,
-  turnTimerSeconds,
   handleOpenSettingsModal,
-  setTurnTimerSeconds,
-  setMpRoundTimer,
   mpAutoStartedRoundRef,
   handleToggleAllPowerUps,
   setShowDeckConfigModal,
   handleTogglePowerUpInDeck,
-  mpRoundTimer,
-  autoStartNextTimer,
-  setAutoStartNextTimer,
   handleMpRoundTimerStart,
   handleMpRoundTimerPause,
   handleMpRoundTimerAddTime,
   handleMpRoundTimerLockNow,
   handleMpRoundTimerReset,
   setShowMpLobbyModal,
-  setMpHideProjectorBets,
-  mpHideProjectorBets,
   effectiveTableLayout,
   potNow,
   lastPotShown,
@@ -172,9 +140,7 @@ export function HandScreen({
   setIsSentenceHeaderStuck,
   isTableView,
   currentSpecialHand,
-  isProcessing,
   handleRevealResults,
-  processingStatus,
   setConfirmAction,
   handleSwapSentence,
   gameClock,
@@ -201,6 +167,23 @@ export function HandScreen({
   const setIsPaused = useGame(s => s.setIsPaused);
   const setTurnTimers = useGame(s => s.setTurnTimers);
   const setTotalRounds = useGame(s => s.setTotalRounds);
+  const secondLookRound = useGame(s => s.secondLookRound);
+  const turnTimerSeconds = useGame(s => s.turnTimerSeconds);
+  const autoStartNextTimer = useGame(s => s.autoStartNextTimer);
+  const isLoading = useGame(s => s.isLoading);
+  const isProcessing = useGame(s => s.isProcessing);
+  const processingStatus = useGame(s => s.processingStatus);
+  const nextRoundSettings = useGame(s => s.nextRoundSettings);
+  const mpRoomCode = useGame(s => s.mpRoomCode);
+  const mpSeats = useGame(s => s.mpSeats);
+  const mpAwayIds = useGame(s => s.mpAwayIds);
+  const mpRoundTimer = useGame(s => s.mpRoundTimer);
+  const mpHideProjectorBets = useGame(s => s.mpHideProjectorBets);
+  const setListenShownRound = useGame(s => s.setListenShownRound);
+  const setTurnTimerSeconds = useGame(s => s.setTurnTimerSeconds);
+  const setAutoStartNextTimer = useGame(s => s.setAutoStartNextTimer);
+  const setMpRoundTimer = useGame(s => s.setMpRoundTimer);
+  const setMpHideProjectorBets = useGame(s => s.setMpHideProjectorBets);
     const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
     const isClozeRound = isGapType(currentQuestionType);

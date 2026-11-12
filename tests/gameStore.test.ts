@@ -8,6 +8,10 @@ const initial = (): GameState => ({
   settings: { topic: 'Past simple', level: 'B1', theme: 'Space', challengeFormat: 'binary' } as GameState['settings'],
   gameMode: 'rounds', totalRounds: 10, targetAmount: 1000,
   freeDraws: {}, powerUpsUsedThisRound: {}, activePowerUps: {}, availablePowerUps: [], selectedPowerUps: [], roundSpending: {},
+  revealSnapshot: null, handReactions: {}, secondLookRound: null, listenShownRound: null, turnTimerSeconds: 0,
+  autoStartNextTimer: true, isLoading: false, isProcessing: false, processingStatus: '', nextRoundSettings: null, startingCash: 1000,
+  mpRoomCode: null, mpRoomLocked: false, mpHostConnected: false, mpSeats: {}, mpAwayIds: [], mpRoundTimer: { status: 'idle' },
+  mpHideProjectorBets: true, isDemoRoom: false,
 });
 
 describe('game store (package F6)', () => {
