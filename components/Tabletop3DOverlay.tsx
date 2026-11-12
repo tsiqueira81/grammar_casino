@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BUDGET, FrameGuard, TIER_SETTINGS, type QualityTier } from '../show/quality';
+import { POT_CENTER, POT_CHIP_CAP, potSlot } from '../show/pot';
+import type { PowerUpFlightEvent } from '../show/flight';
+import { TOTEM_NODES, totemScreenPoint, totemsFor, type TotemKind } from '../show/totems';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -37,6 +40,16 @@ export interface PotSweepEvent {
   id: string;
   winnerSeatIndices: number[];
   totalSeats: number;
+  /** The winners' player ids, so the pot can fly to their own cards on screen. */
+  winnerPlayerIds?: number[];
+}
+
+/** Package V4: a power-up card is dealt from the shoe to this player. */
+export interface ShoeDealEvent {
+  id: string;
+  playerId: number;
+  seatIndex: number;
+  totalSeats: number;
 }
 
 export interface BoomerangArcEvent {
@@ -64,8 +77,17 @@ export interface Tabletop3DOverlayProps {
   tossEvent: ChipTossEvent | null;
   sweepEvent: PotSweepEvent | null;
   boomerangEvent: BoomerangArcEvent | null;
+  shoeEvent?: ShoeDealEvent | null;
+  /** Package V4: a targeted power-up flies from one player to another. */
+  flightEvent?: PowerUpFlightEvent | null;
   jackpotEvent?: JackpotEvent | null;
   onChipImpactSound?: (denomination: number) => void;
+  /** Package V3: every bet still on the table this hand. 0 clears the pot. */
+  potTotal?: number;
+  /** Package V8: the theme's spark colours (gold by default). */
+  sparkPalette?: number[];
+  /** Table view: the chips are drawn on the felt under the game screens (which let the felt show through). */
+  behindInterface?: boolean;
 }
 
 interface RigidChipBody {
@@ -87,6 +109,32 @@ interface RigidChipBody {
   wobble: number;
   wobblePhase: number;
   shadow?: THREE.Mesh;
+  /** Package V3: rests on a pot pile until the payout, instead of fading away. */
+  inPot?: boolean;
+  /** The pile's slot on the felt and the height this chip rests at. */
+  slot?: { x: number; z: number };
+  floorY?: number;
+}
+
+interface DealtCard {
+  mesh: THREE.Object3D;
+  slideFrom: THREE.Vector3;
+  arc: THREE.QuadraticBezierCurve3;
+  elapsed: number;
+  scale: number;
+  /** Package V4: the colours of the burst where the card lands (a targeted power-up). */
+  palette?: number[];
+}
+
+interface SeatTotem {
+  mesh: THREE.Object3D;
+  playerId: number;
+  kind: TotemKind;
+  index: number;
+  count: number;
+  /** 0..1 pop-in progress. */
+  pop: number;
+  scale: number;
 }
 
 interface FallingCoin {
@@ -109,6 +157,14 @@ interface ActiveBoomerangFlight {
 }
 
 const MAX_SPARKS = 420;
+const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
+// Package V4: the card shoe on the far rail, right of the dealer tray, and the deal timing.
+const SHOE_POSITION = { x: 1.25, y: 0.02, z: -2.35, turn: -0.35 };
+const SHOE_SCALE = 0.42;
+const CARD_SCALE = 0.62;
+const DEAL_SLIDE_SEC = 0.25;
+const DEAL_FLY_SEC = 0.6;
+const DEAL_FADE_SEC = 0.18;
 const MAX_COINS = 72;
 
 /** Soft round sprite used for sparkles and contact shadows. */
@@ -219,9 +275,17 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
   tossEvent,
   sweepEvent,
   boomerangEvent,
+  shoeEvent,
+  flightEvent,
   jackpotEvent,
+  seatStates,
   onChipImpactSound,
+  potTotal = 0,
+  behindInterface = false,
+  sparkPalette,
 }) => {
+  const sparkPaletteRef = useRef<number[]>(GOLD_PALETTE);
+  sparkPaletteRef.current = sparkPalette && sparkPalette.length ? sparkPalette : GOLD_PALETTE;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const impactCallbackRef = useRef(onChipImpactSound);
   impactCallbackRef.current = onChipImpactSound;
@@ -253,6 +317,10 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     boomerangTemplate: THREE.Object3D;
     chips: RigidChipBody[];
     boomerangs: ActiveBoomerangFlight[];
+    cardTemplate: THREE.Object3D | null;
+    dealtCards: DealtCard[];
+    lastProcessedShoeId: string | null;
+    lastProcessedFlightId: string | null;
     lastProcessedTossId: string | null;
     lastProcessedSweepId: string | null;
     lastProcessedBoomerangId: string | null;
@@ -261,7 +329,12 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     makeShadow: () => THREE.Mesh;
     coins: FallingCoin[];
     wake: () => void;
+    totemTemplates: Partial<Record<TotemKind, THREE.Object3D>>;
+    totems: Map<string, SeatTotem>;
+    syncTotems: () => void;
   } | null>(null);
+  const seatStatesRef = useRef(seatStates);
+  seatStatesRef.current = seatStates;
 
   // Initialize Three.js WebGL scene & load `.glb` chip/boomerang models
   useEffect(() => {
@@ -283,6 +356,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         alpha: true,
         antialias: tier.antialias,
         powerPreference: 'high-performance',
+        // The pot rests between animations, so the browser must keep the last frame.
+        preserveDrawingBuffer: true,
       });
     } catch {
       return;
@@ -377,6 +452,10 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       boomerangTemplate: boomerangFallback as THREE.Object3D,
       chips: [] as RigidChipBody[],
       boomerangs: [] as ActiveBoomerangFlight[],
+      cardTemplate: null as THREE.Object3D | null,
+      dealtCards: [] as DealtCard[],
+      lastProcessedShoeId: null as string | null,
+      lastProcessedFlightId: null as string | null,
       lastProcessedTossId: null as string | null,
       lastProcessedSweepId: null as string | null,
       lastProcessedBoomerangId: null as string | null,
@@ -385,6 +464,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       makeShadow: (() => new THREE.Mesh()) as () => THREE.Mesh,
       coins: [] as FallingCoin[],
       wake: () => {},
+      totemTemplates: {} as Partial<Record<TotemKind, THREE.Object3D>>,
+      totems: new Map<string, SeatTotem>(),
+      syncTotems: () => {},
     };
     sceneRef.current = stateObj;
 
@@ -404,6 +486,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     };
     const updateShadow = (chip: RigidChipBody, visibility = 1) => {
       if (!chip.shadow) return;
+      // Only the bottom chip of a pile casts the pile's shadow, or a tall pile would draw a black blot.
+      if (chip.inPot && chip.settled && (chip.floorY ?? 0) > 0.03) visibility = 0;
       const h = Math.max(0, chip.position.y - 0.02);
       chip.shadow.position.set(chip.position.x, 0.005, chip.position.z);
       const spread = 1 + h * 0.9;
@@ -442,8 +526,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     scene.add(sparkPoints);
     type Spark = { p: THREE.Vector3; v: THREE.Vector3; life: number; max: number; c: THREE.Color };
     const sparks: Spark[] = [];
-    const GOLD_PALETTE = [0xffe08a, 0xf5c542, 0xfff6d5, 0xffb347];
-    stateObj.spawnSparks = (at, count, palette = GOLD_PALETTE, speed = 1) => {
+    stateObj.spawnSparks = (at, count, palette = sparkPaletteRef.current, speed = 1) => {
       for (let i = 0; i < count && sparks.length < Math.min(MAX_SPARKS, tierRef.current.maxSparks); i++) {
         const theta = Math.random() * Math.PI * 2;
         const up = 0.6 + Math.random() * 1.6;
@@ -487,9 +570,41 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       () => {}
     );
 
+    // Package V4: the dealer's card shoe sits on the far rail; power-up cards are dealt from it.
+    loader.load(
+      '/models/card_shoe.glb',
+      (gltf) => {
+        const shoe = gltf.scene.getObjectByName('DealerCardShoe');
+        const card = gltf.scene.getObjectByName('PowerUpCard');
+        if (shoe) {
+          const s = shoe.clone(true);
+          s.position.set(SHOE_POSITION.x, SHOE_POSITION.y, SHOE_POSITION.z);
+          s.rotation.y = SHOE_POSITION.turn;
+          s.scale.setScalar(SHOE_SCALE);
+          scene.add(s);
+          if (!running) renderer.render(scene, camera);
+        }
+        if (card) {
+          const c = card.clone(true);
+          c.position.set(0, 0, 0);
+          stateObj.cardTemplate = c;
+        }
+      },
+      undefined,
+      () => {}
+    );
+
     loader.load(
       '/models/powerup_totems.glb',
       (gltf) => {
+        for (const kind of Object.keys(TOTEM_NODES) as TotemKind[]) {
+          const node = gltf.scene.getObjectByName(TOTEM_NODES[kind].node);
+          if (!node) continue;
+          const t = node.clone(true);
+          t.position.set(0, 0, 0);
+          stateObj.totemTemplates[kind] = t;
+        }
+        stateObj.syncTotems();
         const boomerang = gltf.scene.getObjectByName('Totem_Boomerang');
         if (boomerang) {
           const c = boomerang.clone(true);
@@ -513,8 +628,11 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const SETTLED_FADE_SEC = 0.28;
 
     let running = false;
+    // A chip resting on a pot pile is not work: the loop stops and the still frame stays.
+    const resting = (c: RigidChipBody) => Boolean(c.inPot && c.settled && !c.sweeping && c.wobble <= 0.002);
     const hasWork = () =>
-      stateObj.chips.length > 0 || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
+      stateObj.chips.some((c) => !resting(c)) ||
+      [...stateObj.totems.values()].some((t) => t.pop < 1) || stateObj.dealtCards.length > 0 || stateObj.boomerangs.length > 0 || sparks.length > 0 || stateObj.coins.length > 0;
 
     // Render only while something is moving; an idle overlay costs nothing on the projector laptop.
     stateObj.wake = () => {
@@ -527,7 +645,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     const animate = () => {
       const rawDt = clock.getDelta();
       const dt = Math.min(rawDt, 0.05);
-      const stepped = guard.push(rawDt * 1000);
+      // ?force3d=1 (development screenshots on software WebGL) keeps the chosen tier.
+      const stepped = force3d ? null : guard.push(rawDt * 1000);
       if (stepped) {
         console.info(`[3D] Frame rate too low; table quality now ${stepped}.`);
         qualityCallbackRef.current?.(stepped, 'slow frames');
@@ -575,7 +694,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
             chip.mesh.rotation.x = 0;
             chip.mesh.rotation.z = 0;
           }
-          if (chip.settledTime > SETTLED_HOLD_SEC) {
+          if (chip.settledTime > SETTLED_HOLD_SEC && !chip.inPot) {
             const fadeT = (chip.settledTime - SETTLED_HOLD_SEC) / SETTLED_FADE_SEC;
             if (fadeT >= 1) {
               removeChip(i);
@@ -596,8 +715,16 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         chip.mesh.rotation.y += chip.angularVelocity.y * dt;
         chip.mesh.rotation.z += chip.angularVelocity.z * dt;
 
-        if (chip.position.y <= TABLE_Y) {
-          chip.position.y = TABLE_Y;
+        const floorY = chip.floorY ?? TABLE_Y;
+        if (chip.position.y <= floorY && chip.velocity.y < 0) {
+          chip.position.y = floorY;
+          if (chip.slot) {
+            // A pot chip drops onto its pile: no sliding, only a small hop.
+            chip.position.x = chip.slot.x;
+            chip.position.z = chip.slot.z;
+            chip.velocity.x = 0;
+            chip.velocity.z = 0;
+          }
           if (Math.abs(chip.velocity.y) > 0.75 && chip.bounces < 2) {
             chip.velocity.y = -chip.velocity.y * RESTITUTION;
             chip.velocity.x *= FRICTION;
@@ -619,6 +746,32 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
         chip.mesh.position.copy(chip.position);
         updateShadow(chip);
+      }
+
+      // Package V4: dealt cards slide out of the shoe, arc to the player, then shrink away.
+      for (let i = stateObj.dealtCards.length - 1; i >= 0; i--) {
+        const c = stateObj.dealtCards[i];
+        c.elapsed += dt;
+        const t = c.elapsed;
+        if (t < DEAL_SLIDE_SEC) {
+          const k = t / DEAL_SLIDE_SEC;
+          c.mesh.position.lerpVectors(c.slideFrom, c.arc.v0, k * k * (3 - 2 * k));
+        } else if (t < DEAL_SLIDE_SEC + DEAL_FLY_SEC) {
+          const k = (t - DEAL_SLIDE_SEC) / DEAL_FLY_SEC;
+          const e = 1 - Math.pow(1 - k, 2);
+          c.mesh.position.copy(c.arc.getPoint(e));
+          c.mesh.rotation.y += dt * 9;
+          c.mesh.rotation.z = Math.sin(e * Math.PI) * 0.5;
+        } else {
+          const k = (t - DEAL_SLIDE_SEC - DEAL_FLY_SEC) / DEAL_FADE_SEC;
+          if (k >= 1) {
+            scene.remove(c.mesh);
+            stateObj.dealtCards.splice(i, 1);
+            continue;
+          }
+          c.mesh.scale.setScalar(c.scale * Math.max(0.001, 1 - k));
+          if (k < dt / DEAL_FADE_SEC + 0.001) stateObj.spawnSparks(c.mesh.position, c.palette ? 22 : 12, c.palette ?? [0xe9d5ff, 0xfde68a, 0xffffff], c.palette ? 0.9 : 0.7);
+        }
       }
 
       // Step 3D Boomerang flights along quadratic Bezier curves
@@ -716,6 +869,15 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       coinMesh.count = coinCount;
       coinMesh.instanceMatrix.needsUpdate = true;
 
+      // Package V4: totems pop in with a small overshoot, then rest.
+      for (const t of stateObj.totems.values()) {
+        if (t.pop >= 1) continue;
+        t.pop = Math.min(1, t.pop + dt / 0.35);
+        const k = t.pop;
+        const back = 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
+        t.mesh.scale.setScalar(t.scale * Math.max(0.001, back));
+      }
+
       renderer.render(scene, camera);
       if (showBudgetRef.current && performance.now() - lastBudgetAt > 250) {
         lastBudgetAt = performance.now();
@@ -734,6 +896,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     renderer.render(scene, camera);
 
+
     const handleResize = () => {
       if (!container) return;
       const w = container.clientWidth || window.innerWidth;
@@ -745,9 +908,81 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     };
     window.addEventListener('resize', handleResize);
 
+    // --- Package V4: totems over the seats (shield, ice, crown), placed over each player's tile ---
+    const layoutTotems = (): boolean => {
+      let moved = false;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      for (const t of stateObj.totems.values()) {
+        const el = document.querySelector(`[data-seat-player="${t.playerId}"]`);
+        const r = el?.getBoundingClientRect();
+        const pt = r && r.width > 0 ? totemScreenPoint(r, t.index, t.count) : null;
+        const hit = pt ? seatPointFromScreen({ left: pt.x - 1, top: pt.y, width: 2, height: 0 }, viewport, camera, 0.5) : null;
+        const visible = Boolean(hit);
+        if (t.mesh.visible !== visible) moved = true;
+        t.mesh.visible = visible;
+        if (hit && hit.distanceToSquared(t.mesh.position) > 1e-6) {
+          t.mesh.position.copy(hit);
+          moved = true;
+        }
+      }
+      return moved;
+    };
+    const renderIfIdle = () => {
+      if (!running) renderer.render(scene, camera);
+    };
+    stateObj.syncTotems = () => {
+      const wanted = new Map<string, { playerId: number; kind: TotemKind; index: number; count: number }>();
+      for (const seat of seatStatesRef.current ?? []) {
+        const kinds = totemsFor(seat);
+        kinds.forEach((kind, index) => wanted.set(`${seat.playerId}:${kind}`, { playerId: seat.playerId, kind, index, count: kinds.length }));
+      }
+      let changed = false;
+      for (const [key, t] of stateObj.totems) {
+        if (wanted.has(key)) continue;
+        scene.remove(t.mesh);
+        stateObj.totems.delete(key);
+        changed = true;
+      }
+      for (const [key, w] of wanted) {
+        const have = stateObj.totems.get(key);
+        if (have) {
+          have.index = w.index;
+          have.count = w.count;
+          continue;
+        }
+        const template = stateObj.totemTemplates[w.kind];
+        if (!template) continue;
+        const mesh = template.clone(true);
+        mesh.scale.setScalar(0.001);
+        scene.add(mesh);
+        stateObj.totems.set(key, { mesh, playerId: w.playerId, kind: w.kind, index: w.index, count: w.count, pop: 0, scale: TOTEM_NODES[w.kind].scale });
+        changed = true;
+      }
+      layoutTotems();
+      if (changed) stateObj.wake();
+      else renderIfIdle();
+    };
+    // Tiles move when the page scrolls or the layout changes, so the totems follow them.
+    let layoutQueued = false;
+    const queueLayout = () => {
+      if (layoutQueued || stateObj.totems.size === 0) return;
+      layoutQueued = true;
+      requestAnimationFrame(() => {
+        layoutQueued = false;
+        if (layoutTotems()) renderIfIdle();
+      });
+    };
+    window.addEventListener('scroll', queueLayout, { capture: true, passive: true });
+    window.addEventListener('resize', queueLayout);
+    const totemTimer = window.setInterval(queueLayout, 800);
+    stateObj.syncTotems();
+
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', queueLayout, { capture: true });
+      window.removeEventListener('resize', queueLayout);
+      window.clearInterval(totemTimer);
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       running = false;
       envTexture.dispose();
@@ -781,13 +1016,19 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       ? seatPointFromScreen(seatEl.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, ctx.camera)
       : null;
     const origin = fromScreen ?? getSeatWorldPosition(tossEvent.seatIndex, tossEvent.totalSeats);
-    const potTarget = new THREE.Vector3(0, 0.04, -0.35);
+    const potTarget = new THREE.Vector3(POT_CENTER.x, 0.04, POT_CENTER.z);
+    const potCap = POT_CHIP_CAP[quality === 'off' ? 'low' : quality];
+    let potCount = ctx.chips.filter((c) => c.inPot).length;
 
     chipsToSpawn.forEach((denom, idx) => {
       const template = ctx.chipTemplates[denom] || ctx.chipTemplates[25];
       if (!template) return;
       const mesh = template.clone(true);
       const baseScale = mesh.scale.x || 0.32;
+      // Package V3: the chip joins a pot pile while there is room; past the cap it lands and fades.
+      const keep = potCount < potCap;
+      const slot = keep ? potSlot(potCount++) : null;
+      const chipHeight = Math.max(0.02, new THREE.Box3().setFromObject(template).getSize(new THREE.Vector3()).y);
 
       const startPos = new THREE.Vector3(
         origin.x + (Math.random() - 0.5) * 0.2,
@@ -796,11 +1037,9 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       );
       mesh.position.copy(startPos);
 
-      const landingSpot = new THREE.Vector3(
-        potTarget.x + (Math.random() - 0.5) * 0.55,
-        0.03,
-        potTarget.z + (Math.random() - 0.5) * 0.4
-      );
+      const landingSpot = slot
+        ? new THREE.Vector3(slot.x, 0.03, slot.z)
+        : new THREE.Vector3(potTarget.x + (Math.random() - 0.5) * 0.55, 0.03, potTarget.z + (Math.random() - 0.5) * 0.4);
       const flightTime = 0.42 + Math.random() * 0.1;
       const vx = (landingSpot.x - startPos.x) / flightTime;
       const vz = (landingSpot.z - startPos.z) / flightTime;
@@ -827,10 +1066,13 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
         wobble: 0,
         wobblePhase: 0,
         shadow: ctx.makeShadow(),
+        inPot: keep,
+        slot: slot ? { x: slot.x, z: slot.z } : undefined,
+        floorY: slot ? 0.024 + slot.level * chipHeight * 0.92 : undefined,
       });
     });
     ctx.wake();
-  }, [tossEvent, calmMode]);
+  }, [tossEvent, calmMode, quality]);
 
   // Handle celebratory 3D Pot Sweep on Round Settlement (spawns transient payout chips that arc to winners and vanish)
   useEffect(() => {
@@ -844,8 +1086,31 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
 
     const hasWinners = sweepEvent.winnerSeatIndices.length > 0;
     const houseVaultPos = new THREE.Vector3(0, 0.3, -2.6);
-    const potCenter = new THREE.Vector3(0, 0.08, -0.35);
-    const sweepDenoms = [100, 50, 25, 100, 500, 50, 25, 100];
+    const potCenter = new THREE.Vector3(POT_CENTER.x, 0.08, POT_CENTER.z);
+    // Each winner's own card on screen when it can be found, else their seat on the rail.
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const winnerTargets = sweepEvent.winnerSeatIndices.map((seat, i) => {
+      const id = sweepEvent.winnerPlayerIds?.[i];
+      const el = id !== undefined ? document.querySelector(`[data-seat-player="${id}"]`) : null;
+      const fromScreen = el ? seatPointFromScreen(el.getBoundingClientRect(), viewport, ctx.camera) : null;
+      return fromScreen ?? getSeatWorldPosition(seat, sweepEvent.totalSeats);
+    });
+    const targetFor = (idx: number) => (hasWinners ? winnerTargets[idx % winnerTargets.length].clone() : houseVaultPos.clone());
+
+    // Package V3: the chips that sat in the pot all hand are the ones that fly to the winners.
+    const potChips = ctx.chips.filter((c) => c.inPot && !c.sweeping);
+    potChips.forEach((chip, idx) => {
+      chip.inPot = false;
+      chip.slot = undefined;
+      chip.settled = true;
+      chip.velocity.set(0, 0, 0);
+      chip.sweeping = true;
+      chip.sweepStart = chip.position.clone();
+      chip.sweepTarget = targetFor(idx);
+      chip.sweepProgress = 0;
+      chip.sweepDelay = Math.min(0.6, idx * 0.02);
+    });
+    const sweepDenoms = potChips.length >= 4 ? [] : [100, 50, 25, 100, 500, 50, 25, 100];
 
     sweepDenoms.forEach((denom, idx) => {
       const template = ctx.chipTemplates[denom] || ctx.chipTemplates[100];
@@ -860,12 +1125,7 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       );
       mesh.position.copy(startPos);
 
-      const targetPos = hasWinners
-        ? getSeatWorldPosition(
-            sweepEvent.winnerSeatIndices[idx % sweepEvent.winnerSeatIndices.length],
-            sweepEvent.totalSeats
-          )
-        : houseVaultPos.clone();
+      const targetPos = targetFor(idx);
 
       ctx.scene.add(mesh);
       ctx.chips.push({
@@ -892,6 +1152,73 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
     ctx.spawnSparks(potCenter, hasWinners ? 36 : 14, hasWinners ? undefined : [0xff6b6b, 0xffb347, 0x8b1e1e], hasWinners ? 1.1 : 0.6);
     ctx.wake();
   }, [sweepEvent, calmMode]);
+
+  // Package V4: a totem appears or leaves as a player's shield, freeze or streak changes.
+  useEffect(() => {
+    if (calmMode) return;
+    sceneRef.current?.syncTotems();
+  }, [seatStates, calmMode]);
+
+  // Package V3: when the bets leave the table without a payout (a void hand, a new hand), the pot
+  // chips fade where they lie.
+  useEffect(() => {
+    if (potTotal > 0) return;
+    const ctx = sceneRef.current;
+    if (!ctx) return;
+    let any = false;
+    for (const chip of ctx.chips) {
+      if (!chip.inPot || chip.sweeping) continue;
+      chip.inPot = false;
+      chip.slot = undefined;
+      any = true;
+    }
+    if (any) ctx.wake();
+  }, [potTotal]);
+
+  // Package V4: a power-up card leaves the shoe and flies to the player who drew it.
+  useEffect(() => {
+    if (!shoeEvent || calmMode) return;
+    const ctx = sceneRef.current;
+    if (!ctx || ctx.lastProcessedShoeId === shoeEvent.id) return;
+    ctx.lastProcessedShoeId = shoeEvent.id;
+    if (!ctx.cardTemplate) return;
+    const el = document.querySelector(`[data-seat-player="${shoeEvent.playerId}"]`);
+    const fromScreen = el ? seatPointFromScreen(el.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, ctx.camera, 0.3) : null;
+    const target = fromScreen ?? getSeatWorldPosition(shoeEvent.seatIndex, shoeEvent.totalSeats);
+    const mouth = new THREE.Vector3(SHOE_POSITION.x, SHOE_POSITION.y + 0.12, SHOE_POSITION.z + 0.42);
+    const slideFrom = new THREE.Vector3(SHOE_POSITION.x, SHOE_POSITION.y + 0.12, SHOE_POSITION.z + 0.1);
+    const mid = mouth.clone().add(target).multiplyScalar(0.5).add(new THREE.Vector3(0, 1.4, 0));
+    const mesh = ctx.cardTemplate.clone(true);
+    mesh.scale.setScalar(CARD_SCALE);
+    mesh.position.copy(slideFrom);
+    ctx.scene.add(mesh);
+    ctx.dealtCards.push({ mesh, slideFrom, arc: new THREE.QuadraticBezierCurve3(mouth, mid, target), elapsed: 0, scale: CARD_SCALE });
+    ctx.wake();
+  }, [shoeEvent, calmMode]);
+
+  // Package V4: a targeted power-up card flies from the player who used it to the one it hits.
+  useEffect(() => {
+    if (!flightEvent || calmMode) return;
+    const ctx = sceneRef.current;
+    if (!ctx || ctx.lastProcessedFlightId === flightEvent.id) return;
+    ctx.lastProcessedFlightId = flightEvent.id;
+    if (!ctx.cardTemplate) return;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const seatPoint = (playerId: number, seatIndex: number) => {
+      const el = document.querySelector(`[data-seat-player="${playerId}"]`);
+      return (el ? seatPointFromScreen(el.getBoundingClientRect(), viewport, ctx.camera, 0.3) : null) ?? getSeatWorldPosition(seatIndex, flightEvent.totalSeats);
+    };
+    const from = seatPoint(flightEvent.fromPlayerId, flightEvent.fromSeatIndex);
+    const to = seatPoint(flightEvent.toPlayerId, flightEvent.toSeatIndex);
+    const mid = from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(0, 1.6, 0));
+    const mesh = ctx.cardTemplate.clone(true);
+    mesh.scale.setScalar(CARD_SCALE);
+    mesh.position.copy(from);
+    ctx.scene.add(mesh);
+    // No slide out of the shoe: slideFrom is the start of the arc.
+    ctx.dealtCards.push({ mesh, slideFrom: from.clone(), arc: new THREE.QuadraticBezierCurve3(from, mid, to), elapsed: DEAL_SLIDE_SEC, scale: CARD_SCALE, palette: flightEvent.palette });
+    ctx.wake();
+  }, [flightEvent, calmMode]);
 
   // Handle 3D Boomerang Parabolic Reflection Flight
   useEffect(() => {
@@ -958,7 +1285,8 @@ export const Tabletop3DOverlay: React.FC<Tabletop3DOverlayProps> = ({
       <div
         ref={containerRef}
         aria-hidden="true"
-        className="fixed inset-0 pointer-events-none z-[12] overflow-hidden"
+        className="fixed inset-0 pointer-events-none overflow-hidden"
+        style={{ zIndex: behindInterface ? -1 : 12 }}
       />
       {budgetText && (
         <div className="fixed left-2 bottom-2 z-[90] px-2 py-1 rounded bg-black/75 text-white font-mono text-[11px] pointer-events-none" data-testid="budget-overlay">

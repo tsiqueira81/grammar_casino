@@ -23,6 +23,8 @@ interface PlayerTileGridProps {
   projectorMode?: boolean;
   /** Package V2 step 3: in Table view, up to 8 players sit in one curved row, like seats at the rail. */
   arc?: boolean;
+  /** Package G6 Final Table: the balances stay hidden until the reveal. */
+  hideMoney?: boolean;
 }
 
 export const ARC_MAX_PLAYERS = 8;
@@ -79,7 +81,7 @@ const StatusIcon: React.FC<{ status: SeatStatus; projectorMode?: boolean }> = ({
   }
 };
 
-const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel, projectorMode = false, arc = false }) => {
+const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, onOpen, outLabel, projectorMode = false, arc = false, hideMoney = false }) => {
   const curved = arc && tiles.length >= 2 && tiles.length <= ARC_MAX_PLAYERS;
   return (
     <div
@@ -110,7 +112,7 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             data-seat-player={player.id}
             onClick={() => onOpen(player.id)}
             aria-pressed={isOpen}
-            aria-label={`${player.name}, $${player.money.toLocaleString()}, ${statusText}. Open betting card.`}
+            aria-label={`${player.name}, ${hideMoney ? 'balance hidden' : `$${player.money.toLocaleString()}`}, ${statusText}. Open betting card.`}
             className={`gc-surface relative w-full h-full rounded-gc shadow-gc-1 ${
               projectorMode ? 'px-4 pt-5 pb-4 gap-2.5' : 'px-3 pt-4 pb-3.5 gap-2'
             } flex flex-col items-center text-center cursor-pointer transition-transform duration-gc-fast hover:-translate-y-[3px] focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/70 overflow-hidden ${
@@ -228,8 +230,8 @@ const PlayerTileGrid: React.FC<PlayerTileGridProps> = ({ tiles, openPlayerId, on
             <span className={`w-full ${projectorMode ? 'text-[23px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} text-gc-ink truncate`}>
               {player.name}
             </span>
-            <span className={`${projectorMode ? 'text-[24px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} tabular-nums text-gc-money -mt-1`}>
-              ${player.money.toLocaleString()}
+            <span data-testid="tile-money" className={`${projectorMode ? 'text-[24px] leading-7 font-extrabold' : 'text-gc-lead font-bold'} tabular-nums text-gc-money -mt-1`}>
+              {hideMoney ? '$ ? ? ?' : `$${player.money.toLocaleString()}`}
             </span>
             <span
               className={`inline-flex items-center gap-1.5 ${

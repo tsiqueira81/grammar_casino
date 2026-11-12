@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReport, classResultLine, correctionAccepted, filterHistory, reportToCsv } from '../game/report';
+import { buildReport, classResultLine, correctionAccepted, filterHistory, formatSeconds, handSeconds, reportPace, reportToCsv, studentReview } from '../game/report';
 import type { Player, RoundHistoryRecord, RoundPlayerResult } from '../types';
 
 const player = (id: number, name: string, money: number): Player => ({ id, name, money, avatar: 'a', history: [], winStreak: 0, effects: [] } as unknown as Player);
@@ -66,5 +66,71 @@ describe('classResultLine (package V9)', () => {
     expect(classResultLine(buildReport([], players))).toBe('');
     const even = [hand(1, 'A', true, [res(1, true), res(2, true)]), hand(2, 'B', true, [res(1, true), res(2, true)])];
     expect(classResultLine(buildReport(even, players))).toBe('Together you got 100% right.');
+  });
+});
+
+describe('still confused in the report (package L7)', () => {
+  it('lists hands with "Still confused" answers, most confused first', () => {
+    const withFeedback = [
+      { ...history[0], feedback: { gotIt: 1, confused: 1 } },
+      { ...history[1], feedback: { gotIt: 0, confused: 2 } },
+      { ...history[2], feedback: { gotIt: 3, confused: 0 } },
+    ];
+    const r = buildReport(withFeedback, players);
+    expect(r.stillConfused.map(c => [c.round, c.confused, c.gotIt])).toEqual([[2, 2, 0], [1, 1, 1]]);
+  });
+
+  it('is empty when no phone answered', () => {
+    expect(buildReport(history, players).stillConfused).toEqual([]);
+  });
+});
+
+describe('student slip (package L7)', () => {
+  const mk = (round: number, phrase: string, win: boolean, extra: Record<string, unknown> = {}): RoundHistoryRecord =>
+    ({ round, topic: 'T', level: 'B1', theme: 't', sentence: { text: `S${round}`, isCorrect: false, correction: `Fixed ${round}`, explanation: `Why ${round}`, grammarPhrase: phrase, ...extra }, playerResults: [res(1, win)] } as RoundHistoryRecord);
+
+  it('picks up to three missed hands, newest first, one per grammar point', () => {
+    const h = [mk(1, 'since', false), mk(2, 'since', false), mk(3, 'for', true), mk(4, 'articles', false), mk(5, 'since', false)];
+    expect(studentReview(h, 1).map(i => i.round)).toEqual([5, 4, 2]);
+  });
+
+  it('gives the right answer for gap hands and says when a sentence was right', () => {
+    const h = [mk(1, 'a', false, { questionType: 'multipleChoice', correctAnswer: 'had' }), mk(2, 'b', false, { isCorrect: true })];
+    const items = studentReview(h, 1);
+    expect(items.find(i => i.round === 1)!.answer).toBe('had');
+    expect(items.find(i => i.round === 2)!.answer).toBe('The sentence was already right.');
+    expect(studentReview(h, 99)).toEqual([]);
+  });
+});
+
+describe('time per hand (L7)', () => {
+  const rec = (round: number, seconds: number | null) =>
+    ({
+      round,
+      sentence: { text: `S${round}`, isCorrect: true, correction: '', explanation: '' },
+      topic: 't',
+      level: 'B1',
+      theme: 'x',
+      playerResults: [],
+      timestamp: 1_000_000 + (seconds ?? 0) * 1000,
+      ...(seconds === null ? {} : { dealtAt: 1_000_000 }),
+    }) as unknown as RoundHistoryRecord;
+
+  it('averages the timed hands and lists the slowest three', () => {
+    const pace = reportPace([rec(1, 40), rec(2, 100), rec(3, 60), rec(4, 20), rec(5, null)]);
+    expect(pace?.averageSeconds).toBe(55);
+    expect(pace?.slowest.map((h) => h.round)).toEqual([2, 3, 1]);
+  });
+
+  it('leaves out a hand left open for a long break, and gives null with no timed hand', () => {
+    expect(handSeconds(rec(1, 3600))).toBeNull();
+    expect(reportPace([rec(1, null)])).toBeNull();
+    expect(reportPace([rec(1, 30)])?.slowest).toEqual([]);
+  });
+
+  it('says times in plain words', () => {
+    expect(formatSeconds(45)).toBe('45 s');
+    expect(formatSeconds(80)).toBe('1 min 20 s');
+    expect(formatSeconds(180)).toBe('3 min');
   });
 });

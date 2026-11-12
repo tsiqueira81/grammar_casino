@@ -96,3 +96,71 @@ describe('saved decks', () => {
     expect(changedWords('He have two cats.', 'He has two cats.')).toEqual({ wrong: 'have', right: 'has' });
   });
 });
+
+describe('Spot the error and Word order lines (L8)', () => {
+  const deck = parseDeckText(
+    [
+      "spot: He don't like coffee in the morning. -> He doesn't like coffee in the morning.",
+      'order: We have never been to Paris.',
+      'spot: She goes to school.',
+      'order: Go to bed.',
+    ].join('\n')
+  );
+
+  it('makes a Spot the error item from a mistake line', () => {
+    const spot = deck.items[0];
+    expect(spot.questionType).toBe('spotError');
+    expect(spot.options).toHaveLength(4);
+    expect(spot.options?.some((o) => o.includes("don't"))).toBe(true);
+  });
+
+  it('makes a Word order item, shuffled the same way every time', () => {
+    const order = deck.items[1];
+    expect(order.questionType).toBe('wordOrder');
+    expect(order.correctAnswer).toBe('we have never been to Paris');
+    const again = parseDeckText('order: We have never been to Paris.').items[0];
+    expect(again.text).toBe(order.text);
+  });
+
+  it('names the problem when a line does not fit the type', () => {
+    expect(deck.problems.map((p) => p.line)).toEqual([3, 4]);
+    expect(deck.problems[0].problem).toMatch(/^spot: needs a sentence with a mistake/);
+    expect(deck.problems[1].problem).toMatch(/^order: needs a correct sentence/);
+  });
+
+  it('counts them in the summary', () => {
+    expect(deckSummary(deck.items)).toBe('2 sentences: 1 spot the error, 1 word order');
+  });
+});
+
+describe('key word transformation lines (package L4)', () => {
+  const deck = parseDeckText(
+    [
+      'key: I started working here in 2019. | BEEN | I _____ here since 2019. [have been working / have been employed]',
+      'key: It is a pity I cannot swim. | WISH | I _____ swim.',
+      'key: only two parts | WORD',
+      'key: She is too young to vote. | OLD | She _____ to vote. [is not old enough / isn\'t old enough]',
+    ].join('\n')
+  );
+
+  it('reads the first sentence, the key word, the gap and the answers', () => {
+    const kwt = deck.items[0];
+    expect(kwt).toMatchObject({
+      questionType: 'keyWordTransformation',
+      leadInSentence: 'I started working here in 2019.',
+      baseWord: 'BEEN',
+      text: 'I _____ here since 2019.',
+      correctAnswer: 'have been working',
+      acceptedAnswers: ['have been working', 'have been employed'],
+    });
+    expect(kwt.mark1Parts).toEqual(['have been']);
+    expect(kwt.mark2Parts).toEqual(['working']);
+    expect(deck.items[1].baseWord).toBe('OLD');
+  });
+
+  it('names the problem with a line that does not fit', () => {
+    expect(deck.problems.map((p) => p.line)).toEqual([2, 3]);
+    expect(deck.problems[0].problem).toMatch(/brackets/);
+    expect(deck.problems[1].problem).toMatch(/^key: needs the first sentence \|/);
+  });
+});

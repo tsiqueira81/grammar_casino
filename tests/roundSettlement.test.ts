@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, SettleRoundInput } from '../utils/roundSettlement';
 import { evaluateKeyWordTransformationDeterministic } from '../services/geminiService';
 import { Player, Bet, ActivePowerUp, GeneratedSentence, PlayerEffect, QuestionType } from '../types';
+import { E2E_SENTENCES } from '../utils/e2eContent';
 
 const flawed: GeneratedSentence = {
   text: 'He don\'t like coffee.',
@@ -41,9 +42,10 @@ interface Setup {
   powerUps?: Record<number, ActivePowerUp[]>;
   verifications?: SettleRoundInput['verifications'];
   clozeWordVerifications?: SettleRoundInput['clozeWordVerifications'];
+  payoutMultiplier?: number;
 }
 
-function settle({ sentence = flawed, players, bets, powerUps = {}, verifications = {}, clozeWordVerifications = {} }: Setup) {
+function settle({ sentence = flawed, players, bets, powerUps = {}, verifications = {}, clozeWordVerifications = {}, payoutMultiplier }: Setup) {
   const qType: QuestionType = sentence.questionType || 'binary';
   const { acceptedSet, baseWordNorm } = buildAcceptedAnswerSet(sentence, qType);
   const active = players.filter(p => p.money > 0);
@@ -65,6 +67,8 @@ function settle({ sentence = flawed, players, bets, powerUps = {}, verifications
     hasPlayerPlacedBet: id => typeof bets[id]?.bet === 'number' && Number(bets[id]?.bet) > 0,
     currentRound: 1,
     roundSpending: {},
+    payoutMultiplier,
+    specialHandTitle: payoutMultiplier ? 'Final Table' : undefined,
   });
 }
 
@@ -338,3 +342,41 @@ describe('getAlternativeAcceptedAnswers', () => {
   });
 });
 
+
+describe('special hands (package G6)', () => {
+  it('multiplies wins on a special hand and leaves losses alone', () => {
+    const r = settle({ players: [player(1), player(2)], bets: { 1: flagged(100), 2: validPick(200) }, payoutMultiplier: 2 });
+    expect(money(r, 1)).toBe(1200);
+    expect(money(r, 2)).toBe(800);
+    expect(r.roundResults[0].outcomeText).toContain('Final Table (2×)');
+  });
+});
+
+describe('Spot the error and Word order (L8)', () => {
+  it('Spot the error pays the part with the mistake 1:1 and the other parts lose', () => {
+    const sentence = E2E_SENTENCES.spotError as GeneratedSentence;
+    const r = settle({
+      sentence,
+      players: [player(1), player(2)],
+      bets: { 1: { bet: 100, selectedOption: 'have finished' }, 2: { bet: 50, selectedOption: 'his homework' } },
+    });
+    expect(money(r, 1)).toBe(1100);
+    expect(money(r, 2)).toBe(950);
+  });
+
+  it('Word order pays the exact sentence, with or without the full stop, and nothing else', () => {
+    const sentence = E2E_SENTENCES.wordOrder as GeneratedSentence;
+    const r = settle({
+      sentence,
+      players: [player(1), player(2), player(3)],
+      bets: {
+        1: { bet: 100, clozeAnswer: 'She has already finished her homework.' },
+        2: { bet: 100, clozeAnswer: 'she already has finished her homework' },
+        3: { bet: 40, clozeAnswer: 'she has already finished her homework' },
+      },
+    });
+    expect(money(r, 1)).toBe(1100);
+    expect(money(r, 2)).toBe(900);
+    expect(money(r, 3)).toBe(1040);
+  });
+});

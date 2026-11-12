@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useFocusTrap } from '../utils/useFocusTrap';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import ActionButton from './ActionButton';
@@ -33,6 +34,10 @@ const Modal: React.FC<ModalProps> = ({ title, onClose, children, playSound, clos
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose, closable, playSound]);
 
+  // Package S8: the keyboard stays in this window while it is open.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef);
+
   const handleBackdropClick = () => {
     handleClose();
   };
@@ -50,6 +55,7 @@ const Modal: React.FC<ModalProps> = ({ title, onClose, children, playSound, clos
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.96, opacity: 0, y: 12 }}
         transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

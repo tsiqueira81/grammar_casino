@@ -24,6 +24,27 @@ export interface DesktopStatus {
   maskedKey?: string;
 }
 
+// Package T6: on the web the AI key lives on the game's server, so "AI sentences" depends on
+// whether the server has one. /api/health says so (a yes or no, never the key). Asked at most once
+// every 5 minutes.
+let serverAiCache: { at: number; value: boolean } | null = null;
+export async function serverHasAi(): Promise<boolean> {
+  if (serverAiCache && Date.now() - serverAiCache.at < 5 * 60_000) return serverAiCache.value;
+  let value = false;
+  try {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch('/api/health', { signal: controller?.signal });
+    if (timer) clearTimeout(timer);
+    const body = res.ok ? await res.json() : null;
+    value = Boolean(body && body.aiConfigured === true);
+  } catch {
+    value = false;
+  }
+  serverAiCache = { at: Date.now(), value };
+  return value;
+}
+
 interface ElectronDesktopAPI {
   isDesktop: boolean;
   gemini: {
@@ -68,11 +89,13 @@ export const getDesktopStatus = async (): Promise<DesktopStatus> => {
       console.warn('Failed to get desktop status:', e);
     }
   }
+  const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   return {
     isDesktop: false,
     isPortable: false,
-    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    hasKey: false,
+    isOnline,
+    // On the web, "has a key" means the game's server has one.
+    hasKey: isOnline && typeof fetch === 'function' ? await serverHasAi() : false,
     isEncrypted: false,
   };
 };
@@ -250,6 +273,10 @@ export function forgetUnplayedSentence(text: string | undefined): void {
   if (text) pendingArchive.delete(text);
 }
 
+/**
+ * Package L8: Spot the error and Word order are made from Valid-or-flawed items (a flawed one, or
+ * a short correct one), so they reuse the AI writer, its check and the offline bank.
+ */
 export const generateSentence = async (
   settings: Settings,
   pastSentences: string[] = [],
@@ -258,8 +285,40 @@ export const generateSentence = async (
   pastMistakes: string[] = [],
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
+  if (questionType !== 'spotError' && questionType !== 'wordOrder') {
+    return generateBaseSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+  }
+  if ((import.meta as any).env.DEV && isE2eMode()) return getE2eSentence(questionType, forceCorrect);
+  const { toSpotError, toWordOrder } = await import('../game/newFormats');
+  const convert = (item: GeneratedSentence) => (questionType === 'spotError' ? toSpotError(item) : toWordOrder(item));
+  const wantCorrect = questionType === 'wordOrder';
+  for (let tries = 0; tries < 3; tries++) {
+    const item = await generateBaseSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary');
+    const made = convert(item);
+    if (made) return made;
+  }
+  // The bank has many items: keep drawing until one fits.
+  const { getCuratedSentence } = await import('./fallbackSentences');
+  for (let tries = 0; tries < 40; tries++) {
+    const made = convert({ ...getCuratedSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary'), source: 'bank' });
+    if (made) return made;
+  }
+  const last = questionType === 'spotError'
+    ? toSpotError({ text: 'She don\'t like getting up early on Mondays.', isCorrect: false, correction: 'She doesn\'t like getting up early on Mondays.', errorPhrase: "don't", grammarPhrase: "don't", explanation: 'With she, he and it, the present simple negative is "doesn\'t".', questionType: 'binary' })
+    : toWordOrder({ text: 'We have already finished our homework.', isCorrect: true, correction: '', explanation: '"Already" goes between "have" and the past participle.', grammarPhrase: 'have already finished', questionType: 'binary' });
+  return last!;
+};
+
+const generateBaseSentence = async (
+  settings: Settings,
+  pastSentences: string[] = [],
+  forceCorrect: boolean | null = null,
+  subtype: string | null = null,
+  pastMistakes: string[] = [],
+  questionType?: QuestionType
+): Promise<GeneratedSentence> => {
   const own = nextDeckItem(teacherDeck, pastSentences);
-  if (own) return own;
+  if (own) return { ...own, source: 'own' };
   // Browser tests get a fixed, known sentence for each question type.
   if ((import.meta as any).env.DEV && isE2eMode()) {
     return getE2eSentence(questionType, forceCorrect);
@@ -288,6 +347,7 @@ export const generateSentence = async (
       // Package L3: no silent archiving. The item is saved to the cloud bank only once it has been
       // played and not voided (archivePlayedSentence, called by the game when the hand is over).
       rememberForArchive(data, settings, subtype);
+      data.source = 'ai';
       return data;
     }
     throw new Error("Invalid sentence structure returned from service.");
@@ -296,7 +356,7 @@ export const generateSentence = async (
     logEvent('ai', `Sentence from the built-in bank instead of AI: ${err instanceof Error ? err.message : String(err)}`);
     // Package L1: the offline bank loads only when it is needed.
     const { getCuratedSentence } = await import('./fallbackSentences');
-    return getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+    return { ...getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType), source: 'bank' };
   }
 };
 

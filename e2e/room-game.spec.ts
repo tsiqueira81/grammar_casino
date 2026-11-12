@@ -19,6 +19,9 @@ async function joinPhone(browser: Browser, code: string, name: string): Promise<
   framesReceived.set(phone, frames);
   phone.on('websocket', ws => ws.on('framereceived', f => frames.push(String(f.payload))));
   await phone.goto(`${E2E_URL}&room=${code}`);
+  // Package S9: the link holds the code, so the phone asks only for a name.
+  await expect(phone.getByTestId('joining-room')).toContainText(code);
+  await expect(phone.getByRole('textbox', { name: 'Room code' })).toHaveCount(0);
   await phone.getByRole('textbox', { name: 'Your name' }).fill(name);
   await phone.getByRole('button', { name: 'Join the table' }).click();
   await expect(phone.getByRole('heading', { name: `You're in, ${name}!` })).toBeVisible();
@@ -61,6 +64,20 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     phones.push(phone);
   }
   await expect(host.getByRole('dialog')).toContainText('3 connected');
+
+  // Package S6: each phone has its own comfort settings, kept on that phone.
+  const eva = phones[1];
+  await eva.getByTestId('comfort-button').click();
+  await eva.getByRole('button', { name: 'Larger' }).click();
+  await expect(eva.locator('html')).toHaveClass(/gc-text-zoom/);
+  await eva.getByRole('button', { name: 'Normal' }).click();
+  await expect(eva.locator('html')).not.toHaveClass(/gc-text-zoom/);
+  await eva.getByRole('switch', { name: /Plain font/ }).click();
+  await expect(eva.locator('html')).toHaveClass(/gc-plain-font/);
+  // Less motion stays on for Eva: her result screen must hold still (package S4).
+  await eva.getByRole('switch', { name: /Less motion/ }).click();
+  await eva.getByTestId('comfort-panel').getByRole('button', { name: 'Done' }).click();
+  await expect(phones[0].locator('html')).not.toHaveClass(/gc-plain-font/);
 
   // Multiple-choice game, dealt from the teacher's screen.
   await host.getByRole('button', { name: 'Back to the table' }).click();
@@ -108,6 +125,10 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     await clickButton(phones[i], new RegExp(`^Lock in \\$${players[i].bet} on`));
   }
 
+  // Package S4: once everyone is in, each phone sees the room's split (no right answer yet).
+  await expect(phones[0].getByTestId('room-split')).toContainText(`67% `);
+  await expect(phones[2].getByTestId('room-split')).toContainText('33%');
+
   await clickButton(host, /^Reveal the answer/);
 
   for (let i = 0; i < players.length; i++) {
@@ -118,6 +139,11 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
     // Package L5: the phone shows the student's own answer beside the right one.
     await expect(phone.getByTestId('my-answer')).toContainText(players[i].option);
   }
+
+  // Package S4: with Less motion on, nothing on Eva's result screen keeps moving.
+  // (Without it, the same screen runs coin, pop and slide animations at this moment.)
+  const evaMoving = await eva.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').map(a => (a as CSSAnimation).animationName || 'animation'));
+  expect(evaMoving).toEqual([]);
 
   // Package S4: each phone says where it stands and how far it is to the next place.
   await expect(phones[2].getByTestId('my-place')).toHaveText('You are 1st of 3. You are in the lead.');

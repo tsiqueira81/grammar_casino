@@ -1,13 +1,15 @@
 import { PowerUp, PowerUpKey, WheelItem, GrammarTopic, CEFRLevel, Theme, ChallengeFormat, QuestionType } from './types';
 
-export const ALL_QUESTION_TYPES: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'];
+export const ALL_QUESTION_TYPES: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation', 'spotError', 'wordOrder'];
+/** Package L8: a mixed game starts with the five classic types; the newer two are added by choice. */
+export const DEFAULT_MIXED_FORMATS: QuestionType[] = ['binary', 'multipleChoice', 'openCloze', 'wordFormation', 'keyWordTransformation'];
 
 export const getEffectiveMixedFormats = (mixedFormats?: QuestionType[]): QuestionType[] => {
   if (!Array.isArray(mixedFormats) || mixedFormats.length === 0) {
-    return ALL_QUESTION_TYPES;
+    return DEFAULT_MIXED_FORMATS;
   }
   const filtered = ALL_QUESTION_TYPES.filter(q => mixedFormats.includes(q));
-  return filtered.length > 0 ? filtered : ALL_QUESTION_TYPES;
+  return filtered.length > 0 ? filtered : DEFAULT_MIXED_FORMATS;
 };
 
 export const LOCAL_STORAGE_KEY = 'grammarCasinoGameState';
@@ -520,10 +522,24 @@ export const CHALLENGE_FORMATS: ChallengeFormatOption[] = [
     icon: '🔑',
   },
   {
+    id: 'spotError',
+    label: 'Spot the error',
+    shortLabel: 'Spot the error',
+    subtitle: 'The sentence is cut into 4 parts (A to D). Pick the part with the mistake.',
+    icon: '🔎',
+  },
+  {
+    id: 'wordOrder',
+    label: 'Word order',
+    shortLabel: 'Word order',
+    subtitle: 'Put the mixed-up words back in order to make the sentence.',
+    icon: '🧩',
+  },
+  {
     id: 'mixed',
     label: 'Mixed',
     shortLabel: 'Mixed',
-    subtitle: 'Each hand uses the next question type you choose below. All 5 are on at first.',
+    subtitle: 'Each hand uses the next question type you choose below. The first 5 are on at first.',
     icon: '🔀',
   },
 ];

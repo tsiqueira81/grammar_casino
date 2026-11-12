@@ -4,6 +4,7 @@ import { getRevealGate, isEveryRoomPlayerReady } from './game/revealGate';
 import { useLaterTimers } from './utils/useLaterTimers';
 import { safePlayerName } from './utils/nameFilter';
 import { LATE_BET_GRACE_MS } from './utils/clockSync';
+import { plainDescriptionOf } from './game/powerUpCatalog';
 import { BOOMERANG_REFLECTED_PLACED, clearNegativeEffects, isBoomerangReflected, isProtectedFromWheelBounty, mayBuyPowerUps } from './game/powerUpRules';
 import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds, presenceSummary } from './game/presence';
@@ -14,8 +15,8 @@ import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
 import { OwnDeckModal } from './components/OwnDeckModal';
 import { deckSummary, parseDeckText, sentenceRecordOf } from './game/teacherDeck';
-import { cancelSecondLook, scheduleSecondLook, secondLookFor, type SecondLook } from './game/spacing';
-import { answerSplit, reactionCounts, recordReaction, type HandReactions } from './game/answerSplit';
+import { addMisses, cancelSecondLook, grantFreeDraws, mostMissedPoint, revokeFreeDraws, scheduleSecondLook, secondLookFor, spendFreeDraw, type FreeDraws, type MissTally, type SecondLook } from './game/spacing';
+import { answerSplit, reactionCounts, recordReaction, roomSplitLine, type HandReactions } from './game/answerSplit';
 import { SETUP_PREFS_KEY, parseSetupPrefs, serializeSetupPrefs, type SetupPrefs } from './game/setupPrefs';
 import { addFinishedGame, getResumeOffer, parseFinishedGames, readSave, stampSave, type FinishedGame } from './game/persistence';
 /** Package T5: reports of the last 20 finished games on this computer. */
@@ -39,9 +40,9 @@ import {
   POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, LOCAL_STORAGE_KEY, 
   INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT,
   JACKPOT_MULTIPLIER, AVATARS, TOPIC_SUBTYPES, getSubtypesForTopic, WHEEL_ITEMS, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS,
-  CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
+  CHALLENGE_FORMATS, ALL_QUESTION_TYPES, DEFAULT_MIXED_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS
 } from './constants';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Cloud as CloudIcon, Copy, Lock, LockOpen, Moon, Projector, Save, Smartphone, Sparkles, Sun, Volume2, VolumeX, Wind, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, AlertTriangle, Info, RotateCcw, Eye, Pause, Play, Maximize, Minimize, Keyboard, WifiOff, Flag, Bot, CircleHelp, Clock } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import ActionButton from './components/ActionButton';
 import TextInput from './components/TextInput';
@@ -81,11 +82,16 @@ import type {
   PotSweepEvent,
   JackpotEvent,
   BoomerangArcEvent,
+  ShoeDealEvent,
   Seat3DState,
 } from './components/Tabletop3DOverlay';
 // three.js is only needed on the teacher's table, so phones never download it.
 const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
 const TableBackdrop = React.lazy(() => import('./components/TableBackdrop'));
+/** Package F6 (part): how long the game waits after the last change before saving it. */
+const SAVE_DEBOUNCE_MS = 1000;
+/** Package T2: how long "Undo" stays up after a player is removed. */
+const REMOVE_UNDO_MS = 5000;
 import {
   MultiplayerSeat,
   buildAllPlayerViews,
@@ -94,10 +100,29 @@ import {
   isValidKeyWordTransformationPhrase,
   buildAudiencePollSummary,
   isPlayerUnderdog,
+  SHARED_VIEW_KEYS,
 } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
-import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep } from './utils/musicEngine';
+import { potTotal } from './show/pot';
+import { playCues, revealCueSheet } from './show/director';
+import { lookForTheme } from './show/looks';
+import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from './game/gameLength';
+import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
+import { AWARDS_KEY, computeAwards } from './game/awards';
+import { sentenceStatus } from './game/aiStatus';
+import { flightPalette, type PowerUpFlightEvent } from './show/flight';
+import { useFocusTrap } from './utils/useFocusTrap';
+import LiveAnnouncer from './components/LiveAnnouncer';
+import FirstRunCoach from './components/FirstRunCoach';
+import { DemoRoomController, type HostRoomLike } from './services/demoRoom';
+import { COACH_SEEN_KEY, shouldShowCoach } from './game/coach';
+import { DEMO_BOT_COUNT } from './game/demoBots';
+import { isE2eMode } from './utils/e2eContent';
+import { classListMatch } from './game/classList';
+import { SAY_IT_KEY, SPECIAL_HANDS_KEY, SPECIAL_HAND_INFO, payoutMultiplierFor, specialHandFor, specialHandLabelFor, spotlightRoundFor, fixItRoundFor, classCorrections, type SpecialHand } from './game/specialHands';
+import { phaseAnnouncement } from './game/announce';
+import { DEFAULT_MUSIC_VOLUME, MUSIC_VOLUME_KEY, createMusicEngine, layerForStep, musicDuckFor, secondsLeftOnTimers } from './utils/musicEngine';
 import { createSoundEngine, clampVolume, DEFAULT_SFX_VOLUME, SFX_VOLUME_STORAGE_KEY, SFX_MUTED_STORAGE_KEY } from './utils/soundEngine';
 import { settleRound, buildAcceptedAnswerSet, getAlternativeAcceptedAnswers, normalizeGapAnswer } from './utils/roundSettlement';
 import { markErrorPhrase, diffWords, TextSegment } from './utils/errorHighlight';
@@ -108,6 +133,11 @@ import {
   syncCloudSentenceBank,
   CloudRoster,
 } from './services/firebaseService';
+import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType, questionTypeLabel } from './game/questionTypes';
+import { wordOrderHint } from './game/newFormats';
+import { REMOTE_STORAGE_KEY, buildRemoteView, isRemoteAction, isRemoteAvatar, newRemoteKey, remoteAvatar, remoteLink } from './game/teacherRemote';
+import { RemotePairModal } from './components/RemotePairModal';
+import { SpotErrorSentence, WordTiles, newFormatTask } from './components/NewFormatSentence';
 
 const HOUSE_BAILOUT_AMOUNT = 150;
 // The sentence banner sticks this far from the top of the window, just below the
@@ -308,7 +338,7 @@ export function App() {
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
       challengeFormat: 'binary',
-      mixedFormats: ALL_QUESTION_TYPES,
+      mixedFormats: DEFAULT_MIXED_FORMATS,
     };
   });
   const [mixedFormatSetupWarning, setMixedFormatSetupWarning] = useState<string | null>(null);
@@ -325,6 +355,11 @@ export function App() {
   currentRoundRef.current = currentRound;
   // Package L6: missed grammar points come back two hands later ("a second look").
   const secondLookQueueRef = useRef<SecondLook[]>([]);
+  // Package G6 Spotlight: misses per grammar point, the Spotlight hand, and free draws earned there.
+  const missTallyRef = useRef<MissTally>({});
+  const spotlightRoundRef = useRef<number | null>(null);
+  const fixItRoundRef = useRef<number | null>(null);
+  const [freeDraws, setFreeDraws] = useState<FreeDraws>({});
   const handSubtypeRef = useRef<string | null>(null);
   /** The hand the next fetch is for, when it is not the next hand (Swap this sentence). */
   const fetchTargetRoundRef = useRef<number | null>(null);
@@ -521,7 +556,12 @@ export function App() {
   const [mpStudentNotifications, setMpStudentNotifications] = useState<
     Record<number, { id: string; title: string; message: string; icon?: string } | null>
   >({});
-  const mpControllerRef = useRef<HostRoomController | null>(null);
+  const mpControllerRef = useRef<HostRoomLike | null>(null);
+  // Package T7: a demo room with bots. While it runs nothing is saved, so ending it (a page
+  // reload) brings back exactly what was there before.
+  const [isDemoRoom, setIsDemoRoom] = useState(false);
+  const [showCoach, setShowCoach] = useState(false);
+  const isDemoRef = useRef(false);
   const mpEventHandlerRef = useRef<(ev: HostEventPayload) => void>(() => {});
 
   // Desktop AI Engine and DPAPI Encryption status
@@ -539,6 +579,44 @@ export function App() {
   const [revealSnapshot, setRevealSnapshot] = useState<RevealSnapshot | null>(null);
   // Package L5: "Got it" / "Still confused" from the phones, per hand.
   const [handReactions, setHandReactions] = useState<HandReactions>({});
+  // Package T3: the teacher's phone as a remote (one per room).
+  const [remotePair, setRemotePair] = useState<{ code: string; key: string; seatId: number | null } | null>(() => {
+    try {
+      const raw = safeLocalStorage.getItem(REMOTE_STORAGE_KEY);
+      const saved = raw ? JSON.parse(raw) : null;
+      return saved && typeof saved.code === 'string' && typeof saved.key === 'string' ? { code: saved.code, key: saved.key, seatId: typeof saved.seatId === 'number' ? saved.seatId : null } : null;
+    } catch {
+      return null;
+    }
+  });
+  const remotePairRef = useRef(remotePair);
+  remotePairRef.current = remotePair;
+  /** Remote seats that are no longer the remote (unpaired, or a second phone): their phones are told so, and nothing they send counts. */
+  const [retiredRemoteSeats, setRetiredRemoteSeats] = useState<number[]>([]);
+  const retiredRemoteSeatsRef = useRef(retiredRemoteSeats);
+  retiredRemoteSeatsRef.current = retiredRemoteSeats;
+  const [remoteNotice, setRemoteNotice] = useState<string | null>(null);
+  const [showRemotePair, setShowRemotePair] = useState(false);
+  const [remoteBase, setRemoteBase] = useState('');
+  useEffect(() => {
+    if (remotePair) safeLocalStorage.setItem(REMOTE_STORAGE_KEY, JSON.stringify(remotePair));
+    else safeLocalStorage.removeItem(REMOTE_STORAGE_KEY);
+  }, [remotePair]);
+  // Package L7: the phones' "Got it" / "Still confused" counts go into each hand's record, so the
+  // report and past reports keep them.
+  useEffect(() => {
+    setRoundHistory(prev => {
+      let changed = false;
+      const next = prev.map(r => {
+        if (!handReactions[r.round]) return r;
+        const c = reactionCounts(handReactions, r.round);
+        if (r.feedback && r.feedback.gotIt === c.gotIt && r.feedback.confused === c.confused) return r;
+        changed = true;
+        return { ...r, feedback: c };
+      });
+      return changed ? next : prev;
+    });
+  }, [handReactions]);
   const [undoClock, setUndoClock] = useState(() => Date.now());
   const [showRulingModal, setShowRulingModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -575,6 +653,28 @@ export function App() {
 
   // The vault asks for the teacher's Google sign-in itself (the Firestore rules require it),
   // so it opens straight away.
+  const startDemoRoom = () => {
+    if (mpControllerRef.current) return;
+    playSound('startGame');
+    isDemoRef.current = true;
+    setIsDemoRoom(true);
+    const controller = new DemoRoomController((ev) => mpEventHandlerRef.current(ev));
+    mpControllerRef.current = controller;
+    setMpRoomCode(controller.code);
+    setMpRoomLocked(false);
+    setMpHostConnected(true);
+  };
+  const endDemoRoom = () => {
+    mpControllerRef.current?.destroy();
+    mpControllerRef.current = null;
+    window.location.reload();
+  };
+
+  const closeCoach = () => {
+    setShowCoach(false);
+    safeLocalStorage.setItem(COACH_SEEN_KEY, 'seen');
+  };
+
   const handleOpenCloudModal = (tab: CloudManagerTab = 'rosters') => {
     playSound('click');
     setCloudModalTab(tab);
@@ -667,10 +767,20 @@ export function App() {
     }
   });
   const [activeCutIn, setActiveCutIn] = useState<BroadcastCutInPayload | null>(null);
+  useEffect(() => {
+    if (activeCutIn || showPowerUpModal || !pendingFlightRef.current) return;
+    const flight = pendingFlightRef.current;
+    pendingFlightRef.current = null;
+    setPowerUpFlightEvent(flight);
+  }, [activeCutIn, showPowerUpModal]);
   const [chipTossEvent, setChipTossEvent] = useState<ChipTossEvent | null>(null);
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
   const [jackpotEvent, setJackpotEvent] = useState<JackpotEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
+  const [shoeDealEvent, setShoeDealEvent] = useState<ShoeDealEvent | null>(null);
+  const [powerUpFlightEvent, setPowerUpFlightEvent] = useState<PowerUpFlightEvent | null>(null);
+  // The flight waits until the cut-in and the power-up message are closed, so it is seen on the felt.
+  const pendingFlightRef = useRef<PowerUpFlightEvent | null>(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle('gc-calm', isCalmMode);
@@ -765,10 +875,147 @@ export function App() {
       window.removeEventListener('keydown', begin);
     };
   }, [musicWanted]);
+  // Package S8: the pause window keeps the keyboard while it is open.
+  const pauseDialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(pauseDialogRef, isPaused && step === 'IN_GAME');
+
+  // Package G7: "2 hands left" and "Last hand" on the hand badge.
+  const handsLeftLabel = gameMode === 'rounds' ? handsLeftNote(currentRound, Number(totalRounds)) : null;
+  // Package G7: the teacher's game clock, from the first deal.
+  const [gameStartedAt, setGameStartedAt] = useState<number | null>(null);
+  /** Package L7: when this hand's sentence was shown, for "time per hand" in the report. */
+  const handShownAtRef = useRef<number | null>(null);
+  const handShownTextRef = useRef<string>('');
   useEffect(() => {
-    musicEngine.setLayer(layerForStep(step));
-    musicEngine.duck(step === 'RESULTS' ? 0.3 : 1);
+    if (step !== 'IN_GAME' || isLoading || !currentSentence) return;
+    const key = `${currentRound}|${currentSentence.text}`;
+    if (handShownTextRef.current === key) return;
+    handShownTextRef.current = key;
+    handShownAtRef.current = Date.now();
+  }, [step, isLoading, currentSentence, currentRound]);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (step === 'PLAYER_SETUP') setGameStartedAt(null);
+    else if (step === 'IN_GAME' && currentRound === 1) setGameStartedAt(prev => prev ?? Date.now());
+  }, [step, currentRound]);
+  useEffect(() => {
+    if (step !== 'IN_GAME' && step !== 'RESULTS') return;
+    setClockNow(Date.now());
+    const timer = setInterval(() => setClockNow(Date.now()), 15000);
+    return () => clearInterval(timer);
   }, [step]);
+  const clockStart = gameStartedAt ?? roundHistory[0]?.timestamp ?? null;
+  const handsDone = step === 'RESULTS' ? currentRound : currentRound - 1;
+  const gameClock = clockStart
+    ? gameClockText({
+        elapsedMs: clockNow - clockStart,
+        handsDone,
+        handsLeft: gameMode === 'rounds' ? Number(totalRounds) - handsDone : null,
+      })
+    : null;
+
+  // Package G6: special hands, off unless the teacher turns them on.
+  const [specialHandsOn, setSpecialHandsOn] = useState<boolean>(() => safeLocalStorage.getItem(SPECIAL_HANDS_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(SPECIAL_HANDS_KEY, specialHandsOn ? 'on' : 'off');
+  }, [specialHandsOn]);
+  const currentSpecialHand: SpecialHand | null = specialHandFor({
+    enabled: specialHandsOn,
+    gameMode,
+    round: currentRound,
+    totalRounds: Number(totalRounds),
+    secondLookRound,
+    questionType: currentSentence?.questionType,
+    sentenceIsCorrect: currentSentence ? currentSentence.isCorrect : null,
+  });
+  const specialHandLabel = specialHandLabelFor(currentSpecialHand);
+  spotlightRoundRef.current = specialHandsOn && gameMode === 'rounds' ? spotlightRoundFor(Number(totalRounds)) : null;
+  fixItRoundRef.current = specialHandsOn && gameMode === 'rounds' ? fixItRoundFor(Number(totalRounds)) : null;
+  // Package L9: "Say it" after each reveal, off unless the teacher turns it on.
+  const [sayItOn, setSayItOn] = useState<boolean>(() => safeLocalStorage.getItem(SAY_IT_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(SAY_IT_KEY, sayItOn ? 'on' : 'off');
+  }, [sayItOn]);
+  // Package L6: the level follows the class, off unless the teacher turns it on.
+  const [adaptiveLevelOn, setAdaptiveLevelOn] = useState<boolean>(() => safeLocalStorage.getItem(ADAPTIVE_LEVEL_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(ADAPTIVE_LEVEL_KEY, adaptiveLevelOn ? 'on' : 'off');
+  }, [adaptiveLevelOn]);
+  // Package G3 / V9: end-of-game awards, off unless the teacher turns them on.
+  const [awardsOn, setAwardsOn] = useState<boolean>(() => safeLocalStorage.getItem(AWARDS_KEY) === 'on');
+  useEffect(() => {
+    safeLocalStorage.setItem(AWARDS_KEY, awardsOn ? 'on' : 'off');
+  }, [awardsOn]);
+  const adaptLastChangeRef = useRef(0);
+  const [levelNotice, setLevelNotice] = useState<{ round: number; text: string } | null>(null);
+  useEffect(() => {
+    if (step === 'IN_GAME' && currentRound === 1) {
+      adaptLastChangeRef.current = 0;
+      setLevelNotice(null);
+    }
+  }, [step, currentRound]);
+  useEffect(() => {
+    if (!adaptiveLevelOn || step !== 'RESULTS' || roundHistory.length === 0) return;
+    if (roundHistory[roundHistory.length - 1].round !== currentRound || levelNotice?.round === currentRound) return;
+    if (gameMode === 'rounds' && currentRound >= Number(totalRounds)) return;
+    const base = nextRoundSettings || settings;
+    const change = nextAdaptiveLevel({ levels: CEFR_LEVELS, current: base.level, history: roundHistory, lastChangeRound: adaptLastChangeRef.current });
+    if (!change) return;
+    adaptLastChangeRef.current = currentRound;
+    setNextRoundSettings({ ...base, level: change.level as Settings['level'] });
+    setLevelNotice({ round: currentRound, text: levelChangeNotice(change) });
+  }, [adaptiveLevelOn, step, roundHistory, currentRound, levelNotice, gameMode, totalRounds, nextRoundSettings, settings]);
+  // Listening hand: the sentence stays hidden on the projector and the phones until the reveal,
+  // unless the teacher shows it (the round number it was shown for).
+  const [listenShownRound, setListenShownRound] = useState<number | null>(null);
+  const isSentenceHiddenForListening =
+    currentSpecialHand === 'listening' && step === 'IN_GAME' && listenShownRound !== currentRound;
+  const [specialHandCard, setSpecialHandCard] = useState<{ hand: SpecialHand; round: number } | null>(null);
+  useEffect(() => {
+    if (step !== 'IN_GAME' || !currentSpecialHand) return;
+    setSpecialHandCard({ hand: currentSpecialHand, round: currentRound });
+    playSound('success');
+    // A title card when the hand is dealt; not again for the same hand.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, currentRound, currentSpecialHand]);
+  useEffect(() => {
+    if (!specialHandCard) return;
+    const timer = setTimeout(() => setSpecialHandCard(null), isCalmMode ? 1800 : 2500);
+    return () => clearTimeout(timer);
+  }, [specialHandCard, isCalmMode]);
+
+  // Package V8: the theme sets the felt, the lamp, the sparks and the music key.
+  const stageLook = lookForTheme(settings.theme);
+  useEffect(() => {
+    musicEngine.setKey(stageLook.musicKey);
+  }, [stageLook]);
+
+  // Package V3: the pot plaque counts up from the last total it showed.
+  const potNow = potTotal(bets);
+  const lastPotShown = useRef(potNow);
+  useEffect(() => {
+    lastPotShown.current = potNow;
+  }, [potNow]);
+
+  // The music turns tense in the last 5 seconds of a turn timer, and drops while a sentence is read aloud.
+  const [musicSecondsLeft, setMusicSecondsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    const timers = mpRoomCode ? [mpRoundTimer] : (Object.values(turnTimers) as PlayerTurnTimer[]);
+    if (step !== 'IN_GAME' || !isTurnTimerEnabled || secondsLeftOnTimers(timers, Date.now()) === null) {
+      setMusicSecondsLeft(null);
+      return;
+    }
+    const tick = () => setMusicSecondsLeft(secondsLeftOnTimers(timers, Date.now()));
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [step, isTurnTimerEnabled, mpRoomCode, mpRoundTimer, turnTimers]);
+  useEffect(() => {
+    musicEngine.setLayer(layerForStep(step, musicSecondsLeft));
+  }, [step, musicSecondsLeft]);
+  useEffect(() => {
+    musicEngine.duck(musicDuckFor(step, isSpeaking));
+  }, [step, isSpeaking]);
 
   const handleSfxVolumeChange = useCallback((next: number) => {
     const v = clampVolume(next);
@@ -930,6 +1177,17 @@ export function App() {
       fallbackSpeak();
     } 
   }, [isMuted, ttsVoices, isSpeaking, ttsAudioContext, orpheusVoice]);
+
+  // Package G6: a listening hand reads its sentence aloud once, after the title card.
+  const listenSpokenRoundRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isSentenceHiddenForListening || !currentSentence?.text || isLoading) return;
+    if (listenSpokenRoundRef.current === currentRound) return;
+    listenSpokenRoundRef.current = currentRound;
+    const timer = setTimeout(() => speakText(currentSentence.text), isCalmMode ? 1900 : 2600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSentenceHiddenForListening, currentSentence?.text, currentRound, isLoading]);
 
   // --- Betting Turn Timer Helpers, Effects & Controls ---
   const isPlayerFrozen = useCallback((playerId: number): boolean => {
@@ -1462,23 +1720,51 @@ export function App() {
     });
   }, [playSound]);
 
-  // Save game state
-  useEffect(() => { 
-    try { 
-      const gameState = { 
-        step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
-        currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
-        powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
-        sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
-      }; 
+  // Save game state. Package F6 (part): at most one write a second while bets are typed, at once
+  // when the screen changes, and on leaving the page, instead of a full write on every keystroke.
+  const pendingSaveRef = useRef<Record<string, unknown> | null>(null);
+  const lastSavedStepRef = useRef<string | null>(null);
+  const flushSave = useCallback(() => {
+    const gameState = pendingSaveRef.current;
+    if (!gameState) return;
+    pendingSaveRef.current = null;
+    try {
       if (!safeLocalStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(stampSave(gameState, Date.now())))) {
         console.warn('The browser would not save the game, so it is kept for this tab only.');
       }
-      GeminiService.savePortableGame(gameState); 
-    } catch (e) { 
-      console.error("Failed to save game state:", e); 
-    } 
-  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer]);
+      GeminiService.savePortableGame(gameState);
+    } catch (e) {
+      console.error("Failed to save game state:", e);
+    }
+  }, []);
+  useEffect(() => { 
+    if (isDemoRef.current) return;
+    pendingSaveRef.current = { 
+      step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount,
+      currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner,
+      powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending,
+      sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer
+    };
+    if (lastSavedStepRef.current !== step) {
+      lastSavedStepRef.current = step;
+      flushSave();
+      return;
+    }
+    const timer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [step, players, settings, nextRoundSettings, customTopic, customTheme, gameMode, totalRounds, targetAmount, currentRound, currentSentence, pastSentences, pastMistakes, bets, hints, roundResults, winner, powerUpsUsedThisRound, activePowerUps, highlightedPhrase, availablePowerUps, selectedPowerUps, roundSpending, sentenceBatch, roundHistory, startingCash, turnTimerSeconds, turnTimers, teacherRevealOverride, autoStartNextTimer, flushSave]);
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flushSave();
+    };
+    window.addEventListener('pagehide', flushSave);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushSave);
+      document.removeEventListener('visibilitychange', onHidden);
+      flushSave();
+    };
+  }, [flushSave]);
 
   // Sticky header logic: smoothly compact into an opaque bar when scrolling down
   useEffect(() => {
@@ -1551,10 +1837,26 @@ export function App() {
       playerNameInputRef.current?.focus(); 
     } 
   };
+  // Package T2: removing a player on this screen can be undone for 5 seconds.
+  const [removedPlayer, setRemovedPlayer] = useState<{ player: Player; index: number } | null>(null);
   const handleDeletePlayer = (idToDelete: number) => { 
     playSound('lose', 0); 
+    const index = players.findIndex(p => p.id === idToDelete);
+    if (index !== -1) setRemovedPlayer({ player: players[index], index });
     setPlayers(prev => prev.filter(p => p.id !== idToDelete)); 
   };
+  const undoRemovePlayer = () => {
+    if (!removedPlayer) return;
+    playSound('addPlayer');
+    const { player, index } = removedPlayer;
+    setPlayers(prev => (prev.some(p => p.id === player.id) ? prev : [...prev.slice(0, index), player, ...prev.slice(index)]));
+    setRemovedPlayer(null);
+  };
+  useEffect(() => {
+    if (!removedPlayer) return;
+    const timer = setTimeout(() => setRemovedPlayer(null), REMOVE_UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [removedPlayer]);
   const handleUpdateAvatar = (playerId: number, newAvatar: string) => {
     setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, avatar: newAvatar } : p));
   };
@@ -1603,6 +1905,15 @@ export function App() {
   useEffect(() => {
     logEvent('step', `Hand ${currentRound}`);
   }, [currentRound]);
+
+  // Package T1: the last game's settings are on this computer, so "Quick start" can deal at once.
+  const hasSetupPrefs = useMemo(() => step === 'PLAYER_SETUP' && Boolean(safeLocalStorage.getItem(SETUP_PREFS_KEY)), [step]);
+  const quickStartSummary = [
+    settings.level,
+    settings.challengeFormat === 'mixed' ? 'Mixed' : questionTypeLabel(settings.challengeFormat),
+    gameMode === 'rounds' ? `${totalRounds} hand${Number(totalRounds) === 1 ? '' : 's'}` : gameMode === 'targetAmount' ? `first to $${Number(targetAmount).toLocaleString()}` : 'last player standing',
+    `$${Number(startingCash).toLocaleString()} each`,
+  ].filter(Boolean).join(' · ');
 
   const handleStartGame = () => { 
     if (players.length > 0) { 
@@ -1772,7 +2083,9 @@ export function App() {
         let resolvedQuestionType: QuestionType = 'binary';
         let forceCorrect = true;
 
-        if (!forcedBatch && prefetchRef.current?.key === expectedKey) {
+        // Package G6 Fix it: that hand is always a flawed Valid-or-flawed sentence, made fresh.
+        const isFixItHand = fixItRoundRef.current === targetRound;
+        if (!forcedBatch && !isFixItHand && prefetchRef.current?.key === expectedKey) {
           const activePrefetch = prefetchRef.current;
           prefetchRef.current = null;
           try {
@@ -1795,13 +2108,15 @@ export function App() {
 
         if (!generated) {
           const rotationOrder: QuestionType[] = getEffectiveMixedFormats(currentSettings.mixedFormats);
-          resolvedQuestionType = formatSetting === 'mixed'
-            ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
-            : formatSetting;
+          resolvedQuestionType = isFixItHand
+            ? 'binary'
+            : formatSetting === 'mixed'
+              ? rotationOrder[(mixedFormatIndexRef.current++) % rotationOrder.length]
+              : formatSetting;
 
           const currentBatch = forcedBatch || (sentenceBatch.length > 0 ? sentenceBatch : newBatch());
-          forceCorrect = resolvedQuestionType === 'binary' ? currentBatch[0] : true;
-          if (resolvedQuestionType === 'binary') {
+          forceCorrect = isFixItHand ? false : resolvedQuestionType === 'binary' ? currentBatch[0] : true;
+          if (resolvedQuestionType === 'binary' && !isFixItHand) {
             setSentenceBatch(currentBatch.slice(1));
           }
 
@@ -1811,7 +2126,9 @@ export function App() {
           const available = allSubtypes.filter(s => !usedSubtypes.includes(s));
           const pool = available.length > 0 ? available : allSubtypes;
           const dueLook = secondLookFor(secondLookQueueRef.current, targetRound);
-          subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+          // Package G6 Spotlight: the point the class has missed most so far.
+          const spotlight = spotlightRoundRef.current === targetRound ? mostMissedPoint(missTallyRef.current, allSubtypes) : null;
+          subtype = dueLook ? dueLook.subtype : spotlight ? spotlight : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
           const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
           generated = await GeminiService.generateSentence(
@@ -1926,6 +2243,8 @@ export function App() {
     mixedFormatIndexRef.current = 0;
     secondLookQueueRef.current = [];
     setSecondLookRound(null);
+    missTallyRef.current = {};
+    setFreeDraws({});
     safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
       settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
       customTopic,
@@ -1942,6 +2261,7 @@ export function App() {
     setPlayers(p => p.map(player => ({ ...player, money: startingCash, history: [], winStreak: 0, effects: [] }))); 
     setStep('IN_GAME');
     setRoundHistory([]);
+    setHandReactions({});
     setBets({});
     setHints({});
     setRoundResults([]);
@@ -1982,11 +2302,12 @@ export function App() {
       setHints(h => ({...h, [playerId]: { text: '', isLoading: true }}));
       
       try {
-        const hintText = await GeminiService.getHint(
+        const hintText = currentSentence.questionType === 'wordOrder' ? wordOrderHint(currentSentence) : await GeminiService.getHint(
           currentSentence.text,
           settings.topic,
           settings.level as any,
-          currentSentence.questionType || 'binary',
+          // Spot the error is a flawed sentence, so it gets the hint a flawed sentence gets.
+          currentSentence.questionType === 'spotError' ? 'binary' : (currentSentence.questionType || 'binary'),
           currentSentence.baseWord,
           currentSentence.leadInSentence
         );
@@ -2134,13 +2455,13 @@ export function App() {
     });
   }, [players, activePowerUps]);
 
-  const handleBuyPowerUp = useCallback((playerId: number, powerUpKey: PowerUpKey) => {
+  const handleBuyPowerUp = useCallback((playerId: number, powerUpKey: PowerUpKey, cost: number = POWERUP_COST) => {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
-    if (!player || player.money < POWERUP_COST) return;
+    if (!player || player.money < cost) return;
     if (!mayBuyPowerUps(player)) return;
     
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const isClozeRound = isGapType(currentSentence?.questionType);
     if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(powerUpKey)) return;
     if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(powerUpKey)) return;
     if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(powerUpKey)) return;
@@ -2186,11 +2507,11 @@ export function App() {
     }
 
     playSound('powerUp');
-    const newMoney = player.money - POWERUP_COST;
+    const newMoney = player.money - cost;
 
     setPlayers(ps => ps.map(p => p.id === playerId ? {...p, money: newMoney} : p));
-    setPowerUpsUsedThisRound(prev => ({...prev, [playerId]: [...(prev[playerId] || []), { key: powerUpKey }]}));
-    setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + POWERUP_COST }));
+    setPowerUpsUsedThisRound(prev => ({...prev, [playerId]: [...(prev[playerId] || []), cost === POWERUP_COST ? { key: powerUpKey } : { key: powerUpKey, cost }]}));
+    setRoundSpending(s => ({...s, [playerId]: (s[playerId] || 0) + cost }));
 
     if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newMoney) {
         setBets(b => ({...b, [playerId]: {...b[playerId], bet: newMoney }}));
@@ -2206,7 +2527,8 @@ export function App() {
         }
     } else {
         // Immediate effect logic
-        let modalMessage = `${powerUp.icon} ${powerUp.description}`;
+        // Package S5: the same short, plain description as the card itself.
+        let modalMessage = `${powerUp.icon} ${plainDescriptionOf(powerUpKey)}`;
         
         if (powerUpKey === 'GRAMMAR_GOGGLES' && currentSentence) {
             if (!mpRoomCode || !mpSeats[playerId]) {
@@ -2215,7 +2537,7 @@ export function App() {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         } else if (powerUpKey === 'SCALPEL' && currentSentence) {
             const qType = currentSentence.questionType || 'binary';
-            if (qType === 'multipleChoice') {
+            if (isOptionType(qType)) {
               const correctNorm = (currentSentence.correctAnswer || '').trim().toLowerCase();
               const wrongOpts = (currentSentence.options || []).filter(
                 o => o.trim().toLowerCase() !== correctNorm
@@ -2278,7 +2600,7 @@ export function App() {
                 [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
               }));
               modalMessage = `${powerUp.icon} Word Formation Clue: ${mask}`;
-            } else if (qType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+            } else if ((qType === 'keyWordTransformation' || qType === 'wordOrder') && currentSentence.correctAnswer) {
               const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
               let mask = '';
               if (words.length <= 2) {
@@ -2291,7 +2613,7 @@ export function App() {
                 ...prev,
                 [playerId]: [...(prev[playerId] || []), { type: 'SCALPEL' }],
               }));
-              modalMessage = `${powerUp.icon} Key Word Transformation Clue: ${mask}`;
+              modalMessage = `${powerUp.icon} ${qType === 'wordOrder' ? 'Word Order' : 'Key Word Transformation'} Clue: ${mask}`;
             } else {
               setActivePowerUps(prev => ({
                 ...prev,
@@ -2522,14 +2844,14 @@ export function App() {
             const updatedPlayersPreview = players.map(p => p.id === playerId ? { ...p, money: newMoney } : p);
             const qualifiesNow = isPlayerUnderdog(playerId, updatedPlayersPreview);
             modalMessage = qualifiesNow
-              ? `${powerUp.icon} Underdog Surge active! You are currently in underdog position — a winning bet this hand will award a 2.5× comeback payout (+150% winnings)!`
-              : `${powerUp.icon} ${powerUp.description} (Note: You currently lead the table; Underdog Surge triggers if you are trailing or in the bottom half when bets settle.)`;
+              ? `${powerUp.icon} Underdog Surge is on. You are behind, so a win this hand pays 2.5 times.`
+              : `${powerUp.icon} ${plainDescriptionOf(powerUpKey)} You are ahead now, so it pays only if you drop to the bottom half by the end of the hand.`;
         } else if (powerUpKey === 'SCAVENGER') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: 'SCAVENGER' }] }));
-            modalMessage = `${powerUp.icon} Dead Pool Scavenger armed! You will scoop up 25% of every losing bet lost by other players to the House this round (up to +$500).`;
+            modalMessage = `${powerUp.icon} Scavenger is on. You get 25% of what others lose this hand (up to $500).`;
         } else if (powerUpKey === 'CORRECTION_BOUNTY' || powerUpKey === 'LONE_WOLF' || powerUpKey === 'CROWD_SURFER' || powerUpKey === 'DOUBLE_OR_NOTHING') {
             setActivePowerUps(prev => ({ ...prev, [playerId]: [...(prev[playerId] || []), { type: powerUpKey }] }));
-            modalMessage = `${powerUp.icon} ${powerUp.description}`;
+            modalMessage = `${powerUp.icon} ${plainDescriptionOf(powerUpKey)}`;
         } else {
             setActivePowerUps(prev => ({...prev, [playerId]: [...(prev[playerId] || []), {type: powerUpKey}]}));
         }
@@ -2691,7 +3013,10 @@ export function App() {
   const handleBuyRandomPowerUp = useCallback((playerId: number) => {
     if (!canPlayerAct(playerId)) return;
     const player = players.find(p => p.id === playerId);
-    if (!player || player.money < POWERUP_COST) return; 
+    // Package G6 Spotlight: a free draw earned on the Spotlight hand costs nothing.
+    const isFree = (freeDraws[playerId] || []).length > 0;
+    const cost = isFree ? 0 : POWERUP_COST;
+    if (!player || player.money < cost) return; 
     // A silenced player cannot buy, even if a phone sends the request anyway (G5 fix).
     if (!mayBuyPowerUps(player)) return;
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
@@ -2700,13 +3025,13 @@ export function App() {
     const limit = hasPowerSurge ? 3 : 1;
     if (usage >= limit) return;
 
-    const isClozeRound = currentSentence?.questionType === 'multipleChoice' || currentSentence?.questionType === 'openCloze' || currentSentence?.questionType === 'wordFormation' || currentSentence?.questionType === 'keyWordTransformation';
+    const isClozeRound = isGapType(currentSentence?.questionType);
     const activeOtherPlayersCount = activePlayers.filter(p => p.id !== playerId).length;
     const drawablePool = availablePowerUps.filter(k => {
       if (isClozeRound && CLOZE_DISABLED_POWER_UPS.includes(k)) return false;
       if (!isClozeRound && BINARY_DISABLED_POWER_UPS.includes(k)) return false;
       if (!mpRoomCode && MP_ONLY_POWER_UPS.includes(k)) return false;
-      if (k === 'GENEROUS' && player.money < POWERUP_COST + activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT) return false;
+      if (k === 'GENEROUS' && player.money < cost + activeOtherPlayersCount * GENEROUS_GIFT_AMOUNT) return false;
       if (k === 'UNDERDOG' && !isPlayerUnderdog(playerId, players)) return false;
       return true;
     });
@@ -2724,8 +3049,16 @@ export function App() {
     }
     const randomIndex = Math.floor(Math.random() * drawablePool.length);
     const selectedPowerUp = drawablePool[randomIndex];
-    handleBuyPowerUp(playerId, selectedPowerUp);
-  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats]);
+    // Package V4: the card leaves the dealer's shoe for this player's seat.
+    setShoeDealEvent({
+      id: `${playerId}-${Date.now()}`,
+      playerId,
+      seatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
+      totalSeats: Math.max(1, activePlayers.length),
+    });
+    handleBuyPowerUp(playerId, selectedPowerUp, cost);
+    if (isFree) setFreeDraws(prev => spendFreeDraw(prev, playerId));
+  }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats, freeDraws]);
 
   const handleTogglePowerUpInDeck = useCallback((key: PowerUpKey) => {
     const isCurrentlyActive = selectedPowerUps.includes(key);
@@ -3032,9 +3365,9 @@ export function App() {
         const qType = currentSentence?.questionType || 'binary';
         let spySummary = 'Undecided';
         if (tBet) {
-          if (qType === 'multipleChoice') {
+          if (isOptionType(qType)) {
             spySummary = tBet.selectedOption ? `"${tBet.selectedOption}"` : (tBet.splitOptions?.length ? `Split: ${tBet.splitOptions.join(' / ')}` : 'Undecided');
-          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+          } else if (isTypedAnswerType(qType)) {
             spySummary = tBet.clozeAnswer ? `"${tBet.clozeAnswer}"` : (tBet.splitClozeAnswers?.some(Boolean) ? `Split: ${tBet.splitClozeAnswers.filter(Boolean).join(' / ')}` : 'Undecided');
           } else {
             spySummary = tBet.opinion === 'correct' ? '✓ Valid' : tBet.opinion === 'incorrect' ? '✕ Flawed' : 'Undecided';
@@ -3124,8 +3457,19 @@ export function App() {
         defenderSeatIndex: defenderIdx,
         totalSeats: Math.max(1, activePlayers.length),
       });
+    } else {
+      // Package V4: the card flies across the felt to the player it was used on.
+      pendingFlightRef.current = ({
+        id: `${playerId}-${targetId}-${powerUpKey}-${Date.now()}`,
+        fromPlayerId: playerId,
+        toPlayerId: targetId,
+        fromSeatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
+        toSeatIndex: Math.max(0, activePlayers.findIndex(p => p.id === targetId)),
+        totalSeats: Math.max(1, activePlayers.length),
+        palette: flightPalette(powerUpKey),
+      });
     }
-    const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${powerUpInfo.description}`;
+    const finalMsg = customModalMessage || `${powerUpInfo.icon} Used ${powerUpInfo.name} on ${targetPlayer.name}: ${plainDescriptionOf(powerUpKey)}`;
     if (isRemoteBuyer) {
       setMpStudentPendingTarget(prev => {
         const next = { ...prev };
@@ -3176,7 +3520,11 @@ export function App() {
     if (playerId === undefined || !powerUpKey) return;
     // Swap is refundable only when nobody can be targeted, so the dialog always has an exit (F4 fix 11)
     if (!canCancelPowerUpTarget(powerUpKey, hasSelectableTarget(playerId, powerUpKey))) return;
-    setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + POWERUP_COST } : p));
+    // A free Spotlight draw gives nothing back (package G6).
+    const usedList = powerUpsUsedThisRound[playerId] || [];
+    const usedEntry = usedList[usedList.map(u => u.key).lastIndexOf(powerUpKey)];
+    const refund = usedEntry?.cost ?? POWERUP_COST;
+    setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + refund } : p));
     setPowerUpsUsedThisRound(prev => {
       const list = prev[playerId] || [];
       const idx = list.map(u => u.key).lastIndexOf(powerUpKey);
@@ -3187,7 +3535,7 @@ export function App() {
       }
       return prev;
     });
-    setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - POWERUP_COST) }));
+    setRoundSpending(s => ({ ...s, [playerId]: Math.max(0, (s[playerId] || 0) - refund) }));
     setAvailablePowerUps(avail => avail.includes(powerUpKey) ? avail : [...avail, powerUpKey]);
     if (mpRoomCode && mpSeats[playerId]) {
       setMpStudentPendingTarget(prev => {
@@ -3199,11 +3547,44 @@ export function App() {
       setShowTargetModal(null);
     }
     playSound('click');
-  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget]);
+  }, [showTargetModal, playSound, mpRoomCode, mpSeats, hasSelectableTarget, powerUpsUsedThisRound]);
 
   // --- Multiplayer Host Lifecycle & Intent Dispatcher ---
   useEffect(() => {
     mpEventHandlerRef.current = (event: HostEventPayload) => {
+      // Package T3: the teacher's remote is never a player.
+      const pair = remotePairRef.current;
+      if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.seat && isRemoteAvatar(event.seat.avatar)) {
+        const seatId = event.seat.playerId;
+        const keyOk = Boolean(pair && pair.code === mpRoomCode && event.seat.avatar === remoteAvatar(pair.key));
+        // One remote at a time: a second phone with the same link is refused.
+        if (keyOk && pair && (pair.seatId === null || pair.seatId === seatId)) {
+          setRetiredRemoteSeats(prev => prev.filter(id => id !== seatId));
+          setRemotePair({ ...pair, seatId });
+          setShowRemotePair(false);
+          setRemoteNotice(null);
+          if (pair.seatId === null) playSound('success');
+          logEvent('room', 'Teacher remote paired');
+        } else {
+          // Not kicked: a kick bans the phone from the room, and it may be a student who scanned the code.
+          logEvent('room', 'A remote link that is not current was refused');
+          setRetiredRemoteSeats(prev => (prev.includes(seatId) ? prev : [...prev, seatId]));
+        }
+        return;
+      }
+      if (event.playerId !== undefined && (event.playerId === pair?.seatId || retiredRemoteSeatsRef.current.includes(event.playerId))) {
+        if (event.playerId === pair?.seatId && event.type === 'STUDENT_INTENT' && event.intent?.type === 'REMOTE_COMMAND') {
+          const action = event.intent.action;
+          const button = isRemoteAction(action) && typeof document !== 'undefined' ? findHotkeyButton(document, action) : null;
+          if (button) {
+            button.click();
+            setRemoteNotice(null);
+          } else {
+            setRemoteNotice('That is not available right now.');
+          }
+        }
+        return;
+      }
       if ((event.type === 'STUDENT_JOINED' || event.type === 'STUDENT_RECONNECTED') && event.playerId !== undefined) {
         mpLastSeenRef.current[event.playerId] = Date.now();
         const seenId = event.playerId;
@@ -3214,6 +3595,11 @@ export function App() {
         const { playerId, avatar } = seat;
         playSound('addPlayer');
         setPlayers(prev => {
+          // Package T4: with a class loaded, a phone named like a listed student takes that place.
+          if (activeCloudRoster && step === 'PLAYER_SETUP' && !prev.some(p => p.id === playerId)) {
+            const at = classListMatch(prev, Object.keys(mpSeatsRef.current).map(Number), seat.name);
+            if (at !== -1) return prev.map((p, i) => (i === at ? { ...p, id: playerId, avatar: avatar || p.avatar } : p));
+          }
           // Package R6: classroom-safe and unique at the table ("Ana 2").
           const name = safePlayerName(seat.name, prev.filter(p => p.id !== playerId).map(p => p.name));
           if (prev.some(p => p.id === playerId)) {
@@ -3415,6 +3801,7 @@ export function App() {
     handleApplyWheelResult,
     handleUpdatePlayerName,
     mpSeats,
+    activeCloudRoster,
     isPlayerFrozen,
     currentRound,
   ]);
@@ -3425,6 +3812,10 @@ export function App() {
 
   const handleCloseMpRoom = useCallback(() => {
     playSound('click');
+    if (isDemoRef.current) {
+      endDemoRoom();
+      return;
+    }
     if (mpControllerRef.current) {
       mpControllerRef.current.destroy();
       mpControllerRef.current = null;
@@ -3439,6 +3830,27 @@ export function App() {
     setShowMpLobbyModal(false);
     prefetchRef.current = null;
   }, [playSound]);
+
+  // Package R6: "Late joiners" off locks the room by itself when the first hand is dealt.
+  // Phones already seated can still come back; the teacher can open the room again.
+  const [lateJoinersAllowed, setLateJoinersAllowed] = useState<boolean>(() => safeLocalStorage.getItem('grammar_casino_late_joiners') !== 'off');
+  useEffect(() => {
+    safeLocalStorage.setItem('grammar_casino_late_joiners', lateJoinersAllowed ? 'on' : 'off');
+  }, [lateJoinersAllowed]);
+  const lateLockDoneRef = useRef(false);
+  useEffect(() => {
+    if (step === 'PLAYER_SETUP' || step === 'SETTINGS') {
+      lateLockDoneRef.current = false;
+      return;
+    }
+    if (step !== 'IN_GAME' || lateJoinersAllowed || !mpRoomCode || lateLockDoneRef.current) return;
+    lateLockDoneRef.current = true;
+    if (!mpRoomLocked) {
+      setMpRoomLocked(true);
+      mpControllerRef.current?.setRoomLocked(true);
+      logEvent('room', 'Room locked at the first hand (late joiners off)');
+    }
+  }, [step, lateJoinersAllowed, mpRoomCode, mpRoomLocked]);
 
   const handleToggleLockMpRoom = useCallback(() => {
     playSound('click');
@@ -3488,6 +3900,7 @@ export function App() {
     mpControllerRef.current = controller;
     const seats: Record<number, MultiplayerSeat> = {};
     controller.getSeats().forEach((seat) => {
+      if (isRemoteAvatar(seat.avatar)) return; // the teacher's remote is never a player
       seats[seat.playerId] = seat;
     });
     setMpSeats(seats);
@@ -3501,6 +3914,21 @@ export function App() {
       }
     };
     // Runs once on load; the phone view never hosts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Package T7: the coach opens by itself on this computer's first visit to the lobby.
+  useEffect(() => {
+    let forced = false;
+    try {
+      forced = new URLSearchParams(window.location.search).get('coach') === '1';
+    } catch {
+      forced = false;
+    }
+    if (shouldShowCoach({ seen: safeLocalStorage.getItem(COACH_SEEN_KEY), step, studentPhone: isStudentControllerMode, testMode: isE2eMode(), forced })) {
+      setShowCoach(true);
+    }
+    // Only on load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3544,11 +3972,71 @@ export function App() {
       turnDurationMs: isTurnTimerEnabled ? turnDurationMs : 0,
       calmMode: isCalmMode,
       paused: isPaused,
+      specialHand: currentSpecialHand
+        ? {
+            title: SPECIAL_HAND_INFO[currentSpecialHand].title,
+            rule: SPECIAL_HAND_INFO[currentSpecialHand].rule,
+            icon: SPECIAL_HAND_INFO[currentSpecialHand].icon,
+            ...(isSentenceHiddenForListening ? { hidesSentence: true } : {}),
+          }
+        : null,
+      freeDraws,
     });
+    // Package S4: once bets close (everyone here locked in, or time is up), the phones see the room's split.
+    if (step === 'IN_GAME' && currentSentence && !isPaused) {
+      const here = activePlayers.filter(p => mpSeats[p.id] && !mpAwayIds.includes(p.id));
+      const closed = (here.length > 0 && here.every(p => mpSeats[p.id]?.lockedIn)) || (isTurnTimerEnabled && mpRoundTimer.status === 'locked');
+      if (closed) {
+        const qt = (currentSentence.questionType || 'binary') as QuestionType;
+        const line = roomSplitLine(qt, answerSplit({
+          qType: qt,
+          bets,
+          playerIds: here.map(p => p.id),
+          sentenceIsCorrect: currentSentence.isCorrect,
+          options: currentSentence.options,
+          isRightAnswer: () => false,
+        }));
+        if (line) for (const id of Object.keys(views)) views[Number(id)] = { ...views[Number(id)], betsSplit: line };
+      }
+    }
+    // Package T3: the remote gets the shared table plus its own view, never a player's.
+    const pairNow = remotePair;
+    const base = Object.values(views)[0] as unknown as Record<string, unknown> | undefined;
+    const shared: Record<string, unknown> = {};
+    if (base) for (const k of SHARED_VIEW_KEYS) if (base[k] !== undefined) shared[k] = base[k];
+    for (const id of retiredRemoteSeats) {
+      if (id !== pairNow?.seatId) views[id] = { ...shared, remote: { ended: true } } as unknown as typeof views[number];
+    }
+    if (pairNow && pairNow.seatId !== null && pairNow.code === mpRoomCode) {
+      views[pairNow.seatId] = {
+        ...shared,
+        remote: buildRemoteView({
+          step,
+          round: currentRound,
+          totalRounds: gameMode === 'rounds' ? Number(totalRounds) || null : null,
+          paused: isPaused,
+          sentence: currentSentence,
+          players: activePlayers.map(p => ({ id: p.id, name: p.name })),
+          lockedIds: Object.values(mpSeats).filter(s => s.lockedIn).map(s => s.playerId),
+          awayIds: mpAwayIds,
+          reactions: handReactions[currentRound] ? reactionCounts(handReactions, currentRound) : null,
+          notice: remoteNotice,
+        }),
+      } as unknown as typeof views[number];
+    }
     mpControllerRef.current.pushViews(views);
   }, [
+    remotePair,
+    retiredRemoteSeats,
+    remoteNotice,
+    handReactions,
+    mpAwayIds,
+    activePlayers,
+    freeDraws,
+    isSentenceHiddenForListening,
     isCalmMode,
     isPaused,
+    currentSpecialHand,
     mpRoomCode,
     mpRoomLocked,
     step,
@@ -3703,7 +4191,7 @@ export function App() {
           ? `${hasUnchangedBaseWordPlayer} typed the unchanged base word "(${(currentSentence?.baseWord || '').toUpperCase()})". Players must transform the base word into a new grammatical form before revealing results!`
           : hasInvalidKwtPlayer
             ? `${hasInvalidKwtPlayer}'s answer must use 2 to 6 words and include the exact unchanged KEY WORD "${(currentSentence?.baseWord || '').toUpperCase()}"!`
-            : qType === 'multipleChoice'
+            : isOptionType(qType)
               ? "All active (unfrozen) players must choose an option and enter a bet."
               : qType === 'keyWordTransformation'
                 ? `All active (unfrozen) players must type a 2–6 word phrase containing "${(currentSentence?.baseWord || '').toUpperCase()}" and enter a bet.`
@@ -3772,6 +4260,7 @@ export function App() {
     const { acceptedSet, baseWordNorm } = buildAcceptedAnswerSet(currentSentence, qType);
 
     const clozeWordVerifications: Record<string, { isCorrect: boolean; marks?: 0 | 1 | 2; feedback: string }> = {};
+    // Word order is judged exactly; only open cloze and word formation ask the AI.
     if (qType === 'openCloze' || qType === 'wordFormation') {
       const unmatchedWordsMap = new Map<string, number>(); // normalizedWord -> representative playerId
       validPlayers.forEach(p => {
@@ -3916,6 +4405,8 @@ export function App() {
       hasPlayerPlacedBet,
       currentRound,
       roundSpending,
+      payoutMultiplier: payoutMultiplierFor(currentSpecialHand),
+      specialHandTitle: currentSpecialHand ? SPECIAL_HAND_INFO[currentSpecialHand].title : undefined,
     };
     const settlement = settleRound(settleInput);
     settlement.sounds.forEach(({ sound, index }) => playSound(sound, index));
@@ -3923,9 +4414,6 @@ export function App() {
     const someoneWentBust = updatedPlayers.some(p =>
       p.money <= 0 && (players.find(o => o.id === p.id)?.money ?? 0) > 0
     );
-    if (someoneWentBust) {
-      later(() => playSound('bankrupt'), 950);
-    }
     const newRoundResultsData = settlement.roundResults;
     const newRoundPlayerResults = settlement.playerResults;
 
@@ -3939,20 +4427,33 @@ export function App() {
         winnerSeatIndices.push(idx);
       }
     });
-    playSound('potSweep', winnerSeatIndices.length);
-    setPotSweepEvent({
+    const sweepEvent: PotSweepEvent = {
       id: `round-${currentRound}-${Date.now()}`,
       winnerSeatIndices,
+      winnerPlayerIds: activePlayers.filter(p => winnerIds.has(p.id)).map(p => p.id),
       totalSeats: Math.max(1, activePlayers.length),
-    });
+    };
     // A small coin shower when someone at least doubles their stack this round
     const bigWin = newRoundPlayerResults.some(r => {
       const before = players.find(p => p.id === r.playerId)?.money ?? 0;
       return r.amountChanged > 0 && before > 0 && r.amountChanged >= before;
     });
-    if (bigWin) {
-      later(() => setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 }), 650);
-    }
+    // Package V5: the director spaces the beats: verdict now, then the pot sweep, then the extras.
+    const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    playCues(
+      revealCueSheet({ bigWin, bust: someoneWentBust, calm: isCalmMode || reduceMotion }),
+      {
+        sound: (name) => {
+          if (name === 'potSweep') playSound('potSweep', winnerSeatIndices.length);
+          else if (name === 'bankrupt') playSound('bankrupt');
+        },
+        table: (name) => {
+          if (name === 'potSweep') setPotSweepEvent(sweepEvent);
+          else if (name === 'jackpot') setJackpotEvent({ id: `big-win-${currentRound}-${Date.now()}`, intensity: 0.45 });
+        },
+      },
+      later,
+    );
 
     setPlayers(updatedPlayers);
     setRoundResults(newRoundResultsData);
@@ -3976,6 +4477,10 @@ export function App() {
         misses: newRoundPlayerResults.filter(r => !r.isWin).length,
         handsLeft: gameMode === 'rounds' && !isNaN(numRounds) ? numRounds - currentRound : Infinity,
       });
+      missTallyRef.current = addMisses(missTallyRef.current, handSubtypeRef.current, newRoundPlayerResults.filter(r => !r.isWin).length);
+      if (currentSpecialHand === 'spotlight') {
+        setFreeDraws(prev => grantFreeDraws(prev, newRoundPlayerResults.filter(r => r.isWin).map(r => r.playerId), currentRound));
+      }
     }
     if (currentSentence) {
       const historyRecord: RoundHistoryRecord = {
@@ -3986,6 +4491,7 @@ export function App() {
         theme: settings.theme === 'Custom' ? customTheme : settings.theme,
         playerResults: newRoundPlayerResults,
         timestamp: Date.now(),
+        ...(handShownAtRef.current ? { dealtAt: handShownAtRef.current } : {}),
       };
       setRoundHistory(prev => [...prev, historyRecord]);
     }
@@ -3995,7 +4501,7 @@ export function App() {
     if (aiGradingFailed) {
       setError({ title: 'AI judge unavailable', message: 'The AI judge did not answer, so typed answers were marked by exact match only.' });
     }
-  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme]);
+  }, [activePlayers, isPlayerFrozen, mpRoomCode, mpSeats, mpAwayIds, isTurnTimerEnabled, turnTimers, teacherRevealOverride, hasPlayerPlacedBet, bets, currentSentence, players, activePowerUps, playSound, verifyPlayerCorrections, roundSpending, currentRound, settings, customTopic, customTheme, isCalmMode, later, currentSpecialHand]);
 
   // The reveal must never hang: whatever fails, the spinner clears and the teacher is told (F4 fix 8)
   const handleRevealResults = useCallback(async (force?: unknown) => {
@@ -4108,7 +4614,7 @@ export function App() {
     });
   }, [roundHistory, winner, players, settings, gameMode, totalRounds, targetAmount]);
   useEffect(() => {
-    if (step === 'GAME_OVER') archiveGame(Date.now());
+    if (step === 'GAME_OVER' && !isDemoRef.current) archiveGame(Date.now());
     // Only when the game ends; archiveGame changes with every state change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -4167,12 +4673,14 @@ export function App() {
     setTeacherRevealOverride(snap.teacherRevealOverrideBefore);
     setRevealSnapshot(null);
     secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, snap.round);
+    setFreeDraws(prev => revokeFreeDraws(prev, snap.round));
     setStep('IN_GAME');
   }, [revealSnapshot, currentRound, playSound, mpRoomCode]);
 
   const handleVoidHand = useCallback(() => {
     if (!revealSnapshot) return;
     secondLookQueueRef.current = cancelSecondLook(secondLookQueueRef.current, revealSnapshot.round);
+    setFreeDraws(prev => revokeFreeDraws(prev, revealSnapshot.round));
     GeminiService.forgetUnplayedSentence(currentSentence?.text);
     applyCorrectedRuling({ ...revealSnapshot, output: voidHand(revealSnapshot), corrected: true });
     setShowRulingModal(false);
@@ -4274,6 +4782,11 @@ export function App() {
   }, [players, gameMode, targetAmount, playSound]);
 
   const handleRestartGame = useCallback(() => {
+    if (isDemoRef.current) {
+      endDemoRoom();
+      return;
+    }
+    pendingSaveRef.current = null;
     safeLocalStorage.removeItem(LOCAL_STORAGE_KEY); 
     GeminiService.clearPortableGame();
     // Automatically close any open multiplayer room on restart / returning to lobby
@@ -4302,7 +4815,7 @@ export function App() {
       level: CEFR_LEVELS[2],
       theme: THEMES[0],
       challengeFormat: 'binary',
-      mixedFormats: ALL_QUESTION_TYPES,
+      mixedFormats: DEFAULT_MIXED_FORMATS,
     });
     setMixedFormatSetupWarning(null);
     mixedFormatIndexRef.current = 0;
@@ -4723,6 +5236,7 @@ export function App() {
                         Room {mpRoomCode}
                         <span className="text-gc-small font-semibold text-gc-quiet">· {phonesConnected} connected</span>
                       </span>
+                      {!isDemoRoom && (
                       <ActionButton
                         data-hotkey="room"
                         onClick={() => setShowMpLobbyModal(true)}
@@ -4732,19 +5246,31 @@ export function App() {
                       >
                         <span className="inline-flex items-center gap-1.5"><QrCode className="w-4 h-4 shrink-0" aria-hidden="true" />Show the QR code</span>
                       </ActionButton>
+                      )}
                     </>
                   ) : (
-                    <ActionButton
-                      onClick={handleCreateMpRoom}
-                      variant="ghost"
-                      className="h-12 px-5 text-gc-body font-bold"
-                      title="Open a live room with a QR code"
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
-                        Open a live room
-                      </span>
-                    </ActionButton>
+                    <>
+                      <ActionButton
+                        onClick={handleCreateMpRoom}
+                        variant="ghost"
+                        className="h-12 px-5 text-gc-body font-bold"
+                        title="Open a live room with a QR code"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Smartphone className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          Open a live room
+                        </span>
+                      </ActionButton>
+                      <button
+                        type="button"
+                        onClick={startDemoRoom}
+                        className="h-12 px-4 inline-flex items-center gap-1.5 rounded-gc-sm text-gc-body font-semibold text-gc-quiet hover:text-gc-ink hover:bg-gc-line/[0.06] cursor-pointer"
+                        title={`Try a room alone: ${DEMO_BOT_COUNT} bots join and bet. Nothing is saved.`}
+                      >
+                        <Bot className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        Demo with bots
+                      </button>
+                    </>
                   )}
                   <button
                     type="button"
@@ -4756,6 +5282,17 @@ export function App() {
                     title="Use this device as a student phone and join a room"
                   >
                     Join a room as a student
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSound('click');
+                      setShowCoach(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-gc-small font-semibold text-gc-quiet hover:text-gc-ink underline underline-offset-4 decoration-gc-line/30 cursor-pointer"
+                  >
+                    <CircleHelp className="w-3.5 h-3.5" aria-hidden="true" />
+                    How it works
                   </button>
                 </div>
               </section>
@@ -4923,6 +5460,19 @@ export function App() {
                   <ArrowRight className="w-5 h-5 shrink-0" aria-hidden="true" />
                 </span>
               </ActionButton>
+              {/* Package T1: deal at once with the settings of the last game on this computer. */}
+              {hasSetupPrefs && players.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleFinalizeSettings}
+                  data-testid="quick-start"
+                  title="Deal the first hand now with the settings of your last game"
+                  className="min-h-[60px] px-5 inline-flex flex-col items-start justify-center rounded-full bg-gc-line/[0.06] border border-gc-gold/50 hover:border-gc-gold text-gc-ink cursor-pointer transition-colors text-left"
+                >
+                  <span className="text-gc-body font-bold">Quick start</span>
+                  <span className="text-gc-cap text-gc-quiet" data-testid="quick-start-summary">{quickStartSummary}</span>
+                </button>
+              )}
               <div className="relative">
                 <button
                   type="button"
@@ -5291,9 +5841,9 @@ export function App() {
                       <div className="mt-4 p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12] space-y-3 animate-gc-fade">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="text-gc-body font-bold text-gc-ink">
-                            In the mix <span className="text-gc-quiet font-semibold tabular-nums">({activeMixed.length} of 5)</span>
+                            In the mix <span className="text-gc-quiet font-semibold tabular-nums">({activeMixed.length} of {ALL_QUESTION_TYPES.length})</span>
                           </h3>
-                          {activeMixed.length < 5 && (
+                          {activeMixed.length < ALL_QUESTION_TYPES.length && (
                             <button
                               type="button"
                               onClick={() => {
@@ -5348,7 +5898,7 @@ export function App() {
                     <p className="mt-4 text-gc-small text-gc-quiet flex items-start gap-2">
                       <Info className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
                       <span>
-                        Gap questions pay 1:1. Key word transformation pays 1× the bet for 1 mark and 2× for 2 marks.
+                        Gap questions, Spot the error and Word order pay 1:1. Key word transformation pays 1× the bet for 1 mark and 2× for 2 marks.
                         A split bet covers two answers at half the bet each. The correction bonus and Grammar Goggles are off for gap questions.
                       </span>
                     </p>
@@ -5427,17 +5977,52 @@ export function App() {
                                 }}
                                 className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
                               />
-                              {[5, 10, 15, 20].map((r) => (
+                              {LENGTH_PRESETS.map(({ hands: r, name, timerSeconds: presetTimer }) => (
                                 <button
                                   key={r}
                                   type="button"
                                   aria-pressed={totalRounds === r}
-                                  onClick={() => { playSound('click'); setTotalRounds(r); }}
-                                  className={`h-9 min-w-[2.5rem] px-2.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
+                                  onClick={() => {
+                                    playSound('click');
+                                    setTotalRounds(r);
+                                    // Package G7: a preset sets the timer too (shown on the button).
+                                    if (presetTimer !== undefined && TURN_TIMER_OPTIONS.includes(presetTimer)) {
+                                      setTurnTimerSeconds(presetTimer);
+                                      setTurnTimers({});
+                                      setMpRoundTimer({ status: 'idle', remainingMs: presetTimer * 1000 });
+                                      mpAutoStartedRoundRef.current = 0;
+                                    }
+                                  }}
+                                  title={presetTimer ? `${r} hands and a ${presetTimer}-second timer` : `${r} hands`}
+                                  className={`min-h-9 min-w-[2.5rem] px-3 py-1 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
                                 >
-                                  {r}
+                                  <span className="tabular-nums">{r}</span> · {name}
+                                  {presetTimer ? <span className="font-semibold opacity-80"> · {presetTimer} s</span> : null}
                                 </button>
                               ))}
+                              {Number(totalRounds) > 0 && (
+                                <p className="w-full text-gc-small text-gc-quiet" data-testid="length-estimate">
+                                  About {estimateMinutes({ hands: Number(totalRounds), players: players.length, timerSeconds: turnTimerSeconds, room: Boolean(mpRoomCode) })} minutes with {mpRoomCode ? 'this room' : `${players.length} player${players.length === 1 ? '' : 's'}`}.
+                                </p>
+                              )}
+                              <label className="w-full mt-1 flex items-center justify-between gap-4 p-3 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] cursor-pointer">
+                                <span>
+                                  <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
+                                  <span className="block text-gc-small text-gc-quiet">
+                                    The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times. Halfway through, a Valid-or-flawed sentence is read aloud, not shown, until the reveal. In longer games, a Spotlight hand repeats the most-missed point, and a Fix it hand asks everyone to correct a sentence.
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={specialHandsOn}
+                                  onClick={() => { playSound('click'); setSpecialHandsOn(v => !v); }}
+                                  className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${specialHandsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                                >
+                                  <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${specialHandsOn ? 'translate-x-5' : ''}`} />
+                                  <span className="sr-only">Special hands</span>
+                                </button>
+                              </label>
                             </div>
                           )}
                           {isSelected && opt.mode === 'targetAmount' && (
@@ -5527,6 +6112,72 @@ export function App() {
                       </button>
                     </label>
                   )}
+                </section>
+
+                {/* Package L6: the level follows the class */}
+                <section className={sectionCls} aria-labelledby="setup-adaptive-level">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-adaptive-level" className={`block ${sectionTitle}`}>Level follows the class</span>
+                      <span className={`block ${sectionHint}`}>
+                        After every three hands: over 85% right, the next hands go one level up; under 45%, one level down. You see a notice each time.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={adaptiveLevelOn}
+                      onClick={() => { playSound('click'); setAdaptiveLevelOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${adaptiveLevelOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${adaptiveLevelOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Level follows the class</span>
+                    </button>
+                  </label>
+                </section>
+
+                {/* Package G3 / V9: awards at the end */}
+                <section className={sectionCls} aria-labelledby="setup-awards">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-awards" className={`block ${sectionTitle}`}>Awards at the end</span>
+                      <span className={`block ${sectionHint}`}>
+                        After the winner, up to five awards (sharpest eye, hot streak, best corrector, comeback, boldest bet), each to a different student. They change no money.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={awardsOn}
+                      onClick={() => { playSound('click'); setAwardsOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${awardsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${awardsOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Awards at the end</span>
+                    </button>
+                  </label>
+                </section>
+
+                {/* Package L9: speaking after the reveal */}
+                <section className={sectionCls} aria-labelledby="setup-say-it">
+                  <label className="flex items-center justify-between gap-4 cursor-pointer">
+                    <span>
+                      <span id="setup-say-it" className={`block ${sectionTitle}`}>Say it</span>
+                      <span className={`block ${sectionHint}`}>
+                        After each reveal, the screen asks students to say the right sentence aloud to a partner. No microphone is used.
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={sayItOn}
+                      onClick={() => { playSound('click'); setSayItOn(v => !v); }}
+                      className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${sayItOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                    >
+                      <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${sayItOn ? 'translate-x-5' : ''}`} />
+                      <span className="sr-only">Say it</span>
+                    </button>
+                  </label>
                 </section>
 
                 {/* Power-ups */}
@@ -5636,7 +6287,7 @@ export function App() {
         case 'IN_GAME': { 
             const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
             const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isClozeRound = currentQuestionType === 'multipleChoice' || currentQuestionType === 'openCloze' || currentQuestionType === 'wordFormation' || currentQuestionType === 'keyWordTransformation';
+            const isClozeRound = isGapType(currentQuestionType);
 
             // Who is in, and whether the answer may be revealed (game/revealGate.ts).
             const revealGate = getRevealGate({
@@ -5689,7 +6340,7 @@ export function App() {
 const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                       let scalpelHint: { eliminatedOptions?: string[]; clozeMask?: string } | null = null;
                       if (scalpelPu && currentSentence) {
-                        if (currentQuestionType === 'multipleChoice') {
+                        if (isOptionType(currentQuestionType)) {
                           scalpelHint = { eliminatedOptions: scalpelPu.eliminatedOptions || [] };
                         } else if (currentQuestionType === 'openCloze' && currentSentence.correctAnswer) {
                           const word = currentSentence.correctAnswer.trim();
@@ -5716,7 +6367,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               };
                             }
                           }
-                        } else if (currentQuestionType === 'keyWordTransformation' && currentSentence.correctAnswer) {
+                        } else if ((currentQuestionType === 'keyWordTransformation' || currentQuestionType === 'wordOrder') && currentSentence.correctAnswer) {
                           const words = currentSentence.correctAnswer.trim().split(/\s+/).filter(Boolean);
                           if (words.length > 0) {
                             if (words.length <= 2) {
@@ -5761,6 +6412,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             </div>
                           )}
                           <PlayerBettingCard 
+                            hasFreeDraw={(freeDraws[player.id] || []).length > 0}
                             player={player} 
                             bet={bets[player.id]} 
                             onBetChange={handleBetChange} 
@@ -5858,15 +6510,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             const nextFormatConfig = nextRoundSettings?.challengeFormat
               ? CHALLENGE_FORMATS.find(f => f.id === nextRoundSettings.challengeFormat)
               : undefined;
-            const currentHandFormatBadge = currentQuestionType === 'multipleChoice'
-              ? 'Multiple choice'
-              : currentQuestionType === 'openCloze'
-                ? 'Open cloze'
-                : currentQuestionType === 'wordFormation'
-                  ? 'Word formation'
-                  : currentQuestionType === 'keyWordTransformation'
-                    ? 'Key word transformation'
-                    : 'Valid or flawed?';
+            const currentHandFormatBadge = currentQuestionType === 'binary' ? 'Valid or flawed?' : questionTypeLabel(currentQuestionType);
             // Style A chips under the sentence: quiet, no emoji; a gold "Next" tag when a change is queued.
             const metaChip = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] text-gc-small font-medium text-gc-quiet whitespace-nowrap';
             const nextTag = 'inline-flex items-center h-5 px-1.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold';
@@ -5880,7 +6524,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               (nextFormatConfig.id === 'mixed' &&
                 getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !== getEffectiveMixedFormats(settings.mixedFormats).join(','))
             ));
-            const aiReady = desktopStatus.hasKey && desktopStatus.isOnline;
+            const aiLine = sentenceStatus(desktopStatus, currentSentence);
             const drawerRows: { tab: SettingsModalTab; icon: string; label: string; value: string; next?: string | null; note?: string; warn?: boolean }[] = [
               {
                 tab: 'topic', icon: '📚', label: 'Topic', value: settings.topic,
@@ -5903,8 +6547,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                   : null,
               },
               {
-                tab: 'ai', icon: desktopStatus.decryptionFailed ? '🔑' : aiReady ? '⚡' : '💾', label: 'Sentences',
-                value: desktopStatus.decryptionFailed ? 'Re-enter the AI key' : aiReady ? 'AI sentences' : 'Offline bank',
+                tab: 'ai', icon: aiLine.icon, label: 'Sentences',
+                value: aiLine.label,
                 note: [desktopStatus.isPortable ? 'Portable' : '', desktopStatus.isReadOnly ? 'Read-only' : ''].filter(Boolean).join(' · ') || undefined,
                 warn: desktopStatus.decryptionFailed,
               },
@@ -5950,7 +6594,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-gc-line/[0.1]">
                                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                                   <span className="inline-flex items-center h-6 px-2.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-cap font-bold whitespace-nowrap">
-                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
+                                    Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{specialHandLabel ? ` · ${specialHandLabel}` : secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                   </span>
                                   {currentQuestionType === 'keyWordTransformation' && currentSentence.baseWord && (
                                     <span className="inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full bg-gc-gold/20 border border-gc-gold/50 text-gc-money font-extrabold text-gc-cap tracking-wider whitespace-nowrap">
@@ -5992,19 +6636,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     <Volume2 className="w-3 h-3 shrink-0" aria-hidden="true" />
                                     <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                   </button>
-                                  <select
-                                    value={orpheusVoice}
-                                    onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                                    aria-label="Orpheus TTS voice for challenge sentence"
-                                    title="Select Orpheus English voice"
-                                    className="h-7 px-2 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                                  >
-                                    {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                                      <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                                        {v.label} ({v.gender})
-                                      </option>
-                                    ))}
-                                  </select>
                                   <button
                                     type="button"
                                     onClick={handleToggleSettingsDeckExpanded}
@@ -6020,7 +6651,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                             ) : (
                               <div className="flex justify-center">
                                 <span className="inline-flex items-center h-8 px-3.5 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold whitespace-nowrap">
-                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{secondLookRound === currentRound ? ' · Second look' : ''}
+                                  Hand {currentRound}{gameMode === 'rounds' ? ` of ${totalRounds}` : ''} · {currentHandFormatBadge}{specialHandLabel ? ` · ${specialHandLabel}` : secondLookRound === currentRound ? ' · Second look' : ''}{handsLeftLabel ? ` · ${handsLeftLabel}` : ''}
                                 </span>
                               </div>
                             )}
@@ -6054,19 +6685,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                         <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                                         <span>{isSpeaking ? 'Speaking…' : 'Listen'}</span>
                                       </button>
-                                      <select
-                                        value={orpheusVoice}
-                                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                                        aria-label="Orpheus TTS voice"
-                                        title="Select Orpheus English voice"
-                                        className="h-8 px-2.5 rounded-full text-gc-cap font-semibold text-gc-quiet hover:text-gc-ink bg-gc-line/[0.06] border border-gc-line/[0.12] transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                                      >
-                                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                                            {v.label} ({v.gender})
-                                          </option>
-                                        ))}
-                                      </select>
                                   </div>
                                 )}
 
@@ -6101,15 +6719,52 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                   )
                                 )}
 
+                                {!isSentenceHeaderStuck && newFormatTask(currentQuestionType) && (
+                                  <p data-testid="format-task" className="text-center text-gc-body font-semibold text-gc-quiet">
+                                    {newFormatTask(currentQuestionType)}
+                                  </p>
+                                )}
                                 <p 
                                   className={`${sentenceTextClass} text-gc-ink font-sentence italic font-medium text-center text-balance max-w-5xl mx-auto px-2 sm:px-6 ${isSentenceHeaderStuck ? 'pt-0.5' : 'pt-3 sm:pt-4'}`}
                                 >
+                                  {isSentenceHiddenForListening ? (
+                                    <span data-testid="listening-hidden" className="not-italic font-sans flex flex-col items-center gap-3">
+                                      <span className={isSentenceHeaderStuck ? 'text-gc-lead font-bold' : 'text-3xl sm:text-4xl font-bold'}>
+                                        <span aria-hidden="true">🎧 </span>Listen to the sentence.
+                                      </span>
+                                      {!isSentenceHeaderStuck && (
+                                        <span className="flex flex-wrap justify-center gap-2.5 text-gc-body">
+                                          <button
+                                            type="button"
+                                            onClick={() => speakText(currentSentence.text)}
+                                            disabled={isSpeaking}
+                                            className="h-11 px-5 rounded-full bg-gc-gold text-gc-on-gold font-bold inline-flex items-center gap-2 cursor-pointer disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                          >
+                                            <Volume2 className="w-4 h-4" aria-hidden="true" />
+                                            {isSpeaking ? 'Reading…' : 'Play it again'}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setListenShownRound(currentRound)}
+                                            className="h-11 px-5 rounded-full bg-gc-line/[0.08] border border-gc-line/[0.18] text-gc-ink font-semibold cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
+                                          >
+                                            Show the sentence
+                                          </button>
+                                        </span>
+                                      )}
+                                    </span>
+                                  ) : currentQuestionType === 'spotError' && currentSentence.options?.length === 4 ? (
+                                    <SpotErrorSentence parts={currentSentence.options} compact={isSentenceHeaderStuck} />
+                                  ) : currentQuestionType === 'wordOrder' && currentSentence.options?.length ? (
+                                    <WordTiles tiles={currentSentence.options} size={isSentenceHeaderStuck ? 'md' : 'lg'} />
+                                  ) : (
                                   <SentenceText
                                     text={currentSentence?.text || ''}
                                     highlight={highlightedPhrase}
                                     showGaps={isClozeRound}
                                     baseWord={currentQuestionType === 'wordFormation' ? currentSentence?.baseWord : null}
                                   />
+                                  )}
                                 </p>
                             </div> 
                             
@@ -6178,7 +6833,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     {turnTimerSeconds === 0 ? 'No timer' : `${turnTimerSeconds} s ${mpRoomCode ? 'per round' : 'per turn'}`}
                                   </span>
                                   <span className={`${metaChip} ${desktopStatus.decryptionFailed ? '!text-gc-loss' : ''}`}>
-                                    {desktopStatus.decryptionFailed ? 'Re-enter the AI key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
+                                    {sentenceStatus(desktopStatus).label}
                                     {desktopStatus.isPortable && <span className="text-gc-cap" title="Portable edition">· Portable</span>}
                                     {desktopStatus.isReadOnly && <span className="text-gc-cap text-gc-loss" title="Read-only media">· Read-only</span>}
                                   </span>
@@ -6353,7 +7008,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     onLockNow={handleMpRoundTimerLockNow}
                     onReset={handleMpRoundTimerReset}
                     onOpenAiSettings={() => handleOpenSettingsModal('ai')}
-                    aiStatusLabel={desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
+                    aiStatusLabel={sentenceStatus(desktopStatus, currentSentence).label}
                     playSound={playSound}
                   />
                 )}
@@ -6399,6 +7054,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         <button
                           type="button"
                           onClick={() => handleTimerStart(nextIdlePlayer.id)}
+                          data-hotkey="timer"
                           className="h-9 px-4 rounded-full text-gc-small font-bold gc-btn-primary hover:brightness-105 active:scale-95 transition-all cursor-pointer"
                         >
                           ▶ Start {nextIdlePlayer.name}'s turn
@@ -6423,7 +7079,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         className="h-9 px-3.5 bg-gc-line/[0.06] border border-gc-line/[0.14] hover:border-gc-line/30 rounded-full text-gc-small text-gc-ink flex items-center gap-1.5 font-semibold cursor-pointer transition-colors"
                         title="AI and offline settings"
                       >
-                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}</span>
+                        <span data-testid="sentence-status">{sentenceStatus(desktopStatus, currentSentence).label}</span>
                       </button>
                     </div>
                   </div>
@@ -6463,6 +7119,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           playSound('click');
                           setMpHideProjectorBets(v => !v);
                         }}
+                        data-hotkey="hide-bets"
                         aria-pressed={mpHideProjectorBets}
                         className={`h-9 px-3.5 rounded-full text-gc-small font-semibold border transition-colors cursor-pointer flex items-center gap-1.5 ${
                           mpHideProjectorBets
@@ -6617,6 +7274,12 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         </div>
                         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                           <div className="flex items-center gap-3 text-gc-small text-gc-quiet">
+                            {potNow > 0 && (
+                              <span className="gc-pot-plaque text-gc-small" data-testid="pot-plaque">
+                                <span className="gc-pot-plaque-label">Pot</span>
+                                <span className="gc-pot-plaque-amount">$<CountUp from={lastPotShown.current} to={potNow} durationMs={500} /></span>
+                              </span>
+                            )}
                             <span className="tabular-nums whitespace-nowrap">{betsReadyCount} of {unfrozenActivePlayers.length} {betsReadyWord}</span>
                             <span
                               className="block h-2 w-40 sm:w-56 rounded-full bg-gc-line/[0.08] border border-gc-line/[0.12] overflow-hidden"
@@ -6729,6 +7392,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           outLabel="Bankrupt"
                           projectorMode={isProjectorMode}
                           arc={isTableView}
+                          hideMoney={currentSpecialHand === 'finalTable'}
                         />
                       )
                     ) : (
@@ -6738,14 +7402,21 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     )}
                   </div>
                 )}
-                <div className="mt-10 text-center pb-20 flex flex-col items-center gap-3">
-                  <div className={`rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
+                {/* Package T2: one control bar, pinned to the bottom of the screen during the hand,
+                    so the teacher never scrolls past 35 seats to reveal. */}
+                <div
+                  className="relative sm:sticky sm:bottom-0 z-30 mt-10 -mx-3 sm:-mx-4 px-3 sm:px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gc-bg/90 backdrop-blur-md border-t border-gc-line/[0.12] flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 print:hidden"
+                  data-testid="control-bar"
+                  role="toolbar"
+                  aria-label="Hand controls"
+                >
+                  <div className={`order-first w-full sm:w-auto flex justify-center rounded-full ${canRevealResults && !isProcessing ? 'animate-gc-breathe' : ''}`}>
                     <ActionButton 
                       data-hotkey="primary"
                       onClick={handleRevealResults} 
                       playSound={playSound} 
                       variant="primary"
-                      className="w-full md:w-auto min-h-[60px] text-gc-lead py-3 px-10" 
+                      className="w-full md:w-auto min-h-[52px] text-gc-lead py-3 px-10" 
                       disabled={isProcessing || !canRevealResults}
                     >
                       {isProcessing ? processingStatus || 'Settling the bets…' : (
@@ -6827,6 +7498,31 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     <RotateCcw className="w-4 h-4 shrink-0" aria-hidden="true" />
                     Swap this sentence
                   </button>
+                  {gameMode === 'rounds' && currentRound < Number(totalRounds) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playSound('click');
+                        setConfirmAction({
+                          title: 'Finish after this hand?',
+                          message: `This becomes the last hand (hand ${currentRound} of ${currentRound}). The most money after it wins.`,
+                          confirmLabel: 'Make it the last hand',
+                          onConfirm: () => setTotalRounds(currentRound),
+                        });
+                      }}
+                      className="inline-flex items-center gap-1.5 min-h-[44px] text-gc-small font-semibold text-gc-quiet hover:text-gc-ink px-3 rounded-md transition-colors cursor-pointer"
+                      title="Teacher only: end the game after this hand"
+                    >
+                      <Flag className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      Finish after this hand
+                    </button>
+                  )}
+                  {gameClock && (
+                    <span className="inline-flex items-center gap-1.5 min-h-[44px] px-3 text-gc-small font-semibold text-gc-quiet tabular-nums" data-testid="game-clock">
+                      <Clock className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      {gameClock}
+                    </span>
+                  )}
                 </div> 
               </div> 
             ); 
@@ -6842,7 +7538,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               bailoutEnabled: isBailoutEnabled,
             } = checkGameEnd({ players, gameMode, currentRound, totalRounds, targetAmount, isRoom: Boolean(mpRoomCode) });
             const resultQuestionType: QuestionType = currentSentence?.questionType || 'binary';
-            const isResultCloze = resultQuestionType === 'multipleChoice' || resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation';
+            const isResultCloze = isGapType(resultQuestionType);
             // Flawed Valid/Flawed sentences: underline the mistake and highlight the fix.
             const revealHighlight = (() => {
               if (!currentSentence || isResultCloze || currentSentence.isCorrect || !currentSentence.correction) return null;
@@ -6925,13 +7621,62 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     </p>
                 </section>
 
+                {levelNotice && levelNotice.round === currentRound && (
+                  <div role="status" data-testid="level-notice" className="mt-4 px-5 py-3 rounded-gc-lg bg-gc-info/[0.08] border border-gc-info/30 text-center text-gc-body font-semibold text-gc-ink">
+                    {levelNotice.text}
+                  </div>
+                )}
+
+                {sayItOn && currentSentence && (() => {
+                  // A gap sentence is said with the answer in the gap; other types say the corrected sentence.
+                  const said = /_{2,}/.test(currentSentence.text) && currentSentence.correctAnswer
+                    ? currentSentence.text.replace(/_{2,}/g, currentSentence.correctAnswer)
+                    : isResultCloze || !currentSentence.isCorrect ? currentSentence.correction : currentSentence.text;
+                  if (!said) return null;
+                  return (
+                    <div data-testid="say-it" className="mt-4 px-5 py-4 rounded-gc-lg bg-gc-gold/[0.12] border border-gc-gold/40 text-center animate-gc-slide-up">
+                      <div className="text-gc-body font-extrabold text-gc-ink">
+                        <span aria-hidden="true">🗣️ </span>Say it: turn to a partner and say the right sentence aloud.
+                      </div>
+                      <div className={`mt-1.5 font-sentence italic text-gc-ink ${isProjectorMode ? 'text-2xl sm:text-3xl font-semibold' : 'text-gc-lead sm:text-2xl'}`}>&ldquo;{said}&rdquo;</div>
+                    </div>
+                  );
+                })()}
+
+                {currentSpecialHand === 'fixIt' && (() => {
+                  const record = roundHistory.find(r => r.round === currentRound);
+                  const list = classCorrections(record?.playerResults || []);
+                  return (
+                    <div data-testid="fixit-corrections" className="mt-4 px-5 sm:px-8 py-4 rounded-gc-lg gc-surface text-left animate-gc-slide-up">
+                      <h3 className="text-gc-body font-extrabold text-gc-ink">
+                        <span aria-hidden="true">🛠️ </span>The class&rsquo;s corrections
+                      </h3>
+                      {list.length === 0 ? (
+                        <p className="mt-1 text-gc-small text-gc-quiet">Nobody typed a correction this time.</p>
+                      ) : (
+                        <ul className="mt-2 space-y-1.5">
+                          {list.map((c, i) => (
+                            <li key={i} className="flex items-start gap-2.5">
+                              <span className={`mt-0.5 shrink-0 inline-flex items-center h-6 px-2 rounded-full text-gc-cap font-bold ${c.accepted ? 'bg-gc-win/15 text-gc-win' : 'bg-gc-line/[0.08] text-gc-quiet'}`}>
+                                {c.accepted ? 'Accepted' : 'Not quite'}
+                              </span>
+                              <span className={`font-sentence italic text-gc-ink ${isProjectorMode ? 'text-2xl' : 'text-gc-lead'}`}>&ldquo;{c.text}&rdquo;</span>
+                              {c.count > 1 && <span className="mt-1 text-gc-cap text-gc-quiet tabular-nums shrink-0">×{c.count}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {isResultCloze && currentSentence?.correction && (
                     <div className="gc-surface rounded-gc-lg mt-4 px-5 sm:px-8 py-5 animate-gc-slide-up [animation-delay:0.75s]">
                         <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
                             <h3 className="text-gc-small font-bold text-gc-quiet">
                               The answer: <span className="text-gc-win">&ldquo;{currentSentence?.correctAnswer}&rdquo;</span>
                             </h3>
-                            {(resultQuestionType === 'openCloze' || resultQuestionType === 'wordFormation' || resultQuestionType === 'keyWordTransformation') && (() => {
+                            {(isTypedAnswerType(resultQuestionType)) && (() => {
                               const altAccepted = getAlternativeAcceptedAnswers(currentSentence.correctAnswer, currentSentence.acceptedAnswers);
                               return altAccepted.length > 0 ? (
                                 <span className="text-gc-small font-semibold text-gc-win bg-gc-win/15 px-2.5 py-0.5 rounded-full">
@@ -7044,19 +7789,6 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                           <Volume2 className="w-4 h-4 shrink-0" aria-hidden="true" />
                           {isSpeaking ? 'Speaking…' : 'Listen'}
                       </button>
-                      <select
-                        value={orpheusVoice}
-                        onChange={(e) => handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId)}
-                        aria-label="Orpheus TTS voice for explanation"
-                        title="Select Orpheus English voice"
-                        className={`${chipButton} pr-3 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn`}
-                      >
-                        {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
-                          <option key={v.id} value={v.id} className="bg-gc-card text-gc-ink">
-                            Voice: {v.label} ({v.gender})
-                          </option>
-                        ))}
-                      </select>
                       {currentSentence?.explanation && (
                         <button 
                             onClick={handleSimplifyExplanation} 
@@ -7083,7 +7815,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     options: currentSentence.options,
                     isRightAnswer: (a) => {
                       const k = normalizeGapAnswer(a);
-                      if (qt === 'multipleChoice') return k === normalizeGapAnswer(currentSentence.correctAnswer);
+                      if (isOptionType(qt)) return k === normalizeGapAnswer(currentSentence.correctAnswer);
                       if (qt === 'keyWordTransformation') return verdicts[k]?.marks === 2;
                       return accepted.has(k) || Boolean(verdicts[k]?.isCorrect);
                     },
@@ -7448,6 +8180,23 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
             )}
             {podium.length > 0 && !everyoneBust && <div className="h-px bg-gc-line/[0.14] max-w-xl mx-auto" aria-hidden="true" />}
 
+            {awardsOn && (() => {
+              const awards = computeAwards(roundHistory, startingCash);
+              if (awards.length === 0) return null;
+              return (
+                <ul className={`mt-6 mx-auto max-w-3xl p-0 list-none grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 ${reveal(stage >= CEREMONY_DONE)}`} data-testid="awards" aria-label="Awards">
+                  {awards.map(a => (
+                    <li key={a.id} className="gc-surface rounded-gc-lg px-3 py-4 text-center">
+                      <div className="text-[34px] leading-none" aria-hidden="true">{a.icon}</div>
+                      <div className="mt-2 text-gc-small font-bold text-gc-quiet">{a.title}</div>
+                      <div className="text-gc-lead font-extrabold text-gc-ink break-words">{a.name}</div>
+                      <div className="text-gc-cap text-gc-quiet">{a.detail}</div>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+
             {classLine && (
               <p className={`mt-6 mx-auto max-w-2xl text-gc-lead font-semibold text-gc-ink text-balance ${reveal(stage >= CEREMONY_DONE)}`} data-testid="class-result">
                 {classLine}
@@ -7530,7 +8279,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         <ThemeAmbience theme={settings.theme} calmMode={isCalmMode} />
         {isTableView && (
           <React.Suspense fallback={null}>
-            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} />
+            <TableBackdrop quality={qualityTier} redrawKey={step} onUnavailable={handleTableUnavailable} look={stageLook} />
           </React.Suspense>
         )}
         <React.Suspense fallback={null}>
@@ -7544,10 +8293,62 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           tossEvent={chipTossEvent}
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
+          shoeEvent={shoeDealEvent}
+          flightEvent={powerUpFlightEvent}
           jackpotEvent={jackpotEvent}
+          potTotal={step === 'IN_GAME' || step === 'RESULTS' ? potNow : 0}
+          behindInterface={isTableView}
+          sparkPalette={stageLook.sparks}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />
         </React.Suspense>
+        <LiveAnnouncer
+          message={phaseAnnouncement({
+            step,
+            round: currentRound,
+            totalRounds: gameMode === 'rounds' ? Number(totalRounds) : null,
+            paused: isPaused && step === 'IN_GAME',
+            winnerName: winner?.name ?? null,
+          })}
+        />
+        {specialHandCard && (
+          <div
+            className="fixed inset-0 z-[60] pointer-events-none grid place-items-center p-4"
+            role="status"
+            data-testid="special-hand-card"
+          >
+            <div className="gc-panel gc-special-card rounded-gc-lg px-8 py-6 text-center shadow-gc-2 border border-gc-gold/50">
+              <div className="text-[44px] leading-none" aria-hidden="true">{SPECIAL_HAND_INFO[specialHandCard.hand].icon}</div>
+              <p className="mt-2 font-logo text-[40px] leading-tight font-bold text-gc-gold">{SPECIAL_HAND_INFO[specialHandCard.hand].title}</p>
+              <p className="mt-1 text-gc-lead font-semibold text-gc-ink">{SPECIAL_HAND_INFO[specialHandCard.hand].rule}</p>
+            </div>
+          </div>
+        )}
+        {showCoach && (
+          <FirstRunCoach
+            onClose={closeCoach}
+            onDemo={mpRoomCode ? null : () => {
+              closeCoach();
+              startDemoRoom();
+            }}
+          />
+        )}
+        {isDemoRoom && (
+          <div
+            data-testid="demo-banner"
+            className={`fixed ${step === 'IN_GAME' ? 'bottom-4 sm:bottom-auto sm:top-20' : 'bottom-4'} left-4 z-40 max-w-[calc(100vw-2rem)] h-11 pl-3 pr-1.5 inline-flex items-center gap-2 rounded-full gc-panel shadow-gc-2 text-gc-small font-semibold text-gc-ink`}
+          >
+            <Bot className="w-4 h-4 text-gc-gold shrink-0" aria-hidden="true" />
+            <span className="truncate">Demo with {DEMO_BOT_COUNT} bots. Nothing is saved.</span>
+            <button
+              type="button"
+              onClick={endDemoRoom}
+              className="h-8 px-3 rounded-full bg-gc-line/[0.08] hover:bg-gc-line/[0.16] font-bold cursor-pointer"
+            >
+              End demo
+            </button>
+          </div>
+        )}
         <BroadcastCutIn cutIn={activeCutIn} onComplete={() => setActiveCutIn(null)} calmMode={isCalmMode} />
         {step !== 'PLAYER_SETUP' && ( 
           <div className="fixed top-4 left-4 z-50">
@@ -7729,8 +8530,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               playSound('click');
               handleOrpheusVoiceChange(e.target.value as GeminiService.OrpheusVoiceId);
             }}
-            aria-label="Croupier TTS voice"
-            title="Select Orpheus English TTS voice (used for challenge sentences and grammar explanations)"
+            aria-label="Reading voice"
+            title="The voice that reads sentences and explanations aloud (one setting for the whole game)"
             className="h-11 px-2.5 rounded-gc-sm bg-gc-card/80 border border-gc-line/[0.14] hover:border-gc-line/30 text-gc-ink text-gc-cap font-semibold shadow-gc-1 backdrop-blur-md transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
           >
             {GeminiService.ORPHEUS_VOICE_OPTIONS.map((v) => (
@@ -7885,7 +8686,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         </Modal>
       )}
       {isPaused && step === 'IN_GAME' && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
+        <div ref={pauseDialogRef} className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="gc-pause-title">
           <div className="w-full max-w-md rounded-gc bg-gc-card border border-gc-line/[0.14] shadow-gc-1 p-8 text-center space-y-5 text-gc-ink">
             <Pause className="w-12 h-12 mx-auto text-gc-gold" aria-hidden="true" />
             <h2 id="gc-pause-title" className="text-gc-h2 font-bold">Paused</h2>
@@ -7979,7 +8780,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     </PowerUpTooltip>
                   </div>
                   <p className="text-center mb-4 text-lg text-slate-600 dark:text-slate-400 font-editorial italic border-b border-slate-200 dark:border-slate-700 pb-3">
-                    "{powerUpInfo.description}"
+                    "{plainDescriptionOf(showTargetModal.powerUp)}"
                   </p> 
 
                   {isSwap && buyerPlayer && (
@@ -8189,6 +8990,22 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           playSound={playSound}
         />
       )}
+      {removedPlayer && step === 'PLAYER_SETUP' && (
+        <div
+          role="status"
+          data-testid="undo-remove"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] w-[min(92vw,26rem)] gc-panel rounded-gc-lg px-4 py-3 flex items-center gap-3"
+        >
+          <p className="flex-1 min-w-0 text-gc-body font-bold text-gc-ink truncate">Removed {removedPlayer.player.name}.</p>
+          <button
+            type="button"
+            onClick={undoRemovePlayer}
+            className="h-10 px-4 rounded-full bg-gc-gold text-gc-on-gold text-gc-small font-bold cursor-pointer"
+          >
+            Undo
+          </button>
+        </div>
+      )}
       {mpResumeNotice && mpRoomCode && (
         <div
           role="status"
@@ -8265,11 +9082,35 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
           players={players}
           seats={mpSeats}
           onCreateRoom={handleCreateMpRoom}
+          classListName={activeCloudRoster?.className ?? null}
           onToggleLockRoom={handleToggleLockMpRoom}
+          lateJoinersAllowed={lateJoinersAllowed}
+          onToggleLateJoiners={() => { playSound('click'); setLateJoinersAllowed(v => !v); }}
           onKickPlayer={handleKickMpPlayer}
           onCloseRoom={handleCloseMpRoom}
           onBailoutBankruptPlayers={handleBailoutBankruptPlayers}
+          onOpenRemote={(base) => { playSound('click'); setRemoteBase(base); setShowMpLobbyModal(false); setShowRemotePair(true); }}
+          remotePaired={Boolean(remotePair && remotePair.code === mpRoomCode && remotePair.seatId !== null)}
           playSound={playSound}
+        />
+      )}
+      {showRemotePair && mpRoomCode && (
+        <RemotePairModal
+          link={remotePair && remotePair.code === mpRoomCode && remotePair.seatId === null ? remoteLink(remoteBase, mpRoomCode, remotePair.key) : null}
+          paired={Boolean(remotePair && remotePair.code === mpRoomCode && remotePair.seatId !== null)}
+          onMakeLink={() => {
+            setRemotePair({ code: mpRoomCode, key: newRemoteKey(), seatId: null });
+          }}
+          onUnpair={() => {
+            if (remotePair?.seatId != null) {
+              // That phone is told it is no longer the remote.
+              const old = remotePair.seatId;
+              setRetiredRemoteSeats(prev => (prev.includes(old) ? prev : [...prev, old]));
+            }
+            setRemotePair(null);
+          }}
+          roomLocked={mpRoomLocked}
+          onClose={() => setShowRemotePair(false)}
         />
       )}
       {showCloudModal && (
@@ -8298,6 +9139,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                 onConfirm: () => {
                   archiveGame(Date.now());
                   setRoundHistory([]);
+                  setHandReactions({});
                   setRoundResults([]);
                   setCurrentRound(1);
                   setCurrentSentence(null);

@@ -15,7 +15,8 @@ const prefersReducedMotion = () =>
   ((typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
     // Calm mode on the projector, or sent to this phone by the teacher
     document.documentElement.classList.contains('gc-calm') ||
-    document.documentElement.classList.contains('gc-calm-room'));
+    document.documentElement.classList.contains('gc-calm-room') ||
+    document.documentElement.classList.contains('gc-less-motion'));
 
 const CountUp: React.FC<CountUpProps> = ({ from, to, delayMs = 0, durationMs = 800, format = n => n.toLocaleString() }) => {
   const [value, setValue] = React.useState(() => (from === to || prefersReducedMotion() ? to : from));

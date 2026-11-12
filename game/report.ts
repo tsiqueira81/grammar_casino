@@ -1,6 +1,7 @@
 // The game report, built once (package L7). The on-screen report card, the PDF and the CSV all
 // read this, so they can never disagree again.
 import type { Player, QuestionType, RoundHistoryRecord, RoundPlayerResult } from '../types';
+import { QUESTION_TYPE_LABEL } from './questionTypes';
 
 export type ReportFilter = 'all' | 'errors' | 'missed' | 'perfect';
 
@@ -39,6 +40,14 @@ export interface MissedItem {
   popularWrongAnswer: string | null;
 }
 
+/** Package L7: a hand where students said "Still confused" on their phones. */
+export interface ConfusedItem {
+  round: number;
+  text: string;
+  confused: number;
+  gotIt: number;
+}
+
 export interface GameReport {
   hands: number;
   bets: number;
@@ -53,15 +62,46 @@ export interface GameReport {
   byType: ReportArea[];
   mostMissed: MissedItem[];
   teachNext: string[];
+  /** Hands with at least one "Still confused", most confused first. */
+  stillConfused: ConfusedItem[];
+  /** Package L7: how long hands took, from the deal to the reveal. Null when no hand was timed. */
+  pace: ReportPace | null;
 }
 
-const TYPE_LABEL: Record<QuestionType, string> = {
-  binary: 'Valid or flawed',
-  multipleChoice: 'Multiple choice',
-  openCloze: 'Open cloze',
-  wordFormation: 'Word formation',
-  keyWordTransformation: 'Key word transformation',
-};
+export interface ReportPace {
+  averageSeconds: number;
+  /** Up to three hands that took longest, longest first. */
+  slowest: { round: number; text: string; seconds: number }[];
+}
+
+/** A hand that took longer than this was left open (a break, a talk), so it is not counted. */
+export const PACE_MAX_SECONDS = 20 * 60;
+
+export function handSeconds(r: Pick<RoundHistoryRecord, 'dealtAt' | 'timestamp'>): number | null {
+  if (typeof r.dealtAt !== 'number' || typeof r.timestamp !== 'number') return null;
+  const s = Math.round((r.timestamp - r.dealtAt) / 1000);
+  return s > 0 && s <= PACE_MAX_SECONDS ? s : null;
+}
+
+export function reportPace(history: RoundHistoryRecord[]): ReportPace | null {
+  const timed = history
+    .map((r) => ({ round: r.round, text: r.sentence.text, seconds: handSeconds(r) }))
+    .filter((t): t is { round: number; text: string; seconds: number } => t.seconds !== null);
+  if (!timed.length) return null;
+  const averageSeconds = Math.round(timed.reduce((sum, t) => sum + t.seconds, 0) / timed.length);
+  const slowest = timed.length >= 3 ? [...timed].sort((a, b) => b.seconds - a.seconds || a.round - b.round).slice(0, 3) : [];
+  return { averageSeconds, slowest };
+}
+
+/** "45 s", "1 min 20 s", "3 min". */
+export function formatSeconds(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (m === 0) return `${s} s`;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
+}
+
+const TYPE_LABEL: Record<QuestionType, string> = QUESTION_TYPE_LABEL;
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
@@ -164,6 +204,12 @@ export function buildReport(history: RoundHistoryRecord[], players: Player[]): G
     byType,
     mostMissed: mostMissed.sort((a, b) => b.missed / b.bets - a.missed / a.bets || b.missed - a.missed).slice(0, 5),
     teachNext,
+    stillConfused: history
+      .filter((r) => (r.feedback?.confused ?? 0) > 0)
+      .map((r) => ({ round: r.round, text: r.sentence.text, confused: r.feedback!.confused, gotIt: r.feedback!.gotIt }))
+      .sort((a, b) => b.confused - a.confused || a.round - b.round)
+      .slice(0, 5),
+    pace: reportPace(history),
   };
 }
 
@@ -196,4 +242,45 @@ export function classResultLine(report: Pick<GameReport, 'bets' | 'accuracy' | '
   const review = report.byTopic.find((t) => t.bets > 0 && t.accuracy < 75);
   if (review) parts.push(`To review: ${review.label}.`);
   return parts.join(' ');
+}
+
+/** Package L7: one item on a student's slip. */
+export interface ReviewItem {
+  round: number;
+  text: string;
+  /** The right sentence or answer. */
+  answer: string;
+  explanation: string;
+  /** The item itself, for "Practice these" (package L6). */
+  sentence: RoundHistoryRecord['sentence'];
+}
+
+/**
+ * Package L7: a student's own slip at game over: up to three hands they missed to review, the
+ * most recent first, one per grammar point when possible.
+ */
+export function studentReview(history: RoundHistoryRecord[], playerId: number, max = 3): ReviewItem[] {
+  const missed = history
+    .filter((r) => r.playerResults.some((p) => p.playerId === playerId && !p.isWin))
+    .slice()
+    .reverse();
+  const picked: RoundHistoryRecord[] = [];
+  const seen = new Set<string>();
+  for (const r of missed) {
+    const key = (r.sentence.grammarPhrase || r.topic || '').toLowerCase();
+    if (key && seen.has(key)) continue;
+    seen.add(key);
+    picked.push(r);
+    if (picked.length === max) break;
+  }
+  for (const r of missed) {
+    if (picked.length === max) break;
+    if (!picked.includes(r)) picked.push(r);
+  }
+  return picked.map((r) => {
+    const s = r.sentence;
+    const gap = s.questionType && s.questionType !== 'binary';
+    const answer = gap ? s.correctAnswer || s.correction || '' : s.isCorrect ? 'The sentence was already right.' : s.correction || '';
+    return { round: r.round, text: s.text, answer, explanation: s.explanation || '', sentence: s };
+  });
 }

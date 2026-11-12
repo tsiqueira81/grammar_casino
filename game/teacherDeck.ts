@@ -8,8 +8,14 @@
 //   I have lived here _____ 2010. [since | for, during, while]
 //                                                 multiple choice: the right answer, then the others
 //   The children laughed _____. (HAPPY) [happily] word formation: the base word in capitals
+//   spot: She go to school. -> She goes to school.  Spot the error (a mistake line, cut into A to D)
+//   order: She goes to school every day.          Word order (4 to 10 words, shuffled into tiles)
+//   key: I started here in 2019. | BEEN | I _____ here since 2019. [have been working]
+//                                                 key word transformation: first sentence | KEY WORD |
+//                                                 second sentence with a gap [2 to 6 words, more after /]
 //   # a line starting with # is a note and is skipped
 import { validateItem } from '../content/schema';
+import { WORD_ORDER_MAX_WORDS, toSpotError, toWordOrder } from './newFormats';
 import type { GeneratedSentence } from '../types';
 
 export const DECK_MAX_LINES = 60;
@@ -131,6 +137,48 @@ function parseLine(raw: string): GeneratedSentence | string {
   } as GeneratedSentence;
 }
 
+/** Key word transformation (package L4): "first sentence | KEY | gapped sentence [answer / other]". */
+function parseKeyWordLine(line: string): GeneratedSentence | string {
+  const parts = line.split('|').map(clean);
+  if (parts.length !== 3) return 'key: needs the first sentence | the KEY WORD | the second sentence with _____ and [the answer]';
+  const [leadIn, keyRaw, rest] = parts;
+  const key = keyRaw.replace(/[^A-Za-z'-]/g, '').toUpperCase();
+  if (!leadIn) return 'key: needs the first sentence before the first |';
+  if (!key || /\s/.test(keyRaw)) return 'key: the KEY WORD between the two | is one word';
+  const bracket = rest.match(/\[([^\]]+)\]\s*$/);
+  if (!/_{2,}/.test(rest)) return 'key: the second sentence needs a gap: _____';
+  if (!bracket) return 'key: put the answer in brackets at the end, for example [has been working]';
+  const text = clean(rest.slice(0, bracket.index).replace(/_{2,}/, GAP));
+  const answers = bracket[1].split('/').map(clean).filter(Boolean);
+  if (!answers.length) return 'key: write the answer in the brackets';
+  const words = answers[0].split(' ');
+  const mid = Math.ceil(words.length / 2);
+  return {
+    text,
+    isCorrect: true,
+    correction: text.replace(GAP, answers[0]),
+    correctAnswer: answers[0],
+    acceptedAnswers: answers,
+    leadInSentence: leadIn,
+    baseWord: key,
+    mark1Parts: [words.slice(0, mid).join(' ')],
+    mark2Parts: [words.slice(mid).join(' ') || words[0]],
+    grammarPhrase: answers[0],
+    explanation: `With ${key}: "${answers[0]}".`,
+    questionType: 'keyWordTransformation',
+  } as GeneratedSentence;
+}
+
+/** The same tiles every time for the same sentence, so a saved deck replays the same way. */
+function seededRand(seed: string): () => number {
+  let h = hash(seed) || 1;
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0;
+    h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
 /** Reads the teacher's text. Lines with a problem are left out and listed. */
 export function parseDeckText(text: string): ParsedDeck {
   const items: GeneratedSentence[] = [];
@@ -144,15 +192,36 @@ export function parseDeckText(text: string): ParsedDeck {
       problems.push({ line: i + 1, text: line, problem: `a deck holds up to ${DECK_MAX_LINES} sentences` });
       return;
     }
-    const parsed = parseLine(line);
-    if (typeof parsed === 'string') {
-      problems.push({ line: i + 1, text: line, problem: parsed });
+    // Package L8 types: "spot:" and "order:" before an ordinary line.
+    const prefix = line.match(/^(spot|order|key)\s*:\s*/i);
+    const kind = prefix ? (prefix[1].toLowerCase() as 'spot' | 'order' | 'key') : null;
+    const body = prefix ? line.slice(prefix[0].length) : line;
+    const base = kind === 'key' ? parseKeyWordLine(body) : parseLine(body);
+    if (typeof base === 'string') {
+      problems.push({ line: i + 1, text: line, problem: base });
       return;
     }
-    const check = validateItem(parsed, parsed.questionType || 'binary');
+    const check = validateItem(base, base.questionType || 'binary');
     if (!check.ok) {
       problems.push({ line: i + 1, text: line, problem: check.errors[0] });
       return;
+    }
+    let parsed: GeneratedSentence = base;
+    if (kind === 'spot') {
+      const spot = base.questionType === 'binary' && !base.isCorrect ? toSpotError(base) : null;
+      if (!spot) {
+        problems.push({ line: i + 1, text: line, problem: 'spot: needs a sentence with a mistake, then -> and its correction (5 words or more)' });
+        return;
+      }
+      parsed = spot;
+    } else if (kind === 'order') {
+      const source: GeneratedSentence = base.questionType === 'binary' ? { ...base, text: base.correction || base.text, isCorrect: true } : base;
+      const order = toWordOrder(source, seededRand(source.correction || source.text));
+      if (!order) {
+        problems.push({ line: i + 1, text: line, problem: `order: needs a correct sentence of 4 to ${WORD_ORDER_MAX_WORDS} words` });
+        return;
+      }
+      parsed = order;
     }
     const key = parsed.text.toLowerCase();
     if (seen.has(key)) {
@@ -166,7 +235,9 @@ export function parseDeckText(text: string): ParsedDeck {
 }
 
 /** How the game remembers a dealt sentence (the same text as App's history). */
-export function sentenceRecordOf(s: Pick<GeneratedSentence, 'text' | 'correction' | 'leadInSentence'>): string {
+export function sentenceRecordOf(s: Pick<GeneratedSentence, 'text' | 'correction' | 'leadInSentence'> & Partial<Pick<GeneratedSentence, 'questionType'>>): string {
+  // Word order shows shuffled tiles: the sentence it came from is what must not repeat.
+  if (s.questionType === 'wordOrder' && s.correction) return s.correction;
   if (s.leadInSentence) return `${s.leadInSentence} -> ${s.correction || s.text}`;
   if (s.correction && s.text.includes(GAP)) return `${s.text} (${s.correction})`;
   return s.text;
@@ -184,11 +255,15 @@ export function deckSummary(items: GeneratedSentence[]): string {
   if (!items.length) return 'No sentences yet';
   const binary = items.filter((i) => (i.questionType || 'binary') === 'binary');
   const flawed = binary.filter((i) => !i.isCorrect).length;
-  const gaps = items.length - binary.length;
+  const spot = items.filter((i) => i.questionType === 'spotError').length;
+  const order = items.filter((i) => i.questionType === 'wordOrder').length;
+  const gaps = items.length - binary.length - spot - order;
   const parts = [
     binary.length - flawed ? `${binary.length - flawed} correct` : '',
     flawed ? `${flawed} with a mistake` : '',
     gaps ? `${gaps} with a gap` : '',
+    spot ? `${spot} spot the error` : '',
+    order ? `${order} word order` : '',
   ].filter(Boolean);
   return `${items.length} sentence${items.length === 1 ? '' : 's'}: ${parts.join(', ')}`;
 }

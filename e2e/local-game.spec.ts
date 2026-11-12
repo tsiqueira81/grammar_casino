@@ -12,6 +12,12 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
 
   await page.goto(E2E_URL);
   await addPlayers(page, ['Ana', 'Bruno', 'Caio']);
+  // Package T2: removing a player can be undone for a few seconds.
+  await page.getByRole('button', { name: 'Remove Bruno' }).click();
+  await expect(page.getByRole('button', { name: 'Remove Bruno' })).toHaveCount(0);
+  await page.getByTestId('undo-remove').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('button', { name: 'Remove Bruno' })).toBeVisible();
+  await expect(page.getByTestId('undo-remove')).toHaveCount(0);
   await setUpMixedGame(page, {
     drop: ['Open cloze', 'Word formation', 'Key word'],
     hands: 2,
@@ -20,6 +26,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
 
   // Hand 1: valid or flawed. The deck decides which; the test reads it.
   await expect(sentence(page)).toContainText(/Lisbon|homework/);
+  // Package G7: the teacher's game clock.
+  await expect(page.getByTestId('game-clock')).toHaveText('Playing for under a minute');
   const isValid = (await sentence(page).innerText()).includes('Lisbon');
   const right = isValid ? /^Valid/ : /^Flawed/;
   const wrong = isValid ? /^Flawed/ : /^Valid/;
@@ -35,6 +43,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
     await c.getByRole('button', { name: h.pick }).click();
     await c.getByPlaceholder('Your bet').fill(String(h.bet));
   }
+  // Package V3: the pot plaque shows every bet on the table.
+  await expect(page.getByTestId('pot-plaque')).toContainText('$350');
   await clickButton(page, /^Reveal the answer/);
 
   for (const [name, amount] of Object.entries({ Ana: 1100, Bruno: 950, Caio: 1200 })) {
@@ -44,6 +54,8 @@ test('a local game plays two hands and ranks the players', async ({ page }) => {
   // Hand 2: multiple choice. "had" is right.
   await clickButton(page, 'Deal the next hand');
   await expect(sentence(page)).toContainText('more time');
+  // Package G7: the badge says this is the last hand.
+  await expect(page.getByText(/Hand 2 of 2 · .* · Last hand/).first()).toBeVisible();
   const fullCards = page.getByRole('button', { name: 'Full cards' });
   if (await fullCards.isVisible()) await fullCards.click();
   const hand2 = [

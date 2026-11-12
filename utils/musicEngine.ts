@@ -44,7 +44,12 @@ export interface MusicNote {
 }
 
 /** The notes of one bar. Pure, so it is easy to test. */
-export function notesForBar(bar: number, layer: MusicLayer): MusicNote[] {
+export function notesForBar(bar: number, layer: MusicLayer, key = 0): MusicNote[] {
+  const shift = Math.pow(2, key / 12);
+  return notesInF(bar, layer).map((n) => (n.instrument === 'hat' || shift === 1 ? n : { ...n, hz: n.hz * shift }));
+}
+
+function notesInF(bar: number, layer: MusicLayer): MusicNote[] {
   const chart = CHART[((bar % CHART.length) + CHART.length) % CHART.length];
   const next = CHART[(((bar + 1) % CHART.length) + CHART.length) % CHART.length];
   const mix = LAYER_MIX[layer];
@@ -79,6 +84,8 @@ export interface MusicEngine {
   start: () => void;
   stop: () => void;
   setLayer: (layer: MusicLayer) => void;
+  /** Package V8: the theme's key, in semitones from F major. */
+  setKey: (semitones: number) => void;
   setVolume: (volume: number) => void;
   /** Lowers the music to this share of its volume (1 = no ducking), e.g. under speech. */
   duck: (share: number) => void;
@@ -94,6 +101,7 @@ export function createMusicEngine(initialVolume: number = DEFAULT_MUSIC_VOLUME):
   let volume = Math.min(1, Math.max(0, initialVolume));
   let ducking = 1;
   let layer: MusicLayer = 'lobby';
+  let key = 0;
   let playing = false;
   let timer: ReturnType<typeof setInterval> | null = null;
   let nextBarAt = 0;
@@ -158,7 +166,7 @@ export function createMusicEngine(initialVolume: number = DEFAULT_MUSIC_VOLUME):
     const c = ctx;
     if (!c || !playing) return;
     while (nextBarAt < c.currentTime + LOOKAHEAD_S) {
-      notesForBar(bar, layer).forEach((n) => play(c, n, nextBarAt + n.at));
+      notesForBar(bar, layer, key).forEach((n) => play(c, n, nextBarAt + n.at));
       nextBarAt += BAR;
       bar++;
     }
@@ -186,6 +194,10 @@ export function createMusicEngine(initialVolume: number = DEFAULT_MUSIC_VOLUME):
       timer = null;
       if (ctx && master) master.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.15);
     },
+    setKey(semitones) {
+      // The new key starts with the next bar scheduled.
+      key = Math.max(-12, Math.min(12, Math.round(semitones)));
+    },
     setLayer(next) {
       layer = next; // takes effect from the next bar, so a change is always on the beat
     },
@@ -207,4 +219,23 @@ export function layerForStep(step: string, secondsLeft?: number | null): MusicLa
   if (step === 'GAME_OVER') return 'celebrate';
   if (step === 'IN_GAME') return typeof secondsLeft === 'number' && secondsLeft <= 5 ? 'tension' : 'think';
   return 'lobby';
+}
+
+/** Seconds left on the soonest running turn timer (held or paused timers do not count), or null. */
+export function secondsLeftOnTimers(
+  timers: ReadonlyArray<{ status: string; endsAt?: number; held?: boolean }>,
+  now: number,
+): number | null {
+  let soonest: number | null = null;
+  for (const t of timers) {
+    if (t.status !== 'running' || t.held || typeof t.endsAt !== 'number') continue;
+    if (soonest === null || t.endsAt < soonest) soonest = t.endsAt;
+  }
+  return soonest === null ? null : Math.max(0, Math.ceil((soonest - now) / 1000));
+}
+
+/** How loud the music plays: 30% while the results are read, at most 35% while a sentence is spoken. */
+export function musicDuckFor(step: string, speaking: boolean): number {
+  const base = step === 'RESULTS' ? 0.3 : 1;
+  return speaking ? Math.min(base, 0.35) : base;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerSplit, reactionCounts, recordReaction } from '../game/answerSplit';
+import { answerSplit, reactionCounts, recordReaction, roomSplitLine } from '../game/answerSplit';
 import { normalizeGapAnswer } from '../utils/roundSettlement';
 
 describe('normalizeGapAnswer (package L5)', () => {
@@ -68,5 +68,20 @@ describe('hand reactions (package L5)', () => {
     expect(reactionCounts(s, 3)).toEqual({ gotIt: 2, confused: 0 });
     expect(reactionCounts(s, 4)).toEqual({ gotIt: 0, confused: 1 });
     expect(recordReaction(s, 4, 1, 'confused')).toBe(s);
+  });
+});
+
+describe("the room's split once bets close (S4)", () => {
+  const rows = [
+    { label: 'Valid', count: 5, isRight: true },
+    { label: 'Flawed', count: 3, isRight: false },
+  ];
+  it('gives percentages without saying which is right', () => {
+    expect(roomSplitLine('binary', rows)).toBe('63% Valid · 38% Flawed');
+  });
+  it('is only for picked answers, and needs two bets', () => {
+    expect(roomSplitLine('openCloze', rows)).toBeNull();
+    expect(roomSplitLine('multipleChoice', [{ label: 'A: had', count: 1, isRight: true }])).toBeNull();
+    expect(roomSplitLine('multipleChoice', [{ label: 'A: had', count: 2, isRight: true }, { label: 'B: have', count: 1, isRight: false }])).toBe('67% A: had · 33% B: have');
   });
 });

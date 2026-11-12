@@ -41,7 +41,13 @@ test('play again keeps the class, and a new class starts from the last setup', a
   }
 
   // A new class after a reload: no players, but the mixed formats and one hand are remembered.
-  await page.evaluate(() => localStorage.removeItem('grammarCasinoGameState'));
+  // The saved game is cleared as the page opens again, because the game also saves while the
+  // page closes (package F6: saves wait for a quiet second).
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('gc-test-cleared')) return;
+    sessionStorage.setItem('gc-test-cleared', '1');
+    localStorage.removeItem('grammarCasinoGameState');
+  });
   await page.reload();
   await addPlayers(page, ['Caio']);
   await page.getByRole('button', { name: 'Set up the game' }).click();

@@ -29,7 +29,33 @@ test("the teacher's own sentences are dealt first", async ({ page }) => {
     await card(page, name).getByPlaceholder('Your bet').fill('50');
   }
   await clickButton(page, /^Reveal the answer/);
+  // Package L7: the report card says how long the hand took.
+  await clickButton(page, /^Report card \(1\)/);
+  await expect(page.getByTestId('report-pace')).toContainText(/On average \d+ s from the deal to the reveal/);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('report-pace')).toHaveCount(0);
   await clickButton(page, 'Deal the next hand');
   await expect(sentence(page)).toContainText('My dog sleep in the garden.');
+  expect(errors).toEqual([]);
+});
+
+/** Package L8 in the teacher's deck: "spot:" and "order:" lines are dealt as those types. */
+test('own deck lines can be Spot the error and Word order', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(E2E_URL);
+  await addPlayers(page, ['Ana']);
+  await page.getByRole('button', { name: 'Set up the game' }).click();
+  await page.getByRole('button', { name: 'Add sentences' }).click();
+  await page.getByTestId('own-deck-text').fill("order: We have never been to Paris.\nspot: He don't like coffee in the morning. -> He doesn't like coffee in the morning.");
+  await expect(page.getByTestId('own-deck-summary')).toHaveText('2 sentences: 1 spot the error, 1 word order');
+  await page.getByRole('button', { name: 'Use 2 sentences' }).click();
+  await page.getByRole('button', { name: 'Next: house rules' }).click();
+  await page.getByRole('button', { name: /Set number of hands/ }).click();
+  await page.locator('input[type="number"]:visible').first().fill('2');
+  await page.getByRole('button', { name: 'Deal the first hand' }).click();
+
+  await expect(page.getByTestId('format-task')).toHaveText('Put the words in order to make a sentence.');
+  await expect(page.getByTestId('word-tiles').first()).toContainText('Paris');
   expect(errors).toEqual([]);
 });

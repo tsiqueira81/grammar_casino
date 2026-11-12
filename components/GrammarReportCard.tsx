@@ -4,8 +4,9 @@ import { Check, ChevronDown, Copy, Download, FileText, Lightbulb, Loader2, Print
 import { generateGrammarReportPDF } from '../utils/pdfGenerator';
 import { getAlternativeAcceptedAnswers } from '../utils/roundSettlement';
 import { PlayerAvatar } from './PlayerAvatar';
-import { buildReport, filterHistory, reportToCsv, type ReportFilter } from '../game/report';
+import { buildReport, filterHistory, formatSeconds, reportToCsv, type ReportFilter } from '../game/report';
 import { getAvatarPlainText } from '../utils/characterAvatars';
+import { isGapType, isOptionType, isTypedAnswerType, questionTypeLabel } from '../game/questionTypes';
 
 interface GrammarReportCardProps {
   history: RoundHistoryRecord[];
@@ -114,14 +115,13 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
     history.forEach((round) => {
       const qType = round.sentence.questionType || 'binary';
       const isCloze =
-        qType === 'multipleChoice' ||
-        qType === 'openCloze' ||
-        qType === 'wordFormation' ||
-        qType === 'keyWordTransformation';
+        isGapType(qType);
       if (isCloze) {
         const modeLabel =
           qType === 'multipleChoice'
             ? 'MULTIPLE-CHOICE CLOZE'
+            : qType === 'spotError' || qType === 'wordOrder'
+              ? questionTypeLabel(qType).toUpperCase()
             : qType === 'wordFormation'
               ? `WORD FORMATION (${round.sentence.baseWord || 'ROOT'})`
               : qType === 'keyWordTransformation'
@@ -129,11 +129,11 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                 : 'OPEN CLOZE';
         report += `[Round ${round.round}] [${modeLabel}] - Official Answer: "${round.sentence.correctAnswer || ''}"\n`;
         report += `Prompt: "${round.sentence.text}"${qType === 'wordFormation' && round.sentence.baseWord ? ` (${round.sentence.baseWord})` : ''}\n`;
-        if (qType === 'multipleChoice' && round.sentence.options) {
+        if (isOptionType(qType) && round.sentence.options) {
           report += `Options: ${round.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${opt}`).join(' | ')}\n`;
         }
         const altAnswers = getAlternativeAcceptedAnswers(round.sentence.correctAnswer, round.sentence.acceptedAnswers);
-        if ((qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && altAnswers.length > 0) {
+        if ((isTypedAnswerType(qType)) && altAnswers.length > 0) {
           report += `Also Accepted: ${altAnswers.join(', ')}\n`;
         }
         if (round.sentence.correction) {
@@ -227,14 +227,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
   const toolBtn =
     'h-10 px-3.5 inline-flex items-center gap-1.5 rounded-full bg-gc-line/[0.06] border border-gc-line/[0.16] hover:border-gc-line/30 text-gc-small font-semibold text-gc-ink transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
   const label = 'text-gc-cap font-bold text-gc-quiet mb-1';
-  const formatName = (q: string) =>
-    q === 'multipleChoice'
-      ? 'Multiple choice'
-      : q === 'wordFormation'
-        ? 'Word formation'
-        : q === 'keyWordTransformation'
-          ? 'Key word'
-          : 'Open cloze';
+  const formatName = (q: string) => (q === 'keyWordTransformation' ? 'Key word' : questionTypeLabel(q));
 
   return (
     <div className="w-full max-w-5xl mx-auto my-8 print:my-0 print:max-w-none relative text-left">
@@ -409,6 +402,43 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
           </div>
         )}
 
+        {/* Package L7: hands students said they are still confused about (from their phones) */}
+        {report.stillConfused.length > 0 && (
+          <div className="mb-5 p-4 rounded-gc bg-gc-info/[0.07] border border-gc-info/25" data-testid="report-still-confused">
+            <div className={label}>Still confused</div>
+            <ol className="m-0 mt-1 pl-5 text-gc-small text-gc-ink space-y-1.5">
+              {report.stillConfused.map(c => (
+                <li key={c.round}>
+                  <span className="font-sentence italic">{c.text}</span>
+                  <span className="block text-gc-quiet">
+                    Hand {c.round}: {c.confused} still confused · {c.gotIt} got it
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {/* Package L7: how long the hands took */}
+        {report.pace && (
+          <div className="mb-5 p-4 rounded-gc bg-gc-line/[0.04] border border-gc-line/[0.12]" data-testid="report-pace">
+            <div className={label}>Time per hand</div>
+            <p className="m-0 mt-1 text-gc-body text-gc-ink">
+              On average {formatSeconds(report.pace.averageSeconds)} from the deal to the reveal.
+            </p>
+            {report.pace.slowest.length > 0 && (
+              <ol className="m-0 mt-2 pl-5 text-gc-small text-gc-ink space-y-1">
+                {report.pace.slowest.map(h => (
+                  <li key={h.round}>
+                    <span className="font-sentence italic">{h.text}</span>
+                    <span className="block text-gc-quiet">Hand {h.round}: {formatSeconds(h.seconds)}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+
         {/* Which hands to show */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-gc-line/[0.12] print:hidden">
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Show">
@@ -441,7 +471,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
             filteredHistory.map((record) => {
               const isExpanded = expandedRounds[record.round] ?? true;
               const qType = record.sentence.questionType || 'binary';
-              const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+              const isCloze = isGapType(qType);
               const hasError = !isCloze && !record.sentence.isCorrect;
               const anyPlayerLost = record.playerResults.some(pr => !pr.isWin);
               const chip = 'h-7 px-2.5 inline-flex items-center gap-1 rounded-full text-gc-cap font-bold shrink-0';
@@ -499,7 +529,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                           </p>
                         )}
                         <p className="text-gc-lead font-sentence italic text-gc-ink">&ldquo;{record.sentence.text}&rdquo;</p>
-                        {qType === 'multipleChoice' && record.sentence.options && (
+                        {isOptionType(qType) && record.sentence.options && (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {record.sentence.options.map((opt, idx) => {
                               const isOfficial = opt.trim().toLowerCase() === (record.sentence.correctAnswer || '').trim().toLowerCase();
@@ -522,7 +552,7 @@ export const GrammarReportCard: React.FC<GrammarReportCardProps> = ({
                         <div className="p-4 rounded-gc-sm bg-gc-win/[0.08] border border-gc-win/30">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className={`${label} !text-gc-win`}>Answer: {record.sentence.correctAnswer}</div>
-                            {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                            {(isTypedAnswerType(qType)) && (() => {
                               const altAnswers = getAlternativeAcceptedAnswers(record.sentence.correctAnswer, record.sentence.acceptedAnswers);
                               return altAnswers.length > 0 ? (
                                 <span className="text-gc-cap text-gc-quiet">Also accepted: {altAnswers.join(', ')}</span>

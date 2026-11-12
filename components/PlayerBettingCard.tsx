@@ -11,9 +11,13 @@ import { TimerAvatarRing, TurnTimerControls, useTurnCountdown } from './TurnTime
 import { HINT_COST, POWERUP_COST, BET_CAP_AMOUNT, POWER_UPS } from '../constants';
 import { isValidKeyWordTransformationPhrase, AudiencePollSummary } from '../utils/multiplayerProtocol';
 import { PlayerAvatar } from './PlayerAvatar';
+import { isOptionType, isTypedAnswerType, isWordAnswerType } from '../game/questionTypes';
+import { WordTilePicker } from './NewFormatSentence';
 
 interface PlayerBettingCardProps {
   player: Player;
+  /** Package G6 Spotlight: this player's next power-up draw is free. */
+  hasFreeDraw?: boolean;
   players: Player[]; 
   bet?: Bet;
   onBetChange: (playerId: number, field: keyof Bet, value: any) => void;
@@ -82,6 +86,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
   onChangeAvatar,
   onUpdateName,
   targetAmount,
+  hasFreeDraw = false,
   questionType = 'binary',
   options = [],
   baseWord,
@@ -370,7 +375,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
       const minRequired = isHighRoller && effectiveMinBet > 0 ? effectiveMinBet : 1;
       const hasValidWager = typeof bet?.bet === 'number' && !isNaN(bet.bet) && bet.bet >= minRequired;
       let hasValidAnswer = false;
-      if (questionType === 'multipleChoice') {
+      if (isOptionType(questionType)) {
         hasValidAnswer = hasSplitBet
           ? (bet?.splitOptions?.length || 0) >= 1
           : Boolean(bet?.selectedOption?.trim());
@@ -380,7 +385,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               (!bet?.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))) ||
             (!bet?.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))
           : isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord);
-      } else if (questionType === 'openCloze' || questionType === 'wordFormation') {
+      } else if (isWordAnswerType(questionType)) {
         const isWordOk = (w?: string) => {
           const trimmed = (w || '').trim().toLowerCase();
           if (!trimmed) return false;
@@ -409,7 +414,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           message = `Hold on! Your Key Word Transformation must use 2 to 6 words and include the exact unchanged key word "${(baseWord || 'KEY').toUpperCase()}" before locking!`;
         } else if (!hasValidAnswer && !hasValidWager) {
           missingField = 'both';
-          if (questionType === 'multipleChoice') {
+          if (isOptionType(questionType)) {
             message = hasSplitBet
               ? 'Hold on! Pick 2 options (50/50) or click 1 option twice for 100% (2×), and enter a wager amount before locking.'
               : 'Hold on! Choose an option (A–D) and enter a wager amount before locking your bet.';
@@ -428,7 +433,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
           }
         } else if (!hasValidAnswer) {
           missingField = 'answer';
-          if (questionType === 'multipleChoice') {
+          if (isOptionType(questionType)) {
             message = hasSplitBet
               ? 'Please pick 2 options (50/50) or click the same option twice for 100% (2×) before locking!'
               : 'Please choose an option (A, B, C, or D) before locking your bet!';
@@ -453,10 +458,10 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         // Move focus to the missing item
         window.requestAnimationFrame(() => {
           if (!hasValidAnswer || isUnchangedBaseWord || isInvalidKwtPhrase) {
-            if (questionType === 'multipleChoice') {
+            if (isOptionType(questionType)) {
               firstOptionBtnRef.current?.focus();
               firstOptionBtnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } else if (questionType === 'openCloze' || questionType === 'wordFormation' || questionType === 'keyWordTransformation') {
+            } else if (isTypedAnswerType(questionType)) {
               if (hasSplitBet) {
                 const targetInput = !bet?.splitClozeAnswers?.[0]?.trim()
                   ? splitWord1InputRef.current
@@ -1027,7 +1032,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
         
         {/* Left/Main Column: Betting Felt & Wager Controls (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
-          {questionType === 'multipleChoice' ? (
+          {isOptionType(questionType) ? (
             <>
               {/* Multiple-Choice Cloze (4 Options: A, B, C, D) */}
               {hasSplitBet && (() => {
@@ -1226,7 +1231,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 />
               )}
             </>
-          ) : (questionType === 'openCloze' || questionType === 'wordFormation' || questionType === 'keyWordTransformation') ? (
+          ) : (isTypedAnswerType(questionType)) ? (
             <>
               {/* Open Cloze, Word Formation & Key Word Transformation */}
               {questionType === 'wordFormation' && baseWord && (
@@ -1314,7 +1319,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                           onChange={(e) => {
                             if (isBlocked) return;
                             const val =
-                              questionType === 'keyWordTransformation'
+                              (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
                                 ? e.target.value.replace(/\s{2,}/g, ' ')
                                 : e.target.value.replace(/\s+/g, '');
                             const second = bet?.splitClozeAnswers?.[1] || '';
@@ -1328,7 +1333,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                                 ? `A new form of ${baseWord.toUpperCase()}`
                                 : 'One word'
                           }
-                          maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
+                          maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
                           className="w-full h-12 px-4 rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-lead"
                         />
                       </div>
@@ -1349,7 +1354,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                             if (isBlocked) return;
                             const first = bet?.splitClozeAnswers?.[0] || '';
                             const val =
-                              questionType === 'keyWordTransformation'
+                              (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
                                 ? e.target.value.replace(/\s{2,}/g, ' ')
                                 : e.target.value.replace(/\s+/g, '');
                             onBetChange(player.id, 'splitClozeAnswers', [first, val]);
@@ -1360,7 +1365,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                               ? 'Leave empty to bet it all on the first'
                               : 'Leave empty to bet it all on the first'
                           }
-                          maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
+                          maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
                           className="w-full h-12 px-4 rounded-gc-sm bg-gc-line/[0.05] border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-lead"
                         />
                       </div>
@@ -1381,13 +1386,15 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                       <span>
                         {questionType === 'keyWordTransformation'
                           ? `Fill the gap using ${(baseWord || 'KEY').toUpperCase()}`
-                          : questionType === 'wordFormation'
+                          : questionType === 'wordOrder'
+                            ? 'Put the words in order'
+                            : questionType === 'wordFormation'
                             ? `Change ${(baseWord || 'ROOT').toUpperCase()} to fit the gap`
                             : 'Type the missing word'}
                       </span>
                     </label>
                     <span className="text-gc-cap font-semibold text-gc-quiet shrink-0">
-                      {questionType === 'keyWordTransformation' ? '2 to 6 words' : 'One word'}
+                      {questionType === 'keyWordTransformation' ? '2 to 6 words' : questionType === 'wordOrder' ? 'The whole sentence' : 'One word'}
                     </span>
                   </div>
                   <input
@@ -1398,7 +1405,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                     onChange={(e) => {
                       if (isBlocked) return;
                       const val =
-                        questionType === 'keyWordTransformation'
+                        (questionType === 'keyWordTransformation' || questionType === 'wordOrder')
                           ? e.target.value.replace(/\s{2,}/g, ' ')
                           : e.target.value.replace(/\s+/g, '');
                       onBetChange(player.id, 'clozeAnswer', val);
@@ -1409,11 +1416,21 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                         ? `2 to 6 words, including ${baseWord.toUpperCase()}`
                         : questionType === 'wordFormation' && baseWord
                           ? `A new form of ${baseWord.toUpperCase()}`
-                          : 'The missing word'
+                          : questionType === 'wordOrder'
+                            ? 'Tap the words, or type the sentence'
+                            : 'The missing word'
                     }
-                    maxLength={questionType === 'keyWordTransformation' ? 80 : 32}
+                    maxLength={questionType === 'keyWordTransformation' ? 80 : questionType === 'wordOrder' ? 120 : 32}
                     className="w-full h-14 px-4 rounded-gc-sm bg-gc-card/60 border border-gc-line/[0.2] text-gc-ink placeholder:text-gc-quiet/70 placeholder:not-italic placeholder:font-sans placeholder:text-gc-body focus:outline-none focus:border-gc-gold focus:ring-2 focus:ring-gc-gold/30 transition-colors font-sentence italic font-semibold text-gc-title"
                   />
+                  {questionType === 'wordOrder' && options.length > 0 && (
+                    <WordTilePicker
+                      tiles={options}
+                      value={bet?.clozeAnswer || ''}
+                      disabled={isBlocked}
+                      onChange={(next) => onBetChange(player.id, 'clozeAnswer', next)}
+                    />
+                  )}
                   {questionType === 'keyWordTransformation' && (() => {
                     const check = inspectKwtPhrase(bet?.clozeAnswer);
                     if (!check.trimmed) return null;
@@ -1868,7 +1885,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
               <button
                 type="button"
                 onClick={() => onGetPowerUp(player.id)}
-                disabled={player.money < POWERUP_COST || isBlocked || powerUpUsedThisRound || isSilenced}
+                disabled={(player.money < POWERUP_COST && !hasFreeDraw) || isBlocked || powerUpUsedThisRound || isSilenced}
                 className="w-full flex items-center gap-3 p-3.5 rounded-gc bg-gc-line/[0.06] border border-gc-line/[0.12] text-gc-ink text-left transition-colors hover:border-gc-line/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-55 focus:outline-none focus-visible:ring-4 focus-visible:ring-gc-turn/40"
                 title={isSilenced ? "You are silenced this round" : undefined}
               >
@@ -1882,7 +1899,7 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                   </span>
                 </span>
                 {!isSilenced && (
-                  <span className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">-${POWERUP_COST}</span>
+                  <span data-testid="draw-price" className="ml-auto pl-2 text-gc-body font-extrabold tabular-nums text-gc-money shrink-0">{hasFreeDraw ? 'Free' : `-$${POWERUP_COST}`}</span>
                 )}
               </button>
             </PowerUpTooltip>
@@ -1910,14 +1927,14 @@ const PlayerBettingCard: React.FC<PlayerBettingCardProps> = ({
                 Use 2–6 words with {(baseWord || 'KEY').toUpperCase()}
               </span>
             ) : (
-              questionType === 'multipleChoice'
+              isOptionType(questionType)
                 ? (typeof bet?.bet === 'number' && (hasSplitBet ? (bet?.splitOptions?.length || 0) >= 1 : Boolean(bet?.selectedOption)))
                 : questionType === 'keyWordTransformation'
                   ? (typeof bet?.bet === 'number' && (hasSplitBet
                       ? (isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[0], baseWord) && (!bet?.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))) ||
                         (!bet?.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(bet?.splitClozeAnswers?.[1], baseWord))
                       : isValidKeyWordTransformationPhrase(bet?.clozeAnswer, baseWord)))
-                  : (questionType === 'openCloze' || questionType === 'wordFormation')
+                  : (isWordAnswerType(questionType))
                     ? (typeof bet?.bet === 'number' && (hasSplitBet ? Boolean(bet?.splitClozeAnswers?.[0]?.trim() || bet?.splitClozeAnswers?.[1]?.trim()) : Boolean(bet?.clozeAnswer?.trim())))
                     : (hasSplitBet ? typeof bet?.bet === 'number' : (bet?.opinion && typeof bet?.bet === 'number'))
             ) ? (

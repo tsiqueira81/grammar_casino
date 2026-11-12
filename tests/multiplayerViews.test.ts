@@ -212,3 +212,24 @@ describe('pause (package R8)', () => {
     expect(buildAllPlayerViews(params('RESULTS', true))[1].paused).toBe(false);
   });
 });
+
+describe('special hands on phones (package G6)', () => {
+  const banner = { title: 'Final Table', rule: 'Last hand. Every win pays double.', icon: '🏆' };
+  const params = (step: 'IN_GAME' | 'GAME_OVER') => ({
+    roomCode: 'TEST', roomLocked: false, step, currentRound: 10, gameMode: 'rounds' as const, totalRounds: 10,
+    targetAmount: 2000, settings: { topic: 'Tenses', level: 'B2', theme: 'General', challengeFormat: 'binary' } as any,
+    customTopic: '', customTheme: '', isLoading: false, isProcessing: false, players: [{ id: 1, name: 'Ana', money: 500, history: [], avatar: '🦊', winStreak: 0, effects: [] } as Player], seats: {},
+    bets: {}, hints: {}, activePowerUps: {}, powerUpsUsedThisRound: {}, availablePowerUps: [], currentSentence: null,
+    roundResults: [], winner: null, studentPendingTarget: {}, studentPendingWheel: {}, studentNotifications: {}, specialHand: banner,
+  });
+
+  it('puts the special hand on the shared table while the hand is played', () => {
+    const views = buildAllPlayerViews(params('IN_GAME'));
+    expect(views[1].specialHand).toEqual(banner);
+    expect(splitPlayerViews(views).table.specialHand).toEqual(banner);
+  });
+
+  it('drops it once the game is over', () => {
+    expect(buildAllPlayerViews(params('GAME_OVER'))[1].specialHand).toBeNull();
+  });
+});

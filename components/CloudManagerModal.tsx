@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useFocusTrap } from '../utils/useFocusTrap';
 import { motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -41,6 +42,7 @@ import {
   signInTeacherWithGoogle,
   syncCloudSentenceBank,
 } from '../services/firebaseService';
+import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
 
 export type CloudManagerTab = 'rosters' | 'reports' | 'sentences';
 
@@ -207,6 +209,9 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
     }
   };
 
+  // Package S8: the keyboard stays in this window while it is open.
+  const dialogRef = React.useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, isOpen);
   if (!isOpen) return null;
 
   const handleCreateNewRoster = async (e: React.FormEvent) => {
@@ -490,6 +495,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.96, opacity: 0, y: 12 }}
         transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Cloud saves and rosters"
@@ -1318,10 +1324,7 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                     <div className="space-y-2.5 max-h-[48vh] overflow-y-auto pr-1 modal-content-scroll">
                       {filteredSentences.map((item) => {
                         const isCloze =
-                          item.questionType === 'multipleChoice' ||
-                          item.questionType === 'openCloze' ||
-                          item.questionType === 'wordFormation' ||
-                          item.questionType === 'keyWordTransformation';
+                          isGapType(item.questionType);
                         return (
                           <div
                             key={item.id}
@@ -1333,7 +1336,9 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
                                   {item.topic} &middot; {item.level}
                                 </span>
                                 <span className="px-2 py-0.5 rounded-full bg-gc-line/[0.08] text-gc-quiet">
-                                  {item.questionType === 'multipleChoice'
+                                  {item.questionType === 'spotError' || item.questionType === 'wordOrder'
+                                    ? questionTypeLabel(item.questionType)
+                                    : isOptionType(item.questionType)
                                     ? '🔠 MC Cloze'
                                     : item.questionType === 'openCloze'
                                       ? '✍️ Open Cloze'

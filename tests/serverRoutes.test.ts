@@ -21,7 +21,18 @@ describe('serverless API routes', () => {
     const res = await call('/api/health');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('application/json');
-    expect(await res.json()).toEqual({ status: 'ok', app: 'grammar-casino' });
+    expect(await res.json()).toEqual({ status: 'ok', app: 'grammar-casino', aiConfigured: false });
+  });
+
+  it('says whether AI sentences are on, never the key (package T6)', async () => {
+    process.env.GEMINI_API_KEY = 'test-key-not-real-123';
+    try {
+      const body = await (await call('/api/health')).json();
+      expect(body.aiConfigured).toBe(true);
+      expect(JSON.stringify(body)).not.toContain('test-key');
+    } finally {
+      delete process.env.GEMINI_API_KEY;
+    }
   });
 
   it('refuses an AI request without an action', async () => {

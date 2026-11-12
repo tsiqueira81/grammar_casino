@@ -2,7 +2,8 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { RoundHistoryRecord, Player, Settings, GameMode } from '../types';
 import { getAlternativeAcceptedAnswers } from './roundSettlement';
-import { buildReport } from '../game/report';
+import { buildReport, formatSeconds } from '../game/report';
+import { isGapType, isOptionType, questionTypeLabel } from '../game/questionTypes';
 
 export interface GeneratePDFOptions {
   history: RoundHistoryRecord[];
@@ -405,6 +406,33 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
   // @ts-expect-error autoTable adds lastAutoTable to doc
   currentY = doc.lastAutoTable.finalY + 8;
 
+  // Package L7: what the class said it found hard, and how long hands took.
+  const classNotes: string[] = [];
+  report.stillConfused.slice(0, 5).forEach((c) => {
+    classNotes.push(`Hand ${c.round}: ${c.confused} still confused${c.gotIt ? `, ${c.gotIt} got it` : ''}. "${cleanText(c.text)}"`);
+  });
+  if (report.pace) {
+    classNotes.push(`Time per hand, deal to reveal: ${formatSeconds(report.pace.averageSeconds)} on average.` +
+      (report.pace.slowest.length ? ` Slowest: ${report.pace.slowest.map((s) => `hand ${s.round} (${formatSeconds(s.seconds)})`).join(', ')}.` : ''));
+  }
+  if (classNotes.length) {
+    ensureSpace(14);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...colors.casinoGreen);
+    doc.text('WHAT THE CLASS FOUND HARD, AND THE PACE', marginX, currentY);
+    currentY += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...colors.slateDark);
+    classNotes.forEach((note) => {
+      const lines = wrapText(note, contentWidth, 7.5, 'normal');
+      ensureSpace(lines.length * 3.6 + 1);
+      currentY = drawWrappedLines(lines, marginX, currentY, 3.6) + 1;
+    });
+    currentY += 5;
+  }
+
   // ==========================================
   // 5. DETAILED SENTENCE-BY-SENTENCE BREAKDOWN
   // ==========================================
@@ -421,7 +449,7 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
   roundsToRender.forEach((record) => {
     const qType = record.sentence.questionType || 'binary';
-    const isCloze = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+    const isCloze = isGapType(qType);
     const isError = !isCloze && !record.sentence.isCorrect;
     const cleanLeadIn = cleanText(record.sentence.leadInSentence || '');
     const cleanSentenceText = cleanText(record.sentence.text);
@@ -434,7 +462,7 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
     const cleanBaseWord = cleanText(record.sentence.baseWord || '');
 
     const altAccepted = getAlternativeAcceptedAnswers(record.sentence.correctAnswer, record.sentence.acceptedAnswers);
-    const optionsLine = (qType === 'multipleChoice' && record.sentence.options)
+    const optionsLine = (isOptionType(qType) && record.sentence.options)
       ? `Options: ${record.sentence.options.map((opt, idx) => `${['A', 'B', 'C', 'D'][idx]}) ${cleanText(opt)}`).join('   ')}`
       : (qType === 'keyWordTransformation')
         ? `KEY WORD: [${cleanBaseWord || 'KEY'}]${altAccepted.length > 0 ? `   |   Also Accepted: ${altAccepted.map(a => cleanText(a)).join(' / ')}` : ''}`
@@ -540,7 +568,9 @@ export function generateGrammarReportPDF(options: GeneratePDFOptions): jsPDF {
 
     // Header line inside card (left side, bounded so it never touches the right badge)
     const modePrefix =
-      qType === 'multipleChoice'
+      qType === 'spotError' || qType === 'wordOrder'
+        ? ` - ${questionTypeLabel(qType).toUpperCase()}`
+        : isOptionType(qType)
         ? ' - MULTIPLE-CHOICE CLOZE'
         : qType === 'keyWordTransformation'
           ? ` - KEY WORD TRANSFORMATION (${cleanBaseWord || 'KEY'})`

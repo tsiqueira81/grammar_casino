@@ -70,7 +70,7 @@ export type GrammarTopic = 'Tenses' | 'Prepositions' | 'Articles' | 'Conditional
 export type CEFRLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 export type Theme = 'Fantasy 🐉' | 'Sci-Fi 🚀' | 'History 🏛️' | 'Everyday Life ☕' | 'Business 💼' | 'Technology 💻' | 'Pop Culture 🍿' | 'Custom ✍️';
 
-export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation';
+export type QuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation' | 'spotError' | 'wordOrder';
 export type ChallengeFormat = QuestionType | 'mixed';
 
 export interface Settings {
@@ -84,6 +84,8 @@ export interface Settings {
 export interface GeneratedSentence {
   /** Package L3: how an AI item was checked ("two models" or "rules"); absent for bank items. */
   checkedBy?: 'two models' | 'rules';
+  /** Package T6: where the item came from, for the teacher's status line. */
+  source?: 'ai' | 'bank' | 'own';
   text: string;
   isCorrect: boolean;
   correction: string;
@@ -210,6 +212,8 @@ export interface ActivePowerUp {
 export interface UsedPowerUp {
   key: PowerUpKey;
   targetId?: number;
+  /** What it cost; 0 for a free Spotlight draw (package G6). Missing means the usual price. */
+  cost?: number;
 }
 
 export interface ShowPowerUpModalPayload {
@@ -253,4 +257,8 @@ export interface RoundHistoryRecord {
   theme: string;
   playerResults: RoundPlayerResult[];
   timestamp?: number;
+  /** Package L7: when the sentence was shown, so the report can say how long each hand took. */
+  dealtAt?: number;
+  /** Package L7: "Got it" / "Still confused" answers from phones after the reveal (package L5). */
+  feedback?: { gotIt: number; confused: number };
 }

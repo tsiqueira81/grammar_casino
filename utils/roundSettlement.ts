@@ -5,6 +5,7 @@
 // unit tested. The asynchronous answer checking (AI judge, correction checks) still
 // happens in App.tsx; its results are passed in as `verifications` and
 // `clozeWordVerifications`. Sounds are returned in order instead of played here.
+import { scaleWin } from '../game/specialHands';
 import { isFrozenBySubZero } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import {
@@ -14,6 +15,7 @@ import { JACKPOT_MULTIPLIER } from '../constants';
 import { isPlayerUnderdog } from './multiplayerProtocol';
 import { evaluateKeyWordTransformationDeterministic } from './kwtMarking';
 import { normalizeUkUsSpelling } from './offlineGrammarEngine';
+import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType } from '../game/questionTypes';
 
 const GeminiService = { evaluateKeyWordTransformationDeterministic };
 
@@ -45,6 +47,10 @@ export interface SettleRoundInput {
   hasPlayerPlacedBet: (playerId: number) => boolean;
   currentRound: number;
   roundSpending: Record<number, number>;
+  /** Package G6: a special hand multiplies wins (Final Table 2, Second look 1.5). Default 1. */
+  payoutMultiplier?: number;
+  /** Shown in the result line when the multiplier applies, e.g. "Final Table". */
+  specialHandTitle?: string;
 }
 
 export interface SettleRoundOutput {
@@ -86,6 +92,10 @@ export function buildAcceptedAnswerSet(sentence: GeneratedSentence, qType: Quest
       addVariant(ans);
     }
   });
+  // Package L8: a word-order answer may end with the full stop (or ! or ?).
+  if (qType === 'wordOrder') {
+    Array.from(acceptedSet).forEach(a => ['.', '!', '?'].forEach(mark => acceptedSet.add(a + mark)));
+  }
   return { acceptedSet, baseWordNorm };
 }
 
@@ -193,13 +203,13 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
         incorrectCount++;
         choiceFrequency['incorrect'] = (choiceFrequency['incorrect'] || 0) + 1;
       }
-    } else if (qType === 'multipleChoice') {
+    } else if (isOptionType(qType)) {
       const opts: string[] = pSplit ? (b.splitOptions || []) : (b.selectedOption ? [b.selectedOption] : []);
       const uniqueKeys = Array.from(new Set<string>(opts.map(o => (o || '').trim().toLowerCase()).filter(Boolean)));
       uniqueKeys.forEach(key => {
         choiceFrequency[key] = (choiceFrequency[key] || 0) + 1;
       });
-    } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+    } else if (isTypedAnswerType(qType)) {
       const words: string[] = pSplit ? (b.splitClozeAnswers || []) : (b.clozeAnswer ? [b.clozeAnswer] : []);
       const uniqueKeys = Array.from(new Set<string>(words.map(w => (w || '').trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)));
       uniqueKeys.forEach(key => {
@@ -217,13 +227,13 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       if (!b) return false;
       const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
       const pSplit = pActive.some(pu => pu.type === 'SPLIT_BET');
-      if (qType === 'multipleChoice') {
+      if (isOptionType(qType)) {
         if (pSplit) {
           return (b.splitOptions || []).some(o => isMcOptionCorrect(o));
         }
         return isMcOptionCorrect(b.selectedOption);
       }
-      if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+      if (isTypedAnswerType(qType)) {
         if (pSplit) {
           return (b.splitClozeAnswers || []).some(w => isClozeWordCorrect(w));
         }
@@ -246,7 +256,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     }
     if (validPlayers.length <= 1) return false;
     const pSplit = (activePowerUps[playerId] || []).some(pu => pu.type === 'SPLIT_BET');
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       const chosen = pSplit
         ? (b.splitOptions || []).find(o => isMcOptionCorrect(o))
         : b.selectedOption;
@@ -254,7 +264,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       const count = key ? (choiceFrequency[key] || 0) : 0;
       return (count > 0 && count < maxChoiceCount) || (winningPlayersCount > 0 && winningPlayersCount < validPlayers.length - winningPlayersCount);
     }
-    if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+    if (isTypedAnswerType(qType)) {
       const chosen = pSplit
         ? (b.splitClozeAnswers || []).find(w => isClozeWordCorrect(w))
         : b.clozeAnswer;
@@ -358,7 +368,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
     let playerAnswerDisplay = '';
 
     // Compute human-readable answer display for Results, Report Card, and PDF
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       if (hasSplitBet) {
         const rawOpts = (playerBetData?.splitOptions || []).filter(Boolean);
         const isSingleStack =
@@ -373,7 +383,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       } else {
         playerAnswerDisplay = formatMcOptionWithLetter(playerBetData?.selectedOption);
       }
-    } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+    } else if (isTypedAnswerType(qType)) {
       if (hasSplitBet) {
         const w1 = playerBetData?.splitClozeAnswers?.[0]?.trim() || '';
         const w2 = playerBetData?.splitClozeAnswers?.[1]?.trim() || '';
@@ -400,7 +410,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
 
     if (hasSplitBet) {
         const wager = finalBet;
-        if (qType === 'multipleChoice') {
+        if (isOptionType(qType)) {
             const splitOpts = (playerBetData?.splitOptions || []).filter(Boolean);
             const isSingleStack =
               splitOpts.length === 1 ||
@@ -489,7 +499,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
               }
             });
             if (fbParts.length > 0) correctionFeedbackText = fbParts.join(' · ');
-        } else if (qType === 'openCloze' || qType === 'wordFormation') {
+        } else if (isWordAnswerType(qType)) {
             const w1 = (playerBetData?.splitClozeAnswers?.[0] || '').trim();
             const w2 = (playerBetData?.splitClozeAnswers?.[1] || '').trim();
             const isSingleOrDuplicateCloze =
@@ -624,7 +634,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
                 outcomeAmount = Math.round(outcomeAmount * 2.5);
                 outcomeText += ' + Underdog Surge (2.5×)! 🚀';
             }
-        } else if (!isWin && outcomeAmount < 0 && (qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation' || hasDoubleOrNothing)) {
+        } else if (!isWin && outcomeAmount < 0 && (isGapType(qType) || hasDoubleOrNothing)) {
             let lossAmount = Math.abs(outcomeAmount);
             const hasImmunity = playerPowerUps.some(pu => pu.type === 'IMMUNITY_IDOL');
             if (hasImmunity) {
@@ -648,7 +658,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
 
     } else {
         let playerGuessedCorrectly = false;
-        if (qType === 'multipleChoice') {
+        if (isOptionType(qType)) {
             if (!playerBetData?.selectedOption) return;
             playerGuessedCorrectly = isMcOptionCorrect(playerBetData.selectedOption);
         } else if (qType === 'keyWordTransformation') {
@@ -660,7 +670,7 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
             if (clozeWordVerifications[norm]?.feedback) {
                 correctionFeedbackText = clozeWordVerifications[norm].feedback;
             }
-        } else if (qType === 'openCloze' || qType === 'wordFormation') {
+        } else if (isWordAnswerType(qType)) {
             if (!playerBetData?.clozeAnswer?.trim()) return;
             playerGuessedCorrectly = isClozeWordCorrect(playerBetData.clozeAnswer);
             const norm = normalizeGapAnswer(playerBetData.clozeAnswer);
@@ -971,7 +981,6 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       finalBet,
       isWin,
       marksAwarded,
-      outcomeAmount,
       correctionFeedbackText,
       playerAnswerDisplay,
       syntheticOpinion,
@@ -980,6 +989,11 @@ export function settleRound(input: SettleRoundInput): SettleRoundOutput {
       teachersPetAwarded,
     } = draft;
     let { outcomeText } = draft;
+    const handMultiplier = input.payoutMultiplier ?? 1;
+    const outcomeAmount = scaleWin(draft.outcomeAmount, handMultiplier);
+    if (outcomeAmount !== draft.outcomeAmount) {
+      outcomeText += ` + ${input.specialHandTitle || 'Special hand'} (${handMultiplier}×)`;
+    }
 
     let newMoney = Math.max(0, player.money + outcomeAmount);
 

@@ -1,4 +1,7 @@
 import { safeLocalStorage } from '../utils/safeStorage';
+import { PracticeQuiz } from './PracticeQuiz';
+import { plainDescriptionOf } from '../game/powerUpCatalog';
+import { settlePendingBet, type PendingBet } from '../game/presence';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ANSWER_INPUT_PROPS, keepFieldInView } from '../utils/answerInputProps';
 import {
@@ -40,9 +43,16 @@ import {
   Sparkles,
   Sun,
   X,
-  Vibrate,
-  VibrateOff,
+  Settings as SettingsIcon,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
+import { SFX_MUTED_STORAGE_KEY } from '../utils/soundEngine';
+import { TEXT_SIZES, applyStudentPrefs, readStudentPrefs, saveStudentPrefs, type StudentPrefs } from '../utils/studentPrefs';
+import { useFocusTrap } from '../utils/useFocusTrap';
+import { studentReview } from '../game/report';
+import { isGapType, isOptionType, isTypedAnswerType, isWordAnswerType, questionTypeLabel } from '../game/questionTypes';
+import { SpotErrorSentence, WordTilePicker, WordTiles, newFormatTask } from './NewFormatSentence';
 
 /** Package S5: how long a toast stays, and how many stack at once. */
 const TOAST_MS = 7000;
@@ -117,12 +127,29 @@ const isTouchScreen = () => {
 export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   initialRoomCode = '',
   onExitStudentMode,
-  playSound,
+  playSound: playSoundProp,
   isDarkMode,
   onToggleTheme,
 }) => {
+  // Package S6: comfort settings on this phone (sound, vibration, text size, font, motion, theme).
+  const [soundOn, setSoundOn] = useState(() => safeLocalStorage.getItem(SFX_MUTED_STORAGE_KEY) !== 'true');
+  const soundOnRef = useRef(soundOn);
+  soundOnRef.current = soundOn;
+  const playSound = useCallback((sound: SoundEffect, ...args: any[]) => {
+    if (soundOnRef.current) playSoundProp(sound, ...args);
+  }, [playSoundProp]);
+  const [comfort, setComfort] = useState<StudentPrefs>(() => readStudentPrefs());
+  const [showComfort, setShowComfort] = useState(false);
+  useEffect(() => {
+    applyStudentPrefs(comfort);
+    saveStudentPrefs(comfort);
+  }, [comfort]);
+  useEffect(() => () => applyStudentPrefs({ textSize: 'normal', plainFont: false, lessMotion: false }), []);
   const [roomCodeInput, setRoomCodeInput] = useState(() => initialRoomCode.toUpperCase());
   const [playerNameInput, setPlayerNameInput] = useState('');
+  // Package S9: a QR scan or join link already holds the code, so the form asks only for a name.
+  const [codeFromLink, setCodeFromLink] = useState(() => /^[A-Z0-9]{4}$/i.test(initialRoomCode));
+  const [welcomeName, setWelcomeName] = useState<string | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState(() => getRandomCharacterAvatar());
   const [isJoining, setIsJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -130,6 +157,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const [isConnected, setIsConnected] = useState(false);
 
   const [view, setView] = useState<PlayerViewPayload | null>(null);
+  // Package S8: the keyboard stays in the target window while it is open.
+  const targetDialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(targetDialogRef, Boolean(view?.pendingTarget));
   const [localBet, setLocalBet] = useState<Bet>({});
   const localBetRef = useRef<Bet>({});
   localBetRef.current = localBet;
@@ -176,7 +206,10 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       const raw = safeLocalStorage.getItem(STUDENT_SESSION_STORAGE_KEY);
       if (!raw) return;
       const saved: SavedStudentSession = JSON.parse(raw);
-      if (saved.name) setPlayerNameInput(saved.name);
+      if (saved.name) {
+        setPlayerNameInput(saved.name);
+        setWelcomeName(saved.name);
+      }
       if (saved.avatar) setSelectedAvatar(saved.avatar);
       const targetCode = (initialRoomCode || saved.code || '').toUpperCase();
       if (targetCode) setRoomCodeInput(targetCode);
@@ -388,6 +421,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   }, []);
 
   // Package L5: "Got it" / "Still confused" after the reveal, remembered for the hand.
+  const [showPractice, setShowPractice] = useState(false);
   const [myReaction, setMyReaction] = useState<{ round: number; value: 'gotIt' | 'confused' } | null>(null);
   const sendReaction = useCallback((round: number, value: 'gotIt' | 'confused') => {
     setMyReaction({ round, value });
@@ -464,6 +498,24 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   const isLockSending = lockSentAt !== null && !confirmedLock;
   const isOffline = !isOnline || (hasSeat && !isConnected);
 
+  // Package R2: a bet changed while offline is sent again when the phone is back, if the hand
+  // is still open; otherwise the student is told plainly that it did not reach the table.
+  const pendingBetRef = useRef<PendingBet | null>(null);
+  const [betLostRound, setBetLostRound] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isOffline || !view || view.step !== 'IN_GAME') return;
+    pendingBetRef.current = { round: view.round, sentence: view.sentence?.text || '', bet: localBet, resent: false };
+  }, [isOffline, localBet, view?.round, view?.step, view?.sentence?.text]);
+  useEffect(() => {
+    if (!view) return;
+    const { pending, action } = settlePendingBet(pendingBetRef.current, view, isOffline);
+    const bet = pendingBetRef.current?.bet;
+    pendingBetRef.current = pending;
+    if (action === 'resend' && bet) sendIntent({ type: 'SET_FULL_BET', bet });
+    if (action === 'lost') setBetLostRound(view.round);
+  }, [view, isOffline, sendIntent]);
+  const betLost = betLostRound !== null && view?.round === betLostRound && view?.step !== 'IN_GAME';
+
   // The round deadline read on this phone's clock (package R3).
   const roundTimer = useMemo(() => toLocalTimer(view?.roundTimer, clockOffsetMs), [view?.roundTimer, clockOffsetMs]);
   const { remainingMs: roundTimerRemainingMs } = useTurnCountdown(
@@ -472,8 +524,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   );
   // Package S4: a tick each second in the last 5 seconds, while this phone has not locked in.
   const secondsLeft = roundTimer?.status === 'running' ? Math.ceil(roundTimerRemainingMs / 1000) : 0;
+  // Package V6: and a soft tick sound with it (not in Calm mode; the phone's own sound switch applies).
   useEffect(() => {
-    if (view?.step === 'IN_GAME' && !view?.lockedIn && secondsLeft >= 1 && secondsLeft <= 5) haptic('tick');
+    if (view?.step === 'IN_GAME' && !view?.lockedIn && !view?.paused && secondsLeft >= 1 && secondsLeft <= 5) {
+      haptic('tick');
+      if (!view?.calmMode) playSound('tick');
+    }
+    // playSound changes identity with the sound settings; the tick should not repeat for that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft, view?.step, view?.lockedIn]);
   const [vibrationOn, setVibrationOn] = useState(() => hapticsEnabled());
 
@@ -576,7 +634,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           !isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord));
 
     let hasValidAnswer = false;
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       hasValidAnswer = hasSplitBet
         ? (localBet.splitOptions?.length || 0) >= 1
         : Boolean(localBet.selectedOption?.trim());
@@ -586,7 +644,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             (!localBet.splitClozeAnswers?.[1]?.trim() || isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))) ||
           (!localBet.splitClozeAnswers?.[0]?.trim() && isValidKeyWordTransformationPhrase(localBet.splitClozeAnswers?.[1], view.sentence?.baseWord))
         : isValidKeyWordTransformationPhrase(localBet.clozeAnswer, view.sentence?.baseWord);
-    } else if (qType === 'openCloze' || qType === 'wordFormation') {
+    } else if (isWordAnswerType(qType)) {
       const isWordOk = (w?: string) => {
         const trimmed = (w || '').trim().toLowerCase();
         if (!trimmed) return false;
@@ -616,7 +674,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       let missingField: 'answer' | 'wager' | 'both' = 'both';
       // Package S3: plain messages, from strings/en.ts.
       const word = `"${(view.sentence?.baseWord || '').toUpperCase()}"`;
-      const split = hasSplitBet && (qType === 'multipleChoice' || qType === 'openCloze') ? 'Split' : '';
+      const split = hasSplitBet && (isOptionType(qType) || qType === 'openCloze') ? 'Split' : '';
       if (isUnchangedBaseWord) {
         missingField = 'answer';
         message = t('lock.baseWordUnchanged', { word });
@@ -643,9 +701,9 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       window.requestAnimationFrame(() => {
         if (!hasValidAnswer || isUnchangedBaseWord || isInvalidKwtAnswer) {
           answerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          if (qType === 'multipleChoice') {
+          if (isOptionType(qType)) {
             firstOptionBtnRef.current?.focus();
-          } else if (qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') {
+          } else if (isTypedAnswerType(qType)) {
             if (hasSplitBet) {
               const targetInput = !localBet.splitClozeAnswers?.[0]?.trim()
                 ? splitWord1InputRef.current
@@ -731,8 +789,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </button>
           </div>
 
-          <h1 className="text-[30px] leading-tight font-extrabold tracking-tight m-0">Join the table</h1>
-          <p className="mt-1.5 mb-5 text-gc-body text-gc-quiet">Type the code shown on the projector.</p>
+          <h1 className="text-[30px] leading-tight font-extrabold tracking-tight m-0">
+            {welcomeName ? `Welcome back, ${welcomeName}` : 'Join the table'}
+          </h1>
+          <p className="mt-1.5 mb-5 text-gc-body text-gc-quiet">
+            {codeFromLink ? 'Type your name and join.' : 'Type the code shown on the projector.'}
+          </p>
 
           {joinError && (
             <div role="alert" className="mb-4 px-4 py-3 rounded-gc bg-gc-loss/10 border border-gc-loss/40 text-gc-small font-semibold text-gc-ink">
@@ -745,6 +807,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             </div>
           )}
 
+          {codeFromLink ? (
+            <div className="mb-5 h-14 px-4 rounded-gc flex items-center justify-between gap-3 bg-gc-line/[0.06] border border-gc-line/[0.14]" data-testid="joining-room">
+              <span className="text-gc-body font-semibold text-gc-ink">
+                Joining room <span className="font-extrabold tracking-[0.18em] text-gc-gold tabular-nums">{roomCodeInput}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setCodeFromLink(false)}
+                className="min-h-[44px] px-2 text-gc-small font-semibold text-gc-quiet underline underline-offset-4 cursor-pointer hover:text-gc-ink"
+              >
+                Change
+              </button>
+            </div>
+          ) : (<>
           <label htmlFor="gc-join-code" className="block mb-2 text-gc-small font-bold text-gc-quiet">Room code</label>
           <input
             id="gc-join-code"
@@ -759,6 +835,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             aria-label="Room code"
             className={`${fieldClass} h-[68px] mb-5 text-center text-[30px] font-extrabold tracking-[0.5em] pl-[0.5em] uppercase tabular-nums`}
           />
+          </>)}
 
           <label htmlFor="gc-join-name" className="block mb-2 text-gc-small font-bold text-gc-quiet">Your name</label>
           <input
@@ -782,16 +859,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
             Give me a name
           </button>
 
-          <span className="block mb-2 text-gc-small font-bold text-gc-quiet" id="gc-join-avatar">Choose & customize your character</span>
-          <div role="group" aria-labelledby="gc-join-avatar">
-            <CharacterPickerPanel
-              value={selectedAvatar}
-              onChange={setSelectedAvatar}
-              playerName={playerNameInput || 'VIP Guest'}
-              playSound={playSound}
-              compact
-            />
-          </div>
+          <p className="m-0 text-gc-small text-gc-quiet">You choose your character after you join.</p>
 
           <div className="mt-auto pt-6 space-y-2">
             <button
@@ -830,23 +898,14 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
   // Derived State for Active Student Controller
   // ============================================================================
   const qType: QuestionType = view.sentence?.questionType || 'binary';
-  const isClozeRound = qType === 'multipleChoice' || qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation';
+  const isClozeRound = isGapType(qType);
   const hasSplitBet = view.myActivePowerUps.some((pu) => pu.type === 'SPLIT_BET');
   const maxAllowedBet = view.isBetCapped
     ? Math.min(view.me.money, view.betCapAmount)
     : view.me.money;
 
   // Plain names for the answer types, as on the projector.
-  const formatLabel =
-    qType === 'multipleChoice'
-      ? 'Multiple choice'
-      : qType === 'openCloze'
-        ? 'Open cloze'
-        : qType === 'wordFormation'
-          ? 'Word formation'
-          : qType === 'keyWordTransformation'
-            ? 'Key word transformation'
-            : 'Valid or flawed?';
+  const formatLabel = qType === 'binary' ? 'Valid or flawed?' : questionTypeLabel(qType);
 
   // A true minus sign: a hyphen leaves a gap before the $ at large sizes.
   const money = (n: number) => `${n < 0 ? '\u2212' : ''}$${Math.abs(Math.round(n)).toLocaleString()}`;
@@ -861,7 +920,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       }
       return localBet.opinion === 'correct' ? 'Valid' : localBet.opinion === 'incorrect' ? 'Flawed' : '';
     }
-    if (qType === 'multipleChoice') {
+    if (isOptionType(qType)) {
       if (hasSplitBet) {
         const list = localBet.splitOptions || [];
         return list.length === 2 && list[0] === list[1] ? `${list[0]} (2×)` : list.join(' / ');
@@ -883,7 +942,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
     : !pickText
       ? qType === 'binary'
         ? 'Choose Valid or Flawed'
-        : qType === 'multipleChoice'
+        : isOptionType(qType)
           ? 'Choose an answer'
           : 'Type your answer'
       : 'Now choose your bet';
@@ -916,6 +975,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {isOffline && (
         <div role="status" className="sticky top-0 z-40 w-full px-4 py-3 bg-gc-loss text-white text-gc-body font-bold text-center">
           You're offline. Reconnecting… Your bet stays on this phone.
+        </div>
+      )}
+      {!isOffline && betLost && (
+        <div role="status" data-testid="bet-lost" className="w-full px-4 py-3 bg-gc-loss/15 text-gc-loss text-gc-body font-bold text-center">
+          That bet did not reach the table. It does not count this hand.
         </div>
       )}
       {/* Package R8: the teacher paused the hand. Nothing can be changed until it resumes. */}
@@ -957,18 +1021,17 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           <div className="h-9 px-3 rounded-full bg-gc-line/[0.07] border border-gc-line/[0.12] inline-flex items-center text-gc-body font-extrabold text-gc-money tabular-nums">
             {money(view.me.money)}
           </div>
-          {canVibrate() && (
-            <button
-              type="button"
-              onClick={() => { setHapticsEnabled(!vibrationOn); setVibrationOn(!vibrationOn); }}
-              className="w-11 h-11 rounded-full grid place-items-center text-gc-quiet cursor-pointer"
-              aria-label={vibrationOn ? 'Turn vibration off' : 'Turn vibration on'}
-              aria-pressed={vibrationOn}
-              title={vibrationOn ? 'Vibration is on' : 'Vibration is off'}
-            >
-              {vibrationOn ? <Vibrate className="w-[18px] h-[18px]" aria-hidden="true" /> : <VibrateOff className="w-[18px] h-[18px]" aria-hidden="true" />}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => { setShowComfort((v) => !v); setShowAvatarPicker(false); }}
+            className="w-11 h-11 rounded-full grid place-items-center text-gc-quiet hover:text-gc-ink cursor-pointer"
+            aria-label="Phone settings"
+            aria-expanded={showComfort}
+            title="Phone settings"
+            data-testid="comfort-button"
+          >
+            <SettingsIcon className="w-[18px] h-[18px]" aria-hidden="true" />
+          </button>
           <button
             type="button"
             onClick={handleLeaveRoom}
@@ -980,6 +1043,69 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Package S6: phone settings */}
+      {showComfort && (
+        <div className="w-full max-w-xl mx-auto px-4 pt-3 animate-gc-slide-up" data-testid="comfort-panel">
+          <div className="gc-surface rounded-gc-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-gc-small font-bold text-gc-ink">On this phone</span>
+              <button
+                type="button"
+                onClick={() => setShowComfort(false)}
+                className="h-11 px-4 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+            {([
+              {
+                key: 'sound', label: 'Sound', on: soundOn,
+                toggle: () => { const next = !soundOn; setSoundOn(next); safeLocalStorage.setItem(SFX_MUTED_STORAGE_KEY, next ? 'false' : 'true'); },
+                icon: soundOn ? <Volume2 className="w-[18px] h-[18px]" aria-hidden="true" /> : <VolumeX className="w-[18px] h-[18px]" aria-hidden="true" />,
+              },
+              ...(canVibrate() ? [{
+                key: 'vibration', label: 'Vibration', on: vibrationOn,
+                toggle: () => { setHapticsEnabled(!vibrationOn); setVibrationOn(!vibrationOn); },
+                icon: null,
+              }] : []),
+              { key: 'font', label: 'Plain font for the sentence', on: comfort.plainFont, toggle: () => setComfort((c) => ({ ...c, plainFont: !c.plainFont })), icon: null },
+              { key: 'motion', label: 'Less motion', on: comfort.lessMotion, toggle: () => setComfort((c) => ({ ...c, lessMotion: !c.lessMotion })), icon: null },
+              { key: 'dark', label: 'Dark theme', on: isDarkMode, toggle: onToggleTheme, icon: isDarkMode ? <Moon className="w-[18px] h-[18px]" aria-hidden="true" /> : <Sun className="w-[18px] h-[18px]" aria-hidden="true" /> },
+            ]).map((row) => (
+              <button
+                key={row.key}
+                type="button"
+                role="switch"
+                aria-checked={row.on}
+                onClick={row.toggle}
+                className="w-full min-h-[48px] flex items-center justify-between gap-3 px-3 rounded-gc-sm bg-gc-line/[0.05] text-left cursor-pointer"
+              >
+                <span className="inline-flex items-center gap-2 text-gc-body font-semibold text-gc-ink">{row.icon}{row.label}</span>
+                <span className={`w-11 h-6 rounded-full p-0.5 transition-colors ${row.on ? 'bg-gc-win' : 'bg-gc-line/[0.2]'}`} aria-hidden="true">
+                  <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${row.on ? 'translate-x-5' : ''}`} />
+                </span>
+              </button>
+            ))}
+            <div className="flex items-center justify-between gap-3 px-3 min-h-[48px] rounded-gc-sm bg-gc-line/[0.05]">
+              <span className="text-gc-body font-semibold text-gc-ink" id="comfort-text-size">Text size</span>
+              <div className="inline-flex p-1 rounded-full bg-gc-line/[0.07]" role="group" aria-labelledby="comfort-text-size">
+                {TEXT_SIZES.map((size) => (
+                  <button
+                    key={size.id}
+                    type="button"
+                    aria-pressed={comfort.textSize === size.id}
+                    onClick={() => setComfort((c) => ({ ...c, textSize: size.id }))}
+                    className={`h-9 px-3 rounded-full text-gc-small font-bold cursor-pointer ${comfort.textSize === size.id ? 'bg-gc-gold text-gc-on-gold' : 'text-gc-quiet'}`}
+                  >
+                    {size.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Avatar picker */}
       {showAvatarPicker && (
@@ -1019,6 +1145,15 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               <PlayerAvatar value={view.me.avatar} size="2xl" className="w-full h-full" animated />
             </div>
             <h1 className="mt-6 mb-1.5 text-[30px] leading-tight font-extrabold">You're in, {view.me.name}!</h1>
+            {!showAvatarPicker && (
+              <button
+                type="button"
+                onClick={() => setShowAvatarPicker(true)}
+                className="mb-3 min-h-[44px] px-4 rounded-full text-gc-small font-bold text-gc-on-gold bg-gc-gold cursor-pointer"
+              >
+                Choose your character
+              </button>
+            )}
             <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">
               Watch the projector. Your betting card opens here when the teacher deals the first hand.
             </p>
@@ -1092,6 +1227,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {isRoundTimeUp && !view.lockedIn ? "Time's up" : "You're locked in"}
                 </h1>
                 <p className="m-0 text-[17px] leading-relaxed text-gc-quiet">Watch the projector for the reveal.</p>
+                {view.betsSplit && (
+                  <p className="mt-2 mb-0 text-gc-body font-semibold text-gc-ink" data-testid="room-split">
+                    The room: {view.betsSplit}
+                  </p>
+                )}
                 <span className="mt-4 max-w-full min-h-10 px-4 py-1.5 rounded-full inline-flex items-center gap-1.5 text-[17px] font-extrabold bg-gc-line/[0.07] border border-gc-line/[0.12]">
                   {pickText ? (
                     <>
@@ -1119,6 +1259,20 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
               </div>
             ) : (
               <>
+                {/* Package G6: a special hand says so before the sentence */}
+                {view.specialHand && (
+                  <div
+                    role="status"
+                    data-testid="phone-special-hand"
+                    className="rounded-[16px] px-4 py-2.5 flex items-center gap-3 bg-gc-gold/[0.12] border border-gc-gold/40"
+                  >
+                    <span className="text-[24px] leading-none" aria-hidden="true">{view.specialHand.icon}</span>
+                    <span className="min-w-0 text-left">
+                      <span className="block text-gc-body font-extrabold text-gc-gold">{view.specialHand.title}</span>
+                      <span className="block text-gc-small text-gc-ink">{view.specialHand.rule}</span>
+                    </span>
+                  </div>
+                )}
                 {/* The sentence */}
                 <section className="gc-surface rounded-[20px] px-[18px] py-4 text-center animate-gc-deal" aria-label="The sentence">
                   <span className="inline-flex items-center h-[26px] px-[11px] rounded-full bg-gc-gold text-gc-on-gold text-[12.5px] font-bold">
@@ -1131,7 +1285,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                   {view.isLoadingSentence || !view.sentence ? (
                     <div className="py-7 space-y-2">
                       <div className="text-3xl animate-pulse" aria-hidden="true">♠</div>
-                      <div className="text-gc-body font-semibold text-gc-quiet">Dealing the next sentence…</div>
+                      <div className="text-gc-body font-semibold text-gc-quiet">Next hand coming…</div>
+                      {/* Package S4: not a blank wait: the student's money (power-ups and effects show below). */}
+                      <div className="text-gc-lead font-extrabold text-gc-money tabular-nums" data-testid="between-hands-money">
+                        You have {money(view.me.money)}
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 pt-2">
@@ -1149,9 +1307,21 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           )}
                         </div>
                       )}
+                      {newFormatTask(qType) && (
+                        <div data-testid="phone-format-task" className="text-gc-small font-semibold text-gc-quiet">{newFormatTask(qType)}</div>
+                      )}
                       <p
                         className="m-0 font-sentence italic font-medium text-[23px] leading-[1.3] text-gc-ink text-balance"
                       >
+                        {view.specialHand?.hidesSentence ? (
+                          <span data-testid="phone-listening" className="not-italic font-sans text-gc-lead font-bold">
+                            <span aria-hidden="true">🎧 </span>Listen to the sentence on your teacher&rsquo;s screen.
+                          </span>
+                        ) : qType === 'spotError' && view.sentence.options?.length === 4 ? (
+                          <SpotErrorSentence parts={view.sentence.options} />
+                        ) : qType === 'wordOrder' && view.sentence.options?.length ? (
+                          <WordTiles tiles={view.sentence.options} size="md" />
+                        ) : (
                         <SentenceText
                           text={view.sentence?.text || ''}
                           highlight={view.sentence?.grammarPhrase}
@@ -1159,6 +1329,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                           baseWord={qType === 'wordFormation' ? view.sentence?.baseWord : null}
                           size="phone"
                         />
+                        )}
                       </p>
                     </div>
                   )}
@@ -1446,7 +1617,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
 
                         {/* Multiple choice */}
-                        {qType === 'multipleChoice' && (
+                        {isOptionType(qType) && (
                           <div className="grid grid-cols-1 gap-2.5">
                             {(() => {
                               const eliminatedSet = new Set(
@@ -1518,7 +1689,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         )}
 
                         {/* Open cloze, word formation, key word transformation */}
-                        {(qType === 'openCloze' || qType === 'wordFormation' || qType === 'keyWordTransformation') && (() => {
+                        {(isTypedAnswerType(qType)) && (() => {
                           const cleanBase = (view.sentence?.baseWord || '').trim().toLowerCase();
                           const isUnchangedBase =
                             qType === 'wordFormation' &&
@@ -1569,11 +1740,11 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                     onBlur={onTypingBlur}
                                     onKeyDown={(e) => onAnswerEnter(e, splitWord2InputRef.current)}
                                     aria-label="First answer"
-                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                     value={localBet.splitClozeAnswers?.[0] || ''}
                                     onChange={(e) =>
                                       updateBetField('splitClozeAnswers', [
-                                        qType === 'keyWordTransformation'
+                                        (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                           ? e.target.value.replace(/\s{2,}/g, ' ')
                                           : e.target.value.replace(/\s+/g, ''),
                                         localBet.splitClozeAnswers?.[1] || '',
@@ -1596,12 +1767,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                     onBlur={onTypingBlur}
                                     onKeyDown={(e) => onAnswerEnter(e, null)}
                                     aria-label="Second answer"
-                                    maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                    maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                     value={localBet.splitClozeAnswers?.[1] || ''}
                                     onChange={(e) =>
                                       updateBetField('splitClozeAnswers', [
                                         localBet.splitClozeAnswers?.[0] || '',
-                                        qType === 'keyWordTransformation'
+                                        (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                           ? e.target.value.replace(/\s{2,}/g, ' ')
                                           : e.target.value.replace(/\s+/g, ''),
                                       ])
@@ -1619,12 +1790,12 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                   onBlur={onTypingBlur}
                                   onKeyDown={(e) => onAnswerEnter(e, null)}
                                   aria-label="Your answer"
-                                  maxLength={qType === 'keyWordTransformation' ? 80 : 32}
+                                  maxLength={qType === 'keyWordTransformation' ? 80 : qType === 'wordOrder' ? 120 : 32}
                                   value={localBet.clozeAnswer || ''}
                                   onChange={(e) =>
                                     updateBetField(
                                       'clozeAnswer',
-                                      qType === 'keyWordTransformation'
+                                      (qType === 'keyWordTransformation' || qType === 'wordOrder')
                                         ? e.target.value.replace(/\s{2,}/g, ' ')
                                         : e.target.value.replace(/\s+/g, '')
                                     )
@@ -1634,9 +1805,18 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                                       ? `2 to 6 words, including ${baseUpper}`
                                       : qType === 'wordFormation' && baseUpper
                                         ? `A new form of ${baseUpper}`
-                                        : 'The missing word'
+                                        : qType === 'wordOrder'
+                                          ? 'Tap the words, or type the sentence'
+                                          : 'The missing word'
                                   }
                                   className={`${textField} ${bad ? fieldBad : fieldOk} h-14 px-4 font-sentence italic font-semibold text-gc-title`}
+                                />
+                              )}
+                              {qType === 'wordOrder' && !hasSplitBet && (view.sentence?.options || []).length > 0 && (
+                                <WordTilePicker
+                                  tiles={view.sentence?.options || []}
+                                  value={localBet.clozeAnswer || ''}
+                                  onChange={(next) => updateBetField('clozeAnswer', next)}
                                 />
                               )}
                               {qType === 'keyWordTransformation' && !hasSplitBet && kwtCheck.raw && (
@@ -1789,7 +1969,7 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                         >
                           <Sparkles className="w-[18px] h-[18px] text-purple-600 dark:text-purple-300" aria-hidden="true" />
                           Draw a power-up
-                          <span className="ml-auto text-gc-money tabular-nums">${POWERUP_COST}</span>
+                          <span data-testid="phone-draw-price" className="ml-auto text-gc-money tabular-nums">{view.freeDraw ? 'Free' : `$${POWERUP_COST}`}</span>
                         </button>
                       </section>
                     </div>
@@ -2020,6 +2200,8 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
           });
           const myAccuracy = myTotalHands > 0 ? Math.round((myWins / myTotalHands) * 100) : 0;
           const isMeChampion = view.winner?.id === view.me.id;
+          // Package L7: the student's own slip, up to three missed hands to review.
+          const toReview = studentReview(history, view.me.id);
 
           const handleDownloadPdf = () => {
             if (isGeneratingPdf || history.length === 0) return;
@@ -2120,6 +2302,35 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
                 </div>
               </div>
 
+              {toReview.length > 0 && (
+                <div className="gc-surface rounded-[20px] px-[18px] py-4 space-y-3" data-testid="my-review">
+                  <h2 className="m-0 text-gc-small font-bold text-gc-quiet">
+                    {toReview.length === 1 ? 'One to review' : `${toReview.length === 2 ? 'Two' : 'Three'} to review`}
+                  </h2>
+                  <ol className="m-0 p-0 list-none space-y-3">
+                    {toReview.map(item => (
+                      <li key={item.round} className="rounded-gc bg-gc-line/[0.05] border border-gc-line/[0.1] px-3 py-2.5">
+                        <p className="m-0 font-sentence italic text-gc-body text-gc-ink">{item.text}</p>
+                        {item.answer && <p className="m-0 mt-1 text-gc-small font-bold text-gc-win">{item.answer}</p>}
+                        {item.explanation && <p className="m-0 mt-1 text-gc-small text-gc-quiet">{item.explanation}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                  {/* Package L6: a short solo quiz on these, no money and no room. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPractice(true)}
+                    data-testid="practice-these"
+                    className="w-full min-h-[48px] rounded-full border border-gc-gold/60 text-gc-body font-bold text-gc-ink cursor-pointer"
+                  >
+                    Practice these
+                  </button>
+                </div>
+              )}
+              {showPractice && toReview.length > 0 && (
+                <PracticeQuiz items={toReview} onClose={() => setShowPractice(false)} />
+              )}
+
               {history.length > 0 && (
                 <div className="space-y-2">
                   <button
@@ -2183,13 +2394,13 @@ export const StudentControllerView: React.FC<StudentControllerViewProps> = ({
       {/* Choosing a target for an attack power-up */}
       {view.pendingTarget && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="gc-panel rounded-gc-lg max-w-md w-full p-5 space-y-4 animate-gc-slide-up" role="dialog" aria-modal="true" aria-labelledby="gc-target-title">
+          <div ref={targetDialogRef} className="gc-panel rounded-gc-lg max-w-md w-full p-5 space-y-4 animate-gc-slide-up" role="dialog" aria-modal="true" aria-labelledby="gc-target-title">
             <div className="text-center space-y-1">
               <div className="text-4xl" aria-hidden="true">{POWER_UPS[view.pendingTarget.powerUp]?.icon}</div>
               <h3 id="gc-target-title" className="m-0 text-gc-title font-extrabold">
                 {POWER_UPS[view.pendingTarget.powerUp]?.name}: choose a player
               </h3>
-              <p className="m-0 text-gc-small text-gc-quiet">{POWER_UPS[view.pendingTarget.powerUp]?.description}</p>
+              <p className="m-0 text-gc-small text-gc-quiet">{plainDescriptionOf(view.pendingTarget.powerUp)}</p>
             </div>
 
             <div className="space-y-2 max-h-64 overflow-y-auto">
