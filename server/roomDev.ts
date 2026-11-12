@@ -60,7 +60,9 @@ export function registerDevRoomRoutes(app: any) {
   });
 }
 
-const roomWss = new WebSocketServer({ noServer: true });
+// Made on first use: the Pages Function bundles server.ts (and so this file), and Cloudflare's
+// runtime has no WebSocketServer, so nothing from `ws` may run when the module loads.
+let roomWss: WebSocketServer | null = null;
 
 /** Handles an upgrade for /api/room/<CODE>/ws. Returns false when the path is not a room's. */
 export function handleDevRoomUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): boolean {
@@ -87,6 +89,7 @@ export function handleDevRoomUpgrade(req: http.IncomingMessage, socket: Duplex, 
     } else if (!isHosted(room.claim, now)) {
       return refuse(404);
     }
+    roomWss ??= new WebSocketServer({ noServer: true });
     roomWss.handleUpgrade(req, socket, head, (ws) => {
       room.sockets.set(ws, door.att);
       room.core.open(ws, door.att);

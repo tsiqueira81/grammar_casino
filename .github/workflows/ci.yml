@@ -160,6 +160,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: "f49491d571ea9dcd9e2bda13cdc59c87"
           BRANCH: ${{ github.head_ref }}
         run: |
+          set -o pipefail
           npx wrangler pages deploy dist --project-name grammarcasino --branch "$BRANCH" | tee deploy.log
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.grammarcasino\.pages\.dev' deploy.log | tail -1)
           {
