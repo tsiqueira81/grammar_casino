@@ -5,7 +5,8 @@ import { E2E_URL, KNOWN, clickButton } from './helpers';
  * A live room: the teacher's screen opens a room, three phones join by code,
  * bet and lock in, one phone is reloaded mid-hand and must get its seat back,
  * the teacher's page is reloaded and must reopen the same room, the teacher reveals, and each phone shows its own result and the explanation.
- * Runs over the dev server's local relay (no Firestore).
+ * Runs twice: over the dev server's local relay, and over the Cloudflare room's local stand-in
+ * (package R4: the teacher opens the room with ?transport=do and the phones find it there).
  */
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
 
@@ -35,22 +36,29 @@ async function placeBet(phone: Page, option: string, amount: number) {
 
 /** Waits until the teacher's screen has sent this phone a view that holds its stake. */
 async function waitForHostToHoldBet(phone: Page, amount: number) {
-  const holdsBet = new RegExp(`"myBet":\\{[^}]*"bet":${amount}[,}]`);
+  // The Cloudflare room carries the view as a JSON string inside its message, so quotes may be escaped.
+  const q = '\\\\?"';
+  const holdsBet = new RegExp(`${q}myBet${q}:\\{[^}]*${q}bet${q}:${amount}[,}]`);
   await expect
     .poll(() => (framesReceived.get(phone) || []).some(f => holdsBet.test(f)), { message: `host holds the $${amount} bet` })
     .toBe(true);
 }
 
-test('three phones play a hand in a live room, surviving a phone reload and a teacher reload', async ({ page: host, browser }) => {
+for (const transport of ['relay', 'do'] as const) {
+test(`three phones play a hand in a live room, surviving a phone reload and a teacher reload (${transport})`, async ({ page: host, browser }) => {
   const errors: string[] = [];
   host.on('pageerror', e => errors.push(`host: ${e.message}`));
 
-  await host.goto(E2E_URL);
+  const hostSockets: string[] = [];
+  host.on('websocket', ws => hostSockets.push(ws.url()));
+  await host.goto(transport === 'do' ? `${E2E_URL}&transport=do` : E2E_URL);
   await host.getByRole('button', { name: 'Open a live room' }).click();
   const roomButton = host.getByRole('button', { name: /^Room [A-Z0-9]{4}/ });
   const code = ((await roomButton.textContent()) || '').match(/Room\s*([A-Z0-9]{4})/)?.[1];
   expect(code, 'room code on the host screen').toBeTruthy();
   await expect(host.getByRole('dialog').getByText('Room online')).toBeVisible();
+  // The room really runs where it was asked to (not on a fallback).
+  expect(hostSockets.some(url => url.includes('/api/room/'))).toBe(transport === 'do');
 
   const players = [
     { name: 'Dani', option: KNOWN.multipleChoiceAnswer, bet: 100, delta: '+$100', balance: '$1,100' },
@@ -161,3 +169,4 @@ test('three phones play a hand in a live room, surviving a phone reload and a te
 
   expect(errors).toEqual([]);
 });
+}

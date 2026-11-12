@@ -39,7 +39,8 @@ import {
 } from '../types';
 // Only the type: the offline bank itself stays out of this file, so phones do not download it (S1).
 import type { BuiltInSeedItem } from './fallbackSentences';
-import { PlayerViewPayload, mergePlayerView } from '../utils/multiplayerProtocol';
+import { PlayerViewPayload } from '../utils/multiplayerProtocol';
+import { createSeatMerger } from './roomDocs';
 
 // Initialize Firebase App singleton
 const app = getApps().some((a) => a.name === '[DEFAULT]') ? getApp() : initializeApp(firebaseConfig);
@@ -529,10 +530,7 @@ export function listenToFirestoreSeat(code: string, clientId: string): Firestore
 
   let room: any = null;
   let seat: any = null;
-  let tableJson = '';
-  let table: Partial<PlayerViewPayload> = {};
-  let ownViewJson = '';
-  let ownView: Partial<PlayerViewPayload> | null = null;
+  const merge = createSeatMerger();
   let roomOk = false;
   let seatOk = false;
 
@@ -546,42 +544,7 @@ export function listenToFirestoreSeat(code: string, clientId: string): Firestore
 
   const emit = () => {
     if (cancelled) return;
-    if (room && typeof room.tableJson === 'string' && room.tableJson !== tableJson) {
-      tableJson = room.tableJson;
-      try {
-        table = JSON.parse(tableJson) || {};
-      } catch {
-        table = {};
-      }
-    }
-    const seatViewJson = seat && typeof seat.viewJson === 'string' ? seat.viewJson : '';
-    if (seatViewJson !== ownViewJson) {
-      ownViewJson = seatViewJson;
-      try {
-        ownView = seatViewJson ? JSON.parse(seatViewJson) : null;
-      } catch {
-        ownView = null;
-      }
-    }
-    let join: FirestoreJoinResponseItem | null = null;
-    if (seat && typeof seat.joinJson === 'string' && seat.joinJson) {
-      try {
-        join = JSON.parse(seat.joinJson);
-      } catch {}
-    }
-    const playerId = seat && typeof seat.playerId === 'number' ? seat.playerId : null;
-    const seatRev = seat && typeof seat.rev === 'number' ? seat.rev : null;
-    const tableSeatRev =
-      room && room.seatRevs && playerId !== null ? room.seatRevs[String(playerId)] : undefined;
-    const inStep = room && ownView && playerId !== null && seatRev !== null && tableSeatRev === seatRev;
-
-    lastUpdate = {
-      join,
-      playerId,
-      view: inStep ? mergePlayerView(table, ownView as Partial<PlayerViewPayload>) : null,
-      kicked: Boolean(seat?.kicked),
-      kickedPlayerIds: room && Array.isArray(room.kickedPlayerIds) ? room.kickedPlayerIds : [],
-    };
+    lastUpdate = merge(room, seat);
     onUpdate?.(lastUpdate);
   };
 

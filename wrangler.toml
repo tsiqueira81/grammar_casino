@@ -5,3 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 GROQ_TTS_VOICE = "troy"
+
+# Package R4: /api/room/* goes to the live-room Worker (room-worker/), deployed separately.
+[[services]]
+binding = "ROOM_WORKER"
+service = "grammarcasino-rooms"

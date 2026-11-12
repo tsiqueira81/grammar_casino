@@ -5,19 +5,26 @@ import {
   splitPlayerViews,
 } from '../utils/multiplayerProtocol';
 import {
-  writeFirestoreRoom,
-  deleteFirestoreRoom,
   isFirestoreRoomCodeFree,
-  listenToFirestoreRoomIntents,
-  sendFirestoreStudentIntent,
   listenToFirestoreSeat,
-  ensureFirebaseUser,
-  subscribeToAuthChanges,
   FirestoreJoinResponseItem,
   FirestoreSeatListener,
   FirestoreSeatUpdate,
   FirestoreSeatWrite,
 } from './firebaseService';
+import {
+  chosenHostTransport,
+  claimDoRoom,
+  doHostLink,
+  doStudentLink,
+  firestoreHostLink,
+  firestoreStudentLink,
+  firestoreStudentLinkWith,
+  isDoRoomHosted,
+  type HostRoomLink,
+  type RoomTransport,
+  type StudentRoomLink,
+} from './roomBackend';
 import { isE2eMode } from '../utils/e2eContent';
 import { nextFlushAt } from '../utils/flushPlan';
 import { cleanName as cleanPlayerName, generateFriendlyName, isBlockedName } from '../utils/nameFilter';
@@ -151,6 +158,8 @@ export interface SavedHostRoom {
   intentClientIds: string[];
   writtenSeatIds: string[];
   savedAt: number;
+  /** Package R4: where the room's records travel; missing means Firestore (older saves). */
+  transport?: RoomTransport;
 }
 
 function getLocalStorage(): Storage | null {
@@ -200,6 +209,10 @@ export function clearSavedHostRoom() {
 export class HostRoomController {
   public code: string;
   public hostToken: string;
+  /** Package R4: Firestore documents, or the Cloudflare room. */
+  public readonly transport: RoomTransport;
+  private link: HostRoomLink;
+  private resyncUnsubscribe: (() => void) | null = null;
   private localServerAvailable: boolean;
   private ws: WebSocket | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -254,10 +267,13 @@ export class HostRoomController {
     localServerAvailable: boolean,
     onEvent: (event: HostEventPayload) => void,
     onConnectionChange?: (connected: boolean) => void,
-    restore?: SavedHostRoom
+    restore?: SavedHostRoom,
+    transport: RoomTransport = 'firestore'
   ) {
     this.code = code;
     this.hostToken = hostToken;
+    this.transport = transport;
+    this.link = transport === 'do' ? doHostLink(code, hostToken) : firestoreHostLink(code);
     this.localServerAvailable = localServerAvailable;
     this.onEventCallback = onEvent;
     this.onConnectionChange = onConnectionChange;
@@ -268,9 +284,16 @@ export class HostRoomController {
     this.scheduleFirestoreFlush(0);
     // If this device's room id changes (its first silent sign-in; Google sign-in no longer touches
     // it, package A6), rewrite the room under the new id so the intent listener can start again.
-    this.authUnsubscribe = subscribeToAuthChanges(() => {
+    this.authUnsubscribe = this.link.onIdentityChange(() => {
       this.forceRoomWrite = true;
       this.scheduleFirestoreFlush(200);
+    });
+    // The Cloudflare room lost what it held (it slept, or this screen reconnected): write it all.
+    this.resyncUnsubscribe = this.link.onResync(() => {
+      this.forceRoomWrite = true;
+      this.lastRoomJson = '';
+      this.writtenSeatJson.clear();
+      this.scheduleFirestoreFlush(0);
     });
 
     if (this.localServerAvailable) {
@@ -366,7 +389,7 @@ export class HostRoomController {
       this.writtenSeatIds.add(clientId);
     });
 
-    const ok = await writeFirestoreRoom({
+    const ok = await this.link.write({
       code: this.code,
       locked: this.roomLocked,
       rev,
@@ -401,13 +424,13 @@ export class HostRoomController {
 
   private ensureFirestoreIntentListener() {
     if (this.destroyed || this.firestoreUnsubscribe) return;
-    this.firestoreUnsubscribe = listenToFirestoreRoomIntents(
-      this.code,
+    this.firestoreUnsubscribe = this.link.listenToIntents(
       (clientId, msg, uid) => this.handleFirestoreIntent(clientId, msg, uid),
       (connected) => {
         this.firestoreConnected = connected;
-        if (!connected && this.firestoreUnsubscribe) {
+        if (!connected && this.firestoreUnsubscribe && this.transport === 'firestore') {
           // The listener stops after an error; the next successful room write attaches a new one.
+          // (The Cloudflare room's listener survives a drop and replays the intents it holds.)
           this.firestoreUnsubscribe();
           this.firestoreUnsubscribe = null;
         }
@@ -426,6 +449,16 @@ export class HostRoomController {
     onConnectionChange?: (connected: boolean) => void
   ): Promise<HostRoomController> {
     // Live rooms are open to everyone (decision D3), so no PIN is asked for.
+    // Package R4: the Cloudflare room when chosen; if it cannot be reached in time, Firestore.
+    if (chosenHostTransport() === 'do') {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const code = generateRoomCode();
+        const token = generateToken('host');
+        const claim = await claimDoRoom(code, token);
+        if (claim === 'ok') return new HostRoomController(code, token, false, onEvent, onConnectionChange, undefined, 'do');
+        if (claim === 'unavailable') break;
+      }
+    }
     // Browser tests (?e2e=1 on the dev server) use the local relay; everything else uses Firestore.
     if ((import.meta as any).env.DEV && isE2eMode()) {
       const res = await safeFetchJson<{ code: string; hostToken: string; error?: string }>('/api/mp/room/create', {
@@ -895,7 +928,8 @@ export class HostRoomController {
       Boolean(saved.localServerAvailable),
       onEvent,
       onConnectionChange,
-      saved
+      saved,
+      saved.transport === 'do' ? 'do' : 'firestore'
     );
   }
 
@@ -928,6 +962,7 @@ export class HostRoomController {
       intentClientIds: Array.from(this.intentClientIds),
       writtenSeatIds: Array.from(this.writtenSeatIds),
       savedAt: Date.now(),
+      transport: this.transport,
     };
   }
 
@@ -966,13 +1001,14 @@ export class HostRoomController {
    */
   public detach() {
     this.stop();
+    this.link.close();
   }
 
   /** Closes the room for good: phones are told it ended and the saved copy is removed. */
   public destroy() {
     this.stop();
     clearSavedHostRoom();
-    void deleteFirestoreRoom(this.code, {
+    void this.link.remove({
       seatClientIds: Array.from(this.writtenSeatIds),
       intentClientIds: Array.from(this.intentClientIds),
     });
@@ -984,6 +1020,10 @@ export class HostRoomController {
     if (this.authUnsubscribe) {
       this.authUnsubscribe();
       this.authUnsubscribe = null;
+    }
+    if (this.resyncUnsubscribe) {
+      this.resyncUnsubscribe();
+      this.resyncUnsubscribe = null;
     }
     if (this.localPushTimer) {
       clearTimeout(this.localPushTimer);
@@ -1020,6 +1060,8 @@ export class StudentRoomController {
   private clientId: string;
   private localServerAvailable: boolean;
   private ws: WebSocket | null = null;
+  /** Package R4: how this phone's records travel (Firestore, or the Cloudflare room). */
+  private link: StudentRoomLink;
   private seatListener: FirestoreSeatListener;
   private firestoreConnected = false;
   private firestoreBetDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1040,7 +1082,7 @@ export class StudentRoomController {
     clientId: string,
     initialView: PlayerViewPayload | null,
     localServerAvailable: boolean,
-    seatListener: FirestoreSeatListener | null,
+    link: StudentRoomLink | null,
     onViewUpdate: (view: PlayerViewPayload) => void,
     onKicked: (reason?: 'removed' | 'closed') => void,
     onConnectionChange?: (connected: boolean) => void
@@ -1054,7 +1096,8 @@ export class StudentRoomController {
     this.onConnectionChange = onConnectionChange;
 
     // This phone's private seat record plus the shared table, kept in step by the host.
-    this.seatListener = seatListener || listenToFirestoreSeat(this.code, this.clientId);
+    this.link = link || firestoreStudentLinkWith(this.code, this.clientId, listenToFirestoreSeat(this.code, this.clientId));
+    this.seatListener = this.link.seat;
     this.seatListener.setHandlers(
       (update) => this.handleSeatUpdate(update),
       (connected) => {
@@ -1116,6 +1159,19 @@ export class StudentRoomController {
     const cleanCode = params.code.trim().toUpperCase();
     const cleanName = params.name.trim();
     const avatar = params.avatar;
+    const clientId = params.reconnectToken?.trim() || generateToken('stu');
+
+    // 0. Package R4: a room the teacher opened on the Cloudflare room is joined there.
+    let link: StudentRoomLink | null = null;
+    if (await isDoRoomHosted(cleanCode)) {
+      link = await doStudentLink(cleanCode, clientId);
+      if (!link) {
+        throw new Error(
+          "This phone couldn't connect to the game server. Check the Wi-Fi or mobile data, then try again."
+        );
+      }
+      return StudentRoomController.handshake(cleanCode, cleanName, avatar, clientId, link, params);
+    }
 
     // 1. Try local Express server first if we are on an Express-backed host
     const localRes = await safeFetchJson<{
@@ -1155,17 +1211,26 @@ export class StudentRoomController {
     }
 
     // 2. Otherwise (Netlify, or a phone on another network): ask the host through Firestore.
-    // The phone needs a Firebase id first: the host addresses its private seat record to it.
-    const user = await ensureFirebaseUser();
-    if (!user) {
+    link = await firestoreStudentLink(cleanCode, clientId);
+    if (!link) {
       throw new Error(
         "This phone couldn't connect to the game server. Check the Wi-Fi or mobile data, then try again."
       );
     }
+    return StudentRoomController.handshake(cleanCode, cleanName, avatar, clientId, link, params);
+  }
 
-    const clientId = params.reconnectToken?.trim() || generateToken('stu');
+  /** Asks the host for a seat over the link, and waits for its answer (resent every 2 s). */
+  private static async handshake(
+    cleanCode: string,
+    cleanName: string,
+    avatar: string,
+    clientId: string,
+    link: StudentRoomLink,
+    params: Parameters<typeof StudentRoomController.joinRoom>[0]
+  ): Promise<StudentRoomController> {
+    const seatListener = link.seat;
     const requestId = generateToken('req');
-    const seatListener = listenToFirestoreSeat(cleanCode, clientId);
     const joinPayload = {
       type: 'CLOUD_JOIN_REQUEST',
       clientId,
@@ -1216,7 +1281,7 @@ export class StudentRoomController {
             }
           });
 
-          const send = () => void sendFirestoreStudentIntent(cleanCode, clientId, 'JOIN_REQUEST', joinPayload);
+          const send = () => void link.sendIntent('JOIN_REQUEST', joinPayload);
           send();
           retryInterval = setInterval(send, 2000);
         }
@@ -1228,7 +1293,7 @@ export class StudentRoomController {
         clientId,
         result.view,
         false,
-        seatListener,
+        link,
         params.onViewUpdate,
         params.onKicked,
         params.onConnectionChange
@@ -1398,7 +1463,7 @@ export class StudentRoomController {
 
   private writeIntentsToFirestore() {
     if (this.destroyed) return;
-    void sendFirestoreStudentIntent(this.code, this.clientId, 'STUDENT_INTENT', {
+    void this.link.sendIntent('STUDENT_INTENT', {
       type: 'CLOUD_STUDENT_INTENTS',
       clientId: this.clientId,
       intents: this.recentIntents,

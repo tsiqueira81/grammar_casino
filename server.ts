@@ -7,6 +7,7 @@ import { APP_ROOT_DIR, isCloudflareWorker, isServerlessRuntime } from './server/
 import { handleGeminiRequest } from './server/aiHandler';
 import { deepHealth, deepHealthAllowed, hasConfiguredAiKey } from './server/aiProviders';
 import { pushEventToHost, registerRelayRoutes, relayIntentId, rooms, sendViewToStudent, serializeSeat } from './server/relay';
+import { handleDevRoomUpgrade, registerDevRoomRoutes } from './server/roomDev';
 
 /**
  * The dev server (npm run dev) and the serverless API (package A1 split the rest into server/).
@@ -42,6 +43,8 @@ app.get("/api/health", async (req, res) => {
 });
 
 registerRelayRoutes(app);
+// Package R4: the Cloudflare room's local stand-in (same rules), for development and tests.
+if (!isCloudflareWorker) registerDevRoomRoutes(app);
 
 // --- Vite Middleware (Dev) or Static Files (Prod) ---
 async function startServer() {
@@ -66,7 +69,17 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   // Attach WebSocketServer at /ws on the same port 3000
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+  // Upgrades are routed by path: /ws is the dev relay, /api/room/<CODE>/ws the room stand-in (R4).
+  const wss = new WebSocketServer({ noServer: true });
+  httpServer.on("upgrade", (req, socket, head) => {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    if (pathname === "/ws") {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      return;
+    }
+    if (handleDevRoomUpgrade(req, socket, head)) return;
+    socket.destroy();
+  });
 
   wss.on("connection", (ws: WebSocket) => {
     let boundRoomCode: string | null = null;

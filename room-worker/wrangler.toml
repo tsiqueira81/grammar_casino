@@ -1,0 +1,15 @@
+# Package R4 stage A: the live-room Worker (a Durable Object per room). Deployed separately from
+# the Pages site, which reaches it through the ROOM_WORKER service binding in ../wrangler.toml.
+name = "grammarcasino-rooms"
+main = "index.ts"
+compatibility_date = "2025-04-01"
+workers_dev = false
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "GameRoom"
+
+# SQLite-backed Durable Objects are the ones the free plan allows.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
