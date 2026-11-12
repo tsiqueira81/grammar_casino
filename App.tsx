@@ -28,7 +28,7 @@ import { checkGameEnd, pickWinnerAtGameEnd, pickWinnerWhenEndedEarly, refundHand
 import { canUndoReveal, listAnswersToAccept, resettleWithAcceptedAnswer, voidHand, canAcceptOtherAnswers, type RevealSnapshot } from './game/ruling';
 import { checkBet, isBetComplete } from './game/betValidity';
 import { hasShieldProtection, isFrozenBySubZero } from './game/status';
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { clampBetInput, getBetLimits } from './game/betLimits';
 import { Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload, Step, GameMode, SoundEffect, UsedPowerUp, WheelItem, RoundHistoryRecord, PlayerTurnTimer, QuestionType, ChallengeFormat } from './types';
 import { POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, THEMES, LOCAL_STORAGE_KEY, INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT, getSubtypesForTopic, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS, ALL_QUESTION_TYPES, DEFAULT_MIXED_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS } from './constants';
@@ -4336,7 +4336,9 @@ export function App() {
   }, [revealResultsCore]);
   
   // Package T2: keyboard shortcuts press the matching button on screen (utils/hotkeys.ts).
-  useEffect(() => {
+  // A layout effect, so the listener is in place by the time the first screen is painted: a
+  // plain effect can run later than that on a slow machine, and a key pressed in the gap is lost.
+  useLayoutEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat) return;
       const target = e.target as HTMLElement | null;
