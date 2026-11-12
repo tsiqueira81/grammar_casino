@@ -22,14 +22,10 @@ export async function clickButton(scope: Page | Locator, name: RegExp | string) 
   const button = scope.getByRole('button', { name }).first();
   await expect(button).toBeVisible();
   await expect(button).toBeEnabled();
-  // A forced click skips Playwright's own wait for the button to stop moving, so first make sure it
-  // is on screen: the results screen can still be growing (payout rows) right after the reveal.
-  await expect(async () => {
-    // Not scrollIntoViewIfNeeded: it waits for the button to stop moving, and the reveal button breathes.
-    await button.evaluate((el) => el.scrollIntoView({ block: 'center' }));
-    await expect(button).toBeInViewport({ timeout: 500 });
-  }).toPass();
-  await button.click({ force: true });
+  // Not a mouse click at the button's position: the reveal button breathes (never "stable"), and right
+  // after a reveal the results screen is still growing, so a position read a moment earlier can be
+  // off screen or on another control. A click event sent to the button itself is what a tap does.
+  await button.dispatchEvent('click');
 }
 
 export async function addPlayers(page: Page, names: string[]) {
