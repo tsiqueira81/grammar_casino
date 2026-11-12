@@ -1,8 +1,9 @@
 // The lobby: players, the live room and starting a game (package F7: moved out of App.tsx without changes).
 
+import { useGame } from '../state/gameStore';
 import { type FinishedGame } from '../game/persistence';
 import React from 'react';
-import { Player, SoundEffect } from '../types';
+import { SoundEffect } from '../types';
 import { ArrowRight, BookOpen, Check, Cloud as CloudIcon, Smartphone, Monitor, Plus, QrCode, Pencil, X, MoreHorizontal, FolderOpen, Bot, CircleHelp } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
 import TextInput from '../components/TextInput';
@@ -27,7 +28,6 @@ export interface LobbyScreenProps {
   startDemoRoom: () => void;
   setIsStudentControllerMode: React.Dispatch<React.SetStateAction<boolean>>;
   setShowCoach: React.Dispatch<React.SetStateAction<boolean>>;
-  players: Player[];
   activeCloudRoster: { id: string; className: string; };
   isEditingStartingCash: boolean;
   tempStartingCash: string;
@@ -71,7 +71,6 @@ export function LobbyScreen({
   startDemoRoom,
   setIsStudentControllerMode,
   setShowCoach,
-  players,
   activeCloudRoster,
   isEditingStartingCash,
   tempStartingCash,
@@ -98,6 +97,8 @@ export function LobbyScreen({
   finishedGames,
   setShowPastReports,
 }: LobbyScreenProps) {
+  // Package F6: the game in play comes from the store, not through props.
+  const players = useGame(s => s.players);
   const phonesConnected = Object.values(mpSeats).filter((s: MultiplayerSeat) => s.connected).length;
   return (
   <div className="w-full max-w-5xl px-4 pt-6 sm:pt-2 pb-8 animate-gc-fade">

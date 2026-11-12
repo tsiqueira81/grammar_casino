@@ -1,10 +1,11 @@
 // Game setup in two steps: the questions, then the house rules (package F7: moved out of App.tsx without changes).
 
+import { useGame } from '../state/gameStore';
 import { APP_VERSION } from '../utils/debugLog';
 import { type QualityChoice, type QualityTier } from '../show/quality';
 import { deckSummary } from '../game/teacherDeck';
 import React from 'react';
-import { Player, Settings, GeneratedSentence, PowerUpKey, Step, GameMode, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
+import { Settings, GeneratedSentence, PowerUpKey, GameMode, SoundEffect, PlayerTurnTimer, QuestionType } from '../types';
 import { POWER_UPS, GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, THEMES, MIN_TARGET_AMOUNT, TURN_TIMER_OPTIONS, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import { ArrowLeft, ArrowRight, Check, AlertTriangle, Info } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -41,7 +42,6 @@ export interface SetupScreenProps {
   setTurnTimers: React.Dispatch<React.SetStateAction<Record<number, PlayerTurnTimer>>>;
   setMpRoundTimer: React.Dispatch<React.SetStateAction<PlayerTurnTimer>>;
   mpAutoStartedRoundRef: React.RefObject<number>;
-  players: Player[];
   specialHandsOn: boolean;
   setSpecialHandsOn: React.Dispatch<React.SetStateAction<boolean>>;
   setTargetAmount: React.Dispatch<React.SetStateAction<string | number>>;
@@ -58,7 +58,6 @@ export interface SetupScreenProps {
   qualityStored: StoredQuality;
   chooseQuality: (choice: QualityChoice) => void;
   qualityTier: QualityTier;
-  setStep: React.Dispatch<React.SetStateAction<Step>>;
   handleFinalizeSettings: () => void;
 }
 
@@ -90,7 +89,6 @@ export function SetupScreen({
   setTurnTimers,
   setMpRoundTimer,
   mpAutoStartedRoundRef,
-  players,
   specialHandsOn,
   setSpecialHandsOn,
   setTargetAmount,
@@ -107,9 +105,11 @@ export function SetupScreen({
   qualityStored,
   chooseQuality,
   qualityTier,
-  setStep,
   handleFinalizeSettings,
 }: SetupScreenProps) {
+  // Package F6: the game in play comes from the store, not through props.
+  const players = useGame(s => s.players);
+  const setStep = useGame(s => s.setStep);
   const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Your own topic") : settings.topic;
   const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
   const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];

@@ -1,12 +1,13 @@
 // The hand in play: the sentence, the seats, bets and the controls (package F7: moved out of App.tsx without changes).
 
+import { useGame } from '../state/gameStore';
 import { getRevealGate } from '../game/revealGate';
 import { presenceSummary } from '../game/presence';
 import { type FreeDraws } from '../game/spacing';
 import { isFrozenBySubZero } from '../game/status';
 import React from 'react';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
-import { Player, Settings, GeneratedSentence, Bet, Hint, PowerUpKey, ActivePowerUp, GameMode, SoundEffect, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
+import { Player, Settings, Bet, PowerUpKey, ActivePowerUp, GameMode, SoundEffect, UsedPowerUp, PlayerTurnTimer, QuestionType } from '../types';
 import { POWER_UPS, TURN_TIMER_OPTIONS, CHALLENGE_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS } from '../constants';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Lock, LockOpen, Smartphone, Volume2, Pencil, RotateCcw, Eye, Pause, WifiOff, Flag, Clock } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -29,22 +30,18 @@ import { STICKY_TOP_PX } from './layout';
 export interface HandScreenProps {
   activePlayers: Player[];
   isPlayerFrozen: (playerId: number) => boolean;
-  currentSentence: GeneratedSentence;
   mpRoomCode: string;
   mpAwayIds: number[];
-  bets: Record<number, Bet>;
   activePowerUps: Record<number, ActivePowerUp[]>;
   isTurnTimerEnabled: boolean;
   mpSeats: Record<number, MultiplayerSeat>;
   turnTimers: Record<number, PlayerTurnTimer>;
   teacherRevealOverride: boolean;
   hasPlayerPlacedBet: (playerId: number) => boolean;
-  players: Player[];
   handleMpUnlockPlayer: (playerId: number) => void;
   freeDraws: FreeDraws;
   handleBetChange: (playerId: number, field: keyof Bet, value: any, ignoreLock?: boolean) => void;
   handleGetHint: (playerId: number) => Promise<void>;
-  hints: Record<number, Hint>;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
   handleBuyRandomPowerUp: (playerId: number) => void;
   powerUpsUsedThisRound: Record<number, UsedPowerUp[]>;
@@ -69,7 +66,6 @@ export interface HandScreenProps {
   sentenceHeaderRef: React.RefObject<HTMLDivElement>;
   isSentenceRevealed: boolean;
   isLoading: boolean;
-  currentRound: number;
   totalRounds: string | number;
   specialHandLabel: string;
   secondLookRound: number;
@@ -127,22 +123,18 @@ export interface HandScreenProps {
 export function HandScreen({
   activePlayers,
   isPlayerFrozen,
-  currentSentence,
   mpRoomCode,
   mpAwayIds,
-  bets,
   activePowerUps,
   isTurnTimerEnabled,
   mpSeats,
   turnTimers,
   teacherRevealOverride,
   hasPlayerPlacedBet,
-  players,
   handleMpUnlockPlayer,
   freeDraws,
   handleBetChange,
   handleGetHint,
-  hints,
   playSound,
   handleBuyRandomPowerUp,
   powerUpsUsedThisRound,
@@ -167,7 +159,6 @@ export function HandScreen({
   sentenceHeaderRef,
   isSentenceRevealed,
   isLoading,
-  currentRound,
   totalRounds,
   specialHandLabel,
   secondLookRound,
@@ -221,6 +212,12 @@ export function HandScreen({
   setTotalRounds,
   gameClock,
 }: HandScreenProps) {
+  // Package F6: the game in play comes from the store, not through props.
+  const players = useGame(s => s.players);
+  const currentRound = useGame(s => s.currentRound);
+  const currentSentence = useGame(s => s.currentSentence);
+  const bets = useGame(s => s.bets);
+  const hints = useGame(s => s.hints);
     const unfrozenActivePlayers = activePlayers.filter(p => !isPlayerFrozen(p.id));
     const currentQuestionType: QuestionType = currentSentence?.questionType || 'binary';
     const isClozeRound = isGapType(currentQuestionType);

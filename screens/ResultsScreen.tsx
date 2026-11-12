@@ -1,10 +1,11 @@
 // The hand results screen (package F7: moved out of App.tsx without changes).
 
+import { useGame } from '../state/gameStore';
 import { answerSplit, reactionCounts, type HandReactions } from '../game/answerSplit';
 import { checkGameEnd } from '../game/flow';
 import { undoRevealSecondsLeft, type RevealSnapshot } from '../game/ruling';
 import React from 'react';
-import { Player, Settings, GeneratedSentence, Bet, RoundResultInfo, GameMode, SoundEffect, RoundHistoryRecord, QuestionType } from '../types';
+import { Settings, GameMode, SoundEffect, QuestionType } from '../types';
 import { CHALLENGE_FORMATS } from '../constants';
 import { ArrowDown, ArrowRight, ArrowUp, Cloud as CloudIcon, Save, Volume2, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -20,27 +21,21 @@ import { renderTextSegments } from '../components/TextSegments';
 
 export interface ResultsScreenProps {
   targetAmount: string | number;
-  players: Player[];
   gameMode: GameMode;
-  currentRound: number;
   totalRounds: string | number;
   mpRoomCode: string;
-  currentSentence: GeneratedSentence;
   nextRoundSettings: Settings;
   settings: Settings;
-  roundResults: RoundResultInfo[];
   isProjectorMode: boolean;
   levelNotice: { round: number; text: string; };
   sayItOn: boolean;
   currentSpecialHand: SpecialHand;
-  roundHistory: RoundHistoryRecord[];
   simplifiedExplanation: { text: string | null; loading: boolean; };
   speakText: (text: string | null) => Promise<void>;
   isSpeaking: boolean;
   handleSimplifyExplanation: () => Promise<void>;
   isRevealSnapshotCurrent: boolean;
   revealSnapshot: RevealSnapshot;
-  bets: Record<number, Bet>;
   handReactions: HandReactions;
   handleSaveGameClick: () => Promise<void>;
   playSound: (sound: SoundEffect, ...args: any[]) => void;
@@ -59,27 +54,21 @@ export interface ResultsScreenProps {
 
 export function ResultsScreen({
   targetAmount,
-  players,
   gameMode,
-  currentRound,
   totalRounds,
   mpRoomCode,
-  currentSentence,
   nextRoundSettings,
   settings,
-  roundResults,
   isProjectorMode,
   levelNotice,
   sayItOn,
   currentSpecialHand,
-  roundHistory,
   simplifiedExplanation,
   speakText,
   isSpeaking,
   handleSimplifyExplanation,
   isRevealSnapshotCurrent,
   revealSnapshot,
-  bets,
   handReactions,
   handleSaveGameClick,
   playSound,
@@ -95,6 +84,13 @@ export function ResultsScreen({
   setConfirmAction,
   handleEndGameEarly,
 }: ResultsScreenProps) {
+  // Package F6: the game in play comes from the store, not through props.
+  const players = useGame(s => s.players);
+  const currentRound = useGame(s => s.currentRound);
+  const currentSentence = useGame(s => s.currentSentence);
+  const bets = useGame(s => s.bets);
+  const roundResults = useGame(s => s.roundResults);
+  const roundHistory = useGame(s => s.roundHistory);
     const numTargetAmount = typeof targetAmount === 'string' ? parseInt(targetAmount, 10) : targetAmount;
     const {
       isGameOver,

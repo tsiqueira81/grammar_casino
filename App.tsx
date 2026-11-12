@@ -30,7 +30,7 @@ import { checkBet, isBetComplete } from './game/betValidity';
 import { hasShieldProtection, isFrozenBySubZero } from './game/status';
 import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { clampBetInput, getBetLimits } from './game/betLimits';
-import { Player, Settings, GeneratedSentence, Bet, Hint, RoundResultInfo, GameError, PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload, Step, GameMode, SoundEffect, UsedPowerUp, WheelItem, RoundHistoryRecord, PlayerTurnTimer, QuestionType, ChallengeFormat } from './types';
+import { Player, Settings, GeneratedSentence, Bet, Hint, GameError, PowerUpKey, ActivePowerUp, ShowTargetModalPayload, ShowPowerUpModalPayload, GameMode, SoundEffect, UsedPowerUp, WheelItem, RoundHistoryRecord, PlayerTurnTimer, QuestionType, ChallengeFormat } from './types';
 import { POWER_UPS, GRAMMAR_TOPICS, CEFR_LEVELS, THEMES, LOCAL_STORAGE_KEY, INITIAL_PLAYER_MONEY, MIN_TARGET_AMOUNT, DEFAULT_TARGET_AMOUNT, HINT_COST, POWERUP_COST, TAXMAN_AMOUNT, GENEROUS_GIFT_AMOUNT, BET_CAP_AMOUNT, getSubtypesForTopic, TURN_TIMER_OPTIONS, TURN_TIMER_BONUS_MS, ALL_QUESTION_TYPES, DEFAULT_MIXED_FORMATS, getEffectiveMixedFormats, CLOZE_DISABLED_POWER_UPS, BINARY_DISABLED_POWER_UPS, MP_ONLY_POWER_UPS, NON_OFFENSIVE_TARGETED_POWER_UPS } from './constants';
 import { ArrowLeft, Cloud as CloudIcon, Moon, Projector, Smartphone, Sun, Volume2, VolumeX, Wind, Pause, Play, Maximize, Minimize, Keyboard, Bot } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
@@ -5023,7 +5023,6 @@ export function App() {
               startDemoRoom={startDemoRoom}
               setIsStudentControllerMode={setIsStudentControllerMode}
               setShowCoach={setShowCoach}
-              players={players}
               activeCloudRoster={activeCloudRoster}
               isEditingStartingCash={isEditingStartingCash}
               tempStartingCash={tempStartingCash}
@@ -5081,7 +5080,6 @@ export function App() {
               setTurnTimers={setTurnTimers}
               setMpRoundTimer={setMpRoundTimer}
               mpAutoStartedRoundRef={mpAutoStartedRoundRef}
-              players={players}
               specialHandsOn={specialHandsOn}
               setSpecialHandsOn={setSpecialHandsOn}
               setTargetAmount={setTargetAmount}
@@ -5098,7 +5096,6 @@ export function App() {
               qualityStored={qualityStored}
               chooseQuality={chooseQuality}
               qualityTier={qualityTier}
-              setStep={setStep}
               handleFinalizeSettings={handleFinalizeSettings}
             />
           );
@@ -5107,22 +5104,18 @@ export function App() {
             <HandScreen
               activePlayers={activePlayers}
               isPlayerFrozen={isPlayerFrozen}
-              currentSentence={currentSentence}
               mpRoomCode={mpRoomCode}
               mpAwayIds={mpAwayIds}
-              bets={bets}
               activePowerUps={activePowerUps}
               isTurnTimerEnabled={isTurnTimerEnabled}
               mpSeats={mpSeats}
               turnTimers={turnTimers}
               teacherRevealOverride={teacherRevealOverride}
               hasPlayerPlacedBet={hasPlayerPlacedBet}
-              players={players}
               handleMpUnlockPlayer={handleMpUnlockPlayer}
               freeDraws={freeDraws}
               handleBetChange={handleBetChange}
               handleGetHint={handleGetHint}
-              hints={hints}
               playSound={playSound}
               handleBuyRandomPowerUp={handleBuyRandomPowerUp}
               powerUpsUsedThisRound={powerUpsUsedThisRound}
@@ -5147,7 +5140,6 @@ export function App() {
               sentenceHeaderRef={sentenceHeaderRef}
               isSentenceRevealed={isSentenceRevealed}
               isLoading={isLoading}
-              currentRound={currentRound}
               totalRounds={totalRounds}
               specialHandLabel={specialHandLabel}
               secondLookRound={secondLookRound}
@@ -5206,27 +5198,21 @@ export function App() {
           return (
             <ResultsScreen
               targetAmount={targetAmount}
-              players={players}
               gameMode={gameMode}
-              currentRound={currentRound}
               totalRounds={totalRounds}
               mpRoomCode={mpRoomCode}
-              currentSentence={currentSentence}
               nextRoundSettings={nextRoundSettings}
               settings={settings}
-              roundResults={roundResults}
               isProjectorMode={isProjectorMode}
               levelNotice={levelNotice}
               sayItOn={sayItOn}
               currentSpecialHand={currentSpecialHand}
-              roundHistory={roundHistory}
               simplifiedExplanation={simplifiedExplanation}
               speakText={speakText}
               isSpeaking={isSpeaking}
               handleSimplifyExplanation={handleSimplifyExplanation}
               isRevealSnapshotCurrent={isRevealSnapshotCurrent}
               revealSnapshot={revealSnapshot}
-              bets={bets}
               handReactions={handReactions}
               handleSaveGameClick={handleSaveGameClick}
               playSound={playSound}
@@ -5246,9 +5232,6 @@ export function App() {
         case 'GAME_OVER':
           return (
             <GameOverScreen
-              players={players}
-              winner={winner}
-              roundHistory={roundHistory}
               settings={settings}
               gameMode={gameMode}
               totalRounds={totalRounds}

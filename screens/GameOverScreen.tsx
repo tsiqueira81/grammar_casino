@@ -1,6 +1,6 @@
 // The final results screen (package F7: moved out of App.tsx without changes): the ceremony,
 // the podium, the optional awards, the class line, the buttons and the session report.
-import React from 'react';
+import { useGame } from '../state/gameStore';
 import { Cloud as CloudIcon, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
 import { PlayerAvatar } from '../components/PlayerAvatar';
@@ -9,12 +9,9 @@ import { CEREMONY_DONE, drawMoment, placeShown, type CeremonyStage } from '../ga
 import { buildReport, classResultLine } from '../game/report';
 import { computeAwards } from '../game/awards';
 import { logEvent } from '../utils/debugLog';
-import type { GameMode, Player, RoundHistoryRecord, Settings, SoundEffect } from '../types';
+import type { GameMode, Settings, SoundEffect } from '../types';
 
 export interface GameOverScreenProps {
-  players: Player[];
-  winner: Player | null;
-  roundHistory: RoundHistoryRecord[];
   settings: Settings;
   gameMode: GameMode;
   totalRounds: number | string;
@@ -30,9 +27,6 @@ export interface GameOverScreenProps {
 }
 
 export function GameOverScreen({
-  players,
-  winner,
-  roundHistory,
   settings,
   gameMode,
   totalRounds,
@@ -46,6 +40,10 @@ export function GameOverScreen({
   onSaveToCloud,
   playSound,
 }: GameOverScreenProps) {
+  // Package F6: the game in play comes from the store, not through props.
+  const players = useGame(s => s.players);
+  const winner = useGame(s => s.winner);
+  const roundHistory = useGame(s => s.roundHistory);
   const ranked = [...players].sort((a, b) => b.money - a.money);
   if (winner) {
     const wi = ranked.findIndex(p => p.id === winner.id);
