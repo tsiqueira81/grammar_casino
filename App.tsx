@@ -110,6 +110,7 @@ import { lookForTheme } from './show/looks';
 import { LENGTH_PRESETS, estimateMinutes, gameClockText, handsLeftNote } from './game/gameLength';
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { AWARDS_KEY, computeAwards } from './game/awards';
+import { sentenceStatus } from './game/aiStatus';
 import { useFocusTrap } from './utils/useFocusTrap';
 import LiveAnnouncer from './components/LiveAnnouncer';
 import FirstRunCoach from './components/FirstRunCoach';
@@ -6502,7 +6503,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
               (nextFormatConfig.id === 'mixed' &&
                 getEffectiveMixedFormats(nextRoundSettings?.mixedFormats).join(',') !== getEffectiveMixedFormats(settings.mixedFormats).join(','))
             ));
-            const aiReady = desktopStatus.hasKey && desktopStatus.isOnline;
+            const aiLine = sentenceStatus(desktopStatus, currentSentence);
             const drawerRows: { tab: SettingsModalTab; icon: string; label: string; value: string; next?: string | null; note?: string; warn?: boolean }[] = [
               {
                 tab: 'topic', icon: '📚', label: 'Topic', value: settings.topic,
@@ -6525,8 +6526,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                   : null,
               },
               {
-                tab: 'ai', icon: desktopStatus.decryptionFailed ? '🔑' : aiReady ? '⚡' : '💾', label: 'Sentences',
-                value: desktopStatus.decryptionFailed ? 'Re-enter the AI key' : aiReady ? 'AI sentences' : 'Offline bank',
+                tab: 'ai', icon: aiLine.icon, label: 'Sentences',
+                value: aiLine.label,
                 note: [desktopStatus.isPortable ? 'Portable' : '', desktopStatus.isReadOnly ? 'Read-only' : ''].filter(Boolean).join(' · ') || undefined,
                 warn: desktopStatus.decryptionFailed,
               },
@@ -6837,7 +6838,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                                     {turnTimerSeconds === 0 ? 'No timer' : `${turnTimerSeconds} s ${mpRoomCode ? 'per round' : 'per turn'}`}
                                   </span>
                                   <span className={`${metaChip} ${desktopStatus.decryptionFailed ? '!text-gc-loss' : ''}`}>
-                                    {desktopStatus.decryptionFailed ? 'Re-enter the AI key' : desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
+                                    {sentenceStatus(desktopStatus).label}
                                     {desktopStatus.isPortable && <span className="text-gc-cap" title="Portable edition">· Portable</span>}
                                     {desktopStatus.isReadOnly && <span className="text-gc-cap text-gc-loss" title="Read-only media">· Read-only</span>}
                                   </span>
@@ -7012,7 +7013,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                     onLockNow={handleMpRoundTimerLockNow}
                     onReset={handleMpRoundTimerReset}
                     onOpenAiSettings={() => handleOpenSettingsModal('ai')}
-                    aiStatusLabel={desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}
+                    aiStatusLabel={sentenceStatus(desktopStatus, currentSentence).label}
                     playSound={playSound}
                   />
                 )}
@@ -7083,7 +7084,7 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
                         className="h-9 px-3.5 bg-gc-line/[0.06] border border-gc-line/[0.14] hover:border-gc-line/30 rounded-full text-gc-small text-gc-ink flex items-center gap-1.5 font-semibold cursor-pointer transition-colors"
                         title="AI and offline settings"
                       >
-                        <span>{desktopStatus.hasKey && desktopStatus.isOnline ? 'AI sentences' : 'Offline bank'}</span>
+                        <span data-testid="sentence-status">{sentenceStatus(desktopStatus, currentSentence).label}</span>
                       </button>
                     </div>
                   </div>

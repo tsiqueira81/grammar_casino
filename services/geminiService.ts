@@ -300,7 +300,7 @@ export const generateSentence = async (
   // The bank has many items: keep drawing until one fits.
   const { getCuratedSentence } = await import('./fallbackSentences');
   for (let tries = 0; tries < 40; tries++) {
-    const made = convert(getCuratedSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary'));
+    const made = convert({ ...getCuratedSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary'), source: 'bank' });
     if (made) return made;
   }
   const last = questionType === 'spotError'
@@ -318,7 +318,7 @@ const generateBaseSentence = async (
   questionType?: QuestionType
 ): Promise<GeneratedSentence> => {
   const own = nextDeckItem(teacherDeck, pastSentences);
-  if (own) return own;
+  if (own) return { ...own, source: 'own' };
   // Browser tests get a fixed, known sentence for each question type.
   if ((import.meta as any).env.DEV && isE2eMode()) {
     return getE2eSentence(questionType, forceCorrect);
@@ -347,6 +347,7 @@ const generateBaseSentence = async (
       // Package L3: no silent archiving. The item is saved to the cloud bank only once it has been
       // played and not voided (archivePlayedSentence, called by the game when the hand is over).
       rememberForArchive(data, settings, subtype);
+      data.source = 'ai';
       return data;
     }
     throw new Error("Invalid sentence structure returned from service.");
@@ -355,7 +356,7 @@ const generateBaseSentence = async (
     logEvent('ai', `Sentence from the built-in bank instead of AI: ${err instanceof Error ? err.message : String(err)}`);
     // Package L1: the offline bank loads only when it is needed.
     const { getCuratedSentence } = await import('./fallbackSentences');
-    return getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+    return { ...getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType), source: 'bank' };
   }
 };
 

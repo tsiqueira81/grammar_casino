@@ -84,6 +84,8 @@ export interface Settings {
 export interface GeneratedSentence {
   /** Package L3: how an AI item was checked ("two models" or "rules"); absent for bank items. */
   checkedBy?: 'two models' | 'rules';
+  /** Package T6: where the item came from, for the teacher's status line. */
+  source?: 'ai' | 'bank' | 'own';
   text: string;
   isCorrect: boolean;
   correction: string;
