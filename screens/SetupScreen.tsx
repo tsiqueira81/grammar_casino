@@ -11,8 +11,10 @@ import { ArrowLeft, ArrowRight, Check, AlertTriangle, Info } from 'lucide-react'
 import ActionButton from '../components/ActionButton';
 import TextInput from '../components/TextInput';
 import { LENGTH_PRESETS, estimateMinutes } from '../game/gameLength';
+import { specialHandsPlan } from '../game/specialHands';
 import { getCefrTopicRuleSpec } from '../utils/cefrGrammarMatrix';
 import type { StoredQuality } from '../show/quality';
+import { RANDOM_THEME, isRandomTheme, withFixedTheme, withRandomTheme } from '../game/randomTheme';
 
 export interface SetupScreenProps {
   customTopic: string;
@@ -95,7 +97,8 @@ export function SetupScreen({
   const setAutoStartNextTimer = useGame(s => s.setAutoStartNextTimer);
   const setMpRoundTimer = useGame(s => s.setMpRoundTimer);
   const resolvedTopicPreview = settings.topic === "My own choice" ? (customTopic.trim() || "Your own topic") : settings.topic;
-  const resolvedThemePreview = settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
+  const randomThemeOn = isRandomTheme(settings);
+  const resolvedThemePreview = randomThemeOn ? RANDOM_THEME : settings.theme === "Custom ✍️" ? (customTheme.trim() || "Your own theme") : settings.theme;
   const currentFormatObj = CHALLENGE_FORMATS.find(f => f.id === (settings.challengeFormat || 'binary')) || CHALLENGE_FORMATS[0];
   const levelProfile = CEFR_DIFFICULTY_PROFILES[settings.level];
   const optionBase = 'border transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn';
@@ -114,7 +117,7 @@ export function SetupScreen({
   // Package T1: say what is missing next to the button, instead of only after a click.
   const setupProblem = (() => {
     if (settings.topic === 'My own choice' && !customTopic.trim()) return 'Type your own topic to go on.';
-    if (settings.theme === 'Custom ✍️' && !customTheme.trim()) return 'Type your own theme to go on.';
+    if (!randomThemeOn && settings.theme === 'Custom ✍️' && !customTheme.trim()) return 'Type your own theme to go on.';
     if (settingsPart === 2) {
       const n = typeof totalRounds === 'string' ? parseInt(totalRounds, 10) : totalRounds;
       if (gameMode === 'rounds' && (isNaN(n) || n <= 0)) return 'Type a number of hands (1 or more) to deal.';
@@ -292,21 +295,39 @@ export function SetupScreen({
           <p className={sectionHint}>The setting for the sentences, such as fantasy or business.</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {THEMES.map(item => {
-              const isActive = settings.theme === item;
+              const isActive = !randomThemeOn && settings.theme === item;
               return (
-                <button
-                  key={item}
-                  type="button"
-                  aria-pressed={isActive}
-                  onClick={() => { playSound('click'); setSettings(s => ({ ...s, theme: item })); }}
-                  className={pill(isActive)}
-                >
-                  {item === 'Custom ✍️' ? 'My own theme ✍️' : item}
-                </button>
+                <React.Fragment key={item}>
+                  {/* Random sits after the named themes, before "My own theme". */}
+                  {item === 'Custom ✍️' && (
+                    <button
+                      type="button"
+                      aria-pressed={randomThemeOn}
+                      data-testid="theme-random"
+                      onClick={() => { playSound('click'); setSettings(s => withRandomTheme(s)); }}
+                      className={pill(randomThemeOn)}
+                    >
+                      {RANDOM_THEME}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => { playSound('click'); setSettings(s => withFixedTheme(s, item)); }}
+                    className={pill(isActive)}
+                  >
+                    {item === 'Custom ✍️' ? 'My own theme ✍️' : item}
+                  </button>
+                </React.Fragment>
               );
             })}
           </div>
-          {settings.theme === 'Custom ✍️' && (
+          {randomThemeOn && (
+            <p className="mt-3 text-gc-small text-gc-quiet animate-gc-fade" data-testid="theme-random-note">
+              Every hand gets a different theme. All seven come up before one comes back.
+            </p>
+          )}
+          {!randomThemeOn && settings.theme === 'Custom ✍️' && (
             <div className="mt-4 animate-gc-fade">
               <TextInput
                 value={customTheme}
@@ -478,6 +499,7 @@ export function SetupScreen({
         <section className={sectionCls} aria-labelledby="setup-win">
           <h2 id="setup-win" className={sectionTitle}>How to win</h2>
           <p className={sectionHint}>When the game ends and who is the winner. A player who reaches $0 is bankrupt and out for good{mpRoomCode && gameMode !== 'lastPlayer' ? ', except in a live room, where they get a $150 House Bailout at the next hand' : ''}.</p>
+          {/* The three ways to win, side by side; what the chosen one needs sits in one wide panel below. */}
           <div className="mt-4 grid md:grid-cols-3 gap-2.5">
             {([
               { mode: 'rounds' as const, icon: '⏳', title: 'Set number of hands', text: 'The most money after the last hand wins.' },
@@ -486,120 +508,160 @@ export function SetupScreen({
             ]).map(opt => {
               const isSelected = gameMode === opt.mode;
               return (
-                <div
+                <button
                   key={opt.mode}
-                  className={`rounded-gc ${optionBase} ${isSelected ? optionOn : optionOff} !cursor-default`}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => { playSound('click'); setGameMode(opt.mode); }}
+                  className={`p-4 text-left flex items-start gap-3 rounded-gc ${optionBase} ${isSelected ? optionOn : optionOff}`}
                 >
-                  <button
-                    type="button"
-                    aria-pressed={isSelected}
-                    onClick={() => { playSound('click'); setGameMode(opt.mode); }}
-                    className="w-full p-4 text-left flex items-start gap-3 cursor-pointer rounded-gc focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn"
-                  >
-                    <span className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] grid place-items-center text-[22px] leading-none" aria-hidden="true">{opt.icon}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-gc-body font-bold">{opt.title}</span>
-                        {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-money" aria-hidden="true" />}
-                      </span>
-                      <span className="block mt-0.5 text-gc-small text-gc-quiet">{opt.text}</span>
+                  <span className="w-10 h-10 shrink-0 rounded-full bg-gc-line/[0.06] grid place-items-center text-[22px] leading-none" aria-hidden="true">{opt.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-gc-body font-bold">{opt.title}</span>
+                      {isSelected && <Check className="w-4 h-4 shrink-0 text-gc-money" aria-hidden="true" />}
                     </span>
-                  </button>
-                  {isSelected && opt.mode === 'rounds' && (
-                    <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
-                      <label htmlFor="gc-total-rounds" className="text-gc-small font-semibold text-gc-quiet">Hands</label>
-                      <TextInput
-                        id="gc-total-rounds"
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={String(totalRounds)}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setTotalRounds(val === '' ? '' : parseInt(val, 10));
-                        }}
-                        className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
-                      />
-                      {LENGTH_PRESETS.map(({ hands: r, name, timerSeconds: presetTimer }) => (
-                        <button
-                          key={r}
-                          type="button"
-                          aria-pressed={totalRounds === r}
-                          onClick={() => {
-                            playSound('click');
-                            setTotalRounds(r);
-                            // Package G7: a preset sets the timer too (shown on the button).
-                            if (presetTimer !== undefined && TURN_TIMER_OPTIONS.includes(presetTimer)) {
-                              setTurnTimerSeconds(presetTimer);
-                              setTurnTimers({});
-                              setMpRoundTimer({ status: 'idle', remainingMs: presetTimer * 1000 });
-                              mpAutoStartedRoundRef.current = 0;
-                            }
-                          }}
-                          title={presetTimer ? `${r} hands and a ${presetTimer}-second timer` : `${r} hands`}
-                          className={`min-h-9 min-w-[2.5rem] px-3 py-1 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
-                        >
-                          <span className="tabular-nums">{r}</span> · {name}
-                          {presetTimer ? <span className="font-semibold opacity-80"> · {presetTimer} s</span> : null}
-                        </button>
-                      ))}
-                      {Number(totalRounds) > 0 && (
-                        <p className="w-full text-gc-small text-gc-quiet" data-testid="length-estimate">
-                          About {estimateMinutes({ hands: Number(totalRounds), players: players.length, timerSeconds: turnTimerSeconds, room: Boolean(mpRoomCode) })} minutes with {mpRoomCode ? 'this room' : `${players.length} player${players.length === 1 ? '' : 's'}`}.
-                        </p>
-                      )}
-                      <label className="w-full mt-1 flex items-center justify-between gap-4 p-3 rounded-gc-sm bg-gc-line/[0.04] border border-gc-line/[0.1] cursor-pointer">
-                        <span>
-                          <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
-                          <span className="block text-gc-small text-gc-quiet">
-                            The last hand is the Final Table (wins pay double). A second-look sentence pays 1.5 times. Halfway through, a Valid-or-flawed sentence is read aloud, not shown, until the reveal. In longer games, a Spotlight hand repeats the most-missed point, and a Fix it hand asks everyone to correct a sentence.
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={specialHandsOn}
-                          onClick={() => { playSound('click'); setSpecialHandsOn(v => !v); }}
-                          className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${specialHandsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
-                        >
-                          <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${specialHandsOn ? 'translate-x-5' : ''}`} />
-                          <span className="sr-only">Special hands</span>
-                        </button>
-                      </label>
-                    </div>
-                  )}
-                  {isSelected && opt.mode === 'targetAmount' && (
-                    <div className="px-4 pb-4 flex flex-wrap items-center gap-2">
-                      <label htmlFor="gc-target-amount" className="text-gc-small font-semibold text-gc-quiet">Target $</label>
-                      <TextInput
-                        id="gc-target-amount"
-                        type="number"
-                        min={MIN_TARGET_AMOUNT}
-                        step={250}
-                        value={String(targetAmount)}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setTargetAmount(val === '' ? '' : parseInt(val, 10));
-                        }}
-                        className="w-24 h-10 !py-1 text-center font-bold tabular-nums"
-                      />
-                      {[2000, 2500, 3000, 5000].map((amt) => (
-                        <button
-                          key={amt}
-                          type="button"
-                          aria-pressed={Number(targetAmount) === amt}
-                          onClick={() => { playSound('click'); setTargetAmount(amt); }}
-                          className={`h-9 px-2.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${Number(targetAmount) === amt ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
-                        >
-                          ${amt.toLocaleString()}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                    <span className="block mt-0.5 text-gc-small text-gc-quiet">{opt.text}</span>
+                  </span>
+                </button>
               );
             })}
           </div>
+
+          {gameMode === 'rounds' && (
+            <div className="mt-2.5 rounded-gc border border-gc-line/[0.14] bg-gc-line/[0.03] animate-gc-fade" data-testid="win-details">
+              <div className="p-4 sm:p-5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label htmlFor="gc-total-rounds" className="text-gc-body font-semibold text-gc-ink mr-1">Hands</label>
+                  <TextInput
+                    id="gc-total-rounds"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={String(totalRounds)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setTotalRounds(val === '' ? '' : parseInt(val, 10));
+                    }}
+                    className="w-20 h-10 !py-1 text-center font-bold tabular-nums"
+                  />
+                  {LENGTH_PRESETS.map(({ hands: r, name, timerSeconds: presetTimer }) => (
+                    <button
+                      key={r}
+                      type="button"
+                      aria-pressed={totalRounds === r}
+                      onClick={() => {
+                        playSound('click');
+                        setTotalRounds(r);
+                        // Package G7: a preset sets the timer too (shown on the button).
+                        if (presetTimer !== undefined && TURN_TIMER_OPTIONS.includes(presetTimer)) {
+                          setTurnTimerSeconds(presetTimer);
+                          setTurnTimers({});
+                          setMpRoundTimer({ status: 'idle', remainingMs: presetTimer * 1000 });
+                          mpAutoStartedRoundRef.current = 0;
+                        }
+                      }}
+                      title={presetTimer ? `${r} hands and a ${presetTimer}-second timer` : `${r} hands`}
+                      className={`min-h-10 min-w-[2.5rem] px-3.5 py-1 rounded-full text-gc-small font-bold ${optionBase} ${totalRounds === r ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
+                    >
+                      <span className="tabular-nums">{r}</span> · {name}
+                      {presetTimer ? <span className="font-semibold opacity-80"> · {presetTimer} s</span> : null}
+                    </button>
+                  ))}
+                </div>
+                {Number(totalRounds) > 0 && (
+                  <p className="mt-2 text-gc-small text-gc-quiet" data-testid="length-estimate">
+                    About {estimateMinutes({ hands: Number(totalRounds), players: players.length, timerSeconds: turnTimerSeconds, room: Boolean(mpRoomCode) })} minutes with {mpRoomCode ? 'this room' : `${players.length} player${players.length === 1 ? '' : 's'}`}.
+                  </p>
+                )}
+              </div>
+
+              {/* Special hands: the switch on one line, then one small card per kind of hand. */}
+              <div className="border-t border-gc-line/[0.12] p-4 sm:p-5" data-testid="special-hands-panel">
+                <label className="flex items-center justify-between gap-4 cursor-pointer">
+                  <span>
+                    <span className="block text-gc-body font-semibold text-gc-ink">Special hands</span>
+                    <span className="block text-gc-small text-gc-quiet">
+                      {specialHandsOn
+                        ? 'On. A few hands of the game play differently:'
+                        : 'Off. Turn on to make a few hands of the game play differently:'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={specialHandsOn}
+                    onClick={() => { playSound('click'); setSpecialHandsOn(v => !v); }}
+                    className={`relative w-12 h-7 shrink-0 rounded-full transition-colors cursor-pointer ${specialHandsOn ? 'bg-gc-win' : 'bg-gc-line/25'}`}
+                  >
+                    <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow transition-transform ${specialHandsOn ? 'translate-x-5' : ''}`} />
+                    <span className="sr-only">Special hands</span>
+                  </button>
+                </label>
+                <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5" aria-label="The special hands">
+                  {specialHandsPlan(Number(totalRounds)).map(item => {
+                    const live = specialHandsOn && item.inThisGame;
+                    return (
+                      <li
+                        key={item.hand}
+                        data-testid={`special-hand-${item.hand}`}
+                        data-live={live ? 'yes' : 'no'}
+                        className={`rounded-gc-sm border p-3 transition-colors ${live ? 'border-gc-gold/50 bg-gc-gold/[0.08]' : 'border-gc-line/[0.1] bg-gc-line/[0.03]'}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`text-[20px] leading-none ${live ? '' : 'grayscale opacity-60'}`} aria-hidden="true">{item.icon}</span>
+                          <span className={`text-gc-small font-bold ${live ? 'text-gc-ink' : 'text-gc-quiet'}`}>{item.title}</span>
+                        </span>
+                        <span className={`mt-2 inline-block rounded-md px-2 py-0.5 text-gc-cap font-bold ${live ? 'bg-gc-gold text-gc-on-gold' : 'bg-gc-line/[0.08] text-gc-quiet'}`}>
+                          {item.when}
+                        </span>
+                        <span className="block mt-1.5 text-gc-small text-gc-quiet">{item.what}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {gameMode === 'lastPlayer' && (
+            <div className="mt-2.5 rounded-gc border border-gc-line/[0.14] bg-gc-line/[0.03] p-4 sm:p-5 animate-gc-fade" data-testid="win-details">
+              <p className="text-gc-small text-gc-quiet">
+                Nothing more to set. There is no fixed number of hands: the game goes on until only one player has money left.
+              </p>
+            </div>
+          )}
+
+          {gameMode === 'targetAmount' && (
+            <div className="mt-2.5 rounded-gc border border-gc-line/[0.14] bg-gc-line/[0.03] p-4 sm:p-5 animate-gc-fade" data-testid="win-details">
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor="gc-target-amount" className="text-gc-body font-semibold text-gc-ink mr-1">Target $</label>
+                <TextInput
+                  id="gc-target-amount"
+                  type="number"
+                  min={MIN_TARGET_AMOUNT}
+                  step={250}
+                  value={String(targetAmount)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTargetAmount(val === '' ? '' : parseInt(val, 10));
+                  }}
+                  className="w-24 h-10 !py-1 text-center font-bold tabular-nums"
+                />
+                {[2000, 2500, 3000, 5000].map((amt) => (
+                  <button
+                    key={amt}
+                    type="button"
+                    aria-pressed={Number(targetAmount) === amt}
+                    onClick={() => { playSound('click'); setTargetAmount(amt); }}
+                    className={`h-10 px-3.5 rounded-full text-gc-small font-bold tabular-nums ${optionBase} ${Number(targetAmount) === amt ? 'bg-gc-gold text-gc-on-gold border-transparent' : optionOff}`}
+                  >
+                    ${amt.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Timer */}

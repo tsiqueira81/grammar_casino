@@ -3,6 +3,7 @@ import { useFocusTrap } from '../utils/useFocusTrap';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, Check, Eye, EyeOff, Info, KeyRound, Lock, Pencil, X } from 'lucide-react';
 import { Settings, CEFRLevel, SoundEffect, ChallengeFormat, QuestionType } from '../types';
+import { RANDOM_THEME, isRandomTheme, newThemeSeed } from '../game/randomTheme';
 import { GRAMMAR_TOPICS, QUICK_LEXICAL_TOPICS, THEMES, CEFR_LEVELS, CEFR_DIFFICULTY_PROFILES, CHALLENGE_FORMATS, ALL_QUESTION_TYPES, getEffectiveMixedFormats } from '../constants';
 import ActionButton from './ActionButton';
 import { AI_DAILY_SENTENCE_LIMIT } from '../utils/aiDailyLimit';
@@ -79,8 +80,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
   const [customThemeInput, setCustomThemeInput] = useState(
     !THEMES.includes(nextSettings.theme as any) ? nextSettings.theme : ''
   );
+  const [isRandomThemeMode, setIsRandomThemeMode] = useState(isRandomTheme(nextSettings));
   const [isCustomThemeMode, setIsCustomThemeMode] = useState(
-    !THEMES.includes(nextSettings.theme as any)
+    !isRandomTheme(nextSettings) && !THEMES.includes(nextSettings.theme as any)
   );
 
   // Desktop AI & Offline states
@@ -109,7 +111,9 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       setIsCustomTopicMode(isTopicCustom);
       if (isTopicCustom) setCustomTopicInput(nextSettings.topic);
 
-      const isThemeCustom = !THEMES.includes(nextSettings.theme as any) || nextSettings.theme.startsWith('Custom');
+      const isThemeRandom = isRandomTheme(nextSettings);
+      setIsRandomThemeMode(isThemeRandom);
+      const isThemeCustom = !isThemeRandom && (!THEMES.includes(nextSettings.theme as any) || nextSettings.theme.startsWith('Custom'));
       setIsCustomThemeMode(isThemeCustom);
       if (isThemeCustom) {
         setCustomThemeInput(nextSettings.theme.replace('Custom ✍️', '').trim());
@@ -139,7 +143,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
   if (!isOpen) return null;
 
   const resolvedTopic = isCustomTopicMode ? (customTopicInput.trim() || 'Custom Grammar') : selectedTopic;
-  const resolvedTheme = isCustomThemeMode ? (customThemeInput.trim() ? `Custom: ${customThemeInput.trim()} ✍️` : 'Custom ✍️') : selectedTheme;
+  const resolvedTheme = isRandomThemeMode ? RANDOM_THEME : isCustomThemeMode ? (customThemeInput.trim() ? `Custom: ${customThemeInput.trim()} ✍️` : 'Custom ✍️') : selectedTheme;
+  // Random theme: keep the game's theme order when it is already running, else start one.
+  const themeSeedPart = isRandomThemeMode ? { themeSeed: nextSettings.themeSeed ?? currentSettings.themeSeed ?? newThemeSeed() } : {};
+  const themeChanged = isRandomThemeMode ? !isRandomTheme(currentSettings) : isRandomTheme(currentSettings) || resolvedTheme !== currentSettings.theme;
   const effectiveMixedFormats = getEffectiveMixedFormats(selectedMixedFormats);
 
   const handleToggleMixedFormatItem = (qType: QuestionType) => {
@@ -166,6 +173,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
       topic: resolvedTopic,
       level: selectedLevel,
       theme: resolvedTheme,
+      ...themeSeedPart,
       challengeFormat: selectedFormat,
       mixedFormats: effectiveMixedFormats,
     });
@@ -178,6 +186,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
         topic: resolvedTopic,
         level: selectedLevel,
         theme: resolvedTheme,
+        ...themeSeedPart,
         challengeFormat: selectedFormat,
         mixedFormats: effectiveMixedFormats,
       });
@@ -255,7 +264,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
   const tabs: { id: SettingsModalTab; label: string; icon: string; changed: boolean }[] = [
     { id: 'topic', label: 'Topic', icon: '📚', changed: resolvedTopic !== currentSettings.topic },
     { id: 'level', label: 'Level', icon: '📊', changed: selectedLevel !== currentSettings.level },
-    { id: 'theme', label: 'Theme', icon: '🎭', changed: resolvedTheme !== currentSettings.theme },
+    { id: 'theme', label: 'Theme', icon: '🎭', changed: themeChanged },
     { id: 'format', label: 'Question type', icon: '🎯', changed: selectedFormat !== (currentSettings.challengeFormat || 'binary') },
     { id: 'ai', label: 'Sentences', icon: aiOn ? '⚡' : '💾', changed: false },
   ];
@@ -445,8 +454,21 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
               <div>
                 <p className={hint}>The setting for the sentences, such as fantasy or business.</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {THEMES.map((th) => {
-                    const isSelected = !isCustomThemeMode && selectedTheme === th;
+                  <button
+                    type="button"
+                    aria-pressed={isRandomThemeMode}
+                    data-testid="rsm-theme-random"
+                    onClick={() => {
+                      playSound('click');
+                      setIsCustomThemeMode(false);
+                      setIsRandomThemeMode(true);
+                    }}
+                    className={`h-10 px-4 rounded-full border text-gc-small font-semibold transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${isRandomThemeMode ? optionOn : optionOff}`}
+                  >
+                    {RANDOM_THEME}
+                  </button>
+                  {THEMES.filter((th) => !th.startsWith('Custom')).map((th) => {
+                    const isSelected = !isRandomThemeMode && !isCustomThemeMode && selectedTheme === th;
                     return (
                       <button
                         key={th}
@@ -455,6 +477,7 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                         onClick={() => {
                           playSound('click');
                           setIsCustomThemeMode(false);
+                          setIsRandomThemeMode(false);
                           setSelectedTheme(th);
                         }}
                         className={`h-10 px-4 rounded-full border text-gc-small font-semibold transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-gc-turn ${isSelected ? optionOn : optionOff}`}
@@ -465,10 +488,14 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                   })}
                 </div>
 
+                {isRandomThemeMode && (
+                  <p className={`mt-3 ${hint}`}>Every hand gets a different theme. All seven come up before one comes back.</p>
+                )}
+
                 {/* My own theme */}
                 <div
                   className={`mt-3 p-3.5 ${optionBase} ${isCustomThemeMode ? optionOn : 'bg-gc-line/[0.03] border-dashed border-gc-line/[0.24] hover:border-gc-line/40'}`}
-                  onClick={() => { if (!isCustomThemeMode) { playSound('click'); setIsCustomThemeMode(true); } }}
+                  onClick={() => { if (!isCustomThemeMode) { playSound('click'); setIsRandomThemeMode(false); setIsCustomThemeMode(true); } }}
                 >
                   <label htmlFor="rsm-custom-theme" className="flex items-center gap-2 text-gc-small font-bold text-gc-ink">
                     <Pencil className="w-4 h-4 text-gc-quiet" aria-hidden="true" />
@@ -480,9 +507,10 @@ export const RoundSettingsModal: React.FC<RoundSettingsModalProps> = ({
                     value={customThemeInput}
                     onChange={(e) => {
                       setCustomThemeInput(e.target.value);
+                      setIsRandomThemeMode(false);
                       if (!isCustomThemeMode) setIsCustomThemeMode(true);
                     }}
-                    onFocus={() => setIsCustomThemeMode(true)}
+                    onFocus={() => { setIsRandomThemeMode(false); setIsCustomThemeMode(true); }}
                     placeholder="For example: Victorian London, a space station, film noir"
                     className={`mt-2 ${inputCls}`}
                   />

@@ -104,3 +104,38 @@ describe('Fix it (package G6)', () => {
 it('puts Fix it before a second look on the same hand', () => {
   expect(specialHandFor({ ...base, round: 8, secondLookRound: 8, sentenceIsCorrect: false })).toBe('fixIt');
 });
+
+describe('the setup screen\'s list of special hands', () => {
+  it('names the hand each one falls on, the same hands the game really deals', async () => {
+    const { specialHandsPlan } = await import('../game/specialHands');
+    for (const n of [4, 5, 6, 8, 10, 15, 20]) {
+      const plan = Object.fromEntries(specialHandsPlan(n).map((p) => [p.hand, p]));
+      expect(Object.keys(plan).sort()).toEqual(['finalTable', 'fixIt', 'listening', 'secondLook', 'spotlight']);
+      expect(plan.finalTable.when).toBe(`Hand ${n}, the last`);
+      expect(specialHandFor({ ...base, totalRounds: n, round: n })).toBe('finalTable');
+      for (const [hand, roundFor] of [['listening', listeningRoundFor], ['spotlight', spotlightRoundFor], ['fixIt', fixItRoundFor]] as const) {
+        const round = roundFor(n);
+        expect(plan[hand].inThisGame).toBe(round !== null);
+        if (round !== null) expect(plan[hand].when).toBe(`Hand ${round}`);
+      }
+      expect(plan.secondLook.inThisGame).toBe(true);
+    }
+  });
+
+  it('says what a short game is missing instead of promising it', async () => {
+    const { specialHandsPlan } = await import('../game/specialHands');
+    const short = Object.fromEntries(specialHandsPlan(3).map((p) => [p.hand, p]));
+    expect(short.listening).toMatchObject({ inThisGame: false, when: 'Needs 4 hands or more' });
+    expect(short.spotlight).toMatchObject({ inThisGame: false, when: 'Needs 6 hands or more' });
+    expect(short.fixIt).toMatchObject({ inThisGame: false, when: 'Needs 8 hands or more' });
+    expect(short.finalTable.inThisGame).toBe(true);
+    // An empty or broken number of hands never throws.
+    expect(specialHandsPlan(Number.NaN)).toHaveLength(5);
+    expect(specialHandsPlan(Number.NaN)[0].when).toBe('The last hand');
+  });
+
+  it('keeps every description short', async () => {
+    const { specialHandsPlan } = await import('../game/specialHands');
+    for (const p of specialHandsPlan(10)) expect(p.what.split(/\s+/).length).toBeLessThanOrEqual(14);
+  });
+});

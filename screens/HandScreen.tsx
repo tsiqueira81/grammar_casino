@@ -12,6 +12,7 @@ import React from 'react';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
 import { Player, Settings, Bet, PowerUpKey, ActivePowerUp, SoundEffect, QuestionType } from '../types';
 import { POWER_UPS, CHALLENGE_FORMATS, getEffectiveMixedFormats } from '../constants';
+import { nextThemeNote, themeLabel } from '../game/randomTheme';
 import { Lock, LockOpen } from 'lucide-react';
 import PlayerBettingCard from '../components/PlayerBettingCard';
 import { PlayerTile, SeatStatus } from '../components/PlayerTileGrid';
@@ -429,8 +430,8 @@ const scalpelPu = playerActive.find(pu => pu.type === 'SCALPEL');
         next: nextRoundSettings && nextRoundSettings.level !== settings.level ? nextRoundSettings.level : null,
       },
       {
-        tab: 'theme', icon: '🎭', label: 'Theme', value: settings.theme,
-        next: nextRoundSettings && nextRoundSettings.theme !== settings.theme ? nextRoundSettings.theme : null,
+        tab: 'theme', icon: '🎭', label: 'Theme', value: themeLabel(settings),
+        next: nextThemeNote(settings, nextRoundSettings),
       },
       {
         tab: 'format', icon: activeFormatConfig.icon, label: 'Question type',

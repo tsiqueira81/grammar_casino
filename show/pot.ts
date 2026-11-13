@@ -1,32 +1,23 @@
-// Package V3: money you can see. Bet chips stay in the pot until the hand is paid out, stacked in
-// a few neat piles in the middle of the felt, and the pot total shows on a brass plaque.
-import type { QualityTier } from './quality';
+// Package V3: money you can see. The pot total shows on a brass plaque. Bet chips fly to the middle
+// of the felt, lie there for a moment and then shrink away: they used to stay in piles until the
+// payout, but they covered what is on the screen (teacher's request, 2026-11-13).
 
 /** Where the pot sits on the felt (table units, y is up). */
 export const POT_CENTER = { x: 0, z: -0.35 } as const;
 
-/** The most chips the pot keeps on each tier; older ones make room for new ones. */
-export const POT_CHIP_CAP: Record<Exclude<QualityTier, 'off'>, number> = { low: 16, medium: 48, high: 72 };
-
-/** Pile spots around the pot centre, offsets in table units. */
-const PILES: ReadonlyArray<readonly [number, number]> = [
-  [0, 0],
-  [-0.34, 0.06],
-  [0.34, 0.04],
-  [-0.17, -0.22],
-  [0.18, -0.21],
-  [-0.15, 0.25],
-  [0.2, 0.25],
-];
+/** How long a thrown chip lies on the felt after landing, and how long it then takes to shrink away. */
+export const CHIP_HOLD_SEC = 1.2;
+export const CHIP_FADE_SEC = 0.4;
 
 /**
- * Where the n-th chip in the pot rests: piles fill in turn so they grow evenly. Returns the pile's
- * x and z and the chip's level in the pile (0 = on the felt).
+ * The size of a thrown chip (1 = full size) this many seconds after it landed, or null once it is
+ * gone. No chip stays on the felt: every one is gone CHIP_HOLD_SEC + CHIP_FADE_SEC after landing.
  */
-export function potSlot(index: number): { x: number; z: number; level: number } {
-  const i = Math.max(0, Math.floor(index));
-  const [dx, dz] = PILES[i % PILES.length];
-  return { x: POT_CENTER.x + dx, z: POT_CENTER.z + dz, level: Math.floor(i / PILES.length) };
+export function chipFadeScale(secondsSinceLanding: number): number | null {
+  const t = (secondsSinceLanding - CHIP_HOLD_SEC) / CHIP_FADE_SEC;
+  if (!(t > 0)) return 1;
+  if (t >= 1) return null;
+  return 1 - t * t;
 }
 
 /** The pot total: every bet still on the table this hand. */

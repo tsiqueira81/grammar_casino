@@ -1,5 +1,6 @@
 // The sentence card of the hand: the dealt card, the sentence, its chips and settings drawer (moved out of HandScreen, F7).
 import type { ChallengeFormatOption } from '../../constants';
+import { nextThemeNote, themeLabel } from '../../game/randomTheme';
 import { useGame } from '../../state/gameStore';
 import React from 'react';
 import { PowerUpKey, SoundEffect, PlayerTurnTimer, QuestionType } from '../../types';
@@ -341,9 +342,9 @@ export function HandSentenceCard({
                           )}
                         </span>
                         <span className={metaChip}>
-                          {settings.theme}
-                          {nextRoundSettings && nextRoundSettings.theme !== settings.theme && (
-                            <span className={nextTag}>Next: {nextRoundSettings.theme}</span>
+                          {themeLabel(settings)}
+                          {nextThemeNote(settings, nextRoundSettings) && (
+                            <span className={nextTag}>Next: {nextThemeNote(settings, nextRoundSettings)}</span>
                           )}
                         </span>
                         <span className={metaChip}>
