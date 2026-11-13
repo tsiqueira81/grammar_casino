@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -42,8 +44,25 @@ jobs:
       # Package R4: the live-room Worker (one Durable Object per room). The Cloudflare token must
       # allow Workers (Account > Workers Scripts > Edit). If it cannot be published, the site still
       # is, and rooms keep using Firestore (the game falls back by itself).
+      # Publishing the room server drops every open connection (phones reconnect by themselves, but
+      # a class mid-hand notices). So it is only published when room-worker/ changed in this push.
+      # A manual run, or a push whose previous commit is unknown, publishes it anyway.
+      - name: Did the room server change?
+        id: changes
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" != "push" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "rooms=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BEFORE" HEAD -- room-worker/; then
+            echo "rooms=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "rooms=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy the room server
         id: rooms
+        if: steps.changes.outputs.rooms == 'true'
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -55,6 +74,8 @@ jobs:
         run: |
           if [ "${{ steps.rooms.outcome }}" = "success" ]; then
             echo "Room server published (grammarcasino-rooms)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.rooms.outcome }}" = "skipped" ]; then
+            echo "Room server unchanged, so it was not restarted: phones in a live room stay connected." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::warning::The room server could not be published. The Cloudflare token probably lacks Account > Workers Scripts > Edit. Live rooms keep using Firestore."
             echo "The room server could not be published: give the Cloudflare token Account > Workers Scripts > Edit. Live rooms keep using Firestore." >> "$GITHUB_STEP_SUMMARY"

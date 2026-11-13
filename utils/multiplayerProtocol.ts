@@ -1,6 +1,7 @@
 import { isBetComplete, isValidKeyWordTransformationPhrase } from '../game/betValidity';
 import { hasShieldProtection, isFrozenBySubZero, isSilencedThisHand } from '../game/status';
 import { getBetCap, getDisplayedMinBet, getHighRoller } from '../game/betLimits';
+import { powerUpLimitPerHand } from '../game/instantPowerUps';
 import {
   Player,
   Settings,
@@ -528,8 +529,7 @@ export function buildAllPlayerViews(params: BuildPlayerViewsParams): Record<numb
   for (const player of players) {
     const myActive = (activePowerUps[player.id] || []) as ActivePowerUp[];
     const myUsed = powerUpsUsedThisRound[player.id] || [];
-    const hasPowerSurge = myActive.some(pu => pu.type === 'POWER_SURGE');
-    const powerUpLimit = hasPowerSurge ? 3 : 1;
+    const powerUpLimit = powerUpLimitPerHand(myActive);
     const isSilenced = isSilencedThisHand(player);
     const isFrozen =
       isFrozenBySubZero(player, allActive);

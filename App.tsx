@@ -62,6 +62,7 @@ const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverla
 const SAVE_DEBOUNCE_MS = 1000;
 /** Package T2: how long "Undo" stays up after a player is removed. */
 const REMOVE_UNDO_MS = 5000;
+import { applyTaxman, applyTithe, applyRobinHood, punisherBankroll, silencerDuration, powerUpLimitPerHand, teachersPetInstantGrant, scalpelEliminatedOptions, applyWheelMoneyPrize } from './game/instantPowerUps';
 import { MultiplayerSeat, buildAllPlayerViews, isPlayerTargetedThisRound, isValidKeyWordTransformationPhrase, buildAudiencePollSummary, isPlayerUnderdog, SHARED_VIEW_KEYS } from './utils/multiplayerProtocol';
 import { HostRoomController, HostEventPayload, SeatTakeoverRequest, loadSavedHostRoom } from './services/multiplayerService';
 import * as GeminiService from './services/geminiService';
@@ -2317,8 +2318,7 @@ export function App() {
 
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
-    const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
-    const limit = hasPowerSurge ? 3 : 1;
+    const limit = powerUpLimitPerHand(playerActive);
     if (usage >= limit) return;
 
     if (!availablePowerUps.includes(powerUpKey)) return;
@@ -2387,12 +2387,7 @@ export function App() {
         } else if (powerUpKey === 'SCALPEL' && currentSentence) {
             const qType = currentSentence.questionType || 'binary';
             if (isOptionType(qType)) {
-              const correctNorm = (currentSentence.correctAnswer || '').trim().toLowerCase();
-              const wrongOpts = (currentSentence.options || []).filter(
-                o => o.trim().toLowerCase() !== correctNorm
-              );
-              const shuffledWrong = [...wrongOpts].sort(() => Math.random() - 0.5);
-              const eliminatedOptions = shuffledWrong.slice(0, 2);
+              const eliminatedOptions = scalpelEliminatedOptions(currentSentence.options, currentSentence.correctAnswer);
               const eliminatedNormSet = new Set(eliminatedOptions.map(o => o.trim().toLowerCase()));
 
               setActivePowerUps(prev => ({
@@ -2522,32 +2517,12 @@ export function App() {
               modalMessage = `${powerUp.icon} Boomerang armed! Any offensive targeted power-up used against you this round will bounce back at the attacker.`;
             }
         } else if (powerUpKey === 'TAXMAN') {
-            let taxCollected = 0;
-            const updatedTaxedPlayers = players.map(p => {
-                const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = hasShieldProtection(pActivePowerUps);
-                if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
-                    const tax = Math.min(TAXMAN_AMOUNT, p.money);
-                    taxCollected += tax;
-                    return {...p, money: p.money - tax};
-                }
-                return p;
-            });
-            setPlayers(updatedTaxedPlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p)); 
+            const { players: taxedPlayers, collected: taxCollected } = applyTaxman(playerId, players, activePlayers, activePowerUps);
+            setPlayers(taxedPlayers);
             modalMessage = `${powerUp.icon} Stole $${TAXMAN_AMOUNT} per rival — collected $${taxCollected.toLocaleString()} total!`;
         } else if (powerUpKey === 'THE_TITHE') {
-             let taxCollected = 0;
-             const updatedTithePlayers = players.map(p => {
-                const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                const isShielded = hasShieldProtection(pActivePowerUps);
-                if (p.id !== playerId && activePlayers.find(ap => ap.id === p.id) && !isShielded) { 
-                    const tax = Math.floor(p.money * 0.10);
-                    taxCollected += tax;
-                    return {...p, money: p.money - tax};
-                }
-                return p;
-             });
-             setPlayers(updatedTithePlayers.map(p => p.id === playerId ? {...p, money: p.money + taxCollected} : p));
+             const { players: tithedPlayers, collected: taxCollected } = applyTithe(playerId, players, activePlayers, activePowerUps);
+             setPlayers(tithedPlayers);
              modalMessage = `${powerUp.icon} Tithed 10% per rival — collected $${taxCollected.toLocaleString()} total!`;
         } else if (powerUpKey === 'GENEROUS') {
             const otherActivePlayers = activePlayers.filter(p => p.id !== playerId);
@@ -2606,49 +2581,16 @@ export function App() {
              }));
              modalMessage = `${powerUp.icon} Auto-revives you with $300 the next time you hit $0.`;
         } else if (powerUpKey === 'ROBIN_HOOD') {
-             const richestAmount = Math.max(...activePlayers.map(p => p.money));
-             const richestPlayers = activePlayers.filter(p => p.money === richestAmount);
-             
-             let totalStolen = 0;
-             const stolenLog: string[] = [];
-             
-             // Phase 1: Steal from Richest
-             const newPlayerState = players.map(p => {
-                 const pActivePowerUps = (activePowerUps[p.id] || []) as ActivePowerUp[];
-                 const isShielded = hasShieldProtection(pActivePowerUps);
-                 
-                 if (richestPlayers.find(rp => rp.id === p.id) && !isShielded) {
-                     const stolen = Math.floor(p.money * 0.20);
-                     totalStolen += stolen;
-                     stolenLog.push(`${p.name} (-$${stolen})`);
-                     return { ...p, money: p.money - stolen };
-                 }
-                 return p;
-             });
-             
-             // Phase 2: Distribute to others (beneficiaries)
-             const beneficiaries = newPlayerState.filter(p => !richestPlayers.find(rp => rp.id === p.id) && p.money > 0);
-             
-             if (beneficiaries.length > 0 && totalStolen > 0) {
-                 const share = Math.floor(totalStolen / beneficiaries.length);
-                 const receivedLog: string[] = [];
-                 
-                 setPlayers(newPlayerState.map(p => {
-                     if (beneficiaries.find(b => b.id === p.id)) {
-                         receivedLog.push(`${p.name} (+$${share})`);
-                         return { ...p, money: p.money + share };
-                     }
-                     return p;
-                 }));
-                 
+             const robin = applyRobinHood(players, activePlayers, activePowerUps);
+             setPlayers(robin.players);
+             const stolenLog = robin.robbed.map(r => `${r.name} (-$${r.amount})`);
+             if (robin.beneficiaries.length > 0) {
+                 const receivedLog = robin.beneficiaries.map(b => `${b.name} (+$${b.amount})`);
                  modalMessage = `${powerUp.icon} Took 20% from ${stolenLog.join(', ')} and shared it with ${receivedLog.join(', ')}.`;
+             } else if (robin.totalStolen > 0) {
+                 modalMessage = `${powerUp.icon} Took 20% from ${stolenLog.join(', ')}, with no eligible players to receive it.`;
              } else {
-                 setPlayers(newPlayerState); 
-                 if (totalStolen > 0) {
-                     modalMessage = `${powerUp.icon} Took 20% from ${stolenLog.join(', ')}, with no eligible players to receive it.`;
-                 } else {
-                     modalMessage = `${powerUp.icon} The richest player is shielded — no money stolen.`;
-                 }
+                 modalMessage = `${powerUp.icon} The richest player is shielded — no money stolen.`;
              }
 
         } else if (powerUpKey === 'THE_WHEEL') {
@@ -2661,7 +2603,7 @@ export function App() {
             return;
         } else if (powerUpKey === 'TEACHERS_PET') {
             if (player.winStreak >= 3) {
-                const grant = Math.floor(newMoney * 0.5);
+                const grant = teachersPetInstantGrant(player.winStreak, newMoney);
                 setPlayers(ps => ps.map(p => {
                     if (p.id === playerId) {
                         const remainingEffects = p.effects.filter(e => e.type !== 'TEACHERS_PET');
@@ -2725,20 +2667,18 @@ export function App() {
   const handleApplyWheelResult = useCallback((playerId: number, item: WheelItem) => {
     switch (item.id) {
       case 'jackpot': {
-        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + 500 } : p));
+        setPlayers(ps => applyWheelMoneyPrize('jackpot', playerId, ps, activePowerUps));
         break;
       }
       case 'house_tax': {
-        setPlayers(ps => ps.map(p => {
-          if (p.id === playerId) {
-            const newM = Math.max(0, p.money - 100);
-            if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
-              setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
-            }
-            return { ...p, money: newM };
+        setPlayers(ps => {
+          const next = applyWheelMoneyPrize('house_tax', playerId, ps, activePowerUps);
+          const newM = next.find(p => p.id === playerId)?.money ?? 0;
+          if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
+            setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
           }
-          return p;
-        }));
+          return next;
+        });
         break;
       }
       case 'shield': {
@@ -2760,22 +2700,7 @@ export function App() {
         break;
       }
       case 'bounty': {
-        let stolen = 0;
-        setPlayers(ps => {
-          const updated = ps.map(p => {
-            if (p.id !== playerId && p.money > 0) {
-              const pActive = (activePowerUps[p.id] || []) as ActivePowerUp[];
-              const isShielded = isProtectedFromWheelBounty(pActive);
-              if (!isShielded) {
-                const take = Math.min(100, p.money);
-                stolen += take;
-                return { ...p, money: p.money - take };
-              }
-            }
-            return p;
-          });
-          return updated.map(p => p.id === playerId ? { ...p, money: p.money + stolen } : p);
-        });
+        setPlayers(ps => applyWheelMoneyPrize('bounty', playerId, ps, activePowerUps));
         setBets(prevBets => {
           let nextBets = { ...prevBets };
           let changed = false;
@@ -2812,26 +2737,17 @@ export function App() {
         break;
       }
       case 'lucky_refund': {
-        setPlayers(ps => ps.map(p => p.id === playerId ? { ...p, money: p.money + 300 } : p));
+        setPlayers(ps => applyWheelMoneyPrize('lucky_refund', playerId, ps, activePowerUps));
         break;
       }
       case 'forced_charity': {
         setPlayers(ps => {
-          const otherActive = ps.filter(p => p.id !== playerId && p.money > 0);
-          const totalCost = otherActive.length * 25;
-          return ps.map(p => {
-            if (p.id === playerId) {
-              const newM = Math.max(0, p.money - totalCost);
-              if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
-                setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
-              }
-              return { ...p, money: newM };
-            }
-            if (otherActive.some(oa => oa.id === p.id)) {
-              return { ...p, money: p.money + 25 };
-            }
-            return p;
-          });
+          const next = applyWheelMoneyPrize('forced_charity', playerId, ps, activePowerUps);
+          const newM = next.find(p => p.id === playerId)?.money ?? 0;
+          if (bets[playerId]?.bet && Number(bets[playerId]?.bet) > newM) {
+            setBets(b => ({ ...b, [playerId]: { ...b[playerId], bet: newM } }));
+          }
+          return next;
         });
         break;
       }
@@ -2870,8 +2786,7 @@ export function App() {
     if (!mayBuyPowerUps(player)) return;
     const usage = (powerUpsUsedThisRound[playerId] || []).length;
     const playerActive = (activePowerUps[playerId] || []) as ActivePowerUp[];
-    const hasPowerSurge = playerActive.some(pu => pu.type === 'POWER_SURGE');
-    const limit = hasPowerSurge ? 3 : 1;
+    const limit = powerUpLimitPerHand(playerActive);
     if (usage >= limit) return;
 
     const isClozeRound = isGapType(currentSentence?.questionType);
@@ -3072,7 +2987,7 @@ export function App() {
     let customModalMessage: string | null = null;
 
     if (powerUpKey === 'THE_PUNISHER') {
-        const newMoney = Math.floor(effectiveTargetPlayer.money * 0.75);
+        const newMoney = punisherBankroll(effectiveTargetPlayer.money);
         setPlayers(ps => ps.map(p => p.id === effectiveTargetId ? {...p, money: newMoney} : p));
         if (targetHasBoomerang) {
           setActivePowerUps(prev => removeBoomerangFromTarget(prev));
@@ -3162,9 +3077,7 @@ export function App() {
           customModalMessage = `🪃 BOOMERANG! ${targetPlayer.name} reflected ⛓️ Crucio back onto ${sourcePlayer.name} for 3 rounds!`;
         }
     } else if (powerUpKey === 'SILENCER') {
-        const targetUsage = powerUpsUsedThisRound[effectiveTargetId] || [];
-        const hasUsedPowerUp = targetUsage.length > 0;
-        const duration = hasUsedPowerUp ? 2 : 1;
+        const duration = silencerDuration((powerUpsUsedThisRound[effectiveTargetId] || []).length);
 
         setPlayers(ps => ps.map(p => {
             if (p.id === effectiveTargetId) {
