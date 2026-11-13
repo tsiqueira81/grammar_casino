@@ -7,6 +7,7 @@ import { undoRevealSecondsLeft } from '../game/ruling';
 import React from 'react';
 import { SoundEffect, QuestionType } from '../types';
 import { CHALLENGE_FORMATS } from '../constants';
+import { nextHandThemeLabel } from '../game/randomTheme';
 import { ArrowDown, ArrowRight, ArrowUp, Cloud as CloudIcon, Save, Volume2, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
 import { PlayerAvatar } from '../components/PlayerAvatar';
@@ -547,7 +548,7 @@ export function ResultsScreen({
                 className={chipButton}
                 title="Change the theme for the next hand"
               >
-                {nextRoundSettings?.theme || settings.theme}
+                {nextHandThemeLabel(settings, nextRoundSettings, currentRound + 1)}
               </button>
 
               <button

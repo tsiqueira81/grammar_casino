@@ -77,6 +77,11 @@ export interface Settings {
   topic: string;
   level: CEFRLevel;
   theme: string;
+  /**
+   * Random theme (game/randomTheme.ts): present while every hand gets a different theme. `theme`
+   * is then the theme of the hand in play (or "Random 🎲" on the setup screen).
+   */
+  themeSeed?: number;
   challengeFormat?: ChallengeFormat;
   mixedFormats?: QuestionType[];
 }

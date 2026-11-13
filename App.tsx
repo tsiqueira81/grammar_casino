@@ -55,7 +55,7 @@ import StudentControllerView from './components/StudentControllerView';
 import CloudManagerModal, { CloudManagerTab } from './components/CloudManagerModal';
 import BroadcastCutIn, { BroadcastCutInPayload } from './components/BroadcastCutIn';
 import ThemeAmbience from './components/ThemeAmbience';
-import type { ChipTossEvent, PotSweepEvent, JackpotEvent, BoomerangArcEvent, ShoeDealEvent, Seat3DState } from './components/Tabletop3DOverlay';
+import type { ChipTossEvent, PotSweepEvent, JackpotEvent, BoomerangArcEvent, Seat3DState } from './components/Tabletop3DOverlay';
 // three.js is only needed on the teacher's table, so phones never download it.
 const Tabletop3DOverlay = React.lazy(() => import('./components/Tabletop3DOverlay'));
 /** Package F6 (part): how long the game waits after the last change before saving it. */
@@ -69,6 +69,7 @@ import * as GeminiService from './services/geminiService';
 import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
+import { RANDOM_THEME, isRandomTheme, newThemeSeed, settingsForRound, withRandomTheme } from './game/randomTheme';
 import { gameClockText, handsLeftNote } from './game/gameLength';
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { AWARDS_KEY } from './game/awards';
@@ -645,7 +646,6 @@ export function App() {
   const [potSweepEvent, setPotSweepEvent] = useState<PotSweepEvent | null>(null);
   const [jackpotEvent, setJackpotEvent] = useState<JackpotEvent | null>(null);
   const [boomerangArcEvent, setBoomerangArcEvent] = useState<BoomerangArcEvent | null>(null);
-  const [shoeDealEvent, setShoeDealEvent] = useState<ShoeDealEvent | null>(null);
   const [powerUpFlightEvent, setPowerUpFlightEvent] = useState<PowerUpFlightEvent | null>(null);
   // The flight waits until the cut-in and the power-up message are closed, so it is seen on the felt.
   const pendingFlightRef = useRef<PowerUpFlightEvent | null>(null);
@@ -836,6 +836,13 @@ export function App() {
 
   // Package V8: the theme sets the felt, the lamp, the sparks and the music key.
   const stageLook = lookForTheme(settings.theme);
+  // Random theme chosen on the setup screen: give the game its theme order straight away, so the
+  // first hand can be fetched ahead.
+  useEffect(() => {
+    if (settings.theme === RANDOM_THEME && settings.themeSeed === undefined) {
+      setSettings(prev => (prev.theme === RANDOM_THEME && prev.themeSeed === undefined ? withRandomTheme(prev) : prev));
+    }
+  }, [settings.theme, settings.themeSeed, setSettings]);
   useEffect(() => {
     musicEngine.setKey(stageLook.musicKey);
   }, [stageLook]);
@@ -1835,17 +1842,23 @@ export function App() {
       const resolvedTopic = settings.topic === "My own choice" ? customTopic.trim() : settings.topic;
       const resolvedTheme = settings.theme === "Custom ✍️" ? customTheme.trim() : settings.theme;
       if (!resolvedTopic || !settings.level || !resolvedTheme) return;
-      targetSettings = {
+      // Random theme: the first hand's theme comes from the seed, which is set a moment after
+      // Random is chosen; until then there is nothing to fetch ahead.
+      const randomOn = isRandomTheme(settings);
+      if (randomOn && settings.themeSeed === undefined) return;
+      targetSettings = settingsForRound({
         topic: resolvedTopic,
         level: settings.level,
         theme: resolvedTheme,
+        ...(randomOn ? { themeSeed: settings.themeSeed } : {}),
         challengeFormat: settings.challengeFormat || 'binary',
         mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
-      };
+      }, 1);
     } else {
       const candidate = nextRoundSettings || settings;
       if (!candidate?.topic || !candidate?.level || !candidate?.theme) return;
-      targetSettings = candidate;
+      // Random theme: the next hand's theme, the same one handleNextRound will deal.
+      targetSettings = settingsForRound(candidate, currentRound + 1);
     }
 
     const activeMixedSubsetKey = (targetSettings.challengeFormat || 'binary') === 'mixed'
@@ -2083,20 +2096,23 @@ export function App() {
         return;
     }
     
-    const newSettings: Settings = {
+    // Random theme: the game keeps the seed, and `theme` is the first hand's theme.
+    const randomOn = isRandomTheme(settings);
+    const newSettings: Settings = settingsForRound({
       topic: finalTopic,
       level: settings.level,
       theme: finalTheme,
+      ...(randomOn ? { themeSeed: settings.themeSeed ?? newThemeSeed() } : {}),
       challengeFormat: settings.challengeFormat || 'binary',
       mixedFormats: getEffectiveMixedFormats(settings.mixedFormats),
-    };
+    }, 1);
     mixedFormatIndexRef.current = 0;
     secondLookQueueRef.current = [];
     setSecondLookRound(null);
     missTallyRef.current = {};
     setFreeDraws({});
     safeLocalStorage.setItem(SETUP_PREFS_KEY, serializeSetupPrefs({
-      settings: { ...settings, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
+      settings: { ...settings, theme: randomOn ? RANDOM_THEME : settings.theme, themeSeed: undefined, challengeFormat: newSettings.challengeFormat, mixedFormats: newSettings.mixedFormats },
       customTopic,
       customTheme,
       gameMode,
@@ -2813,13 +2829,6 @@ export function App() {
     }
     const randomIndex = Math.floor(Math.random() * drawablePool.length);
     const selectedPowerUp = drawablePool[randomIndex];
-    // Package V4: the card leaves the dealer's shoe for this player's seat.
-    setShoeDealEvent({
-      id: `${playerId}-${Date.now()}`,
-      playerId,
-      seatIndex: Math.max(0, activePlayers.findIndex(p => p.id === playerId)),
-      totalSeats: Math.max(1, activePlayers.length),
-    });
     handleBuyPowerUp(playerId, selectedPowerUp, cost);
     if (isFree) setFreeDraws(prev => spendFreeDraw(prev, playerId));
   }, [canPlayerAct, players, powerUpsUsedThisRound, activePowerUps, availablePowerUps, currentSentence, handleBuyPowerUp, mpRoomCode, mpSeats, freeDraws]);
@@ -2895,7 +2904,9 @@ export function App() {
     fetchNewSentence(newSettings, pastSentences, undefined, pastMistakes);
   }, [selectedPowerUps, pastSentences, pastMistakes, fetchNewSentence]);
 
-  const handleApplySettingsImmediately = useCallback((newSettings: Settings) => {
+  const handleApplySettingsImmediately = useCallback((chosen: Settings) => {
+    // Random theme: the hand in play gets its own theme from the seed.
+    const newSettings = settingsForRound(chosen, currentRoundRef.current);
     setSettings(newSettings);
     setNextRoundSettings(null);
     setShowSettingsModal(false);
@@ -4528,9 +4539,10 @@ export function App() {
         setTeacherRevealOverride(false);
         
         // Pass current pastSentences history, using queued nextRoundSettings if set
-        const activeSettings = nextRoundSettings || settings;
-        if (nextRoundSettings) {
-          setSettings(nextRoundSettings);
+        // Random theme: every hand gets the next theme in the game's order.
+        const activeSettings = settingsForRound(nextRoundSettings || settings, currentRound + 1);
+        if (nextRoundSettings || activeSettings !== settings) {
+          setSettings(activeSettings);
           setNextRoundSettings(null);
         }
         fetchNewSentence(activeSettings, pastSentences, undefined, pastMistakes);
@@ -4626,6 +4638,8 @@ export function App() {
   const handlePlayAgainSameClass = useCallback(() => {
     playSound('startGame');
     prefetchRef.current = null;
+    // Random theme stays chosen, with a new order for the new game.
+    setSettings(prev => (isRandomTheme(prev) ? withRandomTheme(prev, newThemeSeed()) : prev));
     setPlayers(prev => prev.map(p => ({ ...p, money: startingCash, history: [], winStreak: 0, effects: [] })));
     setCurrentRound(1);
     setCurrentSentence(null);
@@ -5149,10 +5163,8 @@ export function App() {
           tossEvent={chipTossEvent}
           sweepEvent={potSweepEvent}
           boomerangEvent={boomerangArcEvent}
-          shoeEvent={shoeDealEvent}
           flightEvent={powerUpFlightEvent}
           jackpotEvent={jackpotEvent}
-          potTotal={step === 'IN_GAME' || step === 'RESULTS' ? potNow : 0}
           sparkPalette={stageLook.sparks}
           onChipImpactSound={(denom) => playSound('chipClink', denom)}
         />

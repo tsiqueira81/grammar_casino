@@ -41,6 +41,39 @@ export function listeningRoundFor(totalRounds: number): number | null {
   return Math.ceil(totalRounds / 2);
 }
 
+export interface SpecialHandPlanItem {
+  hand: SpecialHand;
+  icon: string;
+  title: string;
+  /** When it is dealt in a game of this length, or what the game would need for it. */
+  when: string;
+  /** What happens on that hand, in one short sentence. */
+  what: string;
+  /** False when a game of this length has no such hand. */
+  inThisGame: boolean;
+}
+
+/**
+ * The setup screen's list of special hands for a game of `totalRounds` hands: which hand each one
+ * falls on, and which ones a game this short does not have. It only describes the schedule above.
+ */
+export function specialHandsPlan(totalRounds: number): SpecialHandPlanItem[] {
+  const n = Number.isFinite(totalRounds) && totalRounds > 0 ? Math.floor(totalRounds) : 0;
+  const listening = listeningRoundFor(n);
+  const spotlight = spotlightRoundFor(n);
+  const fixIt = fixItRoundFor(n);
+  const item = (hand: SpecialHand, when: string, what: string, inThisGame: boolean): SpecialHandPlanItem => ({
+    hand, icon: SPECIAL_HAND_INFO[hand].icon, title: SPECIAL_HAND_INFO[hand].title, when, what, inThisGame,
+  });
+  return [
+    item('finalTable', n > 0 ? `Hand ${n}, the last` : 'The last hand', 'Every win pays double.', true),
+    item('secondLook', 'When many miss a sentence', 'The same point comes back two hands later. Wins pay 1.5×.', true),
+    item('listening', listening ? `Hand ${listening}` : 'Needs 4 hands or more', 'A Valid-or-flawed sentence is read aloud, not shown, until the reveal.', listening !== null),
+    item('spotlight', spotlight ? `Hand ${spotlight}` : 'Needs 6 hands or more', 'The most-missed point again. A right answer earns a free power-up draw.', spotlight !== null),
+    item('fixIt', fixIt ? `Hand ${fixIt}` : 'Needs 8 hands or more', 'A sentence with a mistake. Everyone types a correction.', fixIt !== null),
+  ];
+}
+
 /** The badge text: the title, and the multiplier when the hand pays more. */
 export function specialHandLabelFor(hand: SpecialHand | null): string | null {
   if (!hand) return null;
