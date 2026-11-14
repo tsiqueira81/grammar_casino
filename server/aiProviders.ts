@@ -1,12 +1,14 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
-import { resolveGroqApiKey, callGroqChatCompletion, callGroqOrpheusTts } from '../utils/groqUtils';
+import { resolveGroqApiKey, callGroqOrpheusTts } from '../utils/groqUtils';
 import { verifierSchema } from './verifyItem';
-import { AI_TIMEOUT_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider } from './providers';
+import { AI_TIMEOUT_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey } from './providers';
+import { COARENA_BASE_URL, NVIDIA_BASE_URL, coarenaCheckerKey, coarenaWriterKey, hasAnyTextKey, nvidiaKey, pickChecker, runOnce, runWriterChain, setGeminiRunner } from './textChain';
 
 // --- Groq & Gemini Client Setup ---
 export let aiClient: GoogleGenAI | null = null;
 
 export function hasConfiguredAiKey(): boolean {
+  if (hasAnyTextKey()) return true;
   if (resolveGroqApiKey()) return true;
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
   return geminiKey.length > 5;
@@ -167,65 +169,27 @@ function hasGeminiKey(): boolean {
   return Boolean(geminiKey) && !geminiKey.startsWith('gsk_');
 }
 
+/**
+ * Every text call (sentences, hints, checks) walks the chain in server/textChain.ts: CoArena,
+ * NVIDIA, Groq, Gemini. All failing throws, and the game falls back to its offline bank.
+ */
 export async function generateAiText(options: {
   prompt: string;
   responseSchema?: any;
   schemaName?: string;
   maxCompletionTokens?: number;
+  temperature?: number;
   /** Which time limit applies (package A2). */
   kind?: AiCallKind;
 }): Promise<{ text: string; meta: AiMeta }> {
-  const kind = options.kind || 'other';
-  const timeoutMs = AI_TIMEOUT_MS[kind];
-  const started = Date.now();
-  const models = aiModels();
-  let fallbackReason: string | undefined;
-  const groqKey = resolveGroqApiKey();
-  if (groqKey && aiBreaker.isOpen('groq')) {
-    fallbackReason = 'groq skipped after repeated failures';
-  }
-  if (groqKey && !fallbackReason) {
-    try {
-      const out = await withTimeout(
-        callGroqChatCompletion({
-          apiKey: groqKey,
-          prompt: options.prompt,
-          responseSchema: options.responseSchema,
-          schemaName: options.schemaName,
-          maxCompletionTokens: options.maxCompletionTokens,
-          models: models.groqText,
-        }),
-        timeoutMs,
-        'groq'
-      );
-      aiBreaker.recordSuccess('groq');
-      return { text: out.text, meta: { provider: 'groq', model: out.model, tokens: out.tokens, latencyMs: Date.now() - started } };
-    } catch (groqErr: any) {
-      aiBreaker.recordFailure('groq');
-      fallbackReason = `groq ${failureReason(groqErr)}`;
-      if (!hasGeminiKey()) {
-        throw groqErr;
-      }
-      console.warn('[AI Router] Groq text generation failed, falling back to Gemini:', groqErr?.message);
-    }
-  }
-  if (groqKey && !hasGeminiKey()) {
-    // Only Groq is set up and it is resting: let the game use its own bank.
-    const err: any = new Error('The AI is resting after repeated failures.');
-    err.status = 503;
-    throw err;
-  }
-
-  let usedModel = '';
-  try {
-    const out = await withTimeout(geminiText(options, models.geminiText, (m) => (usedModel = m)), timeoutMs, 'gemini');
-    aiBreaker.recordSuccess('gemini');
-    return { text: out.text, meta: { provider: 'gemini', model: usedModel, latencyMs: Date.now() - started, fallbackReason } };
-  } catch (err) {
-    aiBreaker.recordFailure('gemini');
-    throw err;
-  }
+  return runWriterChain(options, options.kind || 'other');
 }
+
+setGeminiRunner(async (req, models) => {
+  let usedModel = models[0];
+  const out = await geminiText(req, models, (m) => (usedModel = m));
+  return { text: out.text, model: usedModel };
+});
 
 function geminiText(
   options: { prompt: string; responseSchema?: any },
@@ -305,7 +269,7 @@ export async function generateAiSpeechBase64(safeText: string, requestedVoice?: 
  */
 export async function deepHealth(): Promise<Record<string, { ok: boolean; ms: number; detail?: string; resting?: boolean }>> {
   const out: Record<string, { ok: boolean; ms: number; detail?: string; resting?: boolean }> = {};
-  const probe = async (name: AiProvider, url: string, headers: Record<string, string>) => {
+  const probe = async (name: BreakerKey, url: string, headers: Record<string, string>) => {
     const started = Date.now();
     try {
       const res = await withTimeout(fetch(url, { headers }), 5_000, name);
@@ -317,6 +281,10 @@ export async function deepHealth(): Promise<Record<string, { ok: boolean; ms: nu
   const groqKey = resolveGroqApiKey();
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
   const jobs: Promise<void>[] = [];
+  const base = (name: string, fallback: string) => (String(process.env[name] || '').trim() || fallback).replace(/\/+$/, '');
+  if (coarenaWriterKey()) jobs.push(probe('coarena-writer', `${base('COARENA_BASE_URL', COARENA_BASE_URL)}/models`, { Authorization: `Bearer ${coarenaWriterKey()}` }));
+  if (coarenaCheckerKey()) jobs.push(probe('coarena-checker', `${base('COARENA_BASE_URL', COARENA_BASE_URL)}/models`, { Authorization: `Bearer ${coarenaCheckerKey()}` }));
+  if (nvidiaKey()) jobs.push(probe('nvidia', `${base('NVIDIA_BASE_URL', NVIDIA_BASE_URL)}/models`, { Authorization: `Bearer ${nvidiaKey()}` }));
   if (groqKey) jobs.push(probe('groq', 'https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${groqKey}` }));
   if (hasGeminiKey()) jobs.push(probe('gemini', 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': geminiKey }));
   await Promise.all(jobs);
@@ -331,24 +299,17 @@ export function deepHealthAllowed(authorization: string | null | undefined): boo
 }
 
 /**
- * Package L3: the second model for the cold check. Groq writes with one of its models and checks
- * with the other (no new key). When Groq is down and Gemini wrote the item, only the rules check
- * it, because a second Gemini call would make the class wait.
+ * Package L3: the second model for the cold check, never the one that wrote the item (see
+ * checkerOrder in server/textChain.ts: on CoArena, glm-5-3-flash on its own account).
  */
-export function checkWithSecondModel(meta: AiMeta, timeoutMs: number): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
-  const groqKey = resolveGroqApiKey();
-  if (meta.provider !== 'groq' || !groqKey) return { model: '', ask: null };
-  const list = aiModels().groqText;
-  const other = list.find((m) => m !== meta.model);
-  if (!other) return { model: '', ask: null };
+export function checkWithSecondModel(meta: AiMeta, timeoutMs: number, schema: any = verifierSchema): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
+  if (meta.provider === 'cache') return { model: '', ask: null };
+  const checker = pickChecker(meta.provider, meta.model);
+  if (!checker) return { model: '', ask: null };
   return {
-    model: other,
+    model: checker.model,
     ask: async (prompt: string) => {
-      const out = await withTimeout(
-        callGroqChatCompletion({ apiKey: groqKey, prompt, responseSchema: verifierSchema, schemaName: 'cold_check', maxCompletionTokens: 300, temperature: 0, models: [other] }),
-        timeoutMs,
-        'groq'
-      );
+      const out = await runOnce(checker, { prompt, responseSchema: schema, schemaName: 'cold_check', maxCompletionTokens: schema === verifierSchema ? 300 : 4000, temperature: 0 }, timeoutMs);
       return out.text;
     },
   };

@@ -1,0 +1,296 @@
+// The AI chain for text (2026-11-14, chosen by the teacher). Writers are tried in this order:
+//   1. CoArena  deepseek-v4-1-flash-1017   (key COARENA_WRITER_API_KEY)
+//   2. NVIDIA   nemotron 3 ultra           (key NVIDIA_API_KEY)
+//   3. Groq     openai/gpt-oss-120b        (key GROQ_API_KEY)
+//   4. Gemini   gemini-3.5-flash-lite      (key GEMINI_API_KEY)
+// and the offline bank after that (in the game). A different model checks every item blind: on
+// CoArena, glm-5-3-flash on a second account (key COARENA_CHECKER_API_KEY); see checkerOrder.
+// Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
+import { resolveGroqApiKey, callGroqChatCompletion, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
+import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
+
+export const COARENA_BASE_URL = 'https://coarena.ai/api/v1';
+export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+
+const env = (name: string): string => String((typeof process !== 'undefined' ? process.env?.[name] : '') || '').trim();
+const usableKey = (k: string) => k.length > 5;
+
+export function coarenaWriterKey(): string {
+  return env('COARENA_WRITER_API_KEY');
+}
+export function coarenaCheckerKey(): string {
+  return env('COARENA_CHECKER_API_KEY');
+}
+export function nvidiaKey(): string {
+  return env('NVIDIA_API_KEY');
+}
+export function geminiKey(): string {
+  const k = env('GEMINI_API_KEY') || env('API_KEY');
+  return k && !k.startsWith('gsk_') ? k : '';
+}
+
+/** One request to an AI, the same shape for every provider. */
+export interface TextRequest {
+  prompt: string;
+  responseSchema?: any;
+  schemaName?: string;
+  maxCompletionTokens?: number;
+  temperature?: number;
+}
+
+/** One model on one account. `call` makes the request; the chain adds time limits and the breaker. */
+export interface ChainModel {
+  provider: AiProvider;
+  breaker: BreakerKey;
+  /** The model name (or, for Groq and Gemini, the first of the list it rotates through). */
+  model: string;
+  call: (req: TextRequest, timeoutMs: number) => Promise<{ text: string; model: string; tokens?: number }>;
+}
+
+/** Removes a model's thinking (<think>...</think>) and finds the JSON when JSON was asked for. */
+export function cleanModelText(raw: string, wantJson: boolean): string {
+  const text = String(raw || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*?<\/think>/i, '').trim();
+  return wantJson ? extractJsonFromText(text) : text;
+}
+
+export interface OpenAiCallOptions extends TextRequest {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** 'schema': strict JSON schema; 'object': any JSON; 'prompt': JSON is asked for in words only. */
+  jsonMode: 'schema' | 'object' | 'prompt';
+  extraBody?: Record<string, unknown>;
+}
+
+/**
+ * Any OpenAI-compatible chat API (CoArena, NVIDIA). When the provider refuses the JSON setting
+ * (HTTP 400), the same request is sent once more with JSON asked for in words, and the answer is
+ * cleaned up here.
+ */
+export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text: string; model: string; tokens?: number }> {
+  const wantJson = Boolean(o.responseSchema);
+  let mode = wantJson ? o.jsonMode : 'prompt';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const body: Record<string, any> = {
+      model: o.model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert Cambridge English linguistics examiner. Follow all instructions with 100% precision.' +
+            (wantJson ? ' Reply with one JSON object only, no other text.' : ''),
+        },
+        { role: 'user', content: o.prompt },
+      ],
+      temperature: o.temperature ?? 0.6,
+      max_tokens: o.maxCompletionTokens ?? 1024,
+      ...(o.extraBody || {}),
+    };
+    if (wantJson && mode === 'schema') body.response_format = toStrictGroqResponseFormat(o.responseSchema, o.schemaName || 'grammar_casino_schema');
+    if (wantJson && mode === 'object') body.response_format = { type: 'json_object' };
+    const res = await fetch(`${o.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${o.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      if (res.status === 400 && wantJson && mode !== 'prompt' && attempt === 0) {
+        mode = 'prompt';
+        continue;
+      }
+      const err: any = new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      err.status = res.status;
+      throw err;
+    }
+    const data: any = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('empty answer');
+    }
+    const text = cleanModelText(content, wantJson);
+    if (wantJson) JSON.parse(text); // A broken answer counts as a failure, so the next provider is tried.
+    return { text, model: String(data?.model || o.model), tokens: data?.usage?.total_tokens };
+  }
+  throw new Error('no answer');
+}
+
+/** Tries each model name in turn when a name is not found (404), so a renamed model still works. */
+async function firstModelThatExists(models: string[], run: (model: string) => Promise<{ text: string; model: string; tokens?: number }>) {
+  let last: unknown = null;
+  for (const model of models) {
+    try {
+      return await run(model);
+    } catch (e: any) {
+      last = e;
+      if (e?.status !== 404) throw e;
+    }
+  }
+  throw last || new Error('no model');
+}
+
+function coarenaModel(role: 'writer' | 'checker'): ChainModel | null {
+  const key = role === 'writer' ? coarenaWriterKey() : coarenaCheckerKey();
+  if (!usableKey(key)) return null;
+  const models = role === 'writer' ? aiModels().coarenaWriter : aiModels().coarenaChecker;
+  return {
+    provider: 'coarena',
+    breaker: role === 'writer' ? 'coarena-writer' : 'coarena-checker',
+    model: models[0],
+    call: (req) =>
+      firstModelThatExists(models, (model) =>
+        callOpenAiCompatible({ ...req, baseUrl: env('COARENA_BASE_URL') || COARENA_BASE_URL, apiKey: key, model, jsonMode: 'object' })
+      ),
+  };
+}
+
+function nvidiaModel(): ChainModel | null {
+  const key = nvidiaKey();
+  if (!usableKey(key)) return null;
+  const models = aiModels().nvidiaText;
+  return {
+    provider: 'nvidia',
+    breaker: 'nvidia',
+    model: models[0],
+    // Nemotron 3 Ultra has no JSON mode; thinking is turned off so it answers quickly.
+    call: (req) =>
+      firstModelThatExists(models, (model) =>
+        callOpenAiCompatible({
+          ...req,
+          baseUrl: env('NVIDIA_BASE_URL') || NVIDIA_BASE_URL,
+          apiKey: key,
+          model,
+          jsonMode: 'prompt',
+          extraBody: { chat_template_kwargs: { enable_thinking: false } },
+        })
+      ),
+  };
+}
+
+function groqModel(models: string[]): ChainModel | null {
+  const key = resolveGroqApiKey();
+  if (!key || !models.length) return null;
+  return {
+    provider: 'groq',
+    breaker: 'groq',
+    model: models[0],
+    call: (req) =>
+      callGroqChatCompletion({
+        apiKey: key,
+        prompt: req.prompt,
+        responseSchema: req.responseSchema,
+        schemaName: req.schemaName,
+        maxCompletionTokens: req.maxCompletionTokens,
+        temperature: req.temperature,
+        models,
+      }),
+  };
+}
+
+/** Gemini goes through the existing client with its model rotation (set by aiProviders.ts). */
+export type GeminiRunner = (req: TextRequest, models: string[]) => Promise<{ text: string; model: string }>;
+let geminiRunner: GeminiRunner | null = null;
+export function setGeminiRunner(run: GeminiRunner): void {
+  geminiRunner = run;
+}
+
+function geminiModel(models: string[]): ChainModel | null {
+  if (!geminiKey() || !geminiRunner || !models.length) return null;
+  const run = geminiRunner;
+  return { provider: 'gemini', breaker: 'gemini', model: models[0], call: (req) => run(req, models) };
+}
+
+/** The writers, in the order they are tried. Only those with a key are listed. */
+export function writerChain(): ChainModel[] {
+  const m = aiModels();
+  return [coarenaModel('writer'), nvidiaModel(), groqModel(m.groqText), geminiModel(m.geminiText)].filter((x): x is ChainModel => Boolean(x));
+}
+
+export function hasAnyTextKey(): boolean {
+  return writerChain().length > 0;
+}
+
+/**
+ * Who checks what a writer wrote, best first. Always a different model, and on another account
+ * where there is one, so the checker cannot share the writer's blind spots or its daily allowance.
+ */
+export function checkerOrder(writer: AiProvider, writerModel?: string): ChainModel[] {
+  const m = aiModels();
+  const groqOther = m.groqText.filter((x) => x !== writerModel);
+  const geminiOther = m.geminiChecker.filter((x) => x !== writerModel);
+  const coarenaChecker = coarenaModel('checker');
+  const groqChecker = groqModel(writer === 'groq' ? groqOther.slice(0, 1) : m.groqText.slice(0, 1));
+  const gemini = geminiModel(geminiOther);
+  const nvidia = nvidiaModel();
+  const order: Record<AiProvider, Array<ChainModel | null>> = {
+    coarena: [coarenaChecker, groqChecker, nvidia, gemini],
+    nvidia: [coarenaChecker, groqChecker, gemini],
+    groq: [groqChecker, coarenaChecker, nvidia, gemini],
+    gemini: [gemini, coarenaChecker, groqChecker, nvidia],
+  };
+  return order[writer].filter((x): x is ChainModel => Boolean(x) && x!.model !== writerModel);
+}
+
+/** The first checker that is not resting, or null (then only the rules check the item). */
+export function pickChecker(writer: AiProvider, writerModel?: string, now: number = Date.now()): ChainModel | null {
+  return checkerOrder(writer, writerModel).find((c) => !aiBreaker.isOpen(c.breaker, now)) || null;
+}
+
+/** Runs one model with its time limit and tells the breaker how it went. */
+export async function runOnce(model: ChainModel, req: TextRequest, timeoutMs: number) {
+  try {
+    const out = await withTimeout(model.call(req, timeoutMs), timeoutMs, model.breaker);
+    aiBreaker.recordSuccess(model.breaker);
+    return out;
+  } catch (err) {
+    aiBreaker.recordFailure(model.breaker);
+    throw err;
+  }
+}
+
+/**
+ * Walks the writer chain until one answers. Every provider that is skipped or fails adds to the
+ * reason in the debug log ("coarena-writer 429; nvidia timeout"). All of them failing throws, and
+ * the game deals from its offline bank.
+ */
+export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
+  const started = Date.now();
+  const deadline = started + AI_CHAIN_BUDGET_MS[kind];
+  const reasons: string[] = [];
+  let lastError: unknown = null;
+  for (const model of chain) {
+    if (aiBreaker.isOpen(model.breaker)) {
+      reasons.push(`${model.breaker} resting`);
+      continue;
+    }
+    const left = deadline - Date.now();
+    if (left < 1_000) {
+      reasons.push('out of time');
+      break;
+    }
+    try {
+      const out = await runOnce(model, req, Math.min(AI_TIMEOUT_MS[kind], left));
+      return {
+        text: out.text,
+        meta: {
+          provider: model.provider,
+          model: out.model,
+          tokens: out.tokens,
+          latencyMs: Date.now() - started,
+          fallbackReason: reasons.length ? reasons.join('; ') : undefined,
+        },
+      };
+    } catch (err) {
+      lastError = err;
+      reasons.push(`${model.breaker} ${failureReason(err)}`);
+      console.warn(`[AI chain] ${model.breaker} failed, trying the next one:`, failureReason(err));
+    }
+  }
+  const err: any =
+    lastError instanceof Error
+      ? lastError
+      : new Error(chain.length ? 'The AI is resting after repeated failures.' : 'No AI provider could answer.');
+  err.chainReasons = reasons;
+  if (!err.status) err.status = 503;
+  throw err;
+}

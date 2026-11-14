@@ -91,6 +91,8 @@ export interface GeneratedSentence {
   checkedBy?: 'two models' | 'rules';
   /** Package T6: where the item came from, for the teacher's status line. */
   source?: 'ai' | 'bank' | 'own';
+  /** A sentence made ahead in a batch: the grammar point it was written for (null: none). */
+  writtenFor?: string | null;
   text: string;
   isCorrect: boolean;
   correction: string;

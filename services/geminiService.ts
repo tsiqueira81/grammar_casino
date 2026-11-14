@@ -4,6 +4,8 @@ import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { validateItem } from '../content/schema';
 import { logEvent } from '../utils/debugLog';
 import { nextDeckItem } from '../game/teacherDeck';
+import { getSubtypesForTopic } from '../constants';
+import { SentencePool, planBatch, poolKey, type PooledItem, type SentencePlan } from './sentencePool';
 import { archiveSentenceToCloudBank } from './firebaseService';
 import {
   evaluateBinaryCorrectionOffline,
@@ -161,7 +163,11 @@ export const clearPortableGame = async () => {
 export const AI_SENTENCE_TIMEOUT_MS = 8_000;
 export const AI_CALL_TIMEOUT_MS = 20_000;
 
+/** A batch is made ahead of time, so it may take long; nobody waits for it. */
+export const AI_BATCH_TIMEOUT_MS = 150_000;
+
 export function getAiTimeoutMs(action: string): number {
+  if (action === 'generateSentenceBatch') return AI_BATCH_TIMEOUT_MS;
   return action === 'generateSentence' ? AI_SENTENCE_TIMEOUT_MS : AI_CALL_TIMEOUT_MS;
 }
 
@@ -235,7 +241,8 @@ async function requestDealerAction<T>(action: string, payload: Record<string, an
 
   // The web app is open to everyone, so each device has a daily AI allowance (utils/aiDailyLimit.ts).
   // Past it, callers fall back to the offline bank and local checks, as when the network is down.
-  if (!tryUseAiCall(getBrowserDailyStorage(), getAiCallKind(action))) {
+  const count = action === 'generateSentenceBatch' && Array.isArray(payload.slots) ? payload.slots.length : 1;
+  if (!tryUseAiCall(getBrowserDailyStorage(), getAiCallKind(action), new Date(), undefined, count)) {
     throw new Error('Daily AI limit reached on this device; using the offline bank.');
   }
   return postToGeminiApi<T>(action, payload);
@@ -283,17 +290,18 @@ export const generateSentence = async (
   forceCorrect: boolean | null = null,
   subtype: string | null = null,
   pastMistakes: string[] = [],
-  questionType?: QuestionType
+  questionType?: QuestionType,
+  plan?: SentencePlan
 ): Promise<GeneratedSentence> => {
   if (questionType !== 'spotError' && questionType !== 'wordOrder') {
-    return generateBaseSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+    return generateBaseSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType, plan);
   }
   if ((import.meta as any).env.DEV && isE2eMode()) return getE2eSentence(questionType, forceCorrect);
   const { toSpotError, toWordOrder } = await import('../game/newFormats');
   const convert = (item: GeneratedSentence) => (questionType === 'spotError' ? toSpotError(item) : toWordOrder(item));
   const wantCorrect = questionType === 'wordOrder';
   for (let tries = 0; tries < 3; tries++) {
-    const item = await generateBaseSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary');
+    const item = await generateBaseSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary', tries === 0 ? plan : { ...plan, upcoming: [] });
     const made = convert(item);
     if (made) return made;
   }
@@ -315,13 +323,25 @@ const generateBaseSentence = async (
   forceCorrect: boolean | null = null,
   subtype: string | null = null,
   pastMistakes: string[] = [],
-  questionType?: QuestionType
+  questionType?: QuestionType,
+  plan?: SentencePlan
 ): Promise<GeneratedSentence> => {
   const own = nextDeckItem(teacherDeck, pastSentences);
   if (own) return { ...own, source: 'own' };
   // Browser tests get a fixed, known sentence for each question type.
   if ((import.meta as any).env.DEV && isE2eMode()) {
     return getE2eSentence(questionType, forceCorrect);
+  }
+  // A checked item made ahead in a batch, when one fits this hand. The next batch is asked for
+  // in the background either way.
+  const pooled = sentencePool.take(settings, questionType, forceCorrect, subtype, Boolean(plan?.strictSubtype), pastSentences);
+  refillPool(settings, questionType, plan, pastSentences, pastMistakes);
+  if (pooled) {
+    const { batchSlot: _slot, theme: _theme, ...item } = pooled as PooledItem & { batchSlot?: number };
+    item.questionType = item.questionType || questionType || 'binary';
+    rememberForArchive(item, settings, item.writtenFor ?? subtype);
+    logEvent('ai', `Sentence from a batch made ahead (${sentencePool.size()} left)`);
+    return { ...item, source: 'ai' };
   }
   try {
     const data = await requestDealerAction<GeneratedSentence>('generateSentence', {
@@ -359,6 +379,32 @@ const generateBaseSentence = async (
     return { ...getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType), source: 'bank' };
   }
 };
+
+/** Sentences made ahead in batches (services/sentencePool.ts). */
+export const sentencePool = new SentencePool();
+
+/** Asks, in the background, for the next batch of this hand's type, when one is worth it. */
+function refillPool(settings: Settings, questionType: QuestionType | undefined, plan: SentencePlan | undefined, pastSentences: string[], pastMistakes: string[]): void {
+  if (typeof window !== 'undefined' && window.electronDesktop?.gemini) return; // The desktop app has no batch call.
+  const key = poolKey(settings, questionType);
+  const slots = planBatch(settings, questionType, plan, sentencePool.size(key), getSubtypesForTopic(settings.topic, settings.level));
+  if (!slots.length || !sentencePool.begin(key)) return;
+  const type = !questionType || questionType === 'spotError' || questionType === 'wordOrder' ? 'binary' : questionType;
+  requestDealerAction<{ items?: PooledItem[] }>('generateSentenceBatch', {
+    settings: { topic: settings.topic, level: settings.level, theme: settings.theme },
+    questionType: type,
+    slots,
+    pastSentences,
+    pastMistakes,
+  })
+    .then((data) => {
+      const items = (data?.items || []).filter((it) => validateItem(it, it.questionType || type).ok);
+      sentencePool.add(key, items);
+      logEvent('ai', `Batch made ahead: ${items.length} of ${slots.length} sentences kept`);
+    })
+    .catch((err) => logEvent('ai', `Batch not made: ${err instanceof Error ? err.message : String(err)}`))
+    .finally(() => sentencePool.end(key));
+}
 
 export const getHint = async (
   sentence: string,

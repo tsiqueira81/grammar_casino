@@ -2,8 +2,10 @@
 // environment variables, so retiring a model is a dashboard change, not a code change. Every
 // provider call has a time limit, and a provider that keeps failing is skipped for a while.
 
-export type AiProvider = 'groq' | 'gemini';
-export type AiCallKind = 'generate' | 'verify' | 'speech' | 'other';
+export type AiProvider = 'coarena' | 'nvidia' | 'groq' | 'gemini';
+export type AiCallKind = 'generate' | 'verify' | 'speech' | 'other' | 'batch';
+/** What the circuit breaker rests: a provider, or one of the two CoArena accounts. */
+export type BreakerKey = AiProvider | 'coarena-writer' | 'coarena-checker';
 
 /** Comma-separated list from an environment variable, or the default. */
 function listFromEnv(name: string, fallback: string[]): string[] {
@@ -16,15 +18,26 @@ function listFromEnv(name: string, fallback: string[]): string[] {
 }
 
 export const DEFAULT_MODELS = {
+  // The sentence chain (2026-11-14): CoArena first (one account writes, another checks), then
+  // NVIDIA, then Groq, then Gemini. See server/textChain.ts.
+  coarenaWriter: ['deepseek-v4-1-flash-1017'],
+  coarenaChecker: ['glm-5-3-flash'],
+  nvidiaText: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra'],
   groqText: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'],
   geminiText: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
+  /** Checks what Gemini wrote: a different Gemini model. */
+  geminiChecker: ['gemini-3.8-flash', 'gemini-4-argon'],
   geminiTts: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'],
 };
 
 /** Models in the order they are tried. Read on each call so a changed setting applies at once. */
 export function aiModels() {
   return {
+    coarenaWriter: listFromEnv('COARENA_WRITER_MODELS', DEFAULT_MODELS.coarenaWriter),
+    coarenaChecker: listFromEnv('COARENA_CHECKER_MODELS', DEFAULT_MODELS.coarenaChecker),
+    nvidiaText: listFromEnv('NVIDIA_TEXT_MODELS', DEFAULT_MODELS.nvidiaText),
     groqText: listFromEnv('GROQ_TEXT_MODELS', DEFAULT_MODELS.groqText),
+    geminiChecker: listFromEnv('GEMINI_CHECKER_MODELS', DEFAULT_MODELS.geminiChecker),
     geminiText: listFromEnv('GEMINI_TEXT_MODELS', DEFAULT_MODELS.geminiText),
     geminiTts: listFromEnv('GEMINI_TTS_MODELS', DEFAULT_MODELS.geminiTts),
   };
@@ -40,17 +53,31 @@ export const AI_TIMEOUT_MS: Record<AiCallKind, number> = {
   verify: 8_000,
   speech: 10_000,
   other: 12_000,
+  // A batch of up to 15 items is made ahead of time, never while the class waits.
+  batch: 45_000,
+};
+
+/**
+ * The most a whole chain may take, all providers together. A provider that fails fast (no credit,
+ * 429, 500) leaves the rest of this time to the next one.
+ */
+export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
+  generate: 7_000,
+  verify: 8_000,
+  speech: 10_000,
+  other: 15_000,
+  batch: 100_000,
 };
 
 export class AiTimeoutError extends Error {
-  constructor(public provider: AiProvider, ms: number) {
+  constructor(public provider: AiProvider | BreakerKey, ms: number) {
     super(`${provider} took longer than ${ms / 1000} s`);
     this.name = 'AiTimeoutError';
   }
 }
 
 /** Resolves like `work`, or rejects after `ms`. */
-export function withTimeout<T>(work: Promise<T>, ms: number, provider: AiProvider): Promise<T> {
+export function withTimeout<T>(work: Promise<T>, ms: number, provider: AiProvider | BreakerKey): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const limit = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new AiTimeoutError(provider, ms)), ms);
@@ -64,14 +91,14 @@ export const BREAKER_OPEN_MS = 5 * 60_000;
 
 /** Three failures within a minute skip that provider for five minutes. */
 export class CircuitBreaker {
-  private failures = new Map<AiProvider, number[]>();
-  private openUntil = new Map<AiProvider, number>();
+  private failures = new Map<BreakerKey, number[]>();
+  private openUntil = new Map<BreakerKey, number>();
 
-  isOpen(provider: AiProvider, now: number = Date.now()): boolean {
+  isOpen(provider: BreakerKey, now: number = Date.now()): boolean {
     return (this.openUntil.get(provider) || 0) > now;
   }
 
-  recordFailure(provider: AiProvider, now: number = Date.now()): void {
+  recordFailure(provider: BreakerKey, now: number = Date.now()): void {
     const recent = (this.failures.get(provider) || []).filter((t) => now - t < BREAKER_WINDOW_MS);
     recent.push(now);
     this.failures.set(provider, recent);
@@ -81,7 +108,7 @@ export class CircuitBreaker {
     }
   }
 
-  recordSuccess(provider: AiProvider): void {
+  recordSuccess(provider: BreakerKey): void {
     this.failures.set(provider, []);
     this.openUntil.delete(provider);
   }

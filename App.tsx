@@ -70,6 +70,7 @@ import { potTotal } from './show/pot';
 import { playCues, revealCueSheet } from './show/director';
 import { lookForTheme } from './show/looks';
 import { RANDOM_THEME, isRandomTheme, newThemeSeed, settingsForRound, withRandomTheme } from './game/randomTheme';
+import { upcomingHands } from './game/upcomingHands';
 import { gameClockText, handsLeftNote } from './game/gameLength';
 import { ADAPTIVE_LEVEL_KEY, levelChangeNotice, nextAdaptiveLevel } from './game/adaptiveLevel';
 import { AWARDS_KEY } from './game/awards';
@@ -1889,16 +1890,21 @@ export function App() {
       const dueLook = isSettingsPart2 ? undefined : secondLookFor(secondLookQueueRef.current, currentRoundRef.current + 1);
       const subtype = dueLook ? dueLook.subtype : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
+      const targetRound = isSettingsPart2 ? 1 : currentRound + 1;
+      const lastRound = gameMode === 'rounds' && !isNaN(Number(totalRounds)) ? Number(totalRounds) : null;
       const promise = GeminiService.generateSentence(
         targetSettings,
         pastSentences,
         forceCorrect,
         subtype,
         pastMistakes,
-        resolvedQuestionType
+        resolvedQuestionType,
+        // The hands after this one, so a batch made ahead fits them.
+        { upcoming: upcomingHands(targetSettings, targetRound + 1, formatIdx + 1, lastRound), strictSubtype: Boolean(dueLook) }
       ).then(generated => ({
         generated,
-        subtype,
+        // A sentence from a batch may have been written for another grammar point: count that one.
+        subtype: generated.writtenFor !== undefined ? generated.writtenFor : subtype,
         allSubtypesLen: allSubtypes.length,
         resolvedQuestionType,
         forceCorrect,
@@ -1994,14 +2000,21 @@ export function App() {
           subtype = dueLook ? dueLook.subtype : spotlight ? spotlight : pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
 
           const effectiveMistakes = mistakeHistory !== undefined ? mistakeHistory : pastMistakes;
+          const lastRound = gameMode === 'rounds' && !isNaN(Number(totalRounds)) ? Number(totalRounds) : null;
           generated = await GeminiService.generateSentence(
             currentSettings, 
             history, 
             forceCorrect, 
             subtype,
             effectiveMistakes,
-            resolvedQuestionType
+            resolvedQuestionType,
+            {
+              upcoming: upcomingHands(currentSettings, targetRound + 1, mixedFormatIndexRef.current, lastRound),
+              strictSubtype: Boolean(dueLook || spotlight),
+            }
           );
+          // A sentence from a batch may have been written for another grammar point: count that one.
+          if (generated.writtenFor !== undefined) subtype = generated.writtenFor;
         }
         
         handSubtypeRef.current = subtype;
@@ -2064,7 +2077,7 @@ export function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [sentenceBatch, usedSubtypes, pastMistakes, playSound]);
+  }, [sentenceBatch, usedSubtypes, pastMistakes, playSound, gameMode, totalRounds]);
 
   const handleFinalizeSettings = useCallback(() => {
     const finalTopic = settings.topic === "My own choice" ? customTopic.trim() : settings.topic;
