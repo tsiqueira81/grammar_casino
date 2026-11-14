@@ -19,7 +19,7 @@ describe('serverless API after the teacher PIN was removed (R7)', () => {
 
   it('still answers the health check', async () => {
     const res = await server.dispatchServerlessApi(new Request('https://example.test/api/health'));
-    expect(await res.json()).toEqual({ status: 'ok', app: 'grammar-casino', aiConfigured: false });
+    expect(await res.json()).toMatchObject({ status: 'ok', app: 'grammar-casino', aiConfigured: false, aiChain: [] });
   });
 });
 
