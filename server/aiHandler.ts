@@ -111,7 +111,8 @@ export async function handleGeminiRequest(req: Request, res: Response) {
         // must have its sentence within 8 s, so the check gets what is left of 7.6 s (2.5 to 6 s,
         // singleCheckMs), and a second checker joins after 2 s if the first is slow.
         const checkMs = singleCheckMs(Date.now() - generationStarted);
-        const checker = checkWithSecondModel(response.meta, checkMs);
+        // The fastest checker first: the class is waiting (2026-11-14).
+        const checker = checkWithSecondModel(response.meta, checkMs, undefined, undefined, 'fast');
         const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
         const verdict = await verifyItem(generatedData, resolvedQuestionType, level, checker.ask, pastTexts);
         res.setHeader(
@@ -122,7 +123,10 @@ export async function handleGeminiRequest(req: Request, res: Response) {
             verifiedBy: checker.ask ? checker.model : 'rules only',
             verified: verdict.ok,
             // Keep why earlier providers were skipped, also when the item is rejected.
-            fallbackReason: [response.meta.fallbackReason, verdict.ok ? '' : `rejected: ${verdict.reasons[0]}`].filter(Boolean).join('; ') || undefined,
+            fallbackReason:
+              [response.meta.fallbackReason, checker.notes.length ? `check: ${checker.notes.join(', ')}` : '', verdict.ok ? '' : `rejected: ${verdict.reasons[0]}`]
+                .filter(Boolean)
+                .join('; ') || undefined,
           })
         );
         if (!verdict.ok) {
@@ -156,7 +160,7 @@ export async function handleGeminiRequest(req: Request, res: Response) {
             verifiedBy: result.checkedBy,
             verified: result.items.length > 0,
             fallbackReason:
-              [result.meta.fallbackReason, result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${result.reasons[0] || ''})` : '']
+              [result.meta.fallbackReason, result.checkNotes.length ? `check: ${result.checkNotes.join(', ')}` : '', result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${result.reasons[0] || ''})` : '']
                 .filter(Boolean)
                 .join('; ') || undefined,
           })

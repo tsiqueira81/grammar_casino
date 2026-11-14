@@ -309,19 +309,22 @@ export function checkWithSecondModel(
   meta: AiMeta,
   timeoutMs: number,
   schema: any = verifierSchema,
-  hedgeAfterMs: number = CHECK_HEDGE_AFTER_MS
-): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
-  if (meta.provider === 'cache') return { model: '', ask: null };
-  const first = pickChecker(meta.provider, meta.model);
-  if (!first) return { model: '', ask: null };
-  const checkers = checkerOrder(meta.provider, meta.model);
+  hedgeAfterMs: number = CHECK_HEDGE_AFTER_MS,
+  speed: 'best' | 'fast' = 'best'
+): { model: string; notes: string[]; ask: ((prompt: string) => Promise<string>) | null } {
+  if (meta.provider === 'cache') return { model: '', notes: [], ask: null };
+  const first = pickChecker(meta.provider, meta.model, Date.now(), speed);
+  if (!first) return { model: '', notes: [], ask: null };
+  const checkers = checkerOrder(meta.provider, meta.model, speed);
   const result = {
     model: first.model,
+    /** Checkers that failed, rested or were still busy when another answered, for the log. */
+    notes: [] as string[],
     ask: async (prompt: string) =>
       runCheckers(
         checkers,
         { prompt, responseSchema: schema, schemaName: 'cold_check', maxCompletionTokens: schema === verifierSchema ? 300 : 4000, temperature: 0 },
-        { timeoutMs, hedgeAfterMs, onModel: (model) => (result.model = model) }
+        { timeoutMs, hedgeAfterMs, onModel: (model) => (result.model = model), onNotes: (notes) => (result.notes = notes) }
       ),
   };
   return result;

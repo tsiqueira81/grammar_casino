@@ -114,7 +114,7 @@ export function finishItem(data: any, type: ServerQuestionType): void {
 
 export interface BatchDeps {
   write: (req: { prompt: string; responseSchema: any; schemaName: string; maxCompletionTokens: number; kind: 'batch' }) => Promise<{ text: string; meta: AiMeta }>;
-  checker: (meta: AiMeta) => { model: string; ask: ((prompt: string) => Promise<string>) | null };
+  checker: (meta: AiMeta) => { model: string; notes?: string[]; ask: ((prompt: string) => Promise<string>) | null };
 }
 
 export interface BatchResult {
@@ -123,6 +123,8 @@ export interface BatchResult {
   reasons: string[];
   meta: AiMeta;
   checkedBy: string;
+  /** Checkers that failed, rested or were slower than the one that answered. */
+  checkNotes: string[];
 }
 
 /** Writes, cleans and checks a batch. Items that fail any check are left out. */
@@ -204,5 +206,6 @@ export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise
     reasons,
     meta: response.meta,
     checkedBy: checker.ask ? checker.model : 'rules only',
+    checkNotes: checker.notes || [],
   };
 }

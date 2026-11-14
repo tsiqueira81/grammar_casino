@@ -76,13 +76,15 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
 /**
  * The blind check of a single sentence (2026-11-14). The game waits 8 s for its sentence, so the
  * check gets what is left of 7.6 s, never less than 2.5 s and never more than 6 s (it was 4 s, and
- * glm-5-3-flash often took longer). When the first checker is still busy after 2 s, the next one
- * starts as well and the first answer counts.
+ * glm-5-3-flash often took longer). When the first checker is still busy after 1.2 s, the next one
+ * starts as well and the first answer counts. For a single sentence the fastest checker goes first
+ * (Groq gpt-oss-20b, usually about a second); glm-5-3-flash, slower, comes second (2026-11-14:
+ * after a slow NVIDIA writer only 2.5 s were left and glm alone could not answer in time).
  */
 export const SINGLE_CHECK_DEADLINE_MS = 7_600;
 export const SINGLE_CHECK_MIN_MS = 2_500;
 export const SINGLE_CHECK_MAX_MS = 6_000;
-export const CHECK_HEDGE_AFTER_MS = 2_000;
+export const CHECK_HEDGE_AFTER_MS = 1_200;
 /** A batch check (up to 15 items, 45 s in all): the next checker joins after 20 s. */
 export const BATCH_CHECK_HEDGE_AFTER_MS = 20_000;
 
