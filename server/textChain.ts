@@ -283,6 +283,7 @@ export async function runOnce(model: ChainModel, req: TextRequest, timeoutMs: nu
  * the game deals from its offline bank.
  */
 export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
+  if (kind === 'generate') return runHedgedChain(req, chain);
   const started = Date.now();
   const deadline = started + AI_CHAIN_BUDGET_MS[kind];
   const reasons: string[] = [];
@@ -324,4 +325,92 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
   err.chainConfigured = chain.map((m) => m.breaker).join(',');
   if (!err.status) err.status = 503;
   throw err;
+}
+
+/** A new sentence: when a writer has not answered after this long, the next one starts as well. */
+export const HEDGE_AFTER_MS = 2_500;
+
+/**
+ * For a sentence the class is waiting for (2026-11-14). The 7 s budget is too short to wait for a
+ * slow writer and then try the next one in turn, so writers start one after another, 2.5 s apart
+ * (or at once when the one before fails), and the first good answer wins. A slow CoArena then
+ * costs the class nothing: NVIDIA is already on it.
+ */
+export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
+  const started = Date.now();
+  const deadline = started + AI_CHAIN_BUDGET_MS.generate;
+  const reasons: string[] = [];
+  const usable = chain.filter((m) => {
+    if (!aiBreaker.isOpen(m.breaker)) return true;
+    reasons.push(`${m.breaker} resting`);
+    return false;
+  });
+  const failure = (lastError: unknown) => {
+    const err: any =
+      lastError instanceof Error ? lastError : new Error(chain.length ? 'The AI is resting after repeated failures.' : 'No AI provider could answer.');
+    err.chainReasons = reasons;
+    err.chainConfigured = chain.map((m) => m.breaker).join(',');
+    if (!err.status) err.status = 503;
+    return err;
+  };
+  return new Promise((resolve, reject) => {
+    let next = 0;
+    let running = 0;
+    let done = false;
+    let lastError: unknown = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settleIfOver = () => {
+      if (!done && running === 0 && next >= usable.length) {
+        done = true;
+        clearTimeout(timer);
+        reject(failure(lastError));
+      }
+    };
+    const launch = () => {
+      if (done || next >= usable.length) return settleIfOver();
+      const left = deadline - Date.now();
+      if (left < 1_000) {
+        reasons.push('out of time');
+        next = usable.length;
+        return settleIfOver();
+      }
+      const model = usable[next++];
+      running++;
+      clearTimeout(timer);
+      timer = setTimeout(launch, HEDGE_AFTER_MS);
+      runOnce(model, req, Math.min(AI_TIMEOUT_MS.generate, left)).then(
+        (out) => {
+          running--;
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve({
+            text: out.text,
+            meta: {
+              provider: model.provider,
+              model: out.model,
+              tokens: out.tokens,
+              latencyMs: Date.now() - started,
+              fallbackReason: reasons.length ? reasons.join('; ') : undefined,
+              chain: chain.map((m) => m.breaker).join(','),
+            },
+          });
+        },
+        (err) => {
+          running--;
+          lastError = err;
+          reasons.push(`${model.breaker} ${failureReason(err)}`);
+          if (done) return;
+          if (next < usable.length) launch();
+          else settleIfOver();
+        }
+      );
+    };
+    if (!usable.length) {
+      done = true;
+      reject(failure(null));
+      return;
+    }
+    launch();
+  });
 }
