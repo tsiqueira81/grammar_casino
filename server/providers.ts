@@ -132,17 +132,20 @@ export interface AiMeta {
   /** Package L3: the model that checked the item cold, and whether it passed. */
   verifiedBy?: string;
   verified?: boolean;
+  /** The writers that have a key, in order: a missing secret shows here. */
+  chain?: string;
 }
 
 /** The header value: short and safe (no sentence text, no answers). */
 export function formatAiMeta(meta: AiMeta): string {
-  const clean = (s: string) => s.replace(/[^\w .:/()-]/g, '').slice(0, 80);
+  const clean = (s: string) => s.replace(/[^\w .:/(),;-]/g, '').slice(0, 160);
   const parts: Record<string, string | number> = { provider: meta.provider, latencyMs: Math.round(meta.latencyMs) };
   if (meta.model) parts.model = clean(meta.model);
   if (typeof meta.tokens === 'number') parts.tokens = meta.tokens;
   if (meta.fallbackReason) parts.fallbackReason = clean(meta.fallbackReason);
   if (meta.verifiedBy) parts.verifiedBy = clean(meta.verifiedBy);
   if (typeof meta.verified === 'boolean') parts.verified = meta.verified ? 'yes' : 'no';
+  if (meta.chain !== undefined) parts.chain = clean(meta.chain) || 'none';
   return JSON.stringify(parts);
 }
 

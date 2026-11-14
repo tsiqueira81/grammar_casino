@@ -120,7 +120,8 @@ export async function handleGeminiRequest(req: Request, res: Response) {
             latencyMs: Date.now() - generationStarted,
             verifiedBy: checker.ask ? checker.model : 'rules only',
             verified: verdict.ok,
-            fallbackReason: verdict.ok ? response.meta.fallbackReason : `rejected: ${verdict.reasons[0]}`,
+            // Keep why earlier providers were skipped, also when the item is rejected.
+            fallbackReason: [response.meta.fallbackReason, verdict.ok ? '' : `rejected: ${verdict.reasons[0]}`].filter(Boolean).join('; ') || undefined,
           })
         );
         if (!verdict.ok) {
@@ -153,7 +154,10 @@ export async function handleGeminiRequest(req: Request, res: Response) {
             latencyMs: Date.now() - started,
             verifiedBy: result.checkedBy,
             verified: result.items.length > 0,
-            fallbackReason: result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${result.reasons[0] || ''})` : result.meta.fallbackReason,
+            fallbackReason:
+              [result.meta.fallbackReason, result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${result.reasons[0] || ''})` : '']
+                .filter(Boolean)
+                .join('; ') || undefined,
           })
         );
         if (result.reasons.length) console.warn('[L3] batch items left out:', result.reasons.join('; '));
@@ -465,9 +469,15 @@ Respond ONLY with valid JSON matching the schema.`;
     }
   } catch (err: any) {
     const overload = isHighTrafficOrOverload(err);
-    const shortReason = overload
-      ? "Upstream Gemini rate limit or quota reached; activating curated local fallback."
-      : err?.message || "Gemini request failed; activating local fallback.";
+    // Every step of the chain and why it failed, e.g. "coarena-writer 401; nvidia timeout; gemini 429".
+    const chainReasons: string[] = Array.isArray(err?.chainReasons) ? err.chainReasons : [];
+    const shortReason = chainReasons.length
+      ? `Every AI failed (${chainReasons.join('; ')}); using the built-in bank.`
+      : err?.chainConfigured === ''
+        ? 'No AI key is set on the server; using the built-in bank.'
+        : overload
+          ? "Upstream AI rate limit or quota reached; activating curated local fallback."
+          : err?.message || "AI request failed; activating local fallback.";
     console.warn(`[Gemini Route] ${shortReason}`);
     return res.status(200).json({
       fallback: true,
