@@ -9,7 +9,7 @@ const KEYS = {
   GROQ_API_KEY: 'gsk_test_only',
   GEMINI_API_KEY: 'AIza_test_gemini',
 };
-const TIMING_KEYS = ['AI_HEAD_START_MS', 'AI_SENTENCE_BUDGET_MS', 'AI_AHEAD_HEAD_START_MS', 'AI_AHEAD_BUDGET_MS', 'AI_HEDGE_AFTER_MS'];
+const TIMING_KEYS = ['AI_WRITER_ORDER', 'GROQ_TEXT_MODELS', 'GROQ_CHECKER_MODELS', 'AI_HEAD_START_MS', 'AI_SENTENCE_BUDGET_MS', 'AI_AHEAD_HEAD_START_MS', 'AI_AHEAD_BUDGET_MS', 'AI_HEDGE_AFTER_MS'];
 const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS', ...TIMING_KEYS];
 const GLM = 'z-ai/glm-5.3-flash';
 const MINIMAX = 'minimaxai/minimax-m3.1-flash';
@@ -49,9 +49,22 @@ function setKeys(which: Partial<typeof KEYS>) {
   Object.assign(process.env, which);
 }
 
+/**
+ * Most tests below were written for the NVIDIA-first chain (glm writing, PR #28). Since
+ * 2026-11-14 Groq qwen writes first by default; these settings put the earlier chain back, so
+ * those tests keep checking the NVIDIA path, which is still used as the backup (and by anyone who
+ * sets AI_WRITER_ORDER). The tests of the new default clear them (see "Groq writes first").
+ */
+const NVIDIA_FIRST = {
+  AI_WRITER_ORDER: 'nvidia-writer,nemotron,groq,gemini',
+  GROQ_TEXT_MODELS: 'openai/gpt-oss-120b,openai/gpt-oss-20b',
+  GROQ_CHECKER_MODELS: 'openai/gpt-oss-20b,qwen/qwen3.8-27b,openai/gpt-oss-120b',
+};
+
 beforeEach(() => {
   setKeys(KEYS);
   for (const k of TIMING_KEYS) delete process.env[k];
+  Object.assign(process.env, NVIDIA_FIRST);
   providers.aiBreaker.reset();
   groqUtils.clearGroqKeyCooldowns();
   vi.unstubAllGlobals();
@@ -614,9 +627,9 @@ describe('glm gets more time (2026-11-14: Groq kept winning the race after 1.5 s
     });
   };
 
-  it('defaults: glm works alone for 5 s when the class waits and 10 s when made ahead; 11 s and 19 s in all, below what the game waits', () => {
-    expect(providers.sentenceTiming('now')).toEqual({ headStartMs: 5_000, totalMs: 11_000, writerBudgetMs: 8_100, checkDeadlineMs: 10_600, hedgeAfterMs: 1_500 });
-    expect(providers.sentenceTiming('ahead')).toEqual({ headStartMs: 10_000, totalMs: 19_000, writerBudgetMs: 16_100, checkDeadlineMs: 18_600, hedgeAfterMs: 1_500 });
+  it('defaults (Groq first since 2026-11-14): the first writer works alone for 3 s when the class waits and 4 s when made ahead; 11 s and 19 s in all, below what the game waits', () => {
+    expect(providers.sentenceTiming('now')).toEqual({ headStartMs: 3_000, totalMs: 11_000, writerBudgetMs: 8_100, checkDeadlineMs: 10_600, hedgeAfterMs: 1_500 });
+    expect(providers.sentenceTiming('ahead')).toEqual({ headStartMs: 4_000, totalMs: 19_000, writerBudgetMs: 16_100, checkDeadlineMs: 18_600, hedgeAfterMs: 1_500 });
     expect(providers.sentenceTiming('now').totalMs).toBeLessThan(providers.GAME_WAITS_MS.now);
     expect(providers.sentenceTiming('ahead').totalMs).toBeLessThan(providers.GAME_WAITS_MS.ahead);
   });
@@ -695,5 +708,85 @@ describe('glm gets more time (2026-11-14: Groq kept winning the race after 1.5 s
         6_420
       )
     ).toBe('nvidia-writer wrote in 6.4 s; nemotron still writing after 1.4 s (started at 5.0 s); groq failed after 0.1 s (429) (started at 6.5 s)');
+  });
+});
+
+describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b writes, gpt-oss-120b checks', () => {
+  const QWEN = 'qwen/qwen3.8-27b';
+  const GROQ_HOST = 'api.groq.com';
+  beforeEach(() => {
+    for (const k of Object.keys(NVIDIA_FIRST)) delete process.env[k];
+  });
+
+  it('the default order is Groq, NVIDIA glm, Nemotron, Gemini; Groq writes with qwen first and checks with gpt-oss-120b first', () => {
+    expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'nvidia-writer', 'nemotron', 'gemini']);
+    expect(chain.writerChain()[0].model).toBe(QWEN);
+    expect(providers.aiModels().groqText).toEqual([QWEN, 'openai/gpt-oss-120b']);
+    expect(chain.checkerOrder('groq', QWEN, 'fast')[0].model).toBe('openai/gpt-oss-120b');
+    expect(chain.checkerOrder('groq', QWEN, 'best')[0].model).toBe('openai/gpt-oss-120b');
+  });
+
+  it('a sentence: qwen writes it, gpt-oss-120b checks it, and NVIDIA is not asked', async () => {
+    const n = net((c) => (isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(n.calls.map((c) => [c.host, c.model])).toEqual([
+      [GROQ_HOST, QWEN],
+      [GROQ_HOST, 'openai/gpt-oss-120b'],
+    ]);
+    expect(metaOf(res)).toMatchObject({ provider: 'groq', model: QWEN, verified: 'yes', verifiedBy: 'openai/gpt-oss-120b' });
+    expect(metaOf(res).writers).toMatch(/^groq wrote in 0\.\d s$/);
+  });
+
+  it('qwen is asked not to think, gets the JSON shape in its prompt (no strict schema), and its <think> part is removed', async () => {
+    const n = net((c) =>
+      c.model === QWEN
+        ? new Response(JSON.stringify({ choices: [{ message: { content: `<think>hmm</think>${JSON.stringify(item)}` } }], usage: { total_tokens: 10 } }), { status: 200 })
+        : agree
+    );
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    const qwen = n.calls.find((c) => c.model === QWEN)!;
+    expect(qwen.body.reasoning_effort).toBe('none');
+    expect(qwen.body.response_format).toEqual({ type: 'json_object' });
+    expect(qwen.body.messages[1].content).toContain('=== REPLY FORMAT ===');
+    expect((await res.json()).text).toBe(item.text);
+    // gpt-oss still gets its strict schema and thinks briefly.
+    const checker = n.calls.find((c) => c.model === 'openai/gpt-oss-120b')!;
+    expect(checker.body.reasoning_effort).toBe('low');
+  });
+
+  it('when Groq refuses "reasoning_effort: none" (400), qwen is asked again without it', async () => {
+    const n = net((c) => (c.model === QWEN && c.body.reasoning_effort === 'none' ? fail(400) : isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(metaOf(res)).toMatchObject({ provider: 'groq', model: QWEN });
+    const qwenCalls = n.calls.filter((c) => c.model === QWEN);
+    expect(qwenCalls.map((c) => c.body.reasoning_effort)).toEqual(['none', undefined]);
+  });
+
+  it('when Groq fails, glm writes and minimax checks it', async () => {
+    const n = net((c) => (c.host === GROQ_HOST ? fail(500) : isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: GLM, verifiedBy: MINIMAX });
+    expect(metaOf(res).fallbackReason).toMatch(/^groq 500/);
+    expect(n.calls.filter((c) => !isChecker(c))[0].model).toBe(QWEN);
+  });
+
+  it('a batch: qwen writes, gpt-oss-120b checks', async () => {
+    const n = net((c) =>
+      isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
+    );
+    const res = await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+    expect(res.status).toBe(200);
+    expect(n.calls[0]).toMatchObject({ host: GROQ_HOST, model: QWEN });
+    expect(metaOf(res)).toMatchObject({ provider: 'groq', model: QWEN });
+  });
+
+  it('AI_WRITER_ORDER puts glm first again without new code; unknown names are ignored', () => {
+    process.env.AI_WRITER_ORDER = ' nvidia-writer , NEMOTRON, groq, nonsense ';
+    expect(chain.writerChain().map((m) => m.breaker)).toEqual(['nvidia-writer', 'nemotron', 'groq']);
+    process.env.AI_WRITER_ORDER = 'nonsense';
+    expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'nvidia-writer', 'nemotron', 'gemini']);
   });
 });

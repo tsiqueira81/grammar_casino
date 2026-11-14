@@ -21,16 +21,20 @@ function listFromEnv(name: string, fallback: string[]): string[] {
 }
 
 export const DEFAULT_MODELS = {
-  // The sentence chain (2026-11-14, CoArena dropped): on NVIDIA, glm writes on one account and
-  // minimax checks blind on another; then Nemotron, Groq, Gemini. See server/textChain.ts.
+  // The sentence chain (2026-11-14): Groq qwen writes and Groq gpt-oss-120b checks; then NVIDIA
+  // glm (minimax checks it on a second account), Nemotron, Gemini. See server/textChain.ts.
   // Change with NVIDIA_WRITER_MODELS, NVIDIA_CHECKER_MODELS and NVIDIA_TEXT_MODELS.
   nvidiaWriter: ['z-ai/glm-5.3-flash'],
   nvidiaChecker: ['minimaxai/minimax-m3.1-flash'],
   nvidiaText: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra'],
-  // llama-3.3-70b-versatile was retired for free Groq accounts in 2026 (it answered 404).
-  groqText: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-  /** Checks what another model wrote, on Groq (2026-11-14). Change with GROQ_CHECKER_MODELS. */
-  groqChecker: ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
+  // Groq writes first since 2026-11-14 (glm on NVIDIA took over 12 s): qwen3.8-27b, and
+  // gpt-oss-120b when qwen is not found. llama-3.3-70b-versatile was retired in 2026 (404).
+  groqText: ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
+  /**
+   * Checks what another model wrote, on Groq (2026-11-14: gpt-oss-120b first, chosen by the
+   * teacher). The model that wrote the item is always left out. Change with GROQ_CHECKER_MODELS.
+   */
+  groqChecker: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
   geminiText: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
   /** Checks what Gemini wrote: a different Gemini model. */
   geminiChecker: ['gemini-3.8-flash', 'gemini-4-argon'],
@@ -77,11 +81,13 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
 };
 
 /**
- * A single sentence (2026-11-14, so glm-5.3-flash, which takes 5 to 7 s, gets to write it):
+ * A single sentence (2026-11-14). Groq qwen writes first and usually answers in 1 to 3 s.
  *   'now'   the class is waiting for it (a hand that was not made ahead);
  *   'ahead' made while the class plays the hand before, or while the teacher is on the setup
  *           screen, so nobody waits for it.
- * headStartMs: how long the first writer (glm) works alone before the backup writers start.
+ * headStartMs: how long the first writer (Groq) works alone before the backup writers start. Kept
+ * short since Groq became the primary writer, so glm (which took over 12 s on 2026-11-14) still
+ * has time to answer for a sentence made ahead when Groq is slow.
  * totalMs: writing and the blind check together. The game waits a little longer than this
  * (GAME_WAITS_MS) and then deals from the offline bank.
  * Change them with the server settings AI_HEAD_START_MS and AI_SENTENCE_BUDGET_MS ('now') and
@@ -89,8 +95,8 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
  */
 export type SentenceUrgency = 'now' | 'ahead';
 export const SENTENCE_TIMING_DEFAULTS: Record<SentenceUrgency, { headStartMs: number; totalMs: number }> = {
-  now: { headStartMs: 5_000, totalMs: 11_000 },
-  ahead: { headStartMs: 10_000, totalMs: 19_000 },
+  now: { headStartMs: 3_000, totalMs: 11_000 },
+  ahead: { headStartMs: 4_000, totalMs: 19_000 },
 };
 /** How long the game waits for each (services/geminiService.ts); totalMs always stays below it. */
 export const GAME_WAITS_MS: Record<SentenceUrgency, number> = { now: 12_000, ahead: 20_000 };
