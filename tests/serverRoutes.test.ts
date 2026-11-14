@@ -21,7 +21,7 @@ describe('serverless API routes', () => {
     const res = await call('/api/health');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('application/json');
-    expect(await res.json()).toEqual({ status: 'ok', app: 'grammar-casino', aiConfigured: false });
+    expect(await res.json()).toMatchObject({ status: 'ok', app: 'grammar-casino', aiConfigured: false, aiChain: [] });
   });
 
   it('says whether AI sentences are on, never the key (package T6)', async () => {

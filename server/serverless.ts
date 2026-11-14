@@ -1,5 +1,10 @@
 import { handleGeminiRequest } from './aiHandler';
 import { deepHealth, deepHealthAllowed, hasConfiguredAiKey } from './aiProviders';
+import { writerChain } from './textChain';
+
+/** The AI secrets the server looks for (names only). */
+export const AI_KEY_NAMES = ['COARENA_WRITER_API_KEY', 'COARENA_CHECKER_API_KEY', 'NVIDIA_API_KEY', 'GROQ_API_KEY', 'GROQ_API_KEY_2', 'GEMINI_API_KEY'];
+let lastEnvNames: string[] = [];
 
 /**
  * Serverless Web Request -> Express API dispatcher for Netlify Functions & Cloudflare Workers (`/api/*`).
@@ -9,6 +14,7 @@ export async function dispatchServerlessApi(
   clientIp: string = "127.0.0.1",
   env?: Record<string, any>
 ): Promise<globalThis.Response> {
+  lastEnvNames = env && typeof env === "object" ? Object.keys(env) : [];
   if (env && typeof env === "object") {
     for (const [k, v] of Object.entries(env)) {
       if (typeof v === "string" && v.length > 0) {
@@ -115,7 +121,15 @@ export async function dispatchServerlessApi(
 
     if (url.pathname === "/api/health") {
       // Package T6: whether AI sentences are on (a yes or no, never the key).
-      mockRes.json({ status: "ok", app: "grammar-casino", aiConfigured: hasConfiguredAiKey() });
+      // Which AI keys the server receives and the writers in use, by name only (never a value),
+      // so a missing secret can be found from the browser.
+      mockRes.json({
+        status: "ok",
+        app: "grammar-casino",
+        aiConfigured: hasConfiguredAiKey(),
+        aiChain: writerChain().map((m) => m.breaker),
+        aiKeys: Object.fromEntries(AI_KEY_NAMES.map((name) => [name, { fromCloudflare: lastEnvNames.includes(name), set: String(process.env[name] || "").trim().length > 5 }])),
+      });
       return;
     }
 

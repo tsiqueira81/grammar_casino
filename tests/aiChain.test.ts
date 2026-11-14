@@ -361,3 +361,17 @@ describe('fixes after the first live test (2026-11-14)', () => {
     expect(body.error).not.toMatch(/Gemini rate limit/);
   });
 });
+
+describe('the health page names the AI keys the server receives', () => {
+  it('lists which keys arrived and the writers in use, never a key value', async () => {
+    const env = { NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY };
+    setKeys(env);
+    const res = await server.dispatchServerlessApi(new Request('https://example.test/api/health'), '10.88.0.1', env);
+    const text = await res.text();
+    const body = JSON.parse(text);
+    expect(body.aiChain).toEqual(['nvidia', 'groq']);
+    expect(body.aiKeys.NVIDIA_API_KEY).toEqual({ fromCloudflare: true, set: true });
+    expect(body.aiKeys.COARENA_WRITER_API_KEY).toEqual({ fromCloudflare: false, set: false });
+    for (const key of Object.values(KEYS)) expect(text).not.toContain(key);
+  });
+});

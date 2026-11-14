@@ -472,7 +472,7 @@ Respond ONLY with valid JSON matching the schema.`;
     // Every step of the chain and why it failed, e.g. "coarena-writer 401; nvidia timeout; gemini 429".
     const chainReasons: string[] = Array.isArray(err?.chainReasons) ? err.chainReasons : [];
     const shortReason = chainReasons.length
-      ? `Every AI failed (${chainReasons.join('; ')}); using the built-in bank.`
+      ? `Every AI failed (${chainReasons.join('; ')}; writers with a key: ${err?.chainConfigured || 'none'}); using the built-in bank.`
       : err?.chainConfigured === ''
         ? 'No AI key is set on the server; using the built-in bank.'
         : overload
