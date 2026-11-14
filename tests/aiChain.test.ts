@@ -120,7 +120,8 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'gemini']);
   });
 
-  it('CoArena writes with deepseek on the writer key, glm checks on the checker key', async () => {
+  it('CoArena writes with deepseek on the writer key; glm checks on the checker key when Groq is resting', async () => {
+    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('groq');
     const n = net((c) => (isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
@@ -131,6 +132,11 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect(metaOf(res)).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'glm-5-3-flash' });
   });
 
+  it('a sentence the class waits for is checked by the fastest checker first (Groq gpt-oss-20b), a batch by glm', () => {
+    expect(chain.checkerOrder('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'fast').map((c) => c.model)).toEqual(['openai/gpt-oss-20b', 'glm-5-3-flash', 'gemini-3.8-flash']);
+    expect(chain.checkerOrder('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b').map((c) => c.model)[0]).toBe('glm-5-3-flash');
+  });
+
   it('the checker never sees the answer key', async () => {
     const n = net((c) => (isChecker(c) ? agree : item));
     await sentence();
@@ -138,7 +144,7 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect(checkerPrompt).not.toMatch(/isCorrect|explanation|Present perfect with since/);
   });
 
-  it('NVIDIA writes when CoArena fails, and glm still checks', async () => {
+  it('NVIDIA writes when CoArena fails, and Groq checks it', async () => {
     const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? fail(429) : isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
@@ -148,7 +154,7 @@ describe('the writer chain, in the order the teacher chose', () => {
     const nv = n.calls.find((c) => c.host === 'integrate.api.nvidia.com')!;
     expect(nv.body.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(nv.body.response_format).toBeUndefined();
-    expect(n.calls.find(isChecker)).toMatchObject({ model: 'glm-5-3-flash' });
+    expect(n.calls.find(isChecker)).toMatchObject({ model: 'openai/gpt-oss-20b' });
     const meta = metaOf(res);
     expect(meta.provider).toBe('nvidia');
     expect(meta.fallbackReason).toMatch(/coarena-writer 429/);
@@ -377,7 +383,7 @@ describe('the health page names the AI keys the server receives', () => {
 });
 
 describe('a sentence the class is waiting for (hedged chain)', () => {
-  it('a slow CoArena does not use up the time: NVIDIA starts after 2.5 s and its answer is dealt', async () => {
+  it('a slow CoArena does not use up the time: NVIDIA starts after 1.5 s, its answer is dealt, and the log says CoArena was still busy', async () => {
     const n = net((c) => (isChecker(c) ? agree : item));
     const slowFetch = n.fetch.getMockImplementation()!;
     n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -390,8 +396,9 @@ describe('a sentence the class is waiting for (hedged chain)', () => {
     const started = Date.now();
     const res = await sentence();
     expect(res.status).toBe(200);
-    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(Date.now() - started).toBeLessThan(4_000);
     expect(metaOf(res).provider).toBe('nvidia');
+    expect(metaOf(res).fallbackReason).toMatch(/coarena-writer still busy after \d\.\d s/);
   }, 15_000);
 
   it('the first failure starts the next writer at once', async () => {
@@ -415,28 +422,34 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(providers.singleCheckMs(7_000)).toBe(2_500);
   });
 
-  it('a slow glm checker no longer sends the sentence to the bank: Groq joins after 2 s and its answer counts', async () => {
+  it('a slow first checker no longer sends the sentence to the bank: glm joins after 1.2 s, its answer counts, and the log says who was slow', async () => {
     const n = net((c) => (isChecker(c) ? agree : item));
     const base = n.fetch.getMockImplementation()!;
     n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body || '{}'));
-      if (String(body.model).startsWith('glm')) await new Promise((r) => setTimeout(r, 5_000));
+      if (String(url).includes('groq')) await new Promise((r) => setTimeout(r, 5_000));
       return base(url, init);
     });
     const started = Date.now();
     const res = await sentence();
     expect(res.status).toBe(200);
-    expect(Date.now() - started).toBeLessThan(4_000);
-    expect(metaOf(res)).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'openai/gpt-oss-20b' });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    const meta = metaOf(res);
+    expect(meta).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'glm-5-3-flash' });
+    expect(meta.fallbackReason).toMatch(/check: groq still busy after 1\.\d s/);
   }, 15_000);
 
   it('a checker that fails hands over to the next checker at once', async () => {
-    const n = net((c) => (String(c.model).startsWith('glm') ? fail(500) : isChecker(c) ? agree : item));
+    const n = net((c) => (c.host === 'api.groq.com' && isChecker(c) ? fail(500) : isChecker(c) ? agree : item));
     const started = Date.now();
     const res = await sentence();
     expect(res.status).toBe(200);
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual(['glm-5-3-flash', 'openai/gpt-oss-20b']);
+    const checkers = n.calls.filter(isChecker).map((c) => c.model);
+    expect(checkers[0]).toBe('openai/gpt-oss-20b');
+    expect(checkers[checkers.length - 1]).toBe('glm-5-3-flash');
+    expect(metaOf(res)).toMatchObject({ verifiedBy: 'glm-5-3-flash' });
+    expect(metaOf(res).fallbackReason).toContain('check: groq 500');
   });
 
   it('Groq checks with a model it still has, never llama-3.3-70b, and a 404 moves on to the next model at once', async () => {
@@ -505,7 +518,7 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     const second = await sentence();
     expect(second.status).toBe(200);
     expect(writerCalls()).toBe(1);
-    expect(metaOf(second).fallbackReason).toContain('coarena-writer resting');
+    expect(metaOf(second).fallbackReason).toMatch(/coarena-writer resting, 1[12]\d s left/);
   });
 
   it('without a Retry-After, a provider that stays busy rests 30 s, then 60 s, then 120 s, at most 10 minutes', () => {

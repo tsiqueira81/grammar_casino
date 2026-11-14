@@ -259,7 +259,7 @@ export function hasAnyTextKey(): boolean {
  * Who checks what a writer wrote, best first. Always a different model, and on another account
  * where there is one, so the checker cannot share the writer's blind spots or its daily allowance.
  */
-export function checkerOrder(writer: AiProvider, writerModel?: string): ChainModel[] {
+export function checkerOrder(writer: AiProvider, writerModel?: string, speed: 'best' | 'fast' = 'best'): ChainModel[] {
   const m = aiModels();
   // Groq checks with its own checker list (gpt-oss-20b first), never the model that wrote the item.
   const groqCheckers = m.groqChecker.filter((x) => x !== writerModel);
@@ -274,12 +274,26 @@ export function checkerOrder(writer: AiProvider, writerModel?: string): ChainMod
     groq: [groqChecker, coarenaChecker, nvidia, gemini],
     gemini: [gemini, coarenaChecker, groqChecker, nvidia],
   };
-  return order[writer].filter((x): x is ChainModel => Boolean(x) && x!.model !== writerModel);
+  const list = order[writer].filter((x): x is ChainModel => Boolean(x) && x!.model !== writerModel);
+  // A sentence the class waits for: the fastest checker first (Groq), the others after it.
+  if (speed === 'fast') return [...list.filter((c) => c.provider === 'groq'), ...list.filter((c) => c.provider !== 'groq')];
+  return list;
 }
 
 /** The first checker that is not resting, or null (then only the rules check the item). */
-export function pickChecker(writer: AiProvider, writerModel?: string, now: number = Date.now()): ChainModel | null {
-  return checkerOrder(writer, writerModel).find((c) => !aiBreaker.isOpen(c.breaker, now)) || null;
+export function pickChecker(writer: AiProvider, writerModel?: string, now: number = Date.now(), speed: 'best' | 'fast' = 'best'): ChainModel | null {
+  return checkerOrder(writer, writerModel, speed).find((c) => !aiBreaker.isOpen(c.breaker, now)) || null;
+}
+
+/** "coarena-writer resting, 85 s left": a provider skipped because it is resting, for the log. */
+export function restingNote(key: BreakerKey, now: number = Date.now()): string {
+  const left = Math.max(0, Math.round((aiBreaker.restingUntil(key) - now) / 1000));
+  return left ? `${key} resting, ${left} s left` : `${key} resting`;
+}
+
+/** "coarena-writer still busy after 6.3 s": another model answered first, for the log. */
+export function stillBusyNote(key: BreakerKey, started: number, now: number = Date.now()): string {
+  return `${key} still busy after ${((now - started) / 1000).toFixed(1)} s`;
 }
 
 /** Runs one model with its time limit and tells the breaker how it went. */
@@ -304,12 +318,17 @@ export async function runOnce(model: ChainModel, req: TextRequest, timeoutMs: nu
 export function runCheckers(
   checkers: ChainModel[],
   req: TextRequest,
-  opts: { timeoutMs: number; hedgeAfterMs?: number; onModel?: (model: string) => void }
+  opts: { timeoutMs: number; hedgeAfterMs?: number; onModel?: (model: string) => void; onNotes?: (notes: string[]) => void }
 ): Promise<string> {
   const started = Date.now();
   const deadline = started + opts.timeoutMs;
-  const usable = checkers.filter((c) => !aiBreaker.isOpen(c.breaker));
   const reasons: string[] = [];
+  const usable = checkers.filter((c) => {
+    if (!aiBreaker.isOpen(c.breaker)) return true;
+    reasons.push(restingNote(c.breaker));
+    return false;
+  });
+  const busy = new Set<ChainModel>();
   return new Promise((resolve, reject) => {
     let next = 0;
     let running = 0;
@@ -319,6 +338,7 @@ export function runCheckers(
       if (done || running > 0 || next < usable.length) return;
       done = true;
       clearTimeout(timer);
+      opts.onNotes?.(reasons);
       reject(new Error(reasons.length ? reasons.join('; ') : 'no checker'));
     };
     const launch = () => {
@@ -330,19 +350,24 @@ export function runCheckers(
       }
       const model = usable[next++];
       running++;
+      busy.add(model);
       clearTimeout(timer);
       if (opts.hedgeAfterMs && next < usable.length) timer = setTimeout(launch, opts.hedgeAfterMs);
       runOnce(model, req, left).then(
         (out) => {
           running--;
+          busy.delete(model);
           if (done) return;
           done = true;
           clearTimeout(timer);
+          busy.forEach((m) => reasons.push(stillBusyNote(m.breaker, started)));
           opts.onModel?.(out.model || model.model);
+          opts.onNotes?.(reasons);
           resolve(out.text);
         },
         (err) => {
           running--;
+          busy.delete(model);
           reasons.push(`${model.breaker} ${failureReason(err)}`);
           if (done) return;
           if (next < usable.length) launch();
@@ -367,7 +392,7 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
   let lastError: unknown = null;
   for (const model of chain) {
     if (aiBreaker.isOpen(model.breaker)) {
-      reasons.push(`${model.breaker} resting`);
+      reasons.push(restingNote(model.breaker));
       continue;
     }
     const left = deadline - Date.now();
@@ -405,11 +430,11 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
 }
 
 /** A new sentence: when a writer has not answered after this long, the next one starts as well. */
-export const HEDGE_AFTER_MS = 2_500;
+export const HEDGE_AFTER_MS = 1_500;
 
 /**
  * For a sentence the class is waiting for (2026-11-14). The 7 s budget is too short to wait for a
- * slow writer and then try the next one in turn, so writers start one after another, 2.5 s apart
+ * slow writer and then try the next one in turn, so writers start one after another, 1.5 s apart
  * (or at once when the one before fails), and the first good answer wins. A slow CoArena then
  * costs the class nothing: NVIDIA is already on it.
  */
@@ -419,7 +444,7 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
   const reasons: string[] = [];
   const usable = chain.filter((m) => {
     if (!aiBreaker.isOpen(m.breaker)) return true;
-    reasons.push(`${m.breaker} resting`);
+    reasons.push(restingNote(m.breaker));
     return false;
   });
   const failure = (lastError: unknown) => {
@@ -433,6 +458,7 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
   return new Promise((resolve, reject) => {
     let next = 0;
     let running = 0;
+    const busy = new Set<ChainModel>();
     let done = false;
     let lastError: unknown = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -453,14 +479,19 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
       }
       const model = usable[next++];
       running++;
+      busy.add(model);
       clearTimeout(timer);
       timer = setTimeout(launch, HEDGE_AFTER_MS);
       runOnce(model, req, Math.min(AI_TIMEOUT_MS.generate, left)).then(
         (out) => {
           running--;
+          busy.delete(model);
           if (done) return;
           done = true;
           clearTimeout(timer);
+          // A writer that started earlier and has not answered yet is named, so the log shows why
+          // it was not used (2026-11-14: CoArena was "skipped" with no reason).
+          busy.forEach((m) => reasons.push(stillBusyNote(m.breaker, started)));
           resolve({
             text: out.text,
             meta: {
@@ -475,6 +506,7 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
         },
         (err) => {
           running--;
+          busy.delete(model);
           lastError = err;
           reasons.push(`${model.breaker} ${failureReason(err)}`);
           if (done) return;
