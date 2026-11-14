@@ -303,3 +303,61 @@ describe('a batch through the server', () => {
     expect((await res.json()).fallback).toBe(true);
   });
 });
+
+describe('fixes after the first live test (2026-11-14)', () => {
+  it('a provider without a strict JSON mode is told the field names', async () => {
+    const n = net((c) => (isChecker(c) ? agree : item));
+    setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
+    await sentence();
+    const nvPrompt = n.calls[0].body.messages[1].content;
+    expect(nvPrompt).toMatch(/REPLY FORMAT/);
+    expect(nvPrompt).toMatch(/"text"/);
+    expect(nvPrompt).toMatch(/"isCorrect"/);
+  });
+
+  it('an answer with its own field names counts as a failure, and the next provider writes', async () => {
+    const n = net((c) =>
+      c.host === 'integrate.api.nvidia.com' ? { sentence: item.text, correct: true } : isChecker(c) ? agree : item
+    );
+    setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    const meta = metaOf(res);
+    expect(meta.provider).toBe('groq');
+    expect(meta.fallbackReason).toMatch(/nvidia answer missing text/);
+    expect(n.calls.filter((c) => c.host === 'api.groq.com').length).toBeGreaterThan(0);
+  });
+
+  it('a thinking model that says nothing is reported as such', async () => {
+    net(() => new Response(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'hmm' } }] }), { status: 200 }));
+    await expect(
+      chain.callOpenAiCompatible({ baseUrl: 'https://x.test/v1', apiKey: 'k_123456', model: 'm', prompt: 'p', responseSchema: { type: 'OBJECT', properties: { a: { type: 'STRING' } } }, jsonMode: 'prompt' })
+    ).rejects.toThrow(/ran out of tokens/);
+  });
+
+  it('a rejected item still shows why CoArena was skipped', async () => {
+    net((c) =>
+      c.host === 'coarena.ai' && !isChecker(c) ? fail(401) : isChecker(c) ? { grammatical: false, correction: 'x', acceptable: [] } : item
+    );
+    const res = await sentence();
+    const meta = metaOf(res);
+    expect(meta.fallbackReason).toMatch(/coarena-writer 401/);
+    expect(meta.fallbackReason).toMatch(/rejected/);
+  });
+
+  it('the log lists which writers have a key, so a missing secret shows', async () => {
+    net((c) => (isChecker(c) ? agree : item));
+    setKeys({ GROQ_API_KEY: KEYS.GROQ_API_KEY });
+    const res = await sentence();
+    expect(metaOf(res).chain).toBe('groq');
+  });
+
+  it('when every AI fails, the game is told each step and why', async () => {
+    net(() => fail(500));
+    const res = await sentence();
+    const body = await res.json();
+    expect(body.fallback).toBe(true);
+    expect(body.error).toMatch(/coarena-writer 500; nvidia 500/);
+    expect(body.error).not.toMatch(/Gemini rate limit/);
+  });
+});

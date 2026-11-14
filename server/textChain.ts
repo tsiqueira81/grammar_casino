@@ -6,7 +6,7 @@
 // and the offline bank after that (in the game). A different model checks every item blind: on
 // CoArena, glm-5-3-flash on a second account (key COARENA_CHECKER_API_KEY); see checkerOrder.
 // Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
-import { resolveGroqApiKey, callGroqChatCompletion, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
+import { resolveGroqApiKey, callGroqChatCompletion, convertToStrictJsonSchema, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
 import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
 
 export const COARENA_BASE_URL = 'https://coarena.ai/api/v1';
@@ -53,6 +53,22 @@ export function cleanModelText(raw: string, wantJson: boolean): string {
   return wantJson ? extractJsonFromText(text) : text;
 }
 
+/**
+ * The JSON shape, written into the prompt. A provider without a strict JSON-schema mode (NVIDIA,
+ * CoArena's json_object) never sees the schema otherwise, and then invents its own field names:
+ * the 2026-11-14 bug where every NVIDIA item came back without "text".
+ */
+export function schemaInstruction(schema: any): string {
+  return `\n\n=== REPLY FORMAT ===\nReply with ONE JSON object that matches this JSON Schema exactly: use these field names, fill every required field, add no other text.\n${JSON.stringify(convertToStrictJsonSchema(schema))}`;
+}
+
+/** The required top-level fields the answer lacks (an empty list when it has them all). */
+export function missingFields(schema: any, parsed: unknown): string[] {
+  const required: string[] = Array.isArray(schema?.required) ? schema.required : Object.keys(schema?.properties || {});
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return ['(not an object)'];
+  return required.filter((k) => (parsed as Record<string, unknown>)[k] === undefined);
+}
+
 export interface OpenAiCallOptions extends TextRequest {
   baseUrl: string;
   apiKey: string;
@@ -80,7 +96,7 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
             'You are an expert Cambridge English linguistics examiner. Follow all instructions with 100% precision.' +
             (wantJson ? ' Reply with one JSON object only, no other text.' : ''),
         },
-        { role: 'user', content: o.prompt },
+        { role: 'user', content: wantJson && mode !== 'schema' ? o.prompt + schemaInstruction(o.responseSchema) : o.prompt },
       ],
       temperature: o.temperature ?? 0.6,
       max_tokens: o.maxCompletionTokens ?? 1024,
@@ -104,12 +120,25 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
       throw err;
     }
     const data: any = await res.json();
-    const content = data?.choices?.[0]?.message?.content;
+    const choice = data?.choices?.[0];
+    const content = choice?.message?.content;
     if (typeof content !== 'string' || !content.trim()) {
-      throw new Error('empty answer');
+      // A thinking model can spend every token on its hidden reasoning and say nothing.
+      const why = choice?.finish_reason === 'length' ? 'ran out of tokens while thinking' : choice?.message?.reasoning_content || choice?.message?.reasoning ? 'only thinking, no answer' : 'empty answer';
+      throw new Error(why);
     }
     const text = cleanModelText(content, wantJson);
-    if (wantJson) JSON.parse(text); // A broken answer counts as a failure, so the next provider is tried.
+    if (wantJson) {
+      // A broken or incomplete answer counts as a failure, so the next provider is tried.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error('answer was not JSON');
+      }
+      const missing = missingFields(o.responseSchema, parsed);
+      if (missing.length) throw new Error(`answer missing ${missing.slice(0, 3).join(', ')}`);
+    }
     return { text, model: String(data?.model || o.model), tokens: data?.usage?.total_tokens };
   }
   throw new Error('no answer');
@@ -278,6 +307,7 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
           tokens: out.tokens,
           latencyMs: Date.now() - started,
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
+          chain: chain.map((m) => m.breaker).join(','),
         },
       };
     } catch (err) {
@@ -291,6 +321,7 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
       ? lastError
       : new Error(chain.length ? 'The AI is resting after repeated failures.' : 'No AI provider could answer.');
   err.chainReasons = reasons;
+  err.chainConfigured = chain.map((m) => m.breaker).join(',');
   if (!err.status) err.status = 503;
   throw err;
 }
