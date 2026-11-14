@@ -412,6 +412,11 @@ export interface GroqChatOptions {
   temperature?: number;
   /** Models to try in order (package A2); the built-in list when not given. */
   models?: string[];
+  /**
+   * Let Qwen think before it answers (2026-11-14: for batches, made ahead, where accuracy matters
+   * more than speed). Without it, Qwen's thinking is turned off.
+   */
+  allowThinking?: boolean;
 }
 
 function buildOrderedKeyPool(explicitKey?: string | string[]): string[] {
@@ -487,16 +492,19 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
     // Qwen 3 thinks by default; on Groq, reasoning_effort "none" turns that off (2026-11-14, Qwen
     // writes first). A 400 sends the request again without it.
     const isQwen = /qwen/i.test(model);
+    const qwenThinks = isQwen && options.allowThinking === true;
     for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
       const currentKey = keys[keyIdx];
       const hasAnotherKey = keyIdx < keys.length - 1;
       // Groq's strict JSON schema works on gpt-oss only. Other models get any JSON, with the schema
       // written into the prompt so they keep its field names.
       let useStrictSchema = Boolean(responseSchema) && thinks;
-      let qwenNoThinking = isQwen;
+      let qwenNoThinking = isQwen && !qwenThinks;
+      // A thinking Qwen hides its thinking from the answer (reasoning_format "hidden").
+      let qwenHidden = qwenThinks;
       let attempts = 2;
       // gpt-oss thinks before it answers, and its thinking uses the same token allowance.
-      let maxTokens = Math.min(GROQ_MAX_COMPLETION_TOKENS, maxCompletionTokens + (thinks ? GROQ_REASONING_HEADROOM_TOKENS : 0));
+      let maxTokens = Math.min(GROQ_MAX_COMPLETION_TOKENS, maxCompletionTokens + (thinks || qwenThinks ? GROQ_REASONING_HEADROOM_TOKENS : 0));
       let raisedTokens = false;
 
       while (attempts > 0) {
@@ -517,6 +525,7 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
             body.include_reasoning = false;
           }
           if (qwenNoThinking) body.reasoning_effort = 'none';
+          if (qwenHidden) body.reasoning_format = 'hidden';
 
           if (responseSchema) {
             if (useStrictSchema) {
@@ -538,8 +547,9 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
           if (!res.ok) {
             const errText = await res.text();
             // If json_schema is not supported by a fallback model or fails validation, retry immediately with json_object
-            if (res.status === 400 && qwenNoThinking) {
+            if (res.status === 400 && (qwenNoThinking || qwenHidden)) {
               qwenNoThinking = false;
+              qwenHidden = false;
               attempts++;
               continue;
             }

@@ -37,6 +37,8 @@ export interface TextRequest {
   schemaName?: string;
   maxCompletionTokens?: number;
   temperature?: number;
+  /** Which call this is; a batch lets Qwen think first (2026-11-14). */
+  kind?: AiCallKind;
 }
 
 /** One model on one account. `call` makes the request; the chain adds time limits and the breaker. */
@@ -250,6 +252,8 @@ function groqModel(models: string[]): ChainModel | null {
         maxCompletionTokens: req.maxCompletionTokens,
         temperature: req.temperature,
         models,
+        // A batch is made ahead, so Qwen may think for accuracy; a single sentence stays fast.
+        allowThinking: req.kind === 'batch',
       }),
   };
 }
@@ -465,6 +469,7 @@ export async function runWriterChain(
   chain: ChainModel[] = writerChain(),
   urgency: SentenceUrgency = 'now'
 ): Promise<{ text: string; meta: AiMeta }> {
+  req = { ...req, kind };
   if (kind === 'generate') return runHedgedChain(req, chain, urgency);
   const started = Date.now();
   const deadline = started + AI_CHAIN_BUDGET_MS[kind];
