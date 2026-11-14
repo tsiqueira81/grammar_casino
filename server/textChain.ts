@@ -1,28 +1,29 @@
-// The AI chain for text (2026-11-14, chosen by the teacher). Writers are tried in this order:
-//   1. CoArena  deepseek-v4-1-flash-1017   (key COARENA_WRITER_API_KEY)
+// The AI chain for text (2026-11-14, chosen by the teacher; CoArena was dropped the same day).
+// Writers are tried in this order:
+//   1. NVIDIA   z-ai/glm-5.3-flash         (key NVIDIA_API_KEY)
 //   2. NVIDIA   nemotron 3 ultra           (key NVIDIA_API_KEY)
 //   3. Groq     openai/gpt-oss-120b        (key GROQ_API_KEY)
 //   4. Gemini   gemini-3.5-flash-lite      (key GEMINI_API_KEY)
 // and the offline bank after that (in the game). A different model checks every item blind: on
-// CoArena, glm-5-3-flash on a second account (key COARENA_CHECKER_API_KEY); see checkerOrder.
+// NVIDIA, minimaxai/minimax-m3.1-flash on a second account (key NVIDIA_CHECKER_API_KEY; without it
+// the checker uses NVIDIA_API_KEY); see checkerOrder.
 // Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
 import { resolveGroqApiKey, callGroqChatCompletion, convertToStrictJsonSchema, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
 import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, REASONING_HEADROOM_TOKENS, aiBreaker, aiModels, failureReason, isReasoningModel, parseRetryAfter, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
 
-export const COARENA_BASE_URL = 'https://coarena.ai/api/v1';
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
 const env = (name: string): string => String((typeof process !== 'undefined' ? process.env?.[name] : '') || '').trim();
 const usableKey = (k: string) => k.length > 5;
 
-export function coarenaWriterKey(): string {
-  return env('COARENA_WRITER_API_KEY');
-}
-export function coarenaCheckerKey(): string {
-  return env('COARENA_CHECKER_API_KEY');
-}
+/** The NVIDIA account that writes (glm, and Nemotron as its backup). */
 export function nvidiaKey(): string {
   return env('NVIDIA_API_KEY');
+}
+/** The second NVIDIA account, for the blind check. Without it the check uses the writer's key. */
+export function nvidiaCheckerKey(): string {
+  const own = env('NVIDIA_CHECKER_API_KEY');
+  return usableKey(own) ? own : nvidiaKey();
 }
 export function geminiKey(): string {
   const k = env('GEMINI_API_KEY') || env('API_KEY');
@@ -54,8 +55,8 @@ export function cleanModelText(raw: string, wantJson: boolean): string {
 }
 
 /**
- * The JSON shape, written into the prompt. A provider without a strict JSON-schema mode (NVIDIA,
- * CoArena's json_object) never sees the schema otherwise, and then invents its own field names:
+ * The JSON shape, written into the prompt. A provider without a strict JSON-schema mode (NVIDIA's
+ * json_object, or none at all) never sees the schema otherwise, and then invents its own field names:
  * the 2026-11-14 bug where every NVIDIA item came back without "text".
  */
 export function schemaInstruction(schema: any): string {
@@ -79,7 +80,7 @@ export interface OpenAiCallOptions extends TextRequest {
 }
 
 /**
- * Any OpenAI-compatible chat API (CoArena, NVIDIA). When the provider refuses the JSON setting
+ * Any OpenAI-compatible chat API (NVIDIA). When the provider refuses the JSON setting
  * (HTTP 400), the same request is sent once more with JSON asked for in words, and the answer is
  * cleaned up here.
  */
@@ -174,28 +175,49 @@ async function firstModelThatExists(models: string[], run: (model: string) => Pr
   throw last || new Error('no model');
 }
 
-function coarenaModel(role: 'writer' | 'checker'): ChainModel | null {
-  const key = role === 'writer' ? coarenaWriterKey() : coarenaCheckerKey();
+/**
+ * The NVIDIA settings that turn a model's thinking off, so it answers quickly. Thinking models on
+ * NVIDIA read `chat_template_kwargs`; a model that does not know the setting ignores it.
+ */
+export const NVIDIA_NO_THINKING = { chat_template_kwargs: { enable_thinking: false, thinking: false } };
+
+/**
+ * The primary pair (2026-11-14): glm writes on NVIDIA_API_KEY, minimax checks on
+ * NVIDIA_CHECKER_API_KEY. Both are asked for JSON (json_object); a 400 sends it again with JSON
+ * asked for in words.
+ */
+function nvidiaPairModel(role: 'writer' | 'checker'): ChainModel | null {
+  const key = role === 'writer' ? nvidiaKey() : nvidiaCheckerKey();
   if (!usableKey(key)) return null;
-  const models = role === 'writer' ? aiModels().coarenaWriter : aiModels().coarenaChecker;
+  const models = role === 'writer' ? aiModels().nvidiaWriter : aiModels().nvidiaChecker;
+  if (!models.length) return null;
   return {
-    provider: 'coarena',
-    breaker: role === 'writer' ? 'coarena-writer' : 'coarena-checker',
+    provider: 'nvidia',
+    breaker: role === 'writer' ? 'nvidia-writer' : 'nvidia-checker',
     model: models[0],
     call: (req) =>
       firstModelThatExists(models, (model) =>
-        callOpenAiCompatible({ ...req, baseUrl: env('COARENA_BASE_URL') || COARENA_BASE_URL, apiKey: key, model, jsonMode: 'object' })
+        callOpenAiCompatible({
+          ...req,
+          baseUrl: env('NVIDIA_BASE_URL') || NVIDIA_BASE_URL,
+          apiKey: key,
+          model,
+          jsonMode: 'object',
+          extraBody: NVIDIA_NO_THINKING,
+        })
       ),
   };
 }
 
-function nvidiaModel(): ChainModel | null {
+/** Nemotron 3 Ultra, the backup writer, on the writer's key. */
+function nemotronModel(): ChainModel | null {
   const key = nvidiaKey();
   if (!usableKey(key)) return null;
   const models = aiModels().nvidiaText;
+  if (!models.length) return null;
   return {
     provider: 'nvidia',
-    breaker: 'nvidia',
+    breaker: 'nemotron',
     model: models[0],
     // Nemotron 3 Ultra has no JSON mode; thinking is turned off so it answers quickly.
     call: (req) =>
@@ -248,7 +270,7 @@ function geminiModel(models: string[]): ChainModel | null {
 /** The writers, in the order they are tried. Only those with a key are listed. */
 export function writerChain(): ChainModel[] {
   const m = aiModels();
-  return [coarenaModel('writer'), nvidiaModel(), groqModel(m.groqText), geminiModel(m.geminiText)].filter((x): x is ChainModel => Boolean(x));
+  return [nvidiaPairModel('writer'), nemotronModel(), groqModel(m.groqText), geminiModel(m.geminiText)].filter((x): x is ChainModel => Boolean(x));
 }
 
 export function hasAnyTextKey(): boolean {
@@ -264,15 +286,13 @@ export function checkerOrder(writer: AiProvider, writerModel?: string, speed: 'b
   // Groq checks with its own checker list (gpt-oss-20b first), never the model that wrote the item.
   const groqCheckers = m.groqChecker.filter((x) => x !== writerModel);
   const geminiOther = m.geminiChecker.filter((x) => x !== writerModel);
-  const coarenaChecker = coarenaModel('checker');
+  const nvidiaChecker = nvidiaPairModel('checker');
   const groqChecker = groqModel(groqCheckers);
   const gemini = geminiModel(geminiOther);
-  const nvidia = nvidiaModel();
   const order: Record<AiProvider, Array<ChainModel | null>> = {
-    coarena: [coarenaChecker, groqChecker, nvidia, gemini],
-    nvidia: [coarenaChecker, groqChecker, gemini],
-    groq: [groqChecker, coarenaChecker, nvidia, gemini],
-    gemini: [gemini, coarenaChecker, groqChecker, nvidia],
+    nvidia: [nvidiaChecker, groqChecker, gemini],
+    groq: [groqChecker, nvidiaChecker, gemini],
+    gemini: [gemini, nvidiaChecker, groqChecker],
   };
   const list = order[writer].filter((x): x is ChainModel => Boolean(x) && x!.model !== writerModel);
   // A sentence the class waits for: the fastest checker first (Groq), the others after it.
@@ -285,13 +305,13 @@ export function pickChecker(writer: AiProvider, writerModel?: string, now: numbe
   return checkerOrder(writer, writerModel, speed).find((c) => !aiBreaker.isOpen(c.breaker, now)) || null;
 }
 
-/** "coarena-writer resting, 85 s left": a provider skipped because it is resting, for the log. */
+/** "nvidia-writer resting, 85 s left": a provider skipped because it is resting, for the log. */
 export function restingNote(key: BreakerKey, now: number = Date.now()): string {
   const left = Math.max(0, Math.round((aiBreaker.restingUntil(key) - now) / 1000));
   return left ? `${key} resting, ${left} s left` : `${key} resting`;
 }
 
-/** "coarena-writer still busy after 6.3 s": another model answered first, for the log. */
+/** "nvidia-writer still busy after 6.3 s": another model answered first, for the log. */
 export function stillBusyNote(key: BreakerKey, started: number, now: number = Date.now()): string {
   return `${key} still busy after ${((now - started) / 1000).toFixed(1)} s`;
 }
@@ -381,7 +401,7 @@ export function runCheckers(
 
 /**
  * Walks the writer chain until one answers. Every provider that is skipped or fails adds to the
- * reason in the debug log ("coarena-writer 429; nvidia timeout"). All of them failing throws, and
+ * reason in the debug log ("nvidia-writer 429; nemotron timeout"). All of them failing throws, and
  * the game deals from its offline bank.
  */
 export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
@@ -435,8 +455,8 @@ export const HEDGE_AFTER_MS = 1_500;
 /**
  * For a sentence the class is waiting for (2026-11-14). The 7 s budget is too short to wait for a
  * slow writer and then try the next one in turn, so writers start one after another, 1.5 s apart
- * (or at once when the one before fails), and the first good answer wins. A slow CoArena then
- * costs the class nothing: NVIDIA is already on it.
+ * (or at once when the one before fails), and the first good answer wins. A slow glm then
+ * costs the class nothing: Nemotron is already on it.
  */
 export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
   const started = Date.now();
@@ -490,7 +510,7 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
           done = true;
           clearTimeout(timer);
           // A writer that started earlier and has not answered yet is named, so the log shows why
-          // it was not used (2026-11-14: CoArena was "skipped" with no reason).
+          // it was not used (2026-11-14: a writer was "skipped" with no reason).
           busy.forEach((m) => reasons.push(stillBusyNote(m.breaker, started)));
           resolve({
             text: out.text,

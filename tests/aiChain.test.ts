@@ -1,16 +1,19 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The AI chain (2026-11-14): CoArena writes with deepseek on one account and glm checks blind on
-// another; then NVIDIA, Groq and Gemini take over in that order; all failing sends the game to
-// its offline bank. Every step's item is checked by a different model.
+// The AI chain (2026-11-14, CoArena dropped): on NVIDIA, glm writes on one account and minimax
+// checks blind on another; then Nemotron, Groq and Gemini take over in that order; all failing
+// sends the game to its offline bank. Every step's item is checked by a different model.
 const KEYS = {
-  COARENA_WRITER_API_KEY: 'cw_test_writer_key',
-  COARENA_CHECKER_API_KEY: 'cc_test_checker_key',
   NVIDIA_API_KEY: 'nv_test_key_123',
+  NVIDIA_CHECKER_API_KEY: 'nvc_test_checker_key',
   GROQ_API_KEY: 'gsk_test_only',
   GEMINI_API_KEY: 'AIza_test_gemini',
 };
-const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'COARENA_BASE_URL', 'NVIDIA_BASE_URL', 'COARENA_WRITER_MODELS', 'COARENA_CHECKER_MODELS'];
+const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS'];
+const GLM = 'z-ai/glm-5.3-flash';
+const MINIMAX = 'minimaxai/minimax-m3.1-flash';
+const NEMOTRON = 'nvidia/nemotron-3-ultra-550b-a55b';
+const NV_HOST = 'integrate.api.nvidia.com';
 
 let server: typeof import('../server');
 let chain: typeof import('../server/textChain');
@@ -95,6 +98,7 @@ function net(answer: (c: Call, n: number) => Response | object) {
   return { calls, fetch };
 }
 const fail = (status: number) => new Response(JSON.stringify({ error: 'no' }), { status });
+const isGlm = (c: Call) => c.model === GLM;
 const isChecker = (c: Call) => /examiner\. Answer only from the text/.test(c.body.messages?.[1]?.content || '') || /Answer each numbered task/.test(c.body.messages?.[1]?.content || '');
 
 let ipN = 0;
@@ -107,10 +111,10 @@ const sentence = () => ask({ action: 'generateSentence', settings: { topic: 'Pre
 const metaOf = (res: Response) => JSON.parse(res.headers.get('x-ai-meta') || '{}');
 
 describe('the writer chain, in the order the teacher chose', () => {
-  it('lists CoArena, NVIDIA, Groq, Gemini', () => {
-    expect(chain.writerChain().map((m) => m.breaker)).toEqual(['coarena-writer', 'nvidia', 'groq', 'gemini']);
-    expect(chain.writerChain()[0].model).toBe('deepseek-v4-1-flash-1017');
-    expect(chain.writerChain()[1].model).toBe('nvidia/nemotron-3-ultra-550b-a55b');
+  it('lists NVIDIA glm, NVIDIA Nemotron, Groq, Gemini, and no CoArena', () => {
+    expect(chain.writerChain().map((m) => m.breaker)).toEqual(['nvidia-writer', 'nemotron', 'groq', 'gemini']);
+    expect(chain.writerChain()[0].model).toBe(GLM);
+    expect(chain.writerChain()[1].model).toBe(NEMOTRON);
     expect(chain.writerChain()[2].model).toBe('openai/gpt-oss-120b');
     expect(chain.writerChain()[3].model).toBe('gemini-3.5-flash-lite');
   });
@@ -120,21 +124,53 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'gemini']);
   });
 
-  it('CoArena writes with deepseek on the writer key; glm checks on the checker key when Groq is resting', async () => {
+  it('glm writes on the first NVIDIA key; minimax checks on the second key when Groq is resting', async () => {
     for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('groq');
     const n = net((c) => (isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
     expect((await res.json()).checkedBy).toBe('two models');
     expect(n.calls).toHaveLength(2);
-    expect(n.calls[0]).toMatchObject({ host: 'coarena.ai', model: 'deepseek-v4-1-flash-1017', auth: `Bearer ${KEYS.COARENA_WRITER_API_KEY}` });
-    expect(n.calls[1]).toMatchObject({ host: 'coarena.ai', model: 'glm-5-3-flash', auth: `Bearer ${KEYS.COARENA_CHECKER_API_KEY}` });
-    expect(metaOf(res)).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'glm-5-3-flash' });
+    expect(n.calls[0]).toMatchObject({ host: NV_HOST, model: GLM, auth: `Bearer ${KEYS.NVIDIA_API_KEY}` });
+    expect(n.calls[1]).toMatchObject({ host: NV_HOST, model: MINIMAX, auth: `Bearer ${KEYS.NVIDIA_CHECKER_API_KEY}` });
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: GLM, verified: 'yes', verifiedBy: MINIMAX });
   });
 
-  it('a sentence the class waits for is checked by the fastest checker first (Groq gpt-oss-20b), a batch by glm', () => {
-    expect(chain.checkerOrder('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b', 'fast').map((c) => c.model)).toEqual(['openai/gpt-oss-20b', 'glm-5-3-flash', 'gemini-3.8-flash']);
-    expect(chain.checkerOrder('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b').map((c) => c.model)[0]).toBe('glm-5-3-flash');
+  it('glm and minimax are asked for JSON with thinking off; minimax gets room to think briefly', async () => {
+    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('groq');
+    const n = net((c) => (isChecker(c) ? agree : item));
+    await sentence();
+    const [writer, checker] = n.calls;
+    expect(writer.body.response_format).toEqual({ type: 'json_object' });
+    expect(writer.body.chat_template_kwargs).toEqual({ enable_thinking: false, thinking: false });
+    expect(writer.body.reasoning_effort).toBeUndefined();
+    expect(checker.body.reasoning_effort).toBe('low');
+    expect(checker.body.max_tokens).toBe(300 + 2_048);
+  });
+
+  it('without a second NVIDIA key, minimax checks on the first key', async () => {
+    setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY });
+    const n = net((c) => (isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(n.calls[1]).toMatchObject({ model: MINIMAX, auth: `Bearer ${KEYS.NVIDIA_API_KEY}` });
+  });
+
+  it('the NVIDIA models can be changed with NVIDIA_WRITER_MODELS and NVIDIA_CHECKER_MODELS', () => {
+    process.env.NVIDIA_WRITER_MODELS = 'some/writer, other/writer';
+    process.env.NVIDIA_CHECKER_MODELS = 'some/checker';
+    try {
+      expect(chain.writerChain()[0].model).toBe('some/writer');
+      expect(chain.checkerOrder('nvidia', 'some/writer')[0].model).toBe('some/checker');
+    } finally {
+      delete process.env.NVIDIA_WRITER_MODELS;
+      delete process.env.NVIDIA_CHECKER_MODELS;
+    }
+  });
+
+  it('a sentence the class waits for is checked by the fastest checker first (Groq gpt-oss-20b), a batch by minimax', () => {
+    expect(chain.checkerOrder('nvidia', GLM, 'fast').map((c) => c.model)).toEqual(['openai/gpt-oss-20b', MINIMAX, 'gemini-3.8-flash']);
+    expect(chain.checkerOrder('nvidia', GLM).map((c) => c.model)[0]).toBe(MINIMAX);
   });
 
   it('the checker never sees the answer key', async () => {
@@ -144,24 +180,24 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect(checkerPrompt).not.toMatch(/isCorrect|explanation|Present perfect with since/);
   });
 
-  it('NVIDIA writes when CoArena fails, and Groq checks it', async () => {
-    const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? fail(429) : isChecker(c) ? agree : item));
+  it('Nemotron writes when glm fails, and Groq checks it', async () => {
+    const n = net((c) => (isGlm(c) ? fail(429) : isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
-    const writers = n.calls.filter((c) => !isChecker(c)).map((c) => c.host);
-    expect(writers).toEqual(['coarena.ai', 'integrate.api.nvidia.com']);
+    const writers = n.calls.filter((c) => !isChecker(c)).map((c) => c.model);
+    expect(writers).toEqual([GLM, NEMOTRON]);
     // Nemotron has no JSON mode: thinking off, JSON asked for in words.
-    const nv = n.calls.find((c) => c.host === 'integrate.api.nvidia.com')!;
+    const nv = n.calls.find((c) => c.model === NEMOTRON)!;
     expect(nv.body.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(nv.body.response_format).toBeUndefined();
     expect(n.calls.find(isChecker)).toMatchObject({ model: 'openai/gpt-oss-20b' });
     const meta = metaOf(res);
     expect(meta.provider).toBe('nvidia');
-    expect(meta.fallbackReason).toMatch(/coarena-writer 429/);
+    expect(meta.fallbackReason).toMatch(/nvidia-writer 429/);
   });
 
-  it('Groq writes when CoArena and NVIDIA fail, and its other model checks', async () => {
-    setKeys({ COARENA_WRITER_API_KEY: KEYS.COARENA_WRITER_API_KEY, NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
+  it('Groq writes when both NVIDIA writers fail, and its other model checks', async () => {
+    setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
     const n = net((c) => (c.host !== 'api.groq.com' ? fail(500) : isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
@@ -171,7 +207,7 @@ describe('the writer chain, in the order the teacher chose', () => {
   });
 
   it('Gemini writes last, and a different Gemini model checks', async () => {
-    setKeys({ COARENA_WRITER_API_KEY: KEYS.COARENA_WRITER_API_KEY, GEMINI_API_KEY: KEYS.GEMINI_API_KEY });
+    setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GEMINI_API_KEY: KEYS.GEMINI_API_KEY });
     net(() => fail(503));
     geminiAnswer = (prompt) => JSON.stringify(/examiner\. Answer only/.test(prompt) ? agree : item);
     const res = await sentence();
@@ -194,21 +230,21 @@ describe('the writer chain, in the order the teacher chose', () => {
     expect((await res.json()).fallback).toBe(true);
   });
 
-  it('when glm is resting, another provider checks what deepseek wrote', async () => {
-    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('coarena-checker');
+  it('when minimax is resting, another provider checks what glm wrote', async () => {
+    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('nvidia-checker');
     const n = net((c) => (isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
     expect(n.calls[1].host).toBe('api.groq.com');
   });
 
-  it('a CoArena account that failed three times rests, so the chain goes straight on', async () => {
-    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('coarena-writer');
+  it('a glm writer that failed three times rests, so the chain goes straight on', async () => {
+    for (let i = 0; i < 3; i++) providers.aiBreaker.recordFailure('nvidia-writer');
     const n = net((c) => (isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
-    expect(n.calls.filter((c) => !isChecker(c))[0].host).toBe('integrate.api.nvidia.com');
-    expect(metaOf(res).fallbackReason).toMatch(/coarena-writer resting/);
+    expect(n.calls.filter((c) => !isChecker(c))[0].model).toBe(NEMOTRON);
+    expect(metaOf(res).fallbackReason).toMatch(/nvidia-writer resting/);
   });
 
   it('no key ever appears in what the game receives', async () => {
@@ -222,7 +258,7 @@ describe('the writer chain, in the order the teacher chose', () => {
 describe('talking to an OpenAI-compatible provider', () => {
   it('asks again without the JSON setting when the provider refuses it', async () => {
     const n = net((c, i) => (i === 1 ? fail(400) : item));
-    const out = await chain.callOpenAiCompatible({ baseUrl: 'https://coarena.ai/api/v1', apiKey: 'k_123456', model: 'm', prompt: 'p', responseSchema: { type: 'OBJECT', properties: {} }, jsonMode: 'object' });
+    const out = await chain.callOpenAiCompatible({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'k_123456', model: 'm', prompt: 'p', responseSchema: { type: 'OBJECT', properties: {} }, jsonMode: 'object' });
     expect(JSON.parse(out.text).text).toBe(item.text);
     expect(n.calls[0].body.response_format).toEqual({ type: 'json_object' });
     expect(n.calls[1].body.response_format).toBeUndefined();
@@ -236,23 +272,23 @@ describe('talking to an OpenAI-compatible provider', () => {
   it('a broken answer counts as a failure, so the next provider is tried', async () => {
     net(() => new Response(JSON.stringify({ choices: [{ message: { content: 'not json at all' } }] }), { status: 200 }));
     await expect(
-      chain.callOpenAiCompatible({ baseUrl: 'https://coarena.ai/api/v1', apiKey: 'k_123456', model: 'm', prompt: 'p', responseSchema: { type: 'OBJECT', properties: {} }, jsonMode: 'prompt' })
+      chain.callOpenAiCompatible({ baseUrl: 'https://integrate.api.nvidia.com/v1', apiKey: 'k_123456', model: 'm', prompt: 'p', responseSchema: { type: 'OBJECT', properties: {} }, jsonMode: 'prompt' })
     ).rejects.toThrow();
   });
 
   it('a model name that is not found (404) moves on to the next name', async () => {
-    const n = net((c) => (c.model === 'nvidia/nemotron-3-ultra-550b-a55b' ? fail(404) : isChecker(c) ? agree : item));
+    const n = net((c) => (isGlm(c) ? fail(503) : c.model === NEMOTRON ? fail(404) : isChecker(c) ? agree : item));
     setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
     const res = await sentence();
     expect(res.status).toBe(200);
-    expect(n.calls.map((c) => c.model).slice(0, 2)).toEqual(['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra']);
+    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.model).slice(0, 3)).toEqual([GLM, NEMOTRON, 'nvidia/nemotron-3-ultra']);
   });
 });
 
 describe('every step is checked by a different model', () => {
   it.each([
-    ['coarena', 'deepseek-v4-1-flash-1017'],
-    ['nvidia', 'nvidia/nemotron-3-ultra-550b-a55b'],
+    ['nvidia', GLM],
+    ['nvidia', NEMOTRON],
     ['groq', 'openai/gpt-oss-120b'],
     ['gemini', 'gemini-3.5-flash-lite'],
   ] as const)('%s', (provider, model) => {
@@ -277,7 +313,7 @@ describe('a batch through the server', () => {
       slots: [{ forceCorrect: true, theme: 'Travel' }, { forceCorrect: true, theme: 'Travel' }],
     });
 
-  it('deepseek writes both in one call, glm checks both in one call', async () => {
+  it('glm writes both in one call, minimax checks both in one call', async () => {
     const n = net((c) =>
       isChecker(c)
         ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
@@ -287,12 +323,12 @@ describe('a batch through the server', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.items.map((i: any) => i.text)).toEqual([item.text, second.text]);
-    expect(n.calls.map((c) => c.model)).toEqual(['deepseek-v4-1-flash-1017', 'glm-5-3-flash']);
+    expect(n.calls.map((c) => c.model)).toEqual([GLM, MINIMAX]);
   });
 
   it('falls back down the chain for a batch too', async () => {
     const n = net((c) =>
-      c.host === 'coarena.ai' && !isChecker(c)
+      isGlm(c)
         ? fail(402)
         : isChecker(c)
           ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
@@ -300,7 +336,7 @@ describe('a batch through the server', () => {
     );
     const res = await batch();
     expect((await res.json()).items).toHaveLength(2);
-    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.host)).toEqual(['coarena.ai', 'integrate.api.nvidia.com']);
+    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.model)).toEqual([GLM, NEMOTRON]);
   });
 
   it('everything failing gives the game nothing, and it makes those hands as before', async () => {
@@ -323,14 +359,15 @@ describe('fixes after the first live test (2026-11-14)', () => {
 
   it('an answer with its own field names counts as a failure, and the next provider writes', async () => {
     const n = net((c) =>
-      c.host === 'integrate.api.nvidia.com' ? { sentence: item.text, correct: true } : isChecker(c) ? agree : item
+      c.host === NV_HOST && !isChecker(c) ? { sentence: item.text, correct: true } : isChecker(c) ? agree : item
     );
     setKeys({ NVIDIA_API_KEY: KEYS.NVIDIA_API_KEY, GROQ_API_KEY: KEYS.GROQ_API_KEY });
     const res = await sentence();
     expect(res.status).toBe(200);
     const meta = metaOf(res);
     expect(meta.provider).toBe('groq');
-    expect(meta.fallbackReason).toMatch(/nvidia answer missing text/);
+    expect(meta.fallbackReason).toMatch(/nvidia-writer answer missing text/);
+    expect(meta.fallbackReason).toMatch(/nemotron answer missing text/);
     expect(n.calls.filter((c) => c.host === 'api.groq.com').length).toBeGreaterThan(0);
   });
 
@@ -341,13 +378,13 @@ describe('fixes after the first live test (2026-11-14)', () => {
     ).rejects.toThrow(/ran out of tokens/);
   });
 
-  it('a rejected item still shows why CoArena was skipped', async () => {
+  it('a rejected item still shows why glm was skipped', async () => {
     net((c) =>
-      c.host === 'coarena.ai' && !isChecker(c) ? fail(401) : isChecker(c) ? { grammatical: false, correction: 'x', acceptable: [] } : item
+      isGlm(c) ? fail(401) : isChecker(c) ? { grammatical: false, correction: 'x', acceptable: [] } : item
     );
     const res = await sentence();
     const meta = metaOf(res);
-    expect(meta.fallbackReason).toMatch(/coarena-writer 401/);
+    expect(meta.fallbackReason).toMatch(/nvidia-writer 401/);
     expect(meta.fallbackReason).toMatch(/rejected/);
   });
 
@@ -363,7 +400,7 @@ describe('fixes after the first live test (2026-11-14)', () => {
     const res = await sentence();
     const body = await res.json();
     expect(body.fallback).toBe(true);
-    expect(body.error).toMatch(/coarena-writer 500; nvidia 500/);
+    expect(body.error).toMatch(/nvidia-writer 500; nemotron 500/);
     expect(body.error).not.toMatch(/Gemini rate limit/);
   });
 });
@@ -375,20 +412,21 @@ describe('the health page names the AI keys the server receives', () => {
     const res = await server.dispatchServerlessApi(new Request('https://example.test/api/health'), '10.88.0.1', env);
     const text = await res.text();
     const body = JSON.parse(text);
-    expect(body.aiChain).toEqual(['nvidia', 'groq']);
+    expect(body.aiChain).toEqual(['nvidia-writer', 'nemotron', 'groq']);
     expect(body.aiKeys.NVIDIA_API_KEY).toEqual({ fromCloudflare: true, set: true });
-    expect(body.aiKeys.COARENA_WRITER_API_KEY).toEqual({ fromCloudflare: false, set: false });
+    expect(body.aiKeys.NVIDIA_CHECKER_API_KEY).toEqual({ fromCloudflare: false, set: false });
+    expect(Object.keys(body.aiKeys).some((k) => /COARENA/.test(k))).toBe(false);
     for (const key of Object.values(KEYS)) expect(text).not.toContain(key);
   });
 });
 
 describe('a sentence the class is waiting for (hedged chain)', () => {
-  it('a slow CoArena does not use up the time: NVIDIA starts after 1.5 s, its answer is dealt, and the log says CoArena was still busy', async () => {
+  it('a slow glm does not use up the time: Nemotron starts after 1.5 s, its answer is dealt, and the log says glm was still busy', async () => {
     const n = net((c) => (isChecker(c) ? agree : item));
     const slowFetch = n.fetch.getMockImplementation()!;
     n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body || '{}'));
-      if (String(url).includes('coarena.ai') && String(body.model).startsWith('deepseek')) {
+      if (body.model === GLM) {
         await new Promise((r) => setTimeout(r, 6_000));
       }
       return slowFetch(url, init);
@@ -397,17 +435,17 @@ describe('a sentence the class is waiting for (hedged chain)', () => {
     const res = await sentence();
     expect(res.status).toBe(200);
     expect(Date.now() - started).toBeLessThan(4_000);
-    expect(metaOf(res).provider).toBe('nvidia');
-    expect(metaOf(res).fallbackReason).toMatch(/coarena-writer still busy after \d\.\d s/);
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: NEMOTRON });
+    expect(metaOf(res).fallbackReason).toMatch(/nvidia-writer still busy after \d\.\d s/);
   }, 15_000);
 
   it('the first failure starts the next writer at once', async () => {
-    const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? fail(503) : isChecker(c) ? agree : item));
+    const n = net((c) => (isGlm(c) ? fail(503) : isChecker(c) ? agree : item));
     const started = Date.now();
     const res = await sentence();
     expect(Date.now() - started).toBeLessThan(1_000);
-    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', fallbackReason: 'coarena-writer 503' });
-    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.host)).toEqual(['coarena.ai', 'integrate.api.nvidia.com']);
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: NEMOTRON, fallbackReason: 'nvidia-writer 503' });
+    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.model)).toEqual([GLM, NEMOTRON]);
   });
 });
 
@@ -422,7 +460,7 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(providers.singleCheckMs(7_000)).toBe(2_500);
   });
 
-  it('a slow first checker no longer sends the sentence to the bank: glm joins after 1.2 s, its answer counts, and the log says who was slow', async () => {
+  it('a slow first checker no longer sends the sentence to the bank: minimax joins after 1.2 s, its answer counts, and the log says who was slow', async () => {
     const n = net((c) => (isChecker(c) ? agree : item));
     const base = n.fetch.getMockImplementation()!;
     n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -435,7 +473,7 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(res.status).toBe(200);
     expect(Date.now() - started).toBeLessThan(3_000);
     const meta = metaOf(res);
-    expect(meta).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'glm-5-3-flash' });
+    expect(meta).toMatchObject({ provider: 'nvidia', verified: 'yes', verifiedBy: MINIMAX });
     expect(meta.fallbackReason).toMatch(/check: groq still busy after 1\.\d s/);
   }, 15_000);
 
@@ -447,8 +485,8 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(Date.now() - started).toBeLessThan(1_000);
     const checkers = n.calls.filter(isChecker).map((c) => c.model);
     expect(checkers[0]).toBe('openai/gpt-oss-20b');
-    expect(checkers[checkers.length - 1]).toBe('glm-5-3-flash');
-    expect(metaOf(res)).toMatchObject({ verifiedBy: 'glm-5-3-flash' });
+    expect(checkers[checkers.length - 1]).toBe(MINIMAX);
+    expect(metaOf(res)).toMatchObject({ verifiedBy: MINIMAX });
     expect(metaOf(res).fallbackReason).toContain('check: groq 500');
   });
 
@@ -492,7 +530,7 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(metaOf(res).provider).toBe('groq');
   });
 
-  it('a thinking model on CoArena or NVIDIA gets the same room', async () => {
+  it('a thinking model on NVIDIA gets the same room', async () => {
     let body: any = null;
     vi.stubGlobal(
       'fetch',
@@ -505,31 +543,31 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(body).toMatchObject({ max_tokens: 2_548, reasoning_effort: 'low' });
   });
 
-  it('a busy CoArena writer (429) rests as long as it asked, and is not asked again meanwhile', async () => {
+  it('a busy glm writer (429) rests as long as it asked, and is not asked again meanwhile', async () => {
     const busy = () => new Response('{"error":"busy"}', { status: 429, headers: { 'retry-after': '120' } });
-    const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? busy() : isChecker(c) ? agree : item));
+    const n = net((c) => (isGlm(c) ? busy() : isChecker(c) ? agree : item));
     const first = await sentence();
     expect(first.status).toBe(200);
-    expect(metaOf(first).fallbackReason).toContain('coarena-writer 429 busy, resting 120 s');
-    const until = providers.aiBreaker.restingUntil('coarena-writer');
+    expect(metaOf(first).fallbackReason).toContain('nvidia-writer 429 busy, resting 120 s');
+    const until = providers.aiBreaker.restingUntil('nvidia-writer');
     expect(until - Date.now()).toBeGreaterThan(110_000);
-    const writerCalls = () => n.calls.filter((c) => c.host === 'coarena.ai' && !isChecker(c)).length;
+    const writerCalls = () => n.calls.filter(isGlm).length;
     expect(writerCalls()).toBe(1);
     const second = await sentence();
     expect(second.status).toBe(200);
     expect(writerCalls()).toBe(1);
-    expect(metaOf(second).fallbackReason).toMatch(/coarena-writer resting, 1[12]\d s left/);
+    expect(metaOf(second).fallbackReason).toMatch(/nvidia-writer resting, 1[12]\d s left/);
   });
 
   it('without a Retry-After, a provider that stays busy rests 30 s, then 60 s, then 120 s, at most 10 minutes', () => {
     const b = new providers.CircuitBreaker();
-    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(30_000);
-    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(60_000);
-    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(120_000);
-    for (let i = 0; i < 10; i++) b.recordBusy('coarena-writer', undefined, 0);
-    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(10 * 60_000);
-    b.recordSuccess('coarena-writer');
-    expect(b.recordBusy('coarena-writer', 2_000, 0)).toBe(5_000);
+    expect(b.recordBusy('nvidia-writer', undefined, 0)).toBe(30_000);
+    expect(b.recordBusy('nvidia-writer', undefined, 0)).toBe(60_000);
+    expect(b.recordBusy('nvidia-writer', undefined, 0)).toBe(120_000);
+    for (let i = 0; i < 10; i++) b.recordBusy('nvidia-writer', undefined, 0);
+    expect(b.recordBusy('nvidia-writer', undefined, 0)).toBe(10 * 60_000);
+    b.recordSuccess('nvidia-writer');
+    expect(b.recordBusy('nvidia-writer', 2_000, 0)).toBe(5_000);
   });
 
   it('reads Retry-After in seconds or as a date', () => {
@@ -538,10 +576,10 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(providers.parseRetryAfter(null)).toBeUndefined();
   });
 
-  it('a batch whose glm check fails is checked by the next checker instead of losing every item', async () => {
+  it('a batch whose minimax check fails is checked by the next checker instead of losing every item', async () => {
     const second = { ...item, text: 'They have just finished their science project.', correction: 'They have just finished their science project.', grammarPhrase: 'have just finished' };
     const n = net((c) =>
-      String(c.model).startsWith('glm')
+      c.model === MINIMAX
         ? fail(500)
         : isChecker(c)
           ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
@@ -554,7 +592,7 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
       slots: [{ forceCorrect: true, theme: 'Travel' }, { forceCorrect: true, theme: 'Travel' }],
     });
     expect((await res.json()).items).toHaveLength(2);
-    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual(['glm-5-3-flash', 'openai/gpt-oss-20b']);
+    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual([MINIMAX, 'openai/gpt-oss-20b']);
     expect(metaOf(res).verifiedBy).toBe('openai/gpt-oss-20b');
   });
 });

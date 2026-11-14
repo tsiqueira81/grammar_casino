@@ -2,10 +2,13 @@
 // environment variables, so retiring a model is a dashboard change, not a code change. Every
 // provider call has a time limit, and a provider that keeps failing is skipped for a while.
 
-export type AiProvider = 'coarena' | 'nvidia' | 'groq' | 'gemini';
+export type AiProvider = 'nvidia' | 'groq' | 'gemini';
 export type AiCallKind = 'generate' | 'verify' | 'speech' | 'other' | 'batch';
-/** What the circuit breaker rests: a provider, or one of the two CoArena accounts. */
-export type BreakerKey = AiProvider | 'coarena-writer' | 'coarena-checker';
+/**
+ * What the circuit breaker rests: a provider, or one NVIDIA model. The writer (glm) and the checker
+ * (minimax) are on two NVIDIA accounts; Nemotron, the backup writer, shares the writer's key.
+ */
+export type BreakerKey = AiProvider | 'nvidia-writer' | 'nvidia-checker' | 'nemotron';
 
 /** Comma-separated list from an environment variable, or the default. */
 function listFromEnv(name: string, fallback: string[]): string[] {
@@ -18,10 +21,11 @@ function listFromEnv(name: string, fallback: string[]): string[] {
 }
 
 export const DEFAULT_MODELS = {
-  // The sentence chain (2026-11-14): CoArena first (one account writes, another checks), then
-  // NVIDIA, then Groq, then Gemini. See server/textChain.ts.
-  coarenaWriter: ['deepseek-v4-1-flash-1017'],
-  coarenaChecker: ['glm-5-3-flash'],
+  // The sentence chain (2026-11-14, CoArena dropped): on NVIDIA, glm writes on one account and
+  // minimax checks blind on another; then Nemotron, Groq, Gemini. See server/textChain.ts.
+  // Change with NVIDIA_WRITER_MODELS, NVIDIA_CHECKER_MODELS and NVIDIA_TEXT_MODELS.
+  nvidiaWriter: ['z-ai/glm-5.3-flash'],
+  nvidiaChecker: ['minimaxai/minimax-m3.1-flash'],
   nvidiaText: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra'],
   // llama-3.3-70b-versatile was retired for free Groq accounts in 2026 (it answered 404).
   groqText: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
@@ -36,8 +40,8 @@ export const DEFAULT_MODELS = {
 /** Models in the order they are tried. Read on each call so a changed setting applies at once. */
 export function aiModels() {
   return {
-    coarenaWriter: listFromEnv('COARENA_WRITER_MODELS', DEFAULT_MODELS.coarenaWriter),
-    coarenaChecker: listFromEnv('COARENA_CHECKER_MODELS', DEFAULT_MODELS.coarenaChecker),
+    nvidiaWriter: listFromEnv('NVIDIA_WRITER_MODELS', DEFAULT_MODELS.nvidiaWriter),
+    nvidiaChecker: listFromEnv('NVIDIA_CHECKER_MODELS', DEFAULT_MODELS.nvidiaChecker),
     nvidiaText: listFromEnv('NVIDIA_TEXT_MODELS', DEFAULT_MODELS.nvidiaText),
     groqText: listFromEnv('GROQ_TEXT_MODELS', DEFAULT_MODELS.groqText),
     groqChecker: listFromEnv('GROQ_CHECKER_MODELS', DEFAULT_MODELS.groqChecker),
@@ -78,8 +82,8 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
  * check gets what is left of 7.6 s, never less than 2.5 s and never more than 6 s (it was 4 s, and
  * glm-5-3-flash often took longer). When the first checker is still busy after 1.2 s, the next one
  * starts as well and the first answer counts. For a single sentence the fastest checker goes first
- * (Groq gpt-oss-20b, usually about a second); glm-5-3-flash, slower, comes second (2026-11-14:
- * after a slow NVIDIA writer only 2.5 s were left and glm alone could not answer in time).
+ * (Groq gpt-oss-20b, usually about a second); the NVIDIA checker comes second (2026-11-14:
+ * after a slow NVIDIA writer only 2.5 s were left and a slow checker alone could not answer in time).
  */
 export const SINGLE_CHECK_DEADLINE_MS = 7_600;
 export const SINGLE_CHECK_MIN_MS = 2_500;
@@ -93,10 +97,13 @@ export function singleCheckMs(elapsedMs: number): number {
   return Math.max(SINGLE_CHECK_MIN_MS, Math.min(SINGLE_CHECK_MAX_MS, SINGLE_CHECK_DEADLINE_MS - elapsedMs));
 }
 
-/** Extra tokens a thinking model (gpt-oss) gets for its hidden reasoning, on top of the answer. */
+/**
+ * Extra tokens a thinking model gets for its hidden reasoning, on top of the answer: gpt-oss, and
+ * minimax (its thinking cannot be turned off on NVIDIA, only set to low).
+ */
 export const REASONING_HEADROOM_TOKENS = 2_048;
 export function isReasoningModel(model: string): boolean {
-  return /gpt-oss/i.test(model || '');
+  return /gpt-oss|minimax/i.test(model || '');
 }
 
 export class AiTimeoutError extends Error {
