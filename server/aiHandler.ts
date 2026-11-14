@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CACHE_TTL_MS, checkDailyIpLimit, checkRateLimit, cleanupCache, persistentAiCache, responseCache } from './limits';
-import { AI_TIMEOUT_MS, formatAiMeta } from './providers';
+import { AI_TIMEOUT_MS, BATCH_CHECK_HEDGE_AFTER_MS, formatAiMeta, singleCheckMs } from './providers';
 import { batchVerifierSchema, makeBatch } from './sentenceBatch';
 import { checkWithSecondModel } from './aiProviders';
 import { verifyItem } from './verifyItem';
@@ -108,8 +108,9 @@ export async function handleGeminiRequest(req: Request, res: Response) {
         }
 
         // Package L3: a second model answers the item cold before any student sees it. The game
-        // must have its sentence within 8 s, so the check gets what is left of 7.5 s (at least 1.5 s).
-        const checkMs = Math.max(1_500, Math.min(4_000, 7_500 - (Date.now() - generationStarted)));
+        // must have its sentence within 8 s, so the check gets what is left of 7.6 s (2.5 to 6 s,
+        // singleCheckMs), and a second checker joins after 2 s if the first is slow.
+        const checkMs = singleCheckMs(Date.now() - generationStarted);
         const checker = checkWithSecondModel(response.meta, checkMs);
         const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
         const verdict = await verifyItem(generatedData, resolvedQuestionType, level, checker.ask, pastTexts);
@@ -145,7 +146,7 @@ export async function handleGeminiRequest(req: Request, res: Response) {
         const started = Date.now();
         const result = await makeBatch(payload, {
           write: (req) => generateAiText(req),
-          checker: (meta) => checkWithSecondModel(meta, AI_TIMEOUT_MS.batch, batchVerifierSchema),
+          checker: (meta) => checkWithSecondModel(meta, AI_TIMEOUT_MS.batch, batchVerifierSchema, BATCH_CHECK_HEDGE_AFTER_MS),
         });
         res.setHeader(
           'X-AI-Meta',
