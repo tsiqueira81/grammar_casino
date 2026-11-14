@@ -159,21 +159,35 @@ export const clearPortableGame = async () => {
 /**
  * The lesson must never stall (package R8). A sentence that takes longer than this is dealt from the
  * offline bank instead; every other AI call gives up later, and its caller falls back the same way.
+ * 12 s since 2026-11-14 (it was 8 s), so glm-5.3-flash, which takes 5 to 7 s, can write it and still
+ * be checked. The server stops at 11 s (GAME_WAITS_MS in server/providers.ts must match).
  */
-export const AI_SENTENCE_TIMEOUT_MS = 8_000;
+export const AI_SENTENCE_TIMEOUT_MS = 12_000;
+/**
+ * A sentence made ahead (while the class plays the hand before, or the teacher is on the setup
+ * screen): nobody waits for it yet, so it may take longer. The server stops at 19 s.
+ */
+export const AI_AHEAD_SENTENCE_TIMEOUT_MS = 20_000;
+/**
+ * When the class reaches a hand whose sentence is still being made ahead, it waits at most this
+ * long for it, and then the hand is dealt from the offline bank.
+ */
+export const AHEAD_WAIT_LIMIT_MS = 6_000;
 export const AI_CALL_TIMEOUT_MS = 20_000;
 
 /** A batch is made ahead of time, so it may take long; nobody waits for it. */
 export const AI_BATCH_TIMEOUT_MS = 150_000;
 
-export function getAiTimeoutMs(action: string): number {
+export function getAiTimeoutMs(action: string, ahead = false): number {
   if (action === 'generateSentenceBatch') return AI_BATCH_TIMEOUT_MS;
-  return action === 'generateSentence' ? AI_SENTENCE_TIMEOUT_MS : AI_CALL_TIMEOUT_MS;
+  if (action === 'generateSentence') return ahead ? AI_AHEAD_SENTENCE_TIMEOUT_MS : AI_SENTENCE_TIMEOUT_MS;
+  return AI_CALL_TIMEOUT_MS;
 }
 
 async function postToGeminiApi<T>(action: string, payload: Record<string, any>): Promise<T> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), getAiTimeoutMs(action)) : null;
+  const limitMs = getAiTimeoutMs(action, payload?.ahead === true);
+  const timer = controller ? setTimeout(() => controller.abort(), limitMs) : null;
   let response: Response;
   let data: any = null;
   try {
@@ -193,11 +207,11 @@ async function postToGeminiApi<T>(action: string, payload: Record<string, any>):
       // Non-JSON response (or the time ran out while reading it)
     }
     if (controller?.signal.aborted) {
-      throw new Error(`The AI took longer than ${getAiTimeoutMs(action) / 1000} s; using the offline fallback.`);
+      throw new Error(`The AI took longer than ${limitMs / 1000} s; using the offline fallback.`);
     }
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      throw new Error(`The AI took longer than ${getAiTimeoutMs(action) / 1000} s; using the offline fallback.`);
+      throw new Error(`The AI took longer than ${limitMs / 1000} s; using the offline fallback.`);
     }
     throw err;
   } finally {
@@ -305,8 +319,30 @@ export const generateSentence = async (
     const made = convert(item);
     if (made) return made;
   }
-  // The bank has many items: keep drawing until one fits.
+  return dealFromBank(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType);
+};
+
+/**
+ * A sentence from the offline bank, for any question type (Spot the error and Word order are made
+ * from bank items too). Used when the AI fails, and when the class would otherwise wait too long
+ * for a sentence still being made ahead (AHEAD_WAIT_LIMIT_MS).
+ */
+export const dealFromBank = async (
+  settings: Settings,
+  pastSentences: string[] = [],
+  forceCorrect: boolean | null = null,
+  subtype: string | null = null,
+  pastMistakes: string[] = [],
+  questionType?: QuestionType
+): Promise<GeneratedSentence> => {
   const { getCuratedSentence } = await import('./fallbackSentences');
+  if (questionType !== 'spotError' && questionType !== 'wordOrder') {
+    return { ...getCuratedSentence(settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType), source: 'bank' };
+  }
+  const { toSpotError, toWordOrder } = await import('../game/newFormats');
+  const convert = (item: GeneratedSentence) => (questionType === 'spotError' ? toSpotError(item) : toWordOrder(item));
+  const wantCorrect = questionType === 'wordOrder';
+  // The bank has many items: keep drawing until one fits.
   for (let tries = 0; tries < 40; tries++) {
     const made = convert({ ...getCuratedSentence(settings, pastSentences, wantCorrect, subtype, pastMistakes, 'binary'), source: 'bank' });
     if (made) return made;
@@ -351,6 +387,8 @@ const generateBaseSentence = async (
       subtype,
       pastMistakes,
       questionType,
+      // Made ahead: the server gives glm a longer head start, and the game waits longer.
+      ...(plan?.ahead ? { ahead: true } : {}),
     });
 
     if (data && data.text) {

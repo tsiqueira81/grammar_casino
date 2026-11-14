@@ -26,8 +26,8 @@ describe('model names', () => {
 });
 
 describe('time limits', () => {
-  it('a new sentence stops before the game gives up on it at 8 s', () => {
-    expect(AI_TIMEOUT_MS.generate).toBeLessThan(8_000);
+  it('a new sentence stops before the game gives up on it at 12 s', () => {
+    expect(AI_TIMEOUT_MS.generate).toBeLessThan(12_000);
     expect(AI_TIMEOUT_MS.verify).toBe(8_000);
     expect(AI_TIMEOUT_MS.speech).toBe(10_000);
   });

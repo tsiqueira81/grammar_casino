@@ -17,6 +17,12 @@ export interface SentencePlan {
   upcoming?: UpcomingHand[];
   /** Second look and Spotlight: only an item written for exactly this grammar point will do. */
   strictSubtype?: boolean;
+  /**
+   * Made ahead, while the class plays the hand before or the teacher is on the setup screen
+   * (2026-11-14): nobody waits for it yet, so the server gives glm a longer head start and the
+   * game waits longer for it (AI_AHEAD_SENTENCE_TIMEOUT_MS).
+   */
+  ahead?: boolean;
 }
 
 export type PooledItem = GeneratedSentence & { theme?: string };

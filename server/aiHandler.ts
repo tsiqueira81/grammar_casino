@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CACHE_TTL_MS, checkDailyIpLimit, checkRateLimit, cleanupCache, persistentAiCache, responseCache } from './limits';
-import { AI_TIMEOUT_MS, BATCH_CHECK_HEDGE_AFTER_MS, formatAiMeta, singleCheckMs } from './providers';
+import { AI_TIMEOUT_MS, BATCH_CHECK_HEDGE_AFTER_MS, formatAiMeta, sentenceTiming, singleCheckMs, type SentenceUrgency } from './providers';
 import { batchVerifierSchema, makeBatch } from './sentenceBatch';
 import { checkWithSecondModel } from './aiProviders';
 import { verifyItem } from './verifyItem';
@@ -68,7 +68,12 @@ export async function handleGeminiRequest(req: Request, res: Response) {
           subtype = null,
           pastMistakes = [],
           questionType: requestedQuestionType,
+          ahead = false,
         } = payload;
+        // A sentence made ahead (while the class plays the hand before) may take longer, so the
+        // primary writer, glm, gets a longer head start (2026-11-14).
+        const urgency: SentenceUrgency = ahead === true ? 'ahead' : 'now';
+        const timing = sentenceTiming(urgency);
         if (!settings || typeof settings.topic !== "string" || typeof settings.level !== "string") {
           return res.status(400).json({ error: "Invalid settings provided for sentence generation." });
         }
@@ -83,6 +88,7 @@ export async function handleGeminiRequest(req: Request, res: Response) {
           schemaName: `sentence_${resolvedQuestionType}`,
           maxCompletionTokens: 900,
           kind: 'generate',
+          urgency,
         });
 
         const jsonText = response.text ? response.text.trim() : "";
@@ -108,9 +114,9 @@ export async function handleGeminiRequest(req: Request, res: Response) {
         }
 
         // Package L3: a second model answers the item cold before any student sees it. The game
-        // must have its sentence within 8 s, so the check gets what is left of 7.6 s (2.5 to 6 s,
-        // singleCheckMs), and a second checker joins after 2 s if the first is slow.
-        const checkMs = singleCheckMs(Date.now() - generationStarted);
+        // must have its sentence in time, so the check gets what is left until the deadline (2.5 to
+        // 6 s, singleCheckMs), and a second checker joins after 1.2 s if the first is slow.
+        const checkMs = singleCheckMs(Date.now() - generationStarted, timing.checkDeadlineMs);
         // The fastest checker first: the class is waiting (2026-11-14).
         const checker = checkWithSecondModel(response.meta, checkMs, undefined, undefined, 'fast');
         const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
@@ -477,7 +483,7 @@ Respond ONLY with valid JSON matching the schema.`;
     // Every step of the chain and why it failed, e.g. "nvidia-writer 401; nemotron timeout; gemini 429".
     const chainReasons: string[] = Array.isArray(err?.chainReasons) ? err.chainReasons : [];
     const shortReason = chainReasons.length
-      ? `Every AI failed (${chainReasons.join('; ')}; writers with a key: ${err?.chainConfigured || 'none'}); using the built-in bank.`
+      ? `Every AI failed (${chainReasons.join('; ')}; writers with a key: ${err?.chainConfigured || 'none'}${err?.chainWriters ? `; timing: ${err.chainWriters}` : ''}); using the built-in bank.`
       : err?.chainConfigured === ''
         ? 'No AI key is set on the server; using the built-in bank.'
         : overload

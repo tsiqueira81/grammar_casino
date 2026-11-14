@@ -10,6 +10,7 @@ import { mapWithLimit } from './utils/flushPlan';
 import { awaySeatIds } from './game/presence';
 import { HOTKEY_HELP, findHotkeyButton, hotkeyAction } from './utils/hotkeys';
 import { APP_VERSION, logEvent } from './utils/debugLog';
+import { waitAtMost } from './utils/waitAtMost';
 import { QUALITY_KEY, parseStoredQuality, resolveTier, type QualityChoice, type QualityTier } from './show/quality';
 import { firestoreUsageToday, takeGameUsage } from './utils/firestoreUsage';
 import { DebugLogModal } from './components/DebugLogModal';
@@ -1818,6 +1819,16 @@ export function App() {
       forceCorrect: boolean;
       remainingBatch: boolean[];
     }>;
+    plan: {
+      settings: Settings;
+      pastSentences: string[];
+      pastMistakes: string[];
+      subtype: string | null;
+      allSubtypesLen: number;
+      resolvedQuestionType: QuestionType;
+      forceCorrect: boolean;
+      remainingBatch: boolean[];
+    };
   } | null>(null);
 
   // Background pre-fetch:
@@ -1899,8 +1910,8 @@ export function App() {
         subtype,
         pastMistakes,
         resolvedQuestionType,
-        // The hands after this one, so a batch made ahead fits them.
-        { upcoming: upcomingHands(targetSettings, targetRound + 1, formatIdx + 1, lastRound), strictSubtype: Boolean(dueLook) }
+        // The hands after this one, so a batch made ahead fits them. Made ahead: glm gets more time.
+        { upcoming: upcomingHands(targetSettings, targetRound + 1, formatIdx + 1, lastRound), strictSubtype: Boolean(dueLook), ahead: true }
       ).then(generated => ({
         generated,
         // A sentence from a batch may have been written for another grammar point: count that one.
@@ -1916,6 +1927,8 @@ export function App() {
       prefetchRef.current = {
         key: settingsKey,
         promise,
+        // What this hand will be, so the bank can stand in when the class would wait too long.
+        plan: { settings: targetSettings, pastSentences, pastMistakes, forceCorrect, subtype, resolvedQuestionType, remainingBatch, allSubtypesLen: allSubtypes.length },
       };
     };
 
@@ -1958,7 +1971,20 @@ export function App() {
           const activePrefetch = prefetchRef.current;
           prefetchRef.current = null;
           try {
-            const prefetched = await activePrefetch.promise;
+            // A sentence made ahead may still be on its way (glm gets up to 19 s for it). The class
+            // waits for it at most AHEAD_WAIT_LIMIT_MS; then the same hand comes from the bank.
+            const p = activePrefetch.plan;
+            const prefetched = await waitAtMost(activePrefetch.promise, GeminiService.AHEAD_WAIT_LIMIT_MS, async () => {
+              logEvent('ai', `Sentence made ahead not ready after ${GeminiService.AHEAD_WAIT_LIMIT_MS / 1000} s; dealt from the built-in bank`);
+              return {
+                generated: await GeminiService.dealFromBank(p.settings, p.pastSentences, p.forceCorrect, p.subtype, p.pastMistakes, p.resolvedQuestionType),
+                subtype: p.subtype,
+                allSubtypesLen: p.allSubtypesLen,
+                resolvedQuestionType: p.resolvedQuestionType,
+                forceCorrect: p.forceCorrect,
+                remainingBatch: p.remainingBatch,
+              };
+            });
             generated = prefetched.generated;
             subtype = prefetched.subtype;
             allSubtypesLen = prefetched.allSubtypesLen;

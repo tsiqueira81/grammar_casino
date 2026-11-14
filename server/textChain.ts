@@ -9,7 +9,7 @@
 // the checker uses NVIDIA_API_KEY); see checkerOrder.
 // Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
 import { resolveGroqApiKey, callGroqChatCompletion, convertToStrictJsonSchema, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
-import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, REASONING_HEADROOM_TOKENS, aiBreaker, aiModels, failureReason, isReasoningModel, parseRetryAfter, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
+import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, HEDGE_AFTER_MS, REASONING_HEADROOM_TOKENS, sentenceTiming, type SentenceUrgency, aiBreaker, aiModels, failureReason, isReasoningModel, parseRetryAfter, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
 
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
@@ -399,16 +399,51 @@ export function runCheckers(
   });
 }
 
+/** One writer's run, for the timing line in the debug log. */
+export interface WriterRun {
+  key: BreakerKey;
+  /** When it started, counted from the start of the chain. */
+  startedMs: number;
+  /** How long it took, once it answered or failed. */
+  tookMs?: number;
+  outcome?: 'wrote' | 'failed';
+  reason?: string;
+}
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+/**
+ * "nvidia-writer wrote in 6.4 s; nemotron still writing after 1.4 s (started at 5.0 s)": every
+ * writer that was started, how long it took or has taken so far (2026-11-14, so the real
+ * latencies are visible in the debug log).
+ */
+export function writerTimingNote(runs: WriterRun[], elapsedMs: number): string {
+  return runs
+    .map((r) => {
+      const from = r.startedMs >= 50 ? ` (started at ${secs(r.startedMs)})` : '';
+      if (r.outcome === 'wrote') return `${r.key} wrote in ${secs(r.tookMs ?? 0)}${from}`;
+      if (r.outcome === 'failed') return `${r.key} failed after ${secs(r.tookMs ?? 0)}${r.reason ? ` (${r.reason})` : ''}${from}`;
+      return `${r.key} still writing after ${secs(Math.max(0, elapsedMs - r.startedMs))}${from}`;
+    })
+    .join('; ');
+}
+
 /**
  * Walks the writer chain until one answers. Every provider that is skipped or fails adds to the
  * reason in the debug log ("nvidia-writer 429; nemotron timeout"). All of them failing throws, and
  * the game deals from its offline bank.
  */
-export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
-  if (kind === 'generate') return runHedgedChain(req, chain);
+export async function runWriterChain(
+  req: TextRequest,
+  kind: AiCallKind,
+  chain: ChainModel[] = writerChain(),
+  urgency: SentenceUrgency = 'now'
+): Promise<{ text: string; meta: AiMeta }> {
+  if (kind === 'generate') return runHedgedChain(req, chain, urgency);
   const started = Date.now();
   const deadline = started + AI_CHAIN_BUDGET_MS[kind];
   const reasons: string[] = [];
+  const runs: WriterRun[] = [];
   let lastError: unknown = null;
   for (const model of chain) {
     if (aiBreaker.isOpen(model.breaker)) {
@@ -420,8 +455,11 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
       reasons.push('out of time');
       break;
     }
+    const run: WriterRun = { key: model.breaker, startedMs: Date.now() - started };
+    runs.push(run);
     try {
       const out = await runOnce(model, req, Math.min(AI_TIMEOUT_MS[kind], left));
+      Object.assign(run, { outcome: 'wrote', tookMs: Date.now() - started - run.startedMs });
       return {
         text: out.text,
         meta: {
@@ -431,10 +469,12 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
           latencyMs: Date.now() - started,
           fallbackReason: reasons.length ? reasons.join('; ') : undefined,
           chain: chain.map((m) => m.breaker).join(','),
+          writers: writerTimingNote(runs, Date.now() - started),
         },
       };
     } catch (err) {
       lastError = err;
+      Object.assign(run, { outcome: 'failed', tookMs: Date.now() - started - run.startedMs, reason: failureReason(err) });
       reasons.push(`${model.breaker} ${failureReason(err)}`);
       console.warn(`[AI chain] ${model.breaker} failed, trying the next one:`, failureReason(err));
     }
@@ -445,23 +485,26 @@ export async function runWriterChain(req: TextRequest, kind: AiCallKind, chain: 
       : new Error(chain.length ? 'The AI is resting after repeated failures.' : 'No AI provider could answer.');
   err.chainReasons = reasons;
   err.chainConfigured = chain.map((m) => m.breaker).join(',');
+  err.chainWriters = writerTimingNote(runs, Date.now() - started);
   if (!err.status) err.status = 503;
   throw err;
 }
 
-/** A new sentence: when a writer has not answered after this long, the next one starts as well. */
-export const HEDGE_AFTER_MS = 1_500;
+/** A new sentence: after the head start, each backup writer starts this long after the one before. */
+export { HEDGE_AFTER_MS };
 
 /**
- * For a sentence the class is waiting for (2026-11-14). The 7 s budget is too short to wait for a
- * slow writer and then try the next one in turn, so writers start one after another, 1.5 s apart
- * (or at once when the one before fails), and the first good answer wins. A slow glm then
- * costs the class nothing: Nemotron is already on it.
+ * For a single sentence (2026-11-14). glm-5.3-flash writes first and works alone for a head start
+ * (5 s when the class waits, 10 s for a sentence made ahead; sentenceTiming). When it has not
+ * answered by then, the backup writers start one after another, 1.5 s apart (or at once when the
+ * one before fails), and the first good answer wins. A writer that fails early hands over at once.
  */
-export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerChain()): Promise<{ text: string; meta: AiMeta }> {
+export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerChain(), urgency: SentenceUrgency = 'now'): Promise<{ text: string; meta: AiMeta }> {
+  const timing = sentenceTiming(urgency);
   const started = Date.now();
-  const deadline = started + AI_CHAIN_BUDGET_MS.generate;
+  const deadline = started + timing.writerBudgetMs;
   const reasons: string[] = [];
+  const runs: WriterRun[] = [];
   const usable = chain.filter((m) => {
     if (!aiBreaker.isOpen(m.breaker)) return true;
     reasons.push(restingNote(m.breaker));
@@ -472,6 +515,7 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
       lastError instanceof Error ? lastError : new Error(chain.length ? 'The AI is resting after repeated failures.' : 'No AI provider could answer.');
     err.chainReasons = reasons;
     err.chainConfigured = chain.map((m) => m.breaker).join(',');
+    err.chainWriters = writerTimingNote(runs, Date.now() - started);
     if (!err.status) err.status = 503;
     return err;
   };
@@ -497,15 +541,20 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
         next = usable.length;
         return settleIfOver();
       }
+      const first = next === 0;
       const model = usable[next++];
+      const run: WriterRun = { key: model.breaker, startedMs: Date.now() - started };
+      runs.push(run);
       running++;
       busy.add(model);
       clearTimeout(timer);
-      timer = setTimeout(launch, HEDGE_AFTER_MS);
-      runOnce(model, req, Math.min(AI_TIMEOUT_MS.generate, left)).then(
+      // The first writer works alone for its head start; the backups follow each other faster.
+      timer = setTimeout(launch, first ? timing.headStartMs : timing.hedgeAfterMs);
+      runOnce(model, req, left).then(
         (out) => {
           running--;
           busy.delete(model);
+          Object.assign(run, { outcome: 'wrote', tookMs: Date.now() - started - run.startedMs });
           if (done) return;
           done = true;
           clearTimeout(timer);
@@ -521,12 +570,15 @@ export function runHedgedChain(req: TextRequest, chain: ChainModel[] = writerCha
               latencyMs: Date.now() - started,
               fallbackReason: reasons.length ? reasons.join('; ') : undefined,
               chain: chain.map((m) => m.breaker).join(','),
+              writers: writerTimingNote(runs, Date.now() - started),
+              urgency,
             },
           });
         },
         (err) => {
           running--;
           busy.delete(model);
+          Object.assign(run, { outcome: 'failed', tookMs: Date.now() - started - run.startedMs, reason: failureReason(err) });
           lastError = err;
           reasons.push(`${model.breaker} ${failureReason(err)}`);
           if (done) return;

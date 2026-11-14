@@ -9,7 +9,8 @@ const KEYS = {
   GROQ_API_KEY: 'gsk_test_only',
   GEMINI_API_KEY: 'AIza_test_gemini',
 };
-const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS'];
+const TIMING_KEYS = ['AI_HEAD_START_MS', 'AI_SENTENCE_BUDGET_MS', 'AI_AHEAD_HEAD_START_MS', 'AI_AHEAD_BUDGET_MS', 'AI_HEDGE_AFTER_MS'];
+const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS', ...TIMING_KEYS];
 const GLM = 'z-ai/glm-5.3-flash';
 const MINIMAX = 'minimaxai/minimax-m3.1-flash';
 const NEMOTRON = 'nvidia/nemotron-3-ultra-550b-a55b';
@@ -50,6 +51,7 @@ function setKeys(which: Partial<typeof KEYS>) {
 
 beforeEach(() => {
   setKeys(KEYS);
+  for (const k of TIMING_KEYS) delete process.env[k];
   providers.aiBreaker.reset();
   groqUtils.clearGroqKeyCooldowns();
   vi.unstubAllGlobals();
@@ -107,7 +109,7 @@ const ask = (body: object) =>
     new Request('https://example.test/api/gemini', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
     `10.77.${Math.floor(++ipN / 200)}.${ipN % 200}`
   );
-const sentence = () => ask({ action: 'generateSentence', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', forceCorrect: true });
+const sentence = (extra: object = {}) => ask({ action: 'generateSentence', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', forceCorrect: true, ...extra });
 const metaOf = (res: Response) => JSON.parse(res.headers.get('x-ai-meta') || '{}');
 
 describe('the writer chain, in the order the teacher chose', () => {
@@ -421,7 +423,9 @@ describe('the health page names the AI keys the server receives', () => {
 });
 
 describe('a sentence the class is waiting for (hedged chain)', () => {
-  it('a slow glm does not use up the time: Nemotron starts after 1.5 s, its answer is dealt, and the log says glm was still busy', async () => {
+  it('a slow glm does not use up the time: Nemotron starts after the head start, its answer is dealt, and the log says glm was still busy', async () => {
+    // The head start is a server setting; 1.5 s here keeps the test short.
+    process.env.AI_HEAD_START_MS = '1500';
     const n = net((c) => (isChecker(c) ? agree : item));
     const slowFetch = n.fetch.getMockImplementation()!;
     n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -437,6 +441,7 @@ describe('a sentence the class is waiting for (hedged chain)', () => {
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: NEMOTRON });
     expect(metaOf(res).fallbackReason).toMatch(/nvidia-writer still busy after \d\.\d s/);
+    expect(metaOf(res).writers).toMatch(/^nvidia-writer still writing after 1\.\d s; nemotron wrote in 0\.\d s \(started at 1\.[5-9] s\)$/);
   }, 15_000);
 
   it('the first failure starts the next writer at once', async () => {
@@ -454,10 +459,12 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
   const groqAnswer = (content: string, finish = 'stop') =>
     new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }], usage: { total_tokens: 10 } }), { status: 200 });
 
-  it('the single-sentence check gets 2.5 to 6 s, from what is left of the 8 s', () => {
+  it('the single-sentence check gets 2.5 to 6 s, from what is left until 10.6 s (the class waits 12 s since 2026-11-14)', () => {
     expect(providers.singleCheckMs(0)).toBe(6_000);
-    expect(providers.singleCheckMs(3_000)).toBe(4_600);
-    expect(providers.singleCheckMs(7_000)).toBe(2_500);
+    expect(providers.singleCheckMs(6_000)).toBe(4_600);
+    expect(providers.singleCheckMs(9_000)).toBe(2_500);
+    // A sentence made ahead has a later deadline.
+    expect(providers.singleCheckMs(14_000, providers.sentenceTiming('ahead').checkDeadlineMs)).toBe(4_600);
   });
 
   it('a slow first checker no longer sends the sentence to the bank: minimax joins after 1.2 s, its answer counts, and the log says who was slow', async () => {
@@ -594,5 +601,99 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect((await res.json()).items).toHaveLength(2);
     expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual([MINIMAX, 'openai/gpt-oss-20b']);
     expect(metaOf(res).verifiedBy).toBe('openai/gpt-oss-20b');
+  });
+});
+
+describe('glm gets more time (2026-11-14: Groq kept winning the race after 1.5 s)', () => {
+  const slowGlm = (n: ReturnType<typeof net>, ms: number) => {
+    const base = n.fetch.getMockImplementation()!;
+    n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (body.model === GLM) await new Promise((r) => setTimeout(r, ms));
+      return base(url, init);
+    });
+  };
+
+  it('defaults: glm works alone for 5 s when the class waits and 10 s when made ahead; 11 s and 19 s in all, below what the game waits', () => {
+    expect(providers.sentenceTiming('now')).toEqual({ headStartMs: 5_000, totalMs: 11_000, writerBudgetMs: 8_100, checkDeadlineMs: 10_600, hedgeAfterMs: 1_500 });
+    expect(providers.sentenceTiming('ahead')).toEqual({ headStartMs: 10_000, totalMs: 19_000, writerBudgetMs: 16_100, checkDeadlineMs: 18_600, hedgeAfterMs: 1_500 });
+    expect(providers.sentenceTiming('now').totalMs).toBeLessThan(providers.GAME_WAITS_MS.now);
+    expect(providers.sentenceTiming('ahead').totalMs).toBeLessThan(providers.GAME_WAITS_MS.ahead);
+  });
+
+  it('the server settings change them, but never past what the game waits', () => {
+    process.env.AI_HEAD_START_MS = '6000';
+    process.env.AI_SENTENCE_BUDGET_MS = '10000';
+    process.env.AI_AHEAD_HEAD_START_MS = '12000';
+    process.env.AI_AHEAD_BUDGET_MS = '60000';
+    expect(providers.sentenceTiming('now')).toMatchObject({ headStartMs: 6_000, totalMs: 10_000, writerBudgetMs: 7_100 });
+    expect(providers.sentenceTiming('ahead')).toMatchObject({ headStartMs: 12_000, totalMs: 19_500 });
+    // A head start longer than the writers' time is cut to it; nonsense is ignored.
+    process.env.AI_HEAD_START_MS = '99000';
+    process.env.AI_SENTENCE_BUDGET_MS = 'soon';
+    expect(providers.sentenceTiming('now')).toMatchObject({ headStartMs: 8_100, totalMs: 11_000 });
+  });
+
+  it('glm answering within its head start writes the sentence and no backup writer is asked', async () => {
+    process.env.AI_HEAD_START_MS = '1200';
+    const n = net((c) => (isChecker(c) ? agree : item));
+    slowGlm(n, 800);
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: GLM, verified: 'yes' });
+    expect(metaOf(res).writers).toMatch(/^nvidia-writer wrote in 0\.[89] s$/);
+    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.model)).toEqual([GLM]);
+  });
+
+  it('a sentence made ahead gives glm its longer head start: the same slow glm loses when the class waits and wins when made ahead', async () => {
+    process.env.AI_HEAD_START_MS = '300';
+    process.env.AI_AHEAD_HEAD_START_MS = '1500';
+    const now = net((c) => (isChecker(c) ? agree : item));
+    slowGlm(now, 800);
+    const waiting = await sentence();
+    expect(metaOf(waiting)).toMatchObject({ model: NEMOTRON });
+    expect(metaOf(waiting).urgency).toBe('now');
+
+    providers.aiBreaker.reset();
+    const later = net((c) => (isChecker(c) ? agree : item));
+    slowGlm(later, 800);
+    const ahead = await sentence({ ahead: true });
+    expect(metaOf(ahead)).toMatchObject({ model: GLM, urgency: 'ahead' });
+    expect(later.calls.filter((c) => !isChecker(c)).map((c) => c.model)).toEqual([GLM]);
+  });
+
+  it('after the head start the backups follow 1.5 s apart: glm, then Nemotron, then Groq', async () => {
+    process.env.AI_HEAD_START_MS = '200';
+    process.env.AI_HEDGE_AFTER_MS = '200';
+    const n = net((c) => (isChecker(c) ? agree : item));
+    const base = n.fetch.getMockImplementation()!;
+    n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (body.model === GLM || body.model === NEMOTRON) await new Promise((r) => setTimeout(r, 3_000));
+      return base(url, init);
+    });
+    const res = await sentence();
+    expect(metaOf(res)).toMatchObject({ provider: 'groq' });
+    expect(metaOf(res).writers).toMatch(/^nvidia-writer still writing after 0\.\d s; nemotron still writing after 0\.\d s \(started at 0\.[2-3] s\); groq wrote in 0\.\d s \(started at 0\.[4-6] s\)$/);
+  });
+
+  it('when every writer fails, the reason sent to the game includes how long each one took', async () => {
+    net((c) => (isChecker(c) ? agree : fail(500)));
+    const body = await (await sentence()).json();
+    expect(body.fallback).toBe(true);
+    expect(body.error).toMatch(/timing: nvidia-writer failed after 0\.\d s \(500\); nemotron failed after/);
+  });
+
+  it('the timing line names each writer, how long it took, and when it started', () => {
+    expect(
+      chain.writerTimingNote(
+        [
+          { key: 'nvidia-writer', startedMs: 0, tookMs: 6_420, outcome: 'wrote' },
+          { key: 'nemotron', startedMs: 5_000 },
+          { key: 'groq', startedMs: 6_500, tookMs: 120, outcome: 'failed', reason: '429' },
+        ],
+        6_420
+      )
+    ).toBe('nvidia-writer wrote in 6.4 s; nemotron still writing after 1.4 s (started at 5.0 s); groq failed after 0.1 s (429) (started at 6.5 s)');
   });
 });
