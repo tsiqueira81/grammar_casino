@@ -454,6 +454,11 @@ function buildOrderedKeyPool(explicitKey?: string | string[]): string[] {
   return [...ready, ...cooling.map((c) => c.key)];
 }
 
+/** The JSON shape, written into the prompt for a model without Groq's strict JSON schema. */
+export function groqSchemaInstruction(schema: any): string {
+  return `\n\n=== REPLY FORMAT ===\nReply with ONE JSON object that matches this JSON Schema exactly: use these field names, fill every required field, add no other text.\n${JSON.stringify(convertToStrictJsonSchema(schema))}`;
+}
+
 /**
  * Calls Groq's `openai/gpt-oss-120b` model with `reasoning_effort: "low"` (to protect the 8,000 TPM
  * free-tier limit), automatic multi-key failover (`GROQ_API_KEY`, `GROQ_API_KEY_2`, etc.),
@@ -479,10 +484,16 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
 
   modelLoop: for (const model of options.models && options.models.length ? options.models : GROQ_TEXT_FALLBACK_MODELS) {
     const thinks = model.startsWith('openai/gpt-oss');
+    // Qwen 3 thinks by default; on Groq, reasoning_effort "none" turns that off (2026-11-14, Qwen
+    // writes first). A 400 sends the request again without it.
+    const isQwen = /qwen/i.test(model);
     for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
       const currentKey = keys[keyIdx];
       const hasAnotherKey = keyIdx < keys.length - 1;
-      let useStrictSchema = Boolean(responseSchema);
+      // Groq's strict JSON schema works on gpt-oss only. Other models get any JSON, with the schema
+      // written into the prompt so they keep its field names.
+      let useStrictSchema = Boolean(responseSchema) && thinks;
+      let qwenNoThinking = isQwen;
       let attempts = 2;
       // gpt-oss thinks before it answers, and its thinking uses the same token allowance.
       let maxTokens = Math.min(GROQ_MAX_COMPLETION_TOKENS, maxCompletionTokens + (thinks ? GROQ_REASONING_HEADROOM_TOKENS : 0));
@@ -495,7 +506,7 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
             model,
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: prompt },
+              { role: 'user', content: responseSchema && !useStrictSchema ? prompt + groqSchemaInstruction(responseSchema) : prompt },
             ],
             temperature,
             max_completion_tokens: maxTokens,
@@ -505,6 +516,7 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
             body.reasoning_effort = 'low';
             body.include_reasoning = false;
           }
+          if (qwenNoThinking) body.reasoning_effort = 'none';
 
           if (responseSchema) {
             if (useStrictSchema) {
@@ -526,6 +538,11 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
           if (!res.ok) {
             const errText = await res.text();
             // If json_schema is not supported by a fallback model or fails validation, retry immediately with json_object
+            if (res.status === 400 && qwenNoThinking) {
+              qwenNoThinking = false;
+              attempts++;
+              continue;
+            }
             if (res.status === 400 && useStrictSchema && responseSchema) {
               useStrictSchema = false;
               attempts++;
@@ -558,7 +575,8 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
 
           const data: any = await res.json();
           const choice = data?.choices?.[0];
-          const rawContent = choice?.message?.content || '';
+          // A model that still thinks out loud: its <think>...</think> part is removed.
+          const rawContent = String(choice?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
           const text = responseSchema ? extractJsonFromText(rawContent) : String(rawContent).trim();
           if (!text) {
             if (choice?.finish_reason === 'length') {

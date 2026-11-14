@@ -1,12 +1,12 @@
-// The AI chain for text (2026-11-14, chosen by the teacher; CoArena was dropped the same day).
-// Writers are tried in this order:
-//   1. NVIDIA   z-ai/glm-5.3-flash         (key NVIDIA_API_KEY)
-//   2. NVIDIA   nemotron 3 ultra           (key NVIDIA_API_KEY)
-//   3. Groq     openai/gpt-oss-120b        (key GROQ_API_KEY)
+// The AI chain for text (2026-11-14, chosen by the teacher). Writers are tried in this order:
+//   1. Groq     qwen/qwen3.8-27b           (key GROQ_API_KEY; gpt-oss-120b if qwen is not found)
+//   2. NVIDIA   z-ai/glm-5.3-flash         (key NVIDIA_API_KEY)
+//   3. NVIDIA   nemotron 3 ultra           (key NVIDIA_API_KEY)
 //   4. Gemini   gemini-3.5-flash-lite      (key GEMINI_API_KEY)
-// and the offline bank after that (in the game). A different model checks every item blind: on
-// NVIDIA, minimaxai/minimax-m3.1-flash on a second account (key NVIDIA_CHECKER_API_KEY; without it
-// the checker uses NVIDIA_API_KEY); see checkerOrder.
+// and the offline bank after that (in the game). A different model checks every item blind: for a
+// Groq item, Groq openai/gpt-oss-120b; for an NVIDIA item, minimaxai/minimax-m3.1-flash on a second
+// NVIDIA account (key NVIDIA_CHECKER_API_KEY, or NVIDIA_API_KEY without it); see checkerOrder.
+// (glm wrote first from PR #28 until it kept taking over 12 s, 2026-11-14.)
 // Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
 import { resolveGroqApiKey, callGroqChatCompletion, convertToStrictJsonSchema, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
 import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, HEDGE_AFTER_MS, REASONING_HEADROOM_TOKENS, sentenceTiming, type SentenceUrgency, aiBreaker, aiModels, failureReason, isReasoningModel, parseRetryAfter, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
@@ -267,10 +267,36 @@ function geminiModel(models: string[]): ChainModel | null {
   return { provider: 'gemini', breaker: 'gemini', model: models[0], call: (req) => run(req, models) };
 }
 
+/** The writers' order when the AI_WRITER_ORDER setting does not say otherwise (2026-11-14). */
+export const DEFAULT_WRITER_ORDER: BreakerKey[] = ['groq', 'nvidia-writer', 'nemotron', 'gemini'];
+const WRITER_NAMES: BreakerKey[] = ['groq', 'nvidia-writer', 'nemotron', 'gemini'];
+
+/**
+ * The order from the server setting AI_WRITER_ORDER, e.g. "nvidia-writer,nemotron,groq,gemini"
+ * to put glm first again without new code. A writer left out is not used; an unknown name is
+ * ignored; a setting with no known name gives the default order.
+ */
+export function writerOrder(): BreakerKey[] {
+  const listed = env('AI_WRITER_ORDER')
+    .split(',')
+    .map((x) => x.trim().toLowerCase())
+    .filter((x): x is BreakerKey => (WRITER_NAMES as string[]).includes(x));
+  const unique = listed.filter((x, i) => listed.indexOf(x) === i);
+  return unique.length ? unique : DEFAULT_WRITER_ORDER;
+}
+
 /** The writers, in the order they are tried. Only those with a key are listed. */
 export function writerChain(): ChainModel[] {
   const m = aiModels();
-  return [nvidiaPairModel('writer'), nemotronModel(), groqModel(m.groqText), geminiModel(m.geminiText)].filter((x): x is ChainModel => Boolean(x));
+  const make: Record<string, () => ChainModel | null> = {
+    groq: () => groqModel(m.groqText),
+    'nvidia-writer': () => nvidiaPairModel('writer'),
+    nemotron: () => nemotronModel(),
+    gemini: () => geminiModel(m.geminiText),
+  };
+  return writerOrder()
+    .map((key) => make[key]())
+    .filter((x): x is ChainModel => Boolean(x));
 }
 
 export function hasAnyTextKey(): boolean {
@@ -494,8 +520,8 @@ export async function runWriterChain(
 export { HEDGE_AFTER_MS };
 
 /**
- * For a single sentence (2026-11-14). glm-5.3-flash writes first and works alone for a head start
- * (5 s when the class waits, 10 s for a sentence made ahead; sentenceTiming). When it has not
+ * For a single sentence (2026-11-14). The first writer (Groq qwen) works alone for a head start
+ * (3 s when the class waits, 4 s for a sentence made ahead; sentenceTiming). When it has not
  * answered by then, the backup writers start one after another, 1.5 s apart (or at once when the
  * one before fails), and the first good answer wins. A writer that fails early hands over at once.
  */
