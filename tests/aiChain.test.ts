@@ -160,8 +160,8 @@ describe('the writer chain, in the order the teacher chose', () => {
     const res = await sentence();
     expect(res.status).toBe(200);
     const groqCalls = n.calls.filter((c) => c.host === 'api.groq.com');
-    expect(groqCalls.map((c) => c.model)).toEqual(['openai/gpt-oss-120b', 'llama-3.3-70b-versatile']);
-    expect(metaOf(res)).toMatchObject({ provider: 'groq', verifiedBy: 'llama-3.3-70b-versatile' });
+    expect(groqCalls.map((c) => c.model)).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
+    expect(metaOf(res)).toMatchObject({ provider: 'groq', verifiedBy: 'openai/gpt-oss-20b' });
   });
 
   it('Gemini writes last, and a different Gemini model checks', async () => {
@@ -257,7 +257,7 @@ describe('every step is checked by a different model', () => {
 
   it('with only one Groq key, Groq still checks with its other model', () => {
     setKeys({ GROQ_API_KEY: KEYS.GROQ_API_KEY });
-    expect(chain.pickChecker('groq', 'openai/gpt-oss-120b')!.model).toBe('llama-3.3-70b-versatile');
+    expect(chain.pickChecker('groq', 'openai/gpt-oss-120b')!.model).toBe('openai/gpt-oss-20b');
   });
 });
 
@@ -401,5 +401,147 @@ describe('a sentence the class is waiting for (hedged chain)', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(metaOf(res)).toMatchObject({ provider: 'nvidia', fallbackReason: 'coarena-writer 503' });
     expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.host)).toEqual(['coarena.ai', 'integrate.api.nvidia.com']);
+  });
+});
+
+describe('fixes after the second live test (2026-11-14): slow checker, Groq 404, gpt-oss tokens, 429', () => {
+  const groqOnly = () => setKeys({ GROQ_API_KEY: KEYS.GROQ_API_KEY });
+  const groqAnswer = (content: string, finish = 'stop') =>
+    new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }], usage: { total_tokens: 10 } }), { status: 200 });
+
+  it('the single-sentence check gets 2.5 to 6 s, from what is left of the 8 s', () => {
+    expect(providers.singleCheckMs(0)).toBe(6_000);
+    expect(providers.singleCheckMs(3_000)).toBe(4_600);
+    expect(providers.singleCheckMs(7_000)).toBe(2_500);
+  });
+
+  it('a slow glm checker no longer sends the sentence to the bank: Groq joins after 2 s and its answer counts', async () => {
+    const n = net((c) => (isChecker(c) ? agree : item));
+    const base = n.fetch.getMockImplementation()!;
+    n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (String(body.model).startsWith('glm')) await new Promise((r) => setTimeout(r, 5_000));
+      return base(url, init);
+    });
+    const started = Date.now();
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(metaOf(res)).toMatchObject({ provider: 'coarena', verified: 'yes', verifiedBy: 'openai/gpt-oss-20b' });
+  }, 15_000);
+
+  it('a checker that fails hands over to the next checker at once', async () => {
+    const n = net((c) => (String(c.model).startsWith('glm') ? fail(500) : isChecker(c) ? agree : item));
+    const started = Date.now();
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual(['glm-5-3-flash', 'openai/gpt-oss-20b']);
+  });
+
+  it('Groq checks with a model it still has, never llama-3.3-70b, and a 404 moves on to the next model at once', async () => {
+    groqOnly();
+    const n = net((c) => (isChecker(c) && c.model === 'openai/gpt-oss-20b' ? fail(404) : isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(n.calls.map((c) => c.model)).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']);
+    expect(n.calls.some((c) => /llama/.test(c.model))).toBe(false);
+    expect(metaOf(res).verifiedBy).toBe('qwen/qwen3.8-27b');
+  });
+
+  it('the Groq checker can be changed with GROQ_CHECKER_MODELS', () => {
+    groqOnly();
+    process.env.GROQ_CHECKER_MODELS = 'some/new-model';
+    try {
+      expect(chain.pickChecker('groq', 'openai/gpt-oss-120b')!.model).toBe('some/new-model');
+    } finally {
+      delete process.env.GROQ_CHECKER_MODELS;
+    }
+  });
+
+  it('gpt-oss gets room for its thinking and is asked to think briefly', async () => {
+    groqOnly();
+    const n = net((c) => (isChecker(c) ? agree : item));
+    await sentence();
+    const writer = n.calls[0];
+    expect(writer.model).toBe('openai/gpt-oss-120b');
+    expect(writer.body.reasoning_effort).toBe('low');
+    expect(writer.body.max_completion_tokens).toBe(900 + 2_048);
+  });
+
+  it('gpt-oss that runs out of tokens while thinking is asked once more with twice the room', async () => {
+    groqOnly();
+    const n = net((c, i) => (i === 1 ? groqAnswer('', 'length') : isChecker(c) ? agree : item));
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(n.calls[0].body.max_completion_tokens).toBe(2_948);
+    expect(n.calls[1].body.max_completion_tokens).toBe(5_896);
+    expect(metaOf(res).provider).toBe('groq');
+  });
+
+  it('a thinking model on CoArena or NVIDIA gets the same room', async () => {
+    let body: any = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body || '{}'));
+        return new Response(JSON.stringify({ choices: [{ message: { content: '{"text":"x"}' } }] }), { status: 200 });
+      })
+    );
+    await chain.callOpenAiCompatible({ baseUrl: 'https://x.test/v1', apiKey: 'k', model: 'openai/gpt-oss-120b', prompt: 'p', maxCompletionTokens: 500, jsonMode: 'prompt' });
+    expect(body).toMatchObject({ max_tokens: 2_548, reasoning_effort: 'low' });
+  });
+
+  it('a busy CoArena writer (429) rests as long as it asked, and is not asked again meanwhile', async () => {
+    const busy = () => new Response('{"error":"busy"}', { status: 429, headers: { 'retry-after': '120' } });
+    const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? busy() : isChecker(c) ? agree : item));
+    const first = await sentence();
+    expect(first.status).toBe(200);
+    expect(metaOf(first).fallbackReason).toContain('coarena-writer 429 busy, resting 120 s');
+    const until = providers.aiBreaker.restingUntil('coarena-writer');
+    expect(until - Date.now()).toBeGreaterThan(110_000);
+    const writerCalls = () => n.calls.filter((c) => c.host === 'coarena.ai' && !isChecker(c)).length;
+    expect(writerCalls()).toBe(1);
+    const second = await sentence();
+    expect(second.status).toBe(200);
+    expect(writerCalls()).toBe(1);
+    expect(metaOf(second).fallbackReason).toContain('coarena-writer resting');
+  });
+
+  it('without a Retry-After, a provider that stays busy rests 30 s, then 60 s, then 120 s, at most 10 minutes', () => {
+    const b = new providers.CircuitBreaker();
+    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(30_000);
+    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(60_000);
+    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(120_000);
+    for (let i = 0; i < 10; i++) b.recordBusy('coarena-writer', undefined, 0);
+    expect(b.recordBusy('coarena-writer', undefined, 0)).toBe(10 * 60_000);
+    b.recordSuccess('coarena-writer');
+    expect(b.recordBusy('coarena-writer', 2_000, 0)).toBe(5_000);
+  });
+
+  it('reads Retry-After in seconds or as a date', () => {
+    expect(providers.parseRetryAfter('7')).toBe(7_000);
+    expect(providers.parseRetryAfter(new Date(61_000).toUTCString(), 1_000)).toBe(60_000);
+    expect(providers.parseRetryAfter(null)).toBeUndefined();
+  });
+
+  it('a batch whose glm check fails is checked by the next checker instead of losing every item', async () => {
+    const second = { ...item, text: 'They have just finished their science project.', correction: 'They have just finished their science project.', grammarPhrase: 'have just finished' };
+    const n = net((c) =>
+      String(c.model).startsWith('glm')
+        ? fail(500)
+        : isChecker(c)
+          ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
+          : { items: [item, second] }
+    );
+    const res = await ask({
+      action: 'generateSentenceBatch',
+      settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' },
+      questionType: 'binary',
+      slots: [{ forceCorrect: true, theme: 'Travel' }, { forceCorrect: true, theme: 'Travel' }],
+    });
+    expect((await res.json()).items).toHaveLength(2);
+    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual(['glm-5-3-flash', 'openai/gpt-oss-20b']);
+    expect(metaOf(res).verifiedBy).toBe('openai/gpt-oss-20b');
   });
 });

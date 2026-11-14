@@ -1,8 +1,8 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqOrpheusTts } from '../utils/groqUtils';
 import { verifierSchema } from './verifyItem';
-import { AI_TIMEOUT_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey } from './providers';
-import { COARENA_BASE_URL, NVIDIA_BASE_URL, coarenaCheckerKey, coarenaWriterKey, hasAnyTextKey, nvidiaKey, pickChecker, runOnce, runWriterChain, setGeminiRunner } from './textChain';
+import { AI_TIMEOUT_MS, CHECK_HEDGE_AFTER_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey } from './providers';
+import { COARENA_BASE_URL, NVIDIA_BASE_URL, coarenaCheckerKey, coarenaWriterKey, hasAnyTextKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
 
 // --- Groq & Gemini Client Setup ---
 export let aiClient: GoogleGenAI | null = null;
@@ -300,17 +300,29 @@ export function deepHealthAllowed(authorization: string | null | undefined): boo
 
 /**
  * Package L3: the second model for the cold check, never the one that wrote the item (see
- * checkerOrder in server/textChain.ts: on CoArena, glm-5-3-flash on its own account).
+ * checkerOrder in server/textChain.ts: on CoArena, glm-5-3-flash on its own account). Since
+ * 2026-11-14 the next checker in line takes over when the first fails or is slow
+ * (`hedgeAfterMs`), so one slow checker no longer sends the sentence to the bank. `model` names
+ * the checker that answered once `ask` is done.
  */
-export function checkWithSecondModel(meta: AiMeta, timeoutMs: number, schema: any = verifierSchema): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
+export function checkWithSecondModel(
+  meta: AiMeta,
+  timeoutMs: number,
+  schema: any = verifierSchema,
+  hedgeAfterMs: number = CHECK_HEDGE_AFTER_MS
+): { model: string; ask: ((prompt: string) => Promise<string>) | null } {
   if (meta.provider === 'cache') return { model: '', ask: null };
-  const checker = pickChecker(meta.provider, meta.model);
-  if (!checker) return { model: '', ask: null };
-  return {
-    model: checker.model,
-    ask: async (prompt: string) => {
-      const out = await runOnce(checker, { prompt, responseSchema: schema, schemaName: 'cold_check', maxCompletionTokens: schema === verifierSchema ? 300 : 4000, temperature: 0 }, timeoutMs);
-      return out.text;
-    },
+  const first = pickChecker(meta.provider, meta.model);
+  if (!first) return { model: '', ask: null };
+  const checkers = checkerOrder(meta.provider, meta.model);
+  const result = {
+    model: first.model,
+    ask: async (prompt: string) =>
+      runCheckers(
+        checkers,
+        { prompt, responseSchema: schema, schemaName: 'cold_check', maxCompletionTokens: schema === verifierSchema ? 300 : 4000, temperature: 0 },
+        { timeoutMs, hedgeAfterMs, onModel: (model) => (result.model = model) }
+      ),
   };
+  return result;
 }

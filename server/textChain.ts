@@ -7,7 +7,7 @@
 // CoArena, glm-5-3-flash on a second account (key COARENA_CHECKER_API_KEY); see checkerOrder.
 // Keys live only in the server's secrets (Cloudflare Pages > Settings > Variables and Secrets).
 import { resolveGroqApiKey, callGroqChatCompletion, convertToStrictJsonSchema, extractJsonFromText, toStrictGroqResponseFormat } from '../utils/groqUtils';
-import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
+import { AI_CHAIN_BUDGET_MS, AI_TIMEOUT_MS, REASONING_HEADROOM_TOKENS, aiBreaker, aiModels, failureReason, isReasoningModel, parseRetryAfter, withTimeout, type AiCallKind, type AiMeta, type AiProvider, type BreakerKey } from './providers';
 
 export const COARENA_BASE_URL = 'https://coarena.ai/api/v1';
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
@@ -86,7 +86,12 @@ export interface OpenAiCallOptions extends TextRequest {
 export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text: string; model: string; tokens?: number }> {
   const wantJson = Boolean(o.responseSchema);
   let mode = wantJson ? o.jsonMode : 'prompt';
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // A thinking model (gpt-oss) spends tokens on hidden reasoning before it answers: give it room,
+  // and ask it to think briefly.
+  const thinks = isReasoningModel(o.model);
+  let maxTokens = (o.maxCompletionTokens ?? 1024) + (thinks ? REASONING_HEADROOM_TOKENS : 0);
+  let raisedTokens = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
     const body: Record<string, any> = {
       model: o.model,
       messages: [
@@ -99,7 +104,8 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
         { role: 'user', content: wantJson && mode !== 'schema' ? o.prompt + schemaInstruction(o.responseSchema) : o.prompt },
       ],
       temperature: o.temperature ?? 0.6,
-      max_tokens: o.maxCompletionTokens ?? 1024,
+      max_tokens: maxTokens,
+      ...(thinks ? { reasoning_effort: 'low' } : {}),
       ...(o.extraBody || {}),
     };
     if (wantJson && mode === 'schema') body.response_format = toStrictGroqResponseFormat(o.responseSchema, o.schemaName || 'grammar_casino_schema');
@@ -117,6 +123,7 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
       }
       const err: any = new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
       err.status = res.status;
+      err.retryAfterMs = parseRetryAfter(res.headers?.get?.('retry-after'));
       throw err;
     }
     const data: any = await res.json();
@@ -125,6 +132,12 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
     if (typeof content !== 'string' || !content.trim()) {
       // A thinking model can spend every token on its hidden reasoning and say nothing.
       const why = choice?.finish_reason === 'length' ? 'ran out of tokens while thinking' : choice?.message?.reasoning_content || choice?.message?.reasoning ? 'only thinking, no answer' : 'empty answer';
+      // Once, the same request with twice the room (tokens cost only what is used).
+      if (choice?.finish_reason === 'length' && !raisedTokens) {
+        raisedTokens = true;
+        maxTokens = Math.min(MAX_TOKENS_CEILING, maxTokens * 2);
+        continue;
+      }
       throw new Error(why);
     }
     const text = cleanModelText(content, wantJson);
@@ -143,6 +156,9 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
   }
   throw new Error('no answer');
 }
+
+/** The most tokens one answer may ask for, also after doubling. */
+export const MAX_TOKENS_CEILING = 32_000;
 
 /** Tries each model name in turn when a name is not found (404), so a renamed model still works. */
 async function firstModelThatExists(models: string[], run: (model: string) => Promise<{ text: string; model: string; tokens?: number }>) {
@@ -245,10 +261,11 @@ export function hasAnyTextKey(): boolean {
  */
 export function checkerOrder(writer: AiProvider, writerModel?: string): ChainModel[] {
   const m = aiModels();
-  const groqOther = m.groqText.filter((x) => x !== writerModel);
+  // Groq checks with its own checker list (gpt-oss-20b first), never the model that wrote the item.
+  const groqCheckers = m.groqChecker.filter((x) => x !== writerModel);
   const geminiOther = m.geminiChecker.filter((x) => x !== writerModel);
   const coarenaChecker = coarenaModel('checker');
-  const groqChecker = groqModel(writer === 'groq' ? groqOther.slice(0, 1) : m.groqText.slice(0, 1));
+  const groqChecker = groqModel(groqCheckers);
   const gemini = geminiModel(geminiOther);
   const nvidia = nvidiaModel();
   const order: Record<AiProvider, Array<ChainModel | null>> = {
@@ -271,10 +288,70 @@ export async function runOnce(model: ChainModel, req: TextRequest, timeoutMs: nu
     const out = await withTimeout(model.call(req, timeoutMs), timeoutMs, model.breaker);
     aiBreaker.recordSuccess(model.breaker);
     return out;
-  } catch (err) {
-    aiBreaker.recordFailure(model.breaker);
+  } catch (err: any) {
+    // A busy provider (429) rests at once, for as long as it asked, instead of being asked again.
+    if (err?.status === 429) err.restedMs = aiBreaker.recordBusy(model.breaker, err.retryAfterMs);
+    else aiBreaker.recordFailure(model.breaker);
     throw err;
   }
+}
+
+/**
+ * The blind check (2026-11-14): the first checker that is not resting is asked; when it fails the
+ * next one is asked at once, and when it is still busy after `hedgeAfterMs` the next one starts as
+ * well. The first answer counts. `onModel` learns which checker answered, for the debug log.
+ */
+export function runCheckers(
+  checkers: ChainModel[],
+  req: TextRequest,
+  opts: { timeoutMs: number; hedgeAfterMs?: number; onModel?: (model: string) => void }
+): Promise<string> {
+  const started = Date.now();
+  const deadline = started + opts.timeoutMs;
+  const usable = checkers.filter((c) => !aiBreaker.isOpen(c.breaker));
+  const reasons: string[] = [];
+  return new Promise((resolve, reject) => {
+    let next = 0;
+    let running = 0;
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fail = () => {
+      if (done || running > 0 || next < usable.length) return;
+      done = true;
+      clearTimeout(timer);
+      reject(new Error(reasons.length ? reasons.join('; ') : 'no checker'));
+    };
+    const launch = () => {
+      if (done) return;
+      const left = deadline - Date.now();
+      if (next >= usable.length || left < 500) {
+        next = usable.length;
+        return fail();
+      }
+      const model = usable[next++];
+      running++;
+      clearTimeout(timer);
+      if (opts.hedgeAfterMs && next < usable.length) timer = setTimeout(launch, opts.hedgeAfterMs);
+      runOnce(model, req, left).then(
+        (out) => {
+          running--;
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          opts.onModel?.(out.model || model.model);
+          resolve(out.text);
+        },
+        (err) => {
+          running--;
+          reasons.push(`${model.breaker} ${failureReason(err)}`);
+          if (done) return;
+          if (next < usable.length) launch();
+          else fail();
+        }
+      );
+    };
+    launch();
+  });
 }
 
 /**

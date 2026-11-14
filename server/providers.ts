@@ -23,7 +23,10 @@ export const DEFAULT_MODELS = {
   coarenaWriter: ['deepseek-v4-1-flash-1017'],
   coarenaChecker: ['glm-5-3-flash'],
   nvidiaText: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra'],
-  groqText: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'],
+  // llama-3.3-70b-versatile was retired for free Groq accounts in 2026 (it answered 404).
+  groqText: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+  /** Checks what another model wrote, on Groq (2026-11-14). Change with GROQ_CHECKER_MODELS. */
+  groqChecker: ['openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
   geminiText: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
   /** Checks what Gemini wrote: a different Gemini model. */
   geminiChecker: ['gemini-3.8-flash', 'gemini-4-argon'],
@@ -37,6 +40,7 @@ export function aiModels() {
     coarenaChecker: listFromEnv('COARENA_CHECKER_MODELS', DEFAULT_MODELS.coarenaChecker),
     nvidiaText: listFromEnv('NVIDIA_TEXT_MODELS', DEFAULT_MODELS.nvidiaText),
     groqText: listFromEnv('GROQ_TEXT_MODELS', DEFAULT_MODELS.groqText),
+    groqChecker: listFromEnv('GROQ_CHECKER_MODELS', DEFAULT_MODELS.groqChecker),
     geminiChecker: listFromEnv('GEMINI_CHECKER_MODELS', DEFAULT_MODELS.geminiChecker),
     geminiText: listFromEnv('GEMINI_TEXT_MODELS', DEFAULT_MODELS.geminiText),
     geminiTts: listFromEnv('GEMINI_TTS_MODELS', DEFAULT_MODELS.geminiTts),
@@ -69,6 +73,30 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
   batch: 100_000,
 };
 
+/**
+ * The blind check of a single sentence (2026-11-14). The game waits 8 s for its sentence, so the
+ * check gets what is left of 7.6 s, never less than 2.5 s and never more than 6 s (it was 4 s, and
+ * glm-5-3-flash often took longer). When the first checker is still busy after 2 s, the next one
+ * starts as well and the first answer counts.
+ */
+export const SINGLE_CHECK_DEADLINE_MS = 7_600;
+export const SINGLE_CHECK_MIN_MS = 2_500;
+export const SINGLE_CHECK_MAX_MS = 6_000;
+export const CHECK_HEDGE_AFTER_MS = 2_000;
+/** A batch check (up to 15 items, 45 s in all): the next checker joins after 20 s. */
+export const BATCH_CHECK_HEDGE_AFTER_MS = 20_000;
+
+/** How long the check of a single sentence may take, from when its writing started. */
+export function singleCheckMs(elapsedMs: number): number {
+  return Math.max(SINGLE_CHECK_MIN_MS, Math.min(SINGLE_CHECK_MAX_MS, SINGLE_CHECK_DEADLINE_MS - elapsedMs));
+}
+
+/** Extra tokens a thinking model (gpt-oss) gets for its hidden reasoning, on top of the answer. */
+export const REASONING_HEADROOM_TOKENS = 2_048;
+export function isReasoningModel(model: string): boolean {
+  return /gpt-oss/i.test(model || '');
+}
+
 export class AiTimeoutError extends Error {
   constructor(public provider: AiProvider | BreakerKey, ms: number) {
     super(`${provider} took longer than ${ms / 1000} s`);
@@ -89,10 +117,45 @@ export const BREAKER_FAILURES = 3;
 export const BREAKER_WINDOW_MS = 60_000;
 export const BREAKER_OPEN_MS = 5 * 60_000;
 
-/** Three failures within a minute skip that provider for five minutes. */
+/**
+ * A "busy" answer (HTTP 429): the provider rests at once, for as long as it asked (Retry-After)
+ * or, when it did not say, 30 s, then 60 s, 120 s ... up to 10 minutes while it stays busy. It is
+ * not asked again in the meantime, so a busy provider is never hammered and the chain goes on.
+ */
+export const BUSY_REST_FIRST_MS = 30_000;
+export const BUSY_REST_MIN_MS = 5_000;
+export const BUSY_REST_MAX_MS = 10 * 60_000;
+
+/** Reads a Retry-After header (seconds or a date), in milliseconds, or undefined. */
+export function parseRetryAfter(value: string | null | undefined, now: number = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const secs = Number(value);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
+/** Three failures within a minute skip that provider for five minutes; a 429 rests it at once. */
 export class CircuitBreaker {
   private failures = new Map<BreakerKey, number[]>();
   private openUntil = new Map<BreakerKey, number>();
+  private busyStreak = new Map<BreakerKey, number>();
+
+  /** A 429: rests the provider and returns for how long. */
+  recordBusy(provider: BreakerKey, retryAfterMs?: number, now: number = Date.now()): number {
+    const streak = (this.busyStreak.get(provider) || 0) + 1;
+    this.busyStreak.set(provider, streak);
+    const backoff = BUSY_REST_FIRST_MS * 2 ** (streak - 1);
+    const wanted = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) ? Math.max(retryAfterMs, streak > 1 ? backoff : 0) : backoff;
+    const ms = Math.max(BUSY_REST_MIN_MS, Math.min(BUSY_REST_MAX_MS, wanted));
+    this.openUntil.set(provider, Math.max(this.openUntil.get(provider) || 0, now + ms));
+    return ms;
+  }
+
+  /** When a resting provider may be asked again (0 when it is not resting). */
+  restingUntil(provider: BreakerKey): number {
+    return this.openUntil.get(provider) || 0;
+  }
 
   isOpen(provider: BreakerKey, now: number = Date.now()): boolean {
     return (this.openUntil.get(provider) || 0) > now;
@@ -111,11 +174,13 @@ export class CircuitBreaker {
   recordSuccess(provider: BreakerKey): void {
     this.failures.set(provider, []);
     this.openUntil.delete(provider);
+    this.busyStreak.delete(provider);
   }
 
   reset(): void {
     this.failures.clear();
     this.openUntil.clear();
+    this.busyStreak.clear();
   }
 }
 
@@ -152,7 +217,8 @@ export function formatAiMeta(meta: AiMeta): string {
 /** Short reason for the log: "timeout", "429", "breaker open" and so on. */
 export function failureReason(err: unknown): string {
   if (err instanceof AiTimeoutError) return 'timeout';
-  const e = err as { status?: number; message?: string } | null;
+  const e = err as { status?: number; message?: string; restedMs?: number } | null;
+  if (e?.status === 429 && e.restedMs) return `429 busy, resting ${Math.round(e.restedMs / 1000)} s`;
   if (e?.status) return String(e.status);
   return String(e?.message || err || 'error').slice(0, 60);
 }

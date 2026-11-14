@@ -5,7 +5,11 @@ export const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/co
 export const GROQ_AUDIO_SPEECH_URL = 'https://api.groq.com/openai/v1/audio/speech';
 
 export const GROQ_TEXT_MODEL = 'openai/gpt-oss-120b';
-export const GROQ_TEXT_FALLBACK_MODELS = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
+// llama-3.3-70b-versatile was retired for free Groq accounts in 2026 (404), so it is no longer listed.
+export const GROQ_TEXT_FALLBACK_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+/** Extra tokens gpt-oss gets for its hidden reasoning, on top of the answer (2026-11-14). */
+export const GROQ_REASONING_HEADROOM_TOKENS = 2_048;
+const GROQ_MAX_COMPLETION_TOKENS = 32_000;
 export const GROQ_TTS_MODEL = 'canopylabs/orpheus-v1-english';
 
 export const VALID_ORPHEUS_VOICES = ['troy', 'autumn', 'diana', 'hannah', 'austin', 'daniel'] as const;
@@ -473,12 +477,16 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
 
   let lastError: any = null;
 
-  for (const model of options.models && options.models.length ? options.models : GROQ_TEXT_FALLBACK_MODELS) {
+  modelLoop: for (const model of options.models && options.models.length ? options.models : GROQ_TEXT_FALLBACK_MODELS) {
+    const thinks = model.startsWith('openai/gpt-oss');
     for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
       const currentKey = keys[keyIdx];
       const hasAnotherKey = keyIdx < keys.length - 1;
       let useStrictSchema = Boolean(responseSchema);
       let attempts = 2;
+      // gpt-oss thinks before it answers, and its thinking uses the same token allowance.
+      let maxTokens = Math.min(GROQ_MAX_COMPLETION_TOKENS, maxCompletionTokens + (thinks ? GROQ_REASONING_HEADROOM_TOKENS : 0));
+      let raisedTokens = false;
 
       while (attempts > 0) {
         attempts--;
@@ -490,11 +498,12 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
               { role: 'user', content: prompt },
             ],
             temperature,
-            max_completion_tokens: maxCompletionTokens,
+            max_completion_tokens: maxTokens,
           };
 
-          if (model.startsWith('openai/gpt-oss')) {
+          if (thinks) {
             body.reasoning_effort = 'low';
+            body.include_reasoning = false;
           }
 
           if (responseSchema) {
@@ -531,7 +540,9 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
                 err.status = 429;
                 throw err;
               }
-              if (attempts > 0 && waitMs <= 8000) {
+              // A short wait only: a long one would use up the class's 8 s. Longer than 2 s, the
+              // chain rests Groq and moves on (server/providers.ts recordBusy).
+              if (attempts > 0 && waitMs <= 2000) {
                 await new Promise((r) => setTimeout(r, waitMs));
                 continue;
               }
@@ -541,19 +552,33 @@ export async function callGroqChatCompletion(options: GroqChatOptions): Promise<
             }
             const err: any = new Error(`Groq Chat API Error (${res.status}): ${errText.slice(0, 300)}`);
             err.status = res.status;
+            if (res.status === 429) err.retryAfterMs = extractGroqRetryDelayMs(errText, res.headers.get('retry-after'));
             throw err;
           }
 
           const data: any = await res.json();
-          const rawContent = data?.choices?.[0]?.message?.content || '';
+          const choice = data?.choices?.[0];
+          const rawContent = choice?.message?.content || '';
           const text = responseSchema ? extractJsonFromText(rawContent) : String(rawContent).trim();
           if (!text) {
+            if (choice?.finish_reason === 'length') {
+              // It spent every token thinking: once more with twice the room.
+              if (!raisedTokens) {
+                raisedTokens = true;
+                maxTokens = Math.min(GROQ_MAX_COMPLETION_TOKENS, maxTokens * 2);
+                attempts++;
+                continue;
+              }
+              throw new Error('ran out of tokens while thinking');
+            }
             throw new Error('Empty response content returned by Groq model.');
           }
           const tokens = typeof data?.usage?.total_tokens === 'number' ? data.usage.total_tokens : undefined;
           return { text, model, tokens };
         } catch (e: any) {
           lastError = e;
+          // The model does not exist on this account: the next model, not the same one again.
+          if (e?.status === 404) continue modelLoop;
           if (e?.status === 401 || e?.status === 403) {
             if (hasAnotherKey) {
               break; // Try the next Groq API key
@@ -630,7 +655,9 @@ export async function callGroqOrpheusTts(
                 err.status = 429;
                 throw err;
               }
-              if (attempts > 0 && waitMs <= 8000) {
+              // A short wait only: a long one would use up the class's 8 s. Longer than 2 s, the
+              // chain rests Groq and moves on (server/providers.ts recordBusy).
+              if (attempts > 0 && waitMs <= 2000) {
                 await new Promise((r) => setTimeout(r, waitMs));
                 continue;
               }
