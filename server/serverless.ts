@@ -3,7 +3,7 @@ import { deepHealth, deepHealthAllowed, hasConfiguredAiKey } from './aiProviders
 import { writerChain } from './textChain';
 
 /** The AI secrets the server looks for (names only). */
-export const AI_KEY_NAMES = ['COARENA_WRITER_API_KEY', 'COARENA_CHECKER_API_KEY', 'NVIDIA_API_KEY', 'GROQ_API_KEY', 'GROQ_API_KEY_2', 'GEMINI_API_KEY'];
+export const AI_KEY_NAMES = ['NVIDIA_API_KEY', 'NVIDIA_CHECKER_API_KEY', 'GROQ_API_KEY', 'GROQ_API_KEY_2', 'GEMINI_API_KEY'];
 let lastEnvNames: string[] = [];
 
 /**

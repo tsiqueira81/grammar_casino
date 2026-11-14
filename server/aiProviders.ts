@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqOrpheusTts } from '../utils/groqUtils';
 import { verifierSchema } from './verifyItem';
 import { AI_TIMEOUT_MS, CHECK_HEDGE_AFTER_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey } from './providers';
-import { COARENA_BASE_URL, NVIDIA_BASE_URL, coarenaCheckerKey, coarenaWriterKey, hasAnyTextKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
+import { NVIDIA_BASE_URL, hasAnyTextKey, nvidiaCheckerKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
 
 // --- Groq & Gemini Client Setup ---
 export let aiClient: GoogleGenAI | null = null;
@@ -170,8 +170,8 @@ function hasGeminiKey(): boolean {
 }
 
 /**
- * Every text call (sentences, hints, checks) walks the chain in server/textChain.ts: CoArena,
- * NVIDIA, Groq, Gemini. All failing throws, and the game falls back to its offline bank.
+ * Every text call (sentences, hints, checks) walks the chain in server/textChain.ts: NVIDIA
+ * (glm, then Nemotron), Groq, Gemini. All failing throws, and the game falls back to its offline bank.
  */
 export async function generateAiText(options: {
   prompt: string;
@@ -282,9 +282,9 @@ export async function deepHealth(): Promise<Record<string, { ok: boolean; ms: nu
   const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
   const jobs: Promise<void>[] = [];
   const base = (name: string, fallback: string) => (String(process.env[name] || '').trim() || fallback).replace(/\/+$/, '');
-  if (coarenaWriterKey()) jobs.push(probe('coarena-writer', `${base('COARENA_BASE_URL', COARENA_BASE_URL)}/models`, { Authorization: `Bearer ${coarenaWriterKey()}` }));
-  if (coarenaCheckerKey()) jobs.push(probe('coarena-checker', `${base('COARENA_BASE_URL', COARENA_BASE_URL)}/models`, { Authorization: `Bearer ${coarenaCheckerKey()}` }));
-  if (nvidiaKey()) jobs.push(probe('nvidia', `${base('NVIDIA_BASE_URL', NVIDIA_BASE_URL)}/models`, { Authorization: `Bearer ${nvidiaKey()}` }));
+  const nvidiaModels = `${base('NVIDIA_BASE_URL', NVIDIA_BASE_URL)}/models`;
+  if (nvidiaKey()) jobs.push(probe('nvidia-writer', nvidiaModels, { Authorization: `Bearer ${nvidiaKey()}` }));
+  if (nvidiaCheckerKey()) jobs.push(probe('nvidia-checker', nvidiaModels, { Authorization: `Bearer ${nvidiaCheckerKey()}` }));
   if (groqKey) jobs.push(probe('groq', 'https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${groqKey}` }));
   if (hasGeminiKey()) jobs.push(probe('gemini', 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': geminiKey }));
   await Promise.all(jobs);
@@ -300,7 +300,7 @@ export function deepHealthAllowed(authorization: string | null | undefined): boo
 
 /**
  * Package L3: the second model for the cold check, never the one that wrote the item (see
- * checkerOrder in server/textChain.ts: on CoArena, glm-5-3-flash on its own account). Since
+ * checkerOrder in server/textChain.ts: on NVIDIA, minimax-m3.1-flash on its own account). Since
  * 2026-11-14 the next checker in line takes over when the first fails or is slow
  * (`hedgeAfterMs`), so one slow checker no longer sends the sentence to the bank. `model` names
  * the checker that answered once `ask` is done.

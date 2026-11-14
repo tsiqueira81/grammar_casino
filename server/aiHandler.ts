@@ -474,7 +474,7 @@ Respond ONLY with valid JSON matching the schema.`;
     }
   } catch (err: any) {
     const overload = isHighTrafficOrOverload(err);
-    // Every step of the chain and why it failed, e.g. "coarena-writer 401; nvidia timeout; gemini 429".
+    // Every step of the chain and why it failed, e.g. "nvidia-writer 401; nemotron timeout; gemini 429".
     const chainReasons: string[] = Array.isArray(err?.chainReasons) ? err.chainReasons : [];
     const shortReason = chainReasons.length
       ? `Every AI failed (${chainReasons.join('; ')}; writers with a key: ${err?.chainConfigured || 'none'}); using the built-in bank.`

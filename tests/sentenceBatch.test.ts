@@ -27,7 +27,7 @@ const payload = {
     { forceCorrect: true, subtype: null, theme: 'Travel' },
   ],
 };
-const meta: AiMeta = { provider: 'coarena', model: 'deepseek-v4-1-flash-1017', latencyMs: 5 };
+const meta: AiMeta = { provider: 'nvidia', model: 'z-ai/glm-5.3-flash', latencyMs: 5 };
 
 function deps(answers: object[] | Error, written: object[] = items) {
   const ask = vi.fn(async (_prompt: string) => {
@@ -35,7 +35,7 @@ function deps(answers: object[] | Error, written: object[] = items) {
     return JSON.stringify({ answers });
   });
   const write = vi.fn(async (_req: any) => ({ text: JSON.stringify({ items: written }), meta }));
-  return { write, ask, deps: { write, checker: () => ({ model: 'glm-5-3-flash', ask }) } };
+  return { write, ask, deps: { write, checker: () => ({ model: 'minimaxai/minimax-m3.1-flash', ask }) } };
 }
 const yes = (t: number, text: string) => ({ task: t, grammatical: true, correction: text, acceptable: [] });
 
