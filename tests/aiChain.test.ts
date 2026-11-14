@@ -783,6 +783,35 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
     expect(metaOf(res)).toMatchObject({ provider: 'groq', model: QWEN });
   });
 
+  it('a batch (made ahead) lets qwen think, with its thinking hidden and room for it; a single sentence does not', async () => {
+    const n = net((c) =>
+      isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
+    );
+    await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+    const batchQwen = n.calls.find((c) => c.model === QWEN)!;
+    expect(batchQwen.body.reasoning_effort).toBeUndefined();
+    expect(batchQwen.body.reasoning_format).toBe('hidden');
+    const single = net((c) => (isChecker(c) ? agree : item));
+    await sentence();
+    const singleQwen = single.calls.find((c) => c.model === QWEN)!;
+    expect(singleQwen.body.reasoning_effort).toBe('none');
+    expect(singleQwen.body.reasoning_format).toBeUndefined();
+    expect(batchQwen.body.max_completion_tokens).toBeGreaterThan(singleQwen.body.max_completion_tokens);
+  });
+
+  it('when Groq refuses "reasoning_format: hidden" (400), the batch is asked again without it', async () => {
+    const n = net((c) =>
+      c.model === QWEN && c.body.reasoning_format === 'hidden'
+        ? fail(400)
+        : isChecker(c)
+          ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] }
+          : { items: [{ ...item, slot: 0 }] }
+    );
+    const res = await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+    expect(metaOf(res)).toMatchObject({ provider: 'groq', model: QWEN });
+    expect(n.calls.filter((c) => c.model === QWEN).map((c) => c.body.reasoning_format)).toEqual(['hidden', undefined]);
+  });
+
   it('AI_WRITER_ORDER puts glm first again without new code; unknown names are ignored', () => {
     process.env.AI_WRITER_ORDER = ' nvidia-writer , NEMOTRON, groq, nonsense ';
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['nvidia-writer', 'nemotron', 'groq']);
