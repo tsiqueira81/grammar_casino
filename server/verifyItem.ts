@@ -41,20 +41,20 @@ export function quickProblems(item: Partial<GeneratedSentence>, type: QuestionTy
 }
 
 /** What the verifier is asked. It never sees the key. */
-export function verifierPrompt(item: Partial<GeneratedSentence>, type: QuestionType): string | null {
-  const head = 'You are a careful Cambridge English examiner. Answer only from the text below; reply in JSON.';
+export function verifierPrompt(item: Partial<GeneratedSentence>, type: QuestionType, withHead: boolean = true): string | null {
+  const head = withHead ? 'You are a careful Cambridge English examiner. Answer only from the text below; reply in JSON.' : '';
   if (type === 'binary') {
-    return `${head}\nSentence: "${item.text}"\nIs this sentence grammatically correct standard English? If it is not, give the corrected sentence.`;
+    return `${head ? `${head}\n` : ''}Sentence: "${item.text}"\nIs this sentence grammatically correct standard English? If it is not, give the corrected sentence.`;
   }
   if (type === 'multipleChoice') {
     const options = (item.options || []).map((o, i) => `${String.fromCharCode(65 + i)}) ${o}`).join('\n');
-    return `${head}\nSentence: "${item.text}"\nOptions:\n${options}\nWhich options are grammatically acceptable in the gap? List every acceptable option, written exactly as shown.`;
+    return `${head ? `${head}\n` : ''}Sentence: "${item.text}"\nOptions:\n${options}\nWhich options are grammatically acceptable in the gap? List every acceptable option, written exactly as shown.`;
   }
   if (type === 'openCloze') {
-    return `${head}\nSentence: "${item.text}"\nWhich single words could fill the gap correctly? List all of them (at most 5), most natural first.`;
+    return `${head ? `${head}\n` : ''}Sentence: "${item.text}"\nWhich single words could fill the gap correctly? List all of them (at most 5), most natural first.`;
   }
   if (type === 'wordFormation') {
-    return `${head}\nSentence: "${item.text}"\nBase word: ${String(item.baseWord || '').toUpperCase()}\nForm a word from the base word that fills the gap correctly. List every correct form (at most 3), most natural first.`;
+    return `${head ? `${head}\n` : ''}Sentence: "${item.text}"\nBase word: ${String(item.baseWord || '').toUpperCase()}\nForm a word from the base word that fills the gap correctly. List every correct form (at most 3), most natural first.`;
   }
   return null; // Key word transformation: checked by the quick checks and the marking rules only.
 }

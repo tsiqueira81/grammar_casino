@@ -51,7 +51,7 @@ export function readAiDailyUsage(storage: DailyStorage | null, now: Date): AiDai
 }
 
 export function getAiCallKind(action: string): AiCallKind {
-  return action === 'generateSentence' ? 'sentence' : 'other';
+  return action === 'generateSentence' || action === 'generateSentenceBatch' ? 'sentence' : 'other';
 }
 
 /**
@@ -62,11 +62,14 @@ export function tryUseAiCall(
   storage: DailyStorage | null,
   kind: AiCallKind,
   now: Date = new Date(),
-  limits: Record<AiCallKind, number> = { sentence: AI_DAILY_SENTENCE_LIMIT, other: AI_DAILY_OTHER_LIMIT }
+  limits: Record<AiCallKind, number> = { sentence: AI_DAILY_SENTENCE_LIMIT, other: AI_DAILY_OTHER_LIMIT },
+  /** A batch of 15 sentences counts as 15. */
+  count: number = 1
 ): boolean {
   const usage = readAiDailyUsage(storage, now);
-  if (usage[kind] >= limits[kind]) return false;
-  usage[kind] += 1;
+  const n = Math.max(1, Math.floor(count));
+  if (usage[kind] + n > limits[kind]) return false;
+  usage[kind] += n;
   if (storage) {
     try {
       storage.setItem(AI_DAILY_LIMIT_STORAGE_KEY, JSON.stringify(usage));
