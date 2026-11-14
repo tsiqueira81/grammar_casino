@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqOrpheusTts } from '../utils/groqUtils';
 import { verifierSchema } from './verifyItem';
-import { AI_TIMEOUT_MS, CHECK_HEDGE_AFTER_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey } from './providers';
+import { AI_TIMEOUT_MS, CHECK_HEDGE_AFTER_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey, type SentenceUrgency } from './providers';
 import { NVIDIA_BASE_URL, hasAnyTextKey, nvidiaCheckerKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
 
 // --- Groq & Gemini Client Setup ---
@@ -181,8 +181,10 @@ export async function generateAiText(options: {
   temperature?: number;
   /** Which time limit applies (package A2). */
   kind?: AiCallKind;
+  /** A single sentence: 'ahead' when nobody is waiting for it yet (more time for glm). */
+  urgency?: SentenceUrgency;
 }): Promise<{ text: string; meta: AiMeta }> {
-  return runWriterChain(options, options.kind || 'other');
+  return runWriterChain(options, options.kind || 'other', undefined, options.urgency || 'now');
 }
 
 setGeminiRunner(async (req, models) => {

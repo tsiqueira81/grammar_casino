@@ -52,12 +52,11 @@ export function aiModels() {
 }
 
 /**
- * How long one provider may take. The plan asked for 12 s on generation, but the game itself
- * gives up on a new sentence after 8 s (package R8) and deals one from the bank, so the server
- * stops waiting at 7 s and the answer still arrives in time.
+ * How long one provider may take. For a new sentence the real limits come from sentenceTiming()
+ * below; these two numbers are the class-waiting writer budget, kept for callers that read them.
  */
 export const AI_TIMEOUT_MS: Record<AiCallKind, number> = {
-  generate: 7_000,
+  generate: 8_100,
   verify: 8_000,
   speech: 10_000,
   other: 12_000,
@@ -70,7 +69,7 @@ export const AI_TIMEOUT_MS: Record<AiCallKind, number> = {
  * 429, 500) leaves the rest of this time to the next one.
  */
 export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
-  generate: 7_000,
+  generate: 8_100,
   verify: 8_000,
   speech: 10_000,
   other: 15_000,
@@ -78,14 +77,66 @@ export const AI_CHAIN_BUDGET_MS: Record<AiCallKind, number> = {
 };
 
 /**
- * The blind check of a single sentence (2026-11-14). The game waits 8 s for its sentence, so the
- * check gets what is left of 7.6 s, never less than 2.5 s and never more than 6 s (it was 4 s, and
- * glm-5-3-flash often took longer). When the first checker is still busy after 1.2 s, the next one
- * starts as well and the first answer counts. For a single sentence the fastest checker goes first
- * (Groq gpt-oss-20b, usually about a second); the NVIDIA checker comes second (2026-11-14:
- * after a slow NVIDIA writer only 2.5 s were left and a slow checker alone could not answer in time).
+ * A single sentence (2026-11-14, so glm-5.3-flash, which takes 5 to 7 s, gets to write it):
+ *   'now'   the class is waiting for it (a hand that was not made ahead);
+ *   'ahead' made while the class plays the hand before, or while the teacher is on the setup
+ *           screen, so nobody waits for it.
+ * headStartMs: how long the first writer (glm) works alone before the backup writers start.
+ * totalMs: writing and the blind check together. The game waits a little longer than this
+ * (GAME_WAITS_MS) and then deals from the offline bank.
+ * Change them with the server settings AI_HEAD_START_MS and AI_SENTENCE_BUDGET_MS ('now') and
+ * AI_AHEAD_HEAD_START_MS and AI_AHEAD_BUDGET_MS ('ahead'), in milliseconds.
  */
-export const SINGLE_CHECK_DEADLINE_MS = 7_600;
+export type SentenceUrgency = 'now' | 'ahead';
+export const SENTENCE_TIMING_DEFAULTS: Record<SentenceUrgency, { headStartMs: number; totalMs: number }> = {
+  now: { headStartMs: 5_000, totalMs: 11_000 },
+  ahead: { headStartMs: 10_000, totalMs: 19_000 },
+};
+/** How long the game waits for each (services/geminiService.ts); totalMs always stays below it. */
+export const GAME_WAITS_MS: Record<SentenceUrgency, number> = { now: 12_000, ahead: 20_000 };
+/** After the head start, each further backup writer starts this long after the one before. */
+export const HEDGE_AFTER_MS = 1_500;
+/** The check is asked to answer this long before totalMs, so the answer reaches the game in time. */
+export const SINGLE_CHECK_MARGIN_MS = 400;
+
+export interface SentenceTiming {
+  headStartMs: number;
+  totalMs: number;
+  /** The writers' share: what is left once the shortest check is kept back. */
+  writerBudgetMs: number;
+  /** The check must be done by then, counted from when writing started. */
+  checkDeadlineMs: number;
+  hedgeAfterMs: number;
+}
+
+function msFromEnv(name: string): number | null {
+  const raw = typeof process !== 'undefined' ? process.env?.[name] : undefined;
+  const n = Number(String(raw ?? '').trim());
+  return String(raw ?? '').trim() && Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** The time limits for one sentence, read on each call so a changed setting applies at once. */
+export function sentenceTiming(urgency: SentenceUrgency = 'now'): SentenceTiming {
+  const prefix = urgency === 'ahead' ? 'AI_AHEAD_' : 'AI_';
+  const d = SENTENCE_TIMING_DEFAULTS[urgency];
+  const maxTotal = GAME_WAITS_MS[urgency] - 500;
+  const totalMs = Math.max(6_000, Math.min(maxTotal, msFromEnv(urgency === 'ahead' ? 'AI_AHEAD_BUDGET_MS' : 'AI_SENTENCE_BUDGET_MS') ?? d.totalMs));
+  const checkDeadlineMs = totalMs - SINGLE_CHECK_MARGIN_MS;
+  const writerBudgetMs = checkDeadlineMs - SINGLE_CHECK_MIN_MS;
+  const headStartMs = Math.min(writerBudgetMs, msFromEnv(`${prefix}HEAD_START_MS`) ?? d.headStartMs);
+  const hedgeAfterMs = msFromEnv('AI_HEDGE_AFTER_MS') ?? HEDGE_AFTER_MS;
+  return { headStartMs, totalMs, writerBudgetMs, checkDeadlineMs, hedgeAfterMs };
+}
+
+/**
+ * The blind check of a single sentence. It gets what is left until the deadline (10.6 s when the
+ * class waits, see sentenceTiming), never less than 2.5 s and never more than 6 s. When the first
+ * checker is still busy after 1.2 s, the next one starts as well and the first answer counts. For a
+ * single sentence the fastest checker goes first (Groq gpt-oss-20b, usually about a second); the
+ * NVIDIA checker comes second (2026-11-14: after a slow NVIDIA writer only 2.5 s were left and a
+ * slow checker alone could not answer in time).
+ */
+export const SINGLE_CHECK_DEADLINE_MS = SENTENCE_TIMING_DEFAULTS.now.totalMs - SINGLE_CHECK_MARGIN_MS;
 export const SINGLE_CHECK_MIN_MS = 2_500;
 export const SINGLE_CHECK_MAX_MS = 6_000;
 export const CHECK_HEDGE_AFTER_MS = 1_200;
@@ -93,8 +144,8 @@ export const CHECK_HEDGE_AFTER_MS = 1_200;
 export const BATCH_CHECK_HEDGE_AFTER_MS = 20_000;
 
 /** How long the check of a single sentence may take, from when its writing started. */
-export function singleCheckMs(elapsedMs: number): number {
-  return Math.max(SINGLE_CHECK_MIN_MS, Math.min(SINGLE_CHECK_MAX_MS, SINGLE_CHECK_DEADLINE_MS - elapsedMs));
+export function singleCheckMs(elapsedMs: number, deadlineMs: number = SINGLE_CHECK_DEADLINE_MS): number {
+  return Math.max(SINGLE_CHECK_MIN_MS, Math.min(SINGLE_CHECK_MAX_MS, deadlineMs - elapsedMs));
 }
 
 /**
@@ -208,11 +259,18 @@ export interface AiMeta {
   verified?: boolean;
   /** The writers that have a key, in order: a missing secret shows here. */
   chain?: string;
+  /**
+   * How long each writer took, for the debug log (2026-11-14): "nvidia-writer wrote in 6.4 s;
+   * nemotron still writing after 1.4 s (started at 5.0 s)".
+   */
+  writers?: string;
+  /** 'ahead' when the sentence was made before the class needed it. */
+  urgency?: SentenceUrgency;
 }
 
 /** The header value: short and safe (no sentence text, no answers). */
 export function formatAiMeta(meta: AiMeta): string {
-  const clean = (s: string) => s.replace(/[^\w .:/(),;-]/g, '').slice(0, 160);
+  const clean = (s: string, max = 160) => s.replace(/[^\w .:/(),;-]/g, '').slice(0, max);
   const parts: Record<string, string | number> = { provider: meta.provider, latencyMs: Math.round(meta.latencyMs) };
   if (meta.model) parts.model = clean(meta.model);
   if (typeof meta.tokens === 'number') parts.tokens = meta.tokens;
@@ -220,6 +278,8 @@ export function formatAiMeta(meta: AiMeta): string {
   if (meta.verifiedBy) parts.verifiedBy = clean(meta.verifiedBy);
   if (typeof meta.verified === 'boolean') parts.verified = meta.verified ? 'yes' : 'no';
   if (meta.chain !== undefined) parts.chain = clean(meta.chain) || 'none';
+  if (meta.writers) parts.writers = clean(meta.writers, 300);
+  if (meta.urgency) parts.urgency = meta.urgency;
   return JSON.stringify(parts);
 }
 

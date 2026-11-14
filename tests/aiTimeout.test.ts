@@ -7,7 +7,8 @@ vi.mock('../services/firebaseService', () => ({
   isVerifiedTeacherUser: () => false,
 }));
 
-import { AI_SENTENCE_TIMEOUT_MS, generateSentence, getAiTimeoutMs, verifyCorrection } from '../services/geminiService';
+import { AI_AHEAD_SENTENCE_TIMEOUT_MS, AI_SENTENCE_TIMEOUT_MS, generateSentence, getAiTimeoutMs, verifyCorrection } from '../services/geminiService';
+import { GAME_WAITS_MS } from '../server/providers';
 import type { Settings } from '../types';
 
 const settings = { topic: 'Present Perfect', level: 'B1', theme: 'classic' } as unknown as Settings;
@@ -30,9 +31,39 @@ describe('AI calls that take too long', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sentences wait 8 seconds; other calls wait longer', () => {
-    expect(getAiTimeoutMs('generateSentence')).toBe(8_000);
-    expect(getAiTimeoutMs('verifyCorrection')).toBeGreaterThan(8_000);
+  it('sentences wait 12 seconds (20 when made ahead, which nobody waits for); other calls wait longer', () => {
+    expect(getAiTimeoutMs('generateSentence')).toBe(12_000);
+    expect(getAiTimeoutMs('generateSentence', true)).toBe(20_000);
+    expect(getAiTimeoutMs('verifyCorrection')).toBeGreaterThan(12_000);
+  });
+
+  it('the game waits just as long as the server is told it may take', () => {
+    expect(GAME_WAITS_MS.now).toBe(AI_SENTENCE_TIMEOUT_MS);
+    expect(GAME_WAITS_MS.ahead).toBe(AI_AHEAD_SENTENCE_TIMEOUT_MS);
+  });
+
+  it('a sentence made ahead tells the server so, and gets the longer wait', async () => {
+    const fetch = hangingFetch();
+    vi.stubGlobal('fetch', fetch);
+    const pending = generateSentence(settings, [], null, null, [], 'binary', { ahead: true });
+    await vi.advanceTimersByTimeAsync(AI_SENTENCE_TIMEOUT_MS + 10);
+    let settled = false;
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).ahead).toBe(true);
+    await vi.advanceTimersByTimeAsync(AI_AHEAD_SENTENCE_TIMEOUT_MS - AI_SENTENCE_TIMEOUT_MS);
+    const sentence = await pending;
+    expect(sentence.source).toBe('bank');
+  });
+
+  it('a sentence the class waits for does not say it was made ahead', async () => {
+    const fetch = hangingFetch();
+    vi.stubGlobal('fetch', fetch);
+    const pending = generateSentence(settings, [], null, null, [], 'binary');
+    await vi.advanceTimersByTimeAsync(AI_SENTENCE_TIMEOUT_MS + 10);
+    await pending;
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).ahead).toBeUndefined();
   });
 
   it('deals a sentence from the offline bank when the AI hangs', async () => {
