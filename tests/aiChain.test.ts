@@ -375,3 +375,31 @@ describe('the health page names the AI keys the server receives', () => {
     for (const key of Object.values(KEYS)) expect(text).not.toContain(key);
   });
 });
+
+describe('a sentence the class is waiting for (hedged chain)', () => {
+  it('a slow CoArena does not use up the time: NVIDIA starts after 2.5 s and its answer is dealt', async () => {
+    const n = net((c) => (isChecker(c) ? agree : item));
+    const slowFetch = n.fetch.getMockImplementation()!;
+    n.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'));
+      if (String(url).includes('coarena.ai') && String(body.model).startsWith('deepseek')) {
+        await new Promise((r) => setTimeout(r, 6_000));
+      }
+      return slowFetch(url, init);
+    });
+    const started = Date.now();
+    const res = await sentence();
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(metaOf(res).provider).toBe('nvidia');
+  }, 15_000);
+
+  it('the first failure starts the next writer at once', async () => {
+    const n = net((c) => (c.host === 'coarena.ai' && !isChecker(c) ? fail(503) : isChecker(c) ? agree : item));
+    const started = Date.now();
+    const res = await sentence();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', fallbackReason: 'coarena-writer 503' });
+    expect(n.calls.filter((c) => !isChecker(c)).map((c) => c.host)).toEqual(['coarena.ai', 'integrate.api.nvidia.com']);
+  });
+});

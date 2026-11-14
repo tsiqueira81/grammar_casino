@@ -12,8 +12,11 @@
 
 export const AI_DAILY_LIMIT_STORAGE_KEY = 'grammar_casino_ai_daily_v1';
 
-/** About five 40-hand lessons a day. */
-export const AI_DAILY_SENTENCE_LIMIT = 200;
+/**
+ * About fifteen 40-hand lessons a day. Sentences made ahead in batches count one by one (a batch of
+ * 15 is 15), and the ones a batch did not deliver are given back (giveBackAiCalls).
+ */
+export const AI_DAILY_SENTENCE_LIMIT = 600;
 /** Answer checks (one per different answer), hints, explanations and read-aloud. */
 export const AI_DAILY_OTHER_LIMIT = 1500;
 
@@ -86,5 +89,18 @@ export function getBrowserDailyStorage(): DailyStorage | null {
     return typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
   } catch {
     return null;
+  }
+}
+
+/** Gives back calls that were counted but delivered nothing (a batch that came back short or failed). */
+export function giveBackAiCalls(storage: DailyStorage | null, kind: AiCallKind, count: number, now: Date = new Date()): void {
+  const n = Math.max(0, Math.floor(count));
+  if (!n || !storage) return;
+  const usage = readAiDailyUsage(storage, now);
+  usage[kind] = Math.max(0, usage[kind] - n);
+  try {
+    storage.setItem(AI_DAILY_LIMIT_STORAGE_KEY, JSON.stringify(usage));
+  } catch {
+    // Storage full or blocked: nothing to give back.
   }
 }

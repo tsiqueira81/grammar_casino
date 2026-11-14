@@ -132,3 +132,17 @@ describe('the daily AI allowance on this device', () => {
     expect(tryUseAiCall(s, 'sentence', new Date(), limits, 5)).toBe(true);
   });
 });
+
+describe('a batch that delivers less gives the rest back', () => {
+  it('only delivered sentences count', async () => {
+    const { giveBackAiCalls, readAiDailyUsage } = await import('../utils/aiDailyLimit');
+    const m = new Map<string, string>();
+    const s = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+    const now = new Date();
+    tryUseAiCall(s, 'sentence', now, undefined, 15);
+    giveBackAiCalls(s, 'sentence', 11, now);
+    expect(readAiDailyUsage(s, now).sentence).toBe(4);
+    giveBackAiCalls(s, 'sentence', 50, now);
+    expect(readAiDailyUsage(s, now).sentence).toBe(0);
+  });
+});

@@ -1,4 +1,4 @@
-import { getAiCallKind, getBrowserDailyStorage, tryUseAiCall } from '../utils/aiDailyLimit';
+import { getAiCallKind, getBrowserDailyStorage, giveBackAiCalls, tryUseAiCall } from '../utils/aiDailyLimit';
 import { Settings, GeneratedSentence, CEFRLevel, QuestionType } from '../types';
 import { getE2eSentence, isE2eMode } from '../utils/e2eContent';
 import { validateItem } from '../content/schema';
@@ -400,9 +400,15 @@ function refillPool(settings: Settings, questionType: QuestionType | undefined, 
     .then((data) => {
       const items = (data?.items || []).filter((it) => validateItem(it, it.questionType || type).ok);
       sentencePool.add(key, items);
+      // Only the sentences that arrived count toward the device's daily allowance.
+      giveBackAiCalls(getBrowserDailyStorage(), 'sentence', slots.length - items.length);
       logEvent('ai', `Batch made ahead: ${items.length} of ${slots.length} sentences kept`);
     })
-    .catch((err) => logEvent('ai', `Batch not made: ${err instanceof Error ? err.message : String(err)}`))
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/Daily AI limit/.test(message)) giveBackAiCalls(getBrowserDailyStorage(), 'sentence', slots.length);
+      logEvent('ai', `Batch not made: ${message}`);
+    })
     .finally(() => sentencePool.end(key));
 }
 
