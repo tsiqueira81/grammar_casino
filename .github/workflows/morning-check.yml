@@ -19,15 +19,17 @@ jobs:
     env:
       SITE: https://grammarcasino.pages.dev
     steps:
+      # -L follows redirects: Cloudflare Pages answers /privacy.html with a redirect to /privacy,
+      # and without -L curl reads the empty redirect reply, so the check failed with the page fine.
       - name: The game page loads
-        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/" | grep -q '<div id="root"'
+        run: curl -fsSL --retry 3 --retry-delay 10 "$SITE/" | grep -q '<div id="root"'
       - name: The game server answers
-        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/api/health" | grep -q '"status":"ok"'
+        run: curl -fsSL --retry 3 --retry-delay 10 "$SITE/api/health" | grep -q '"status":"ok"'
       - name: The privacy notice is there
-        run: curl -fsS --retry 3 --retry-delay 10 "$SITE/privacy.html" | grep -q 'Privacy in Grammar Casino'
+        run: curl -fsSL --retry 3 --retry-delay 10 "$SITE/privacy.html" | grep -q 'Privacy in Grammar Casino'
       - name: Open an issue when something failed
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const title = 'Morning check failed: the live game may be down';
