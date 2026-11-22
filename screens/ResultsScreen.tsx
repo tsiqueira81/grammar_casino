@@ -1,7 +1,7 @@
 // The hand results screen (package F7: moved out of App.tsx without changes).
 
 import { useGame } from '../state/gameStore';
-import { answerSplit, reactionCounts } from '../game/answerSplit';
+import { answerSplit, reactionCounts, rightWrongCounts, type AnswerSplitInput } from '../game/answerSplit';
 import { checkGameEnd } from '../game/flow';
 import { undoRevealSecondsLeft } from '../game/ruling';
 import React from 'react';
@@ -363,7 +363,7 @@ export function ResultsScreen({
           const qt = (currentSentence.questionType || 'binary') as QuestionType;
           const accepted = snap?.input.acceptedSet ?? buildAcceptedAnswerSet(currentSentence, qt).acceptedSet;
           const verdicts = snap?.input.clozeWordVerifications ?? {};
-          const rows = answerSplit({
+          const splitInput: AnswerSplitInput = {
             qType: qt,
             bets,
             playerIds: (snap?.input.validPlayers ?? players).map(p => p.id),
@@ -375,20 +375,27 @@ export function ResultsScreen({
               if (qt === 'keyWordTransformation') return verdicts[k]?.marks === 2;
               return accepted.has(k) || Boolean(verdicts[k]?.isCorrect);
             },
-          });
+            showUnpickedRight: true,
+            correctAnswer: currentSentence.correctAnswer,
+          };
+          const rows = answerSplit(splitInput);
+          const score = rightWrongCounts(splitInput);
           const counts = reactionCounts(handReactions, currentRound);
           if (rows.length === 0 && counts.gotIt + counts.confused === 0) return null;
-          const shown = rows.slice(0, 6);
+          // Keep the right answer on screen even when many different wrong answers fill the list.
+          const shown = rows.length > 6 && !rows.slice(0, 6).some(r => r.isRight) && rows.some(r => r.isRight)
+            ? [...rows.slice(0, 5), rows.find(r => r.isRight)!]
+            : rows.slice(0, 6);
           const top = Math.max(1, ...shown.map(r => r.count));
           return (
             <div className="gc-surface rounded-gc-lg p-6 mt-6 animate-gc-slide-up [animation-delay:1.1s]" data-testid="answer-split">
               <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
                 <h3 className="text-gc-title font-bold text-gc-ink">What the class answered</h3>
-                {counts.gotIt + counts.confused > 0 && (
-                  <p className="text-gc-body font-semibold" data-testid="reaction-counts">
-                    <span className="text-gc-win">{counts.gotIt} got it</span>
+                {score.answered > 0 && (
+                  <p className="text-gc-body font-semibold" data-testid="right-wrong-counts">
+                    <span className={score.right > 0 ? 'text-gc-win' : 'text-gc-quiet'}>{score.right} right</span>
                     <span className="text-gc-quiet"> · </span>
-                    <span className={counts.confused > 0 ? 'text-gc-danger' : 'text-gc-quiet'}>{counts.confused} still confused</span>
+                    <span className={score.answered - score.right > 0 ? 'text-gc-danger' : 'text-gc-quiet'}>{score.answered - score.right} wrong</span>
                   </p>
                 )}
               </div>
@@ -403,6 +410,16 @@ export function ResultsScreen({
                   </li>
                 ))}
               </ul>
+              {counts.gotIt + counts.confused > 0 && (
+                <p className="mt-4 pt-3 border-t border-gc-line/[0.1] text-gc-body text-gc-quiet" data-testid="reaction-feedback">
+                  After the explanation, on their phones:{' '}
+                  <span className="font-semibold" data-testid="reaction-counts">
+                    <span className="text-gc-win">{counts.gotIt} got it</span>
+                    <span> · </span>
+                    <span className={counts.confused > 0 ? 'text-gc-danger' : ''}>{counts.confused} still confused</span>
+                  </span>
+                </p>
+              )}
             </div>
           );
         })()}
