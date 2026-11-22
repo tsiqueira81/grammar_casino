@@ -8,7 +8,7 @@ export type AiCallKind = 'generate' | 'verify' | 'speech' | 'other' | 'batch';
  * What the circuit breaker rests: a provider, or one NVIDIA model. The writer (glm) and the checker
  * (minimax) are on two NVIDIA accounts; Nemotron, the backup writer, shares the writer's key.
  */
-export type BreakerKey = AiProvider | 'nvidia-writer' | 'nvidia-checker' | 'nemotron';
+export type BreakerKey = AiProvider | 'nvidia-writer' | 'nvidia-checker' | 'nemotron' | 'gemini-decision';
 
 /** Comma-separated list from an environment variable, or the default. */
 function listFromEnv(name: string, fallback: string[]): string[] {
@@ -21,10 +21,11 @@ function listFromEnv(name: string, fallback: string[]): string[] {
 }
 
 export const DEFAULT_MODELS = {
-  // The sentence chain (2026-11-14): Groq qwen writes and Groq gpt-oss-120b checks; then NVIDIA
-  // glm (minimax checks it on a second account), Nemotron, Gemini. See server/textChain.ts.
-  // Change with NVIDIA_WRITER_MODELS, NVIDIA_CHECKER_MODELS and NVIDIA_TEXT_MODELS.
-  nvidiaWriter: ['z-ai/glm-5.3-flash'],
+  // The sentence chain: Groq qwen writes single live hands first; NVIDIA Nemotron 3.5 Super writes
+  // ahead-of-time batches first (with z-ai/glm-5.3-flash fallback on 404/403), then Nemotron 3 Ultra,
+  // then Gemini. Change with NVIDIA_WRITER_MODELS, NVIDIA_CHECKER_MODELS, NVIDIA_TEXT_MODELS,
+  // AI_WRITER_ORDER, and AI_BATCH_WRITER_ORDER.
+  nvidiaWriter: ['nvidia/nemotron-3.5-super-vl-120b-a12b', 'z-ai/glm-5.3-flash'],
   nvidiaChecker: ['minimaxai/minimax-m3.1-flash'],
   nvidiaText: ['nvidia/nemotron-3-ultra-550b-a55b', 'nvidia/nemotron-3-ultra'],
   // Groq writes first since 2026-11-14 (glm on NVIDIA took over 12 s): qwen3.8-27b, and
@@ -38,11 +39,13 @@ export const DEFAULT_MODELS = {
   geminiText: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
   /** Checks what Gemini wrote: a different Gemini model. */
   geminiChecker: ['gemini-3.8-flash', 'gemini-4-argon'],
+  geminiDecision: 'gemini-decision-1',
   geminiTts: ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'],
 };
 
 /** Models in the order they are tried. Read on each call so a changed setting applies at once. */
 export function aiModels() {
+  const decisionEnv = typeof process !== 'undefined' ? String(process.env?.GEMINI_DECISION_MODEL || '').trim() : '';
   return {
     nvidiaWriter: listFromEnv('NVIDIA_WRITER_MODELS', DEFAULT_MODELS.nvidiaWriter),
     nvidiaChecker: listFromEnv('NVIDIA_CHECKER_MODELS', DEFAULT_MODELS.nvidiaChecker),
@@ -51,6 +54,7 @@ export function aiModels() {
     groqChecker: listFromEnv('GROQ_CHECKER_MODELS', DEFAULT_MODELS.groqChecker),
     geminiChecker: listFromEnv('GEMINI_CHECKER_MODELS', DEFAULT_MODELS.geminiChecker),
     geminiText: listFromEnv('GEMINI_TEXT_MODELS', DEFAULT_MODELS.geminiText),
+    geminiDecision: decisionEnv || DEFAULT_MODELS.geminiDecision,
     geminiTts: listFromEnv('GEMINI_TTS_MODELS', DEFAULT_MODELS.geminiTts),
   };
 }
@@ -146,8 +150,8 @@ export const SINGLE_CHECK_DEADLINE_MS = SENTENCE_TIMING_DEFAULTS.now.totalMs - S
 export const SINGLE_CHECK_MIN_MS = 2_500;
 export const SINGLE_CHECK_MAX_MS = 6_000;
 export const CHECK_HEDGE_AFTER_MS = 1_200;
-/** A batch check (up to 15 items, 45 s in all): the next checker joins after 20 s. */
-export const BATCH_CHECK_HEDGE_AFTER_MS = 20_000;
+/** A batch check (up to 15 items, 45 s in all): the next checker joins after 8 s. */
+export const BATCH_CHECK_HEDGE_AFTER_MS = 8_000;
 
 /** How long the check of a single sentence may take, from when its writing started. */
 export function singleCheckMs(elapsedMs: number, deadlineMs: number = SINGLE_CHECK_DEADLINE_MS): number {
@@ -155,12 +159,12 @@ export function singleCheckMs(elapsedMs: number, deadlineMs: number = SINGLE_CHE
 }
 
 /**
- * Extra tokens a thinking model gets for its hidden reasoning, on top of the answer: gpt-oss, and
- * minimax (its thinking cannot be turned off on NVIDIA, only set to low).
+ * Extra tokens a thinking model gets for its hidden reasoning, on top of the answer: gpt-oss,
+ * minimax, and Kimi K3.1 Pro (whose thinking is always on and configured via reasoning_effort: low).
  */
 export const REASONING_HEADROOM_TOKENS = 2_048;
 export function isReasoningModel(model: string): boolean {
-  return /gpt-oss|minimax/i.test(model || '');
+  return /gpt-oss|minimax|kimi/i.test(model || '');
 }
 
 export class AiTimeoutError extends Error {
@@ -276,7 +280,7 @@ export interface AiMeta {
 
 /** The header value: short and safe (no sentence text, no answers). */
 export function formatAiMeta(meta: AiMeta): string {
-  const clean = (s: string, max = 160) => s.replace(/[^\w .:/(),;-]/g, '').slice(0, max);
+  const clean = (s: string, max = 160) => s.replace(/[^\w .:/(),;=-]/g, '').slice(0, max);
   const parts: Record<string, string | number> = { provider: meta.provider, latencyMs: Math.round(meta.latencyMs) };
   if (meta.model) parts.model = clean(meta.model);
   if (typeof meta.tokens === 'number') parts.tokens = meta.tokens;

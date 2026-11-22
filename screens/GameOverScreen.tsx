@@ -1,5 +1,6 @@
 // The final results screen (package F7: moved out of App.tsx without changes): the ceremony,
 // the podium, the optional awards, the class line, the buttons and the session report.
+import { useLayoutEffect } from 'react';
 import { useGame } from '../state/gameStore';
 import { Cloud as CloudIcon, RotateCcw } from 'lucide-react';
 import ActionButton from '../components/ActionButton';
@@ -30,6 +31,13 @@ export function GameOverScreen({
   onSaveToCloud,
   playSound,
 }: GameOverScreenProps) {
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.scrollTo(0, 0);
+    const raf = window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
   // Package F6: the game in play comes from the store, not through props.
   const players = useGame(s => s.players);
   const winner = useGame(s => s.winner);

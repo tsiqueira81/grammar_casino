@@ -9,7 +9,9 @@ import { NEAR_DUPLICATE, similarity } from '../content/audit';
 import { buildSentencePrompt, type ServerQuestionType } from './sentencePrompt';
 import { getSentenceSchema } from './sentenceSchemas';
 import { enforceKeyWordTransformationIntegrity, enforceMultipleChoiceIntegrity, enforceOpenClozeIntegrity, enforceWordFormationIntegrity } from './sentenceIntegrity';
-import { judge, quickProblems, verifierPrompt, verifierSchema, type VerifierAnswer } from './verifyItem';
+import { judge, quickProblems, verifierPrompt, verifierSchema, type Verdict, type VerifierAnswer } from './verifyItem';
+import { supportsDecisionBlindCheck, type BlindCheckEntry } from './decisionRubrics';
+import { contrastiveRivals, contrastiveSlotHint } from './contrastiveTopic';
 import type { AiMeta } from './providers';
 
 export const MAX_BATCH = 15;
@@ -44,7 +46,10 @@ export function cleanSlots(raw: unknown, fallbackTheme: string): BatchSlot[] {
 }
 
 /** The one-item prompt, plus the list of items wanted. Each item's line overrides the settings above. */
-export function batchPrompt(payload: BatchPayload, slots: BatchSlot[]): { prompt: string; type: ServerQuestionType; level: string } {
+export function batchPrompt(
+  payload: BatchPayload,
+  slots: BatchSlot[]
+): { prompt: string; type: ServerQuestionType; level: string; contrastiveTargets: string[] } {
   const theme = slots[0]?.theme || payload.settings.theme || 'Everyday Life';
   const base = buildSentencePrompt({
     settings: { ...payload.settings, theme },
@@ -53,23 +58,35 @@ export function batchPrompt(payload: BatchPayload, slots: BatchSlot[]): { prompt
     forceCorrect: null,
     subtype: null,
     questionType: payload.questionType,
+    contrastiveTarget: null,
   });
+  const isContrastiveGap =
+    base.contrastiveTargets.length >= 2 &&
+    (base.resolvedQuestionType === 'openCloze' || base.resolvedQuestionType === 'multipleChoice');
   const lines = slots.map((slot, i) => {
     const parts = [`theme "${slot.theme}"`];
     if (base.resolvedQuestionType === 'binary' && typeof slot.forceCorrect === 'boolean') {
       parts.push(slot.forceCorrect ? 'the sentence MUST be 100% correct' : 'the sentence MUST contain exactly one error');
     }
+    if (isContrastiveGap) {
+      const target = base.contrastiveTargets[i % base.contrastiveTargets.length];
+      const rivals = contrastiveRivals(base.contrastiveTargets, target);
+      parts.push(contrastiveSlotHint(target, rivals));
+    }
     if (slot.subtype) parts.push(`structure focus: "${slot.subtype}"`);
     return `Item ${i + 1}: ${parts.join('; ')}.`;
   });
+  const uniquenessRule = isContrastiveGap
+    ? 'No two items may share a scenario or main verb. Follow the assigned gap target for each item above so all contrasted words are tested evenly.'
+    : 'No two items may share a scenario, main verb, key word or gap target.';
   const prompt = `${base.prompt}
 
 === BATCH: WRITE ${slots.length} ITEMS ===
 Write ${slots.length} different items. Every item follows ALL the rules above. Where an item below names a theme, a correctness or a structure focus, it replaces the matching setting above for that item only.
 ${lines.join('\n')}
-No two items may share a scenario, main verb, key word or gap target.
+${uniquenessRule}
 Reply ONLY with JSON of the form {"items": [ item 1, item 2, ... ]} in this order, each item an object matching the schema.`;
-  return { prompt, type: base.resolvedQuestionType, level: base.level };
+  return { prompt, type: base.resolvedQuestionType, level: base.level, contrastiveTargets: base.contrastiveTargets };
 }
 
 export function batchSchema(type: ServerQuestionType) {
@@ -115,6 +132,8 @@ export function finishItem(data: any, type: ServerQuestionType): void {
 export interface BatchDeps {
   write: (req: { prompt: string; responseSchema: any; schemaName: string; maxCompletionTokens: number; kind: 'batch' }) => Promise<{ text: string; meta: AiMeta }>;
   checker: (meta: AiMeta) => { model: string; notes?: string[]; ask: ((prompt: string) => Promise<string>) | null };
+  /** Optional Gemini Decision 1 primary check for closed-ended batch types (binary, MC, KWT). */
+  decisionCheck?: (entries: BlindCheckEntry[]) => Promise<{ used: boolean; verdicts?: Map<number, Verdict>; model?: string; note?: string }>;
 }
 
 export interface BatchResult {
@@ -127,12 +146,58 @@ export interface BatchResult {
   checkNotes: string[];
 }
 
+function classifyBatchReason(reason: string): { label: string; count: number } {
+  const missingMatch = /^(\d+)\s+items?\s+missing/i.exec(reason.trim());
+  if (missingMatch) return { label: 'missing', count: Math.max(1, Number(missingMatch[1])) };
+  const lower = reason.toLowerCase();
+  if (lower.includes('ambiguous')) return { label: 'ambiguous', count: 1 };
+  if (lower.includes('off-topic')) return { label: 'off-topic', count: 1 };
+  if (lower.includes('rival target')) return { label: 'rival fits', count: 1 };
+  if (lower.includes('too open')) return { label: 'too open', count: 1 };
+  if (lower.includes('cefr drift')) return { label: 'CEFR drift', count: 1 };
+  if (lower.includes('distractor')) return { label: 'distractor valid', count: 1 };
+  if (lower.includes('kwt ')) return { label: 'KWT check', count: 1 };
+  if (lower.includes('near copy')) return { label: 'duplicate', count: 1 };
+  if (lower.includes('correct/flawed not as asked')) return { label: 'wrong polarity', count: 1 };
+  if (lower.includes('did not answer') || lower.includes('skipped') || lower.includes('gave no verdict') || lower.includes('incomplete')) {
+    return { label: 'checker error', count: 1 };
+  }
+  if (
+    lower.includes('found a mistake') ||
+    lower.includes('found no mistake') ||
+    lower.includes('rejected the key') ||
+    lower.includes('no acceptable option') ||
+    lower.includes('disagreed')
+  ) {
+    return { label: 'checker disagreed', count: 1 };
+  }
+  return { label: 'rules', count: 1 };
+}
+
+/**
+ * Compact summary of why batch items were dropped, for X-AI-Meta.
+ * Keeps full detail for a single rejection, and aggregates counts by category when multiple items drop.
+ */
+export function summarizeBatchReasons(reasons: string[]): string {
+  if (!reasons.length) return '';
+  if (reasons.length === 1) return reasons[0];
+  const counts = new Map<string, number>();
+  for (const r of reasons) {
+    const { label, count } = classifyBatchReason(r);
+    counts.set(label, (counts.get(label) || 0) + count);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count]) => `${count} ${label}`)
+    .join(', ');
+}
+
 /** Writes, cleans and checks a batch. Items that fail any check are left out. */
 export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise<BatchResult> {
   const fallbackTheme = clip(payload.settings.theme || 'Everyday Life', 80);
   const slots = cleanSlots(payload.slots, fallbackTheme);
   if (!slots.length) throw Object.assign(new Error('A batch needs at least one item.'), { status: 400 });
-  const { prompt, type, level } = batchPrompt(payload, slots);
+  const { prompt, type, level, contrastiveTargets } = batchPrompt(payload, slots);
   const response = await deps.write({
     prompt,
     responseSchema: batchSchema(type),
@@ -153,7 +218,7 @@ export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise
     } catch (e) {
       return void reasons.push(`item ${slot + 1}: ${e instanceof Error ? e.message.slice(0, 60) : 'broken'}`);
     }
-    const problems = quickProblems(item, type as QuestionType, level);
+    const problems = quickProblems(item, type as QuestionType, level, contrastiveTargets);
     const seen = [...past, ...accepted.map((a) => a.item.text)];
     const copy = seen.find((t) => similarity(t, item.text || '') > NEAR_DUPLICATE);
     if (copy) problems.push('a near copy of another sentence');
@@ -163,7 +228,45 @@ export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise
     accepted.push({ slot, item });
   });
 
-  // One blind check for every item that needs one (key word transformation gets the rules only).
+  // Primary Decision 1 blind check for closed-ended formats (binary, MC, KWT) and contrastive Open Cloze in one call.
+  const extraCheckNotes: string[] = [];
+  if (accepted.length && deps.decisionCheck && supportsDecisionBlindCheck(type as QuestionType, contrastiveTargets)) {
+    const batchTopic = clip(payload.settings.topic, 100);
+    const entries: BlindCheckEntry[] = accepted.map((a, i) => ({
+      id: i,
+      item: a.item,
+      type: type as QuestionType,
+      level,
+      topic: batchTopic,
+      contrastiveTargets: contrastiveTargets.length >= 2 ? contrastiveTargets : undefined,
+    }));
+    const dec = await deps.decisionCheck(entries);
+    if (dec.used && dec.verdicts) {
+      const items: BatchItem[] = [];
+      accepted.forEach((a, i) => {
+        const verdict = dec.verdicts!.get(i);
+        if (!verdict) return void reasons.push(`item ${a.slot + 1}: the checker skipped it`);
+        if (!verdict.ok) return void reasons.push(`item ${a.slot + 1}: ${verdict.reasons[0]}`);
+        if (type === 'openCloze' && contrastiveTargets.length >= 2) {
+          a.item.acceptedAnswers = [String(a.item.correctAnswer || '').trim().toLowerCase()].filter(Boolean);
+        }
+        a.item.checkedBy = 'two models';
+        items.push({ ...a.item, batchSlot: a.slot, writtenFor: slots[a.slot].subtype || null, theme: slots[a.slot].theme || fallbackTheme });
+      });
+      if (raw.length < slots.length) reasons.push(`${slots.length - raw.length} items missing from the answer`);
+      return {
+        items,
+        rejected: slots.length - items.length,
+        reasons,
+        meta: response.meta,
+        checkedBy: dec.model || 'gemini-decision-1',
+        checkNotes: dec.note ? [dec.note] : [],
+      };
+    }
+    if (dec.note) extraCheckNotes.push(dec.note);
+  }
+
+  // Fallback (or openCloze / wordFormation): one blind check via text checkers.
   const checker = deps.checker(response.meta);
   const tasks = accepted
     .map((a, i) => ({ i, prompt: verifierPrompt(a.item, type as QuestionType, false) }))
@@ -191,11 +294,15 @@ export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise
       if (checkFailed) return void reasons.push(`item ${a.slot + 1}: ${checkFailed}`);
       const answer = answers.get(i);
       if (!answer) return void reasons.push(`item ${a.slot + 1}: the checker skipped it`);
-      const verdict = judge(a.item, type as QuestionType, answer);
+      const verdict = judge(a.item, type as QuestionType, answer, contrastiveTargets);
       if (!verdict.ok) return void reasons.push(`item ${a.slot + 1}: ${verdict.reasons[0]}`);
-      if (verdict.extraAnswers.length) a.item.acceptedAnswers = Array.from(new Set([...(a.item.acceptedAnswers || []), ...verdict.extraAnswers]));
+      if (type === 'openCloze' && contrastiveTargets.length >= 2) {
+        a.item.acceptedAnswers = [String(a.item.correctAnswer || '').trim().toLowerCase()].filter(Boolean);
+      } else if (verdict.extraAnswers.length) {
+        a.item.acceptedAnswers = Array.from(new Set([...(a.item.acceptedAnswers || []), ...verdict.extraAnswers]));
+      }
     }
-    a.item.checkedBy = checker.ask ? 'two models' : 'rules';
+    a.item.checkedBy = checker.ask && tasks.some((t) => t.i === i) ? 'two models' : 'rules';
     items.push({ ...a.item, batchSlot: a.slot, writtenFor: slots[a.slot].subtype || null, theme: slots[a.slot].theme || fallbackTheme });
   });
   if (raw.length < slots.length) reasons.push(`${slots.length - raw.length} items missing from the answer`);
@@ -205,7 +312,7 @@ export async function makeBatch(payload: BatchPayload, deps: BatchDeps): Promise
     rejected: slots.length - items.length,
     reasons,
     meta: response.meta,
-    checkedBy: checker.ask ? checker.model : 'rules only',
-    checkNotes: checker.notes || [],
+    checkedBy: checker.ask && tasks.length > 0 ? checker.model : 'rules only',
+    checkNotes: [...extraCheckNotes, ...(checker.notes || [])],
   };
 }

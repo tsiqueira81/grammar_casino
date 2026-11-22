@@ -1882,11 +1882,26 @@ function pickKeepingLevel<T extends BankEntryBase>(
   const { topic, level } = settings;
   const hasTopic = Boolean(topic) && topic !== 'My own choice';
   const topicLower = (topic || '').trim().toLowerCase();
+  const inferredBankTopic = (() => {
+    if (!topicLower) return '';
+    if (/\b(can|could|must|should|might|may|ought|have to|mustn't|can't|modal|modals)\b/.test(topicLower)) return 'modals';
+    if (/\bpassive\b/.test(topicLower)) return 'passive voice';
+    if (/\b(preposition|prepositions)\b/.test(topicLower) || /\b(in|on|at|for|since|by|until|during)\b.*\b(in|on|at|for|since|by|until|during)\b/.test(topicLower)) return 'prepositions';
+    if (/\b(article|articles)\b/.test(topicLower) || /\b(a|an|the)\b.*\b(a|an|the)\b/.test(topicLower)) return 'articles';
+    if (/\b(conditional|conditionals|if|unless)\b/.test(topicLower)) return 'conditionals';
+    if (/\breported\b/.test(topicLower)) return 'reported speech';
+    if (/\brelative\b/.test(topicLower) || /\b(who|which|whose|where)\b.*\b(who|which|whose|where)\b/.test(topicLower)) return 'relative clauses';
+    if (/\b(gerund|infinitive)\b/.test(topicLower)) return 'gerunds and infinitives';
+    if (/\bphrasal\b/.test(topicLower)) return 'phrasal verbs';
+    if (/\b(collocation|make|do|say|tell)\b/.test(topicLower)) return 'collocations';
+    if (/\b(tense|tenses|past|present|future|perfect|continuous)\b/.test(topicLower)) return 'tenses';
+    return '';
+  })();
   const sameTopic = (e: T) => {
     if (!hasTopic) return true;
     const entryTopicLower = e.topic.toLowerCase();
     if (entryTopicLower === topicLower) return true;
-    if (topicLower.includes('passive') && entryTopicLower === 'passive voice') return true;
+    if (inferredBankTopic && entryTopicLower === inferredBankTopic) return true;
     return false;
   };
   const sameLevel = (e: T) => !level || e.level === level;

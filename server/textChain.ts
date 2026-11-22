@@ -16,18 +16,23 @@ export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 const env = (name: string): string => String((typeof process !== 'undefined' ? process.env?.[name] : '') || '').trim();
 const usableKey = (k: string) => k.length > 5;
 
-/** The NVIDIA account that writes (glm, and Nemotron as its backup). */
+const cleanSecret = (name: string): string => env(name).replace(/^['"]+|['"]+$/g, '').trim();
+
+/** The NVIDIA account that writes (Kimi K3.1 Pro, glm fallback, and Nemotron as backup). */
 export function nvidiaKey(): string {
-  return env('NVIDIA_API_KEY');
+  return cleanSecret('NVIDIA_API_KEY');
 }
 /** The second NVIDIA account, for the blind check. Without it the check uses the writer's key. */
 export function nvidiaCheckerKey(): string {
-  const own = env('NVIDIA_CHECKER_API_KEY');
+  const own = cleanSecret('NVIDIA_CHECKER_API_KEY');
   return usableKey(own) ? own : nvidiaKey();
 }
+const PLACEHOLDER_KEY = /^(my_|your_|replace_|placeholder|changeme|todo|example|none|null|undefined)/i;
+
 export function geminiKey(): string {
   const k = env('GEMINI_API_KEY') || env('API_KEY');
-  return k && !k.startsWith('gsk_') ? k : '';
+  if (!usableKey(k) || k.startsWith('gsk_') || PLACEHOLDER_KEY.test(k)) return '';
+  return k;
 }
 
 /** One request to an AI, the same shape for every provider. */
@@ -163,7 +168,7 @@ export async function callOpenAiCompatible(o: OpenAiCallOptions): Promise<{ text
 /** The most tokens one answer may ask for, also after doubling. */
 export const MAX_TOKENS_CEILING = 32_000;
 
-/** Tries each model name in turn when a name is not found (404), so a renamed model still works. */
+/** Tries each model name in turn when a name is not found (404) or gated (403), so a renamed/gated model still works. */
 async function firstModelThatExists(models: string[], run: (model: string) => Promise<{ text: string; model: string; tokens?: number }>) {
   let last: unknown = null;
   for (const model of models) {
@@ -171,7 +176,7 @@ async function firstModelThatExists(models: string[], run: (model: string) => Pr
       return await run(model);
     } catch (e: any) {
       last = e;
-      if (e?.status !== 404) throw e;
+      if (e?.status !== 404 && e?.status !== 403) throw e;
     }
   }
   throw last || new Error('no model');
@@ -198,16 +203,20 @@ function nvidiaPairModel(role: 'writer' | 'checker'): ChainModel | null {
     breaker: role === 'writer' ? 'nvidia-writer' : 'nvidia-checker',
     model: models[0],
     call: (req) =>
-      firstModelThatExists(models, (model) =>
-        callOpenAiCompatible({
+      firstModelThatExists(models, (model) => {
+        const isNemotron = /nemotron/i.test(model);
+        const isKimi = /kimi/i.test(model);
+        return callOpenAiCompatible({
           ...req,
           baseUrl: env('NVIDIA_BASE_URL') || NVIDIA_BASE_URL,
           apiKey: key,
           model,
-          jsonMode: 'object',
-          extraBody: NVIDIA_NO_THINKING,
-        })
-      ),
+          // Nemotron models on NVIDIA work fastest and cleanest with prompt-embedded JSON schema
+          // and `enable_thinking: false`; Kimi uses top-level `reasoning_effort: 'low'` (no chat_template_kwargs).
+          jsonMode: isNemotron ? 'prompt' : 'object',
+          extraBody: isKimi ? undefined : isNemotron ? { chat_template_kwargs: { enable_thinking: false } } : NVIDIA_NO_THINKING,
+        });
+      }),
   };
 }
 
@@ -271,26 +280,40 @@ function geminiModel(models: string[]): ChainModel | null {
   return { provider: 'gemini', breaker: 'gemini', model: models[0], call: (req) => run(req, models) };
 }
 
-/** The writers' order when the AI_WRITER_ORDER setting does not say otherwise (2026-11-14). */
+/** Default writer order for live single hands: fast Groq first, then NVIDIA Nemotron 3.5 Super, Nemotron 3 Ultra, Gemini. */
 export const DEFAULT_WRITER_ORDER: BreakerKey[] = ['groq', 'nvidia-writer', 'nemotron', 'gemini'];
+/** Default writer order for ahead-of-time batches: NVIDIA Nemotron 3.5 Super first, then Groq, Nemotron 3 Ultra, Gemini. */
+export const DEFAULT_BATCH_WRITER_ORDER: BreakerKey[] = ['nvidia-writer', 'groq', 'nemotron', 'gemini'];
 const WRITER_NAMES: BreakerKey[] = ['groq', 'nvidia-writer', 'nemotron', 'gemini'];
 
-/**
- * The order from the server setting AI_WRITER_ORDER, e.g. "nvidia-writer,nemotron,groq,gemini"
- * to put glm first again without new code. A writer left out is not used; an unknown name is
- * ignored; a setting with no known name gives the default order.
- */
-export function writerOrder(): BreakerKey[] {
-  const listed = env('AI_WRITER_ORDER')
+function parseWriterOrderEnv(name: string): BreakerKey[] {
+  const listed = env(name)
     .split(',')
     .map((x) => x.trim().toLowerCase())
     .filter((x): x is BreakerKey => (WRITER_NAMES as string[]).includes(x));
-  const unique = listed.filter((x, i) => listed.indexOf(x) === i);
-  return unique.length ? unique : DEFAULT_WRITER_ORDER;
+  return listed.filter((x, i) => listed.indexOf(x) === i);
+}
+
+/**
+ * The order from AI_WRITER_ORDER (or AI_BATCH_WRITER_ORDER for batches), e.g.
+ * "nvidia-writer,groq,nemotron,gemini". When AI_BATCH_WRITER_ORDER is unset, AI_WRITER_ORDER
+ * overrides both; when both are unset, batches use DEFAULT_BATCH_WRITER_ORDER (Kimi first) and
+ * live single hands use DEFAULT_WRITER_ORDER (Groq first).
+ */
+export function writerOrder(kind?: AiCallKind): BreakerKey[] {
+  if (kind === 'batch') {
+    const batchListed = parseWriterOrderEnv('AI_BATCH_WRITER_ORDER');
+    if (batchListed.length) return batchListed;
+    const globalListed = parseWriterOrderEnv('AI_WRITER_ORDER');
+    if (globalListed.length) return globalListed;
+    return DEFAULT_BATCH_WRITER_ORDER;
+  }
+  const listed = parseWriterOrderEnv('AI_WRITER_ORDER');
+  return listed.length ? listed : DEFAULT_WRITER_ORDER;
 }
 
 /** The writers, in the order they are tried. Only those with a key are listed. */
-export function writerChain(): ChainModel[] {
+export function writerChain(kind?: AiCallKind): ChainModel[] {
   const m = aiModels();
   const make: Record<string, () => ChainModel | null> = {
     groq: () => groqModel(m.groqText),
@@ -298,7 +321,7 @@ export function writerChain(): ChainModel[] {
     nemotron: () => nemotronModel(),
     gemini: () => geminiModel(m.geminiText),
   };
-  return writerOrder()
+  return writerOrder(kind)
     .map((key) => make[key]())
     .filter((x): x is ChainModel => Boolean(x));
 }
@@ -320,9 +343,10 @@ export function checkerOrder(writer: AiProvider, writerModel?: string, speed: 'b
   const groqChecker = groqModel(groqCheckers);
   const gemini = geminiModel(geminiOther);
   const order: Record<AiProvider, Array<ChainModel | null>> = {
-    nvidia: [nvidiaChecker, groqChecker, gemini],
+    // Prefer fast cross-provider Groq checker before MiniMax (which took >20 s on NVIDIA NIM batches).
+    nvidia: [groqChecker, nvidiaChecker, gemini],
     groq: [groqChecker, nvidiaChecker, gemini],
-    gemini: [gemini, nvidiaChecker, groqChecker],
+    gemini: [gemini, groqChecker, nvidiaChecker],
   };
   const list = order[writer].filter((x): x is ChainModel => Boolean(x) && x!.model !== writerModel);
   // A sentence the class waits for: the fastest checker first (Groq), the others after it.
@@ -466,7 +490,7 @@ export function writerTimingNote(runs: WriterRun[], elapsedMs: number): string {
 export async function runWriterChain(
   req: TextRequest,
   kind: AiCallKind,
-  chain: ChainModel[] = writerChain(),
+  chain: ChainModel[] = writerChain(kind),
   urgency: SentenceUrgency = 'now'
 ): Promise<{ text: string; meta: AiMeta }> {
   req = { ...req, kind };

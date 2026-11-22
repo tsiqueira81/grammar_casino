@@ -1,0 +1,8 @@
+{
+  "name": "Grammar Casino",
+  "description": "High-stakes EFL classroom grammar game with single-screen and live multiplayer phone play.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

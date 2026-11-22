@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_BATCH, batchPrompt, cleanSlots, makeBatch } from '../server/sentenceBatch';
+import { MAX_BATCH, batchPrompt, cleanSlots, makeBatch, summarizeBatchReasons } from '../server/sentenceBatch';
 import type { AiMeta } from '../server/providers';
 
 // Up to 15 items in one request (2026-11-14): one call writes them, one blind call checks them,
@@ -104,5 +104,19 @@ describe('a batch of sentences', () => {
   it('never more than 15 in one batch', () => {
     expect(MAX_BATCH).toBe(15);
     expect(cleanSlots(Array.from({ length: 40 }, () => ({})), 'Travel')).toHaveLength(15);
+  });
+
+  it('summarizes batch drop reasons with full detail for one drop and grouped counts for multiple drops', () => {
+    expect(summarizeBatchReasons([])).toBe('');
+    expect(summarizeBatchReasons(['item 2: ambiguous grammaticality (p=0.54)'])).toBe('item 2: ambiguous grammaticality (p=0.54)');
+    expect(
+      summarizeBatchReasons([
+        'item 1: ambiguous grammaticality (p=0.52)',
+        'item 2: CEFR drift (scored C1 for B1)',
+        'item 3: ambiguous flaw (p=0.47)',
+        'item 4: a flawed sentence needs a different correction',
+        '2 items missing from the answer',
+      ])
+    ).toBe('2 ambiguous, 2 missing, 1 CEFR drift, 1 rules');
   });
 });

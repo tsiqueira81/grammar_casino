@@ -1656,11 +1656,16 @@ export function App() {
     };
   }, [step, openSeatPlayerId, effectiveTableLayout]); 
 
-  // Scroll to top when betting screen loads
+  // Scroll to top when betting, results, or final results (Table closed) screen loads
   useEffect(() => {
-    if (step === 'IN_GAME' || step === 'RESULTS') {
+    if (step === 'IN_GAME' || step === 'RESULTS' || step === 'GAME_OVER') {
       setIsSentenceHeaderStuck(false);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (step === 'GAME_OVER') {
+        window.scrollTo(0, 0);
+        requestAnimationFrame(() => window.scrollTo(0, 0));
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   }, [step, currentRound]);
 

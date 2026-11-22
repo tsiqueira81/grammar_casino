@@ -9,8 +9,10 @@ const KEYS = {
   GROQ_API_KEY: 'gsk_test_only',
   GEMINI_API_KEY: 'AIza_test_gemini',
 };
-const TIMING_KEYS = ['AI_WRITER_ORDER', 'GROQ_TEXT_MODELS', 'GROQ_CHECKER_MODELS', 'AI_HEAD_START_MS', 'AI_SENTENCE_BUDGET_MS', 'AI_AHEAD_HEAD_START_MS', 'AI_AHEAD_BUDGET_MS', 'AI_HEDGE_AFTER_MS'];
-const OTHER_KEYS = ['GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS', ...TIMING_KEYS];
+const TIMING_KEYS = ['AI_WRITER_ORDER', 'AI_BATCH_WRITER_ORDER', 'GROQ_TEXT_MODELS', 'GROQ_CHECKER_MODELS', 'AI_HEAD_START_MS', 'AI_SENTENCE_BUDGET_MS', 'AI_AHEAD_HEAD_START_MS', 'AI_AHEAD_BUDGET_MS', 'AI_HEDGE_AFTER_MS'];
+const OTHER_KEYS = ['AI_DECISION_ENABLED', 'GROQ_API_KEY_2', 'GROQ_API_KEYS', 'API_KEY', 'NVIDIA_BASE_URL', 'NVIDIA_WRITER_MODELS', 'NVIDIA_CHECKER_MODELS', 'NVIDIA_TEXT_MODELS', ...TIMING_KEYS];
+const NEMOTRON_SUPER = 'nvidia/nemotron-3.5-super-vl-120b-a12b';
+const KIMI = 'moonshotai/kimi-k3.1-pro';
 const GLM = 'z-ai/glm-5.3-flash';
 const MINIMAX = 'minimaxai/minimax-m3.1-flash';
 const NEMOTRON = 'nvidia/nemotron-3-ultra-550b-a55b';
@@ -57,6 +59,7 @@ function setKeys(which: Partial<typeof KEYS>) {
  */
 const NVIDIA_FIRST = {
   AI_WRITER_ORDER: 'nvidia-writer,nemotron,groq,gemini',
+  NVIDIA_WRITER_MODELS: 'z-ai/glm-5.3-flash',
   GROQ_TEXT_MODELS: 'openai/gpt-oss-120b,openai/gpt-oss-20b',
   GROQ_CHECKER_MODELS: 'openai/gpt-oss-20b,qwen/qwen3.8-27b,openai/gpt-oss-120b',
 };
@@ -65,6 +68,8 @@ beforeEach(() => {
   setKeys(KEYS);
   for (const k of TIMING_KEYS) delete process.env[k];
   Object.assign(process.env, NVIDIA_FIRST);
+  // Existing text-chain tests assert Groq/NVIDIA text checkers directly; Decision 1 has its own suite in tests/decisionEngine.test.ts.
+  process.env.AI_DECISION_ENABLED = 'false';
   providers.aiBreaker.reset();
   groqUtils.clearGroqKeyCooldowns();
   vi.unstubAllGlobals();
@@ -176,16 +181,20 @@ describe('the writer chain, in the order the teacher chose', () => {
     process.env.NVIDIA_CHECKER_MODELS = 'some/checker';
     try {
       expect(chain.writerChain()[0].model).toBe('some/writer');
-      expect(chain.checkerOrder('nvidia', 'some/writer')[0].model).toBe('some/checker');
+      expect(chain.checkerOrder('nvidia', 'some/writer').map((c) => c.model)).toEqual([
+        'openai/gpt-oss-20b',
+        'some/checker',
+        'gemini-3.8-flash',
+      ]);
     } finally {
       delete process.env.NVIDIA_WRITER_MODELS;
       delete process.env.NVIDIA_CHECKER_MODELS;
     }
   });
 
-  it('a sentence the class waits for is checked by the fastest checker first (Groq gpt-oss-20b), a batch by minimax', () => {
+  it('both live hands and batches check NVIDIA items with Groq first, keeping minimax as backup', () => {
     expect(chain.checkerOrder('nvidia', GLM, 'fast').map((c) => c.model)).toEqual(['openai/gpt-oss-20b', MINIMAX, 'gemini-3.8-flash']);
-    expect(chain.checkerOrder('nvidia', GLM).map((c) => c.model)[0]).toBe(MINIMAX);
+    expect(chain.checkerOrder('nvidia', GLM, 'best').map((c) => c.model)).toEqual(['openai/gpt-oss-20b', MINIMAX, 'gemini-3.8-flash']);
   });
 
   it('the checker never sees the answer key', async () => {
@@ -328,7 +337,7 @@ describe('a batch through the server', () => {
       slots: [{ forceCorrect: true, theme: 'Travel' }, { forceCorrect: true, theme: 'Travel' }],
     });
 
-  it('glm writes both in one call, minimax checks both in one call', async () => {
+  it('glm writes both in one call, Groq checks both in one call', async () => {
     const n = net((c) =>
       isChecker(c)
         ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
@@ -338,7 +347,7 @@ describe('a batch through the server', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.items.map((i: any) => i.text)).toEqual([item.text, second.text]);
-    expect(n.calls.map((c) => c.model)).toEqual([GLM, MINIMAX]);
+    expect(n.calls.map((c) => c.model)).toEqual([GLM, 'openai/gpt-oss-20b']);
   });
 
   it('falls back down the chain for a batch too', async () => {
@@ -596,10 +605,10 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
     expect(providers.parseRetryAfter(null)).toBeUndefined();
   });
 
-  it('a batch whose minimax check fails is checked by the next checker instead of losing every item', async () => {
+  it('a batch whose Groq check fails falls back to minimax instead of losing every item', async () => {
     const second = { ...item, text: 'They have just finished their science project.', correction: 'They have just finished their science project.', grammarPhrase: 'have just finished' };
     const n = net((c) =>
-      c.model === MINIMAX
+      c.host === 'api.groq.com' && isChecker(c)
         ? fail(500)
         : isChecker(c)
           ? { answers: [{ task: 1, ...agree }, { task: 2, grammatical: true, correction: second.text, acceptable: [] }] }
@@ -612,8 +621,10 @@ describe('fixes after the second live test (2026-11-14): slow checker, Groq 404,
       slots: [{ forceCorrect: true, theme: 'Travel' }, { forceCorrect: true, theme: 'Travel' }],
     });
     expect((await res.json()).items).toHaveLength(2);
-    expect(n.calls.filter(isChecker).map((c) => c.model)).toEqual([MINIMAX, 'openai/gpt-oss-20b']);
-    expect(metaOf(res).verifiedBy).toBe('openai/gpt-oss-20b');
+    const checkers = n.calls.filter(isChecker).map((c) => c.model);
+    expect(checkers[0]).toBe('openai/gpt-oss-20b');
+    expect(checkers[checkers.length - 1]).toBe(MINIMAX);
+    expect(metaOf(res).verifiedBy).toBe(MINIMAX);
   });
 });
 
@@ -718,12 +729,14 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
     for (const k of Object.keys(NVIDIA_FIRST)) delete process.env[k];
   });
 
-  it('the default order is Groq, NVIDIA glm, Nemotron, Gemini; Groq writes with qwen first and checks with gpt-oss-120b first', () => {
+  it('the default order is Groq, NVIDIA Nemotron 3.5 Super, Nemotron Ultra, Gemini; Groq writes with qwen first and checks with gpt-oss-120b first', () => {
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'nvidia-writer', 'nemotron', 'gemini']);
     expect(chain.writerChain()[0].model).toBe(QWEN);
+    expect(chain.writerChain()[1].model).toBe(NEMOTRON_SUPER);
     expect(providers.aiModels().groqText).toEqual([QWEN, 'openai/gpt-oss-120b']);
     expect(chain.checkerOrder('groq', QWEN, 'fast')[0].model).toBe('openai/gpt-oss-120b');
     expect(chain.checkerOrder('groq', QWEN, 'best')[0].model).toBe('openai/gpt-oss-120b');
+    expect(chain.checkerOrder('nvidia', NEMOTRON_SUPER, 'best').map((c) => c.model)).toEqual(['openai/gpt-oss-120b', MINIMAX, 'gemini-3.8-flash']);
   });
 
   it('a sentence: qwen writes it, gpt-oss-120b checks it, and NVIDIA is not asked', async () => {
@@ -764,16 +777,64 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
     expect(qwenCalls.map((c) => c.body.reasoning_effort)).toEqual(['none', undefined]);
   });
 
-  it('when Groq fails, glm writes and minimax checks it', async () => {
+  it('when Groq fails, Nemotron 3.5 Super writes (prompt JSON, thinking off) and minimax checks it', async () => {
     const n = net((c) => (c.host === GROQ_HOST ? fail(500) : isChecker(c) ? agree : item));
     const res = await sentence();
     expect(res.status).toBe(200);
-    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: GLM, verifiedBy: MINIMAX });
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: NEMOTRON_SUPER, verifiedBy: MINIMAX });
     expect(metaOf(res).fallbackReason).toMatch(/^groq 500/);
     expect(n.calls.filter((c) => !isChecker(c))[0].model).toBe(QWEN);
+    const superCall = n.calls.find((c) => c.model === NEMOTRON_SUPER)!;
+    expect(superCall.body.response_format).toBeUndefined();
+    expect(superCall.body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(superCall.body.reasoning_effort).toBeUndefined();
   });
 
-  it('a batch: qwen writes, gpt-oss-120b checks', async () => {
+  it('a batch defaults to Nemotron 3.5 Super first (checked by Groq first, with glm fallback on 404), while live single hands stay Groq-first', async () => {
+    expect(chain.writerChain('generate').map((m) => m.breaker)).toEqual(['groq', 'nvidia-writer', 'nemotron', 'gemini']);
+    expect(chain.writerChain('batch').map((m) => m.breaker)).toEqual(['nvidia-writer', 'groq', 'nemotron', 'gemini']);
+    expect(chain.writerChain('batch')[0].model).toBe(NEMOTRON_SUPER);
+
+    const n = net((c) =>
+      isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
+    );
+    const res = await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+    expect(res.status).toBe(200);
+    expect(n.calls[0]).toMatchObject({ host: NV_HOST, model: NEMOTRON_SUPER });
+    expect(n.calls[0].body.response_format).toBeUndefined();
+    expect(n.calls[0].body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(n.calls[0].body.reasoning_effort).toBeUndefined();
+    expect(n.calls[1]).toMatchObject({ host: GROQ_HOST, model: 'openai/gpt-oss-120b' });
+    expect(metaOf(res)).toMatchObject({ provider: 'nvidia', model: NEMOTRON_SUPER, verifiedBy: 'openai/gpt-oss-120b' });
+
+    // 404 on Nemotron 3.5 Super automatically rotates to z-ai/glm-5.3-flash on the same NVIDIA writer step
+    const n404 = net((c) =>
+      c.model === NEMOTRON_SUPER ? fail(404) : isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
+    );
+    const res404 = await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+    expect(res404.status).toBe(200);
+    expect(n404.calls.filter((c) => !isChecker(c)).map((c) => c.model)).toEqual([NEMOTRON_SUPER, GLM]);
+    expect(metaOf(res404)).toMatchObject({ provider: 'nvidia', model: GLM });
+  });
+
+  it('NVIDIA_WRITER_MODELS=moonshotai/kimi-k3.1-pro still sends reasoning_effort low without chat_template_kwargs', async () => {
+    process.env.NVIDIA_WRITER_MODELS = KIMI;
+    try {
+      const n = net((c) =>
+        isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
+      );
+      const res = await ask({ action: 'generateSentenceBatch', settings: { topic: 'Present Perfect', level: 'B1', theme: 'Travel' }, questionType: 'binary', slots: [{ forceCorrect: true, subtype: null, theme: 'Travel' }] });
+      expect(res.status).toBe(200);
+      expect(n.calls[0]).toMatchObject({ host: NV_HOST, model: KIMI });
+      expect(n.calls[0].body.reasoning_effort).toBe('low');
+      expect(n.calls[0].body.chat_template_kwargs).toBeUndefined();
+    } finally {
+      delete process.env.NVIDIA_WRITER_MODELS;
+    }
+  });
+
+  it('a batch with Groq first (via AI_BATCH_WRITER_ORDER): qwen writes, gpt-oss-120b checks', async () => {
+    process.env.AI_BATCH_WRITER_ORDER = 'groq,nvidia-writer,nemotron,gemini';
     const n = net((c) =>
       isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
     );
@@ -784,6 +845,7 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
   });
 
   it('a batch (made ahead) lets qwen think, with its thinking hidden and room for it; a single sentence does not', async () => {
+    process.env.AI_BATCH_WRITER_ORDER = 'groq,nvidia-writer,nemotron,gemini';
     const n = net((c) =>
       isChecker(c) ? { answers: [{ grammatical: true, correction: item.text, acceptable: [] }] } : { items: [{ ...item, slot: 0 }] }
     );
@@ -800,6 +862,7 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
   });
 
   it('when Groq refuses "reasoning_format: hidden" (400), the batch is asked again without it', async () => {
+    process.env.AI_BATCH_WRITER_ORDER = 'groq,nvidia-writer,nemotron,gemini';
     const n = net((c) =>
       c.model === QWEN && c.body.reasoning_format === 'hidden'
         ? fail(400)
@@ -812,10 +875,12 @@ describe('Groq writes first (2026-11-14, chosen by the teacher): qwen3.8-27b wri
     expect(n.calls.filter((c) => c.model === QWEN).map((c) => c.body.reasoning_format)).toEqual(['hidden', undefined]);
   });
 
-  it('AI_WRITER_ORDER puts glm first again without new code; unknown names are ignored', () => {
+  it('AI_WRITER_ORDER puts nvidia-writer first without new code; unknown names are ignored', () => {
     process.env.AI_WRITER_ORDER = ' nvidia-writer , NEMOTRON, groq, nonsense ';
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['nvidia-writer', 'nemotron', 'groq']);
+    expect(chain.writerChain('batch').map((m) => m.breaker)).toEqual(['nvidia-writer', 'nemotron', 'groq']);
     process.env.AI_WRITER_ORDER = 'nonsense';
     expect(chain.writerChain().map((m) => m.breaker)).toEqual(['groq', 'nvidia-writer', 'nemotron', 'gemini']);
+    expect(chain.writerChain('batch').map((m) => m.breaker)).toEqual(['nvidia-writer', 'groq', 'nemotron', 'gemini']);
   });
 });

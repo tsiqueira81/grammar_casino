@@ -203,5 +203,38 @@ describe('Offline picker when the bank runs dry', () => {
       expect(item.explanation.length).toBeLessThanOrEqual(2500);
     }
   });
+
+  it('maps custom modal topics like "should vs must" to the Modals bank instead of switching to unrelated topics', () => {
+    for (let i = 0; i < 20; i++) {
+      const s = getCuratedSentence(
+        { topic: 'should vs must', level: 'B1', theme: 'Fantasy', challengeFormat: 'openCloze' },
+        [],
+        null,
+        null,
+        [],
+        'openCloze'
+      );
+      const entry = CURATED_CLOZE_BANK.find(e => e.text === s.text)!;
+      expect(entry.level).toBe('B1');
+      expect(entry.topic).toBe('Modals');
+      expect(s.bankTopic).toBeUndefined();
+    }
+
+    for (let i = 0; i < 15; i++) {
+      const s = getCuratedSentence(
+        { topic: 'can or must', level: 'A2', theme: 'Everyday Life', challengeFormat: 'binary' },
+        [],
+        i % 2 === 0,
+        null,
+        [],
+        'binary'
+      );
+      const entry = CURATED_SENTENCE_BANK.find(e => e.text === s.text)!;
+      expect(entry.level).toBe('A2');
+      expect(entry.topic).toBe('Modals');
+      expect(s.bankTopic).toBeUndefined();
+    }
+  });
 });
+
 

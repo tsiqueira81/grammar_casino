@@ -3,9 +3,11 @@ import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CACHE_TTL_MS, checkDailyIpLimit, checkRateLimit, cleanupCache, persistentAiCache, responseCache } from './limits';
 import { AI_TIMEOUT_MS, BATCH_CHECK_HEDGE_AFTER_MS, formatAiMeta, sentenceTiming, singleCheckMs, type SentenceUrgency } from './providers';
-import { batchVerifierSchema, makeBatch } from './sentenceBatch';
+import { batchVerifierSchema, makeBatch, summarizeBatchReasons } from './sentenceBatch';
 import { checkWithSecondModel } from './aiProviders';
-import { verifyItem } from './verifyItem';
+import { verifyItem, type Verdict } from './verifyItem';
+import { checkBatchWithDecision, checkSingleWithDecision, gradeBatchWithDecision, gradeCorrectionWithDecision } from './decisionEngine';
+import { supportsDecisionBlindCheck } from './decisionRubrics';
 import { buildSentencePrompt } from './sentencePrompt';
 import { generateAiSpeechBase64, generateAiText, hasConfiguredAiKey, isHighTrafficOrOverload } from './aiProviders';
 import { CEFR_PROFILES, batchClozeVerificationSchema, getSentenceSchema, verificationSchema } from './sentenceSchemas';
@@ -78,59 +80,115 @@ export async function handleGeminiRequest(req: Request, res: Response) {
           return res.status(400).json({ error: "Invalid settings provided for sentence generation." });
         }
 
-        const { prompt, resolvedQuestionType, level } = buildSentencePrompt({ settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType: requestedQuestionType });
+        const { prompt, resolvedQuestionType, level, topic, contrastiveTargets } = buildSentencePrompt({ settings, pastSentences, forceCorrect, subtype, pastMistakes, questionType: requestedQuestionType });
 
         const activeSchema = getSentenceSchema(resolvedQuestionType);
         const generationStarted = Date.now();
-        const response = await generateAiText({
-          prompt,
-          responseSchema: activeSchema,
-          schemaName: `sentence_${resolvedQuestionType}`,
-          maxCompletionTokens: 900,
-          kind: 'generate',
-          urgency,
-        });
+        const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
 
-        const jsonText = response.text ? response.text.trim() : "";
-        const generatedData = JSON.parse(jsonText);
-        generatedData.questionType = resolvedQuestionType;
+        let response: Awaited<ReturnType<typeof generateAiText>> | null = null;
+        let generatedData: any = null;
+        let verdict: Verdict = { ok: false, reasons: ['no verdict'], extraAnswers: [] };
+        let verifiedByLabel = 'rules only';
+        let checkedByTwoModels = false;
+        const checkNotes: string[] = [];
+        const priorFallbackReasons: string[] = [];
+        let retryFeedback = '';
 
-        if (resolvedQuestionType === "binary") {
-          if (!generatedData.isCorrect && !generatedData.errorPhrase) {
-            generatedData.errorPhrase = generatedData.grammarPhrase;
+        // If the first draft is rejected quickly (e.g. ~1 s on Groq + Decision 1) and plenty of
+        // budget remains, do one fast rewrite with the exact rejection reason before falling back.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const attemptPrompt = retryFeedback
+            ? `${prompt}\n\n=== RETRY CORRECTION ===\nYour previous draft was rejected because: ${retryFeedback}. Write a completely fresh sentence that strictly fixes this issue.`
+            : prompt;
+
+          response = await generateAiText({
+            prompt: attemptPrompt,
+            responseSchema: activeSchema,
+            schemaName: `sentence_${resolvedQuestionType}`,
+            maxCompletionTokens: 900,
+            kind: 'generate',
+            urgency,
+          });
+          if (response.meta.fallbackReason) priorFallbackReasons.push(response.meta.fallbackReason);
+
+          const jsonText = response.text ? response.text.trim() : "";
+          generatedData = JSON.parse(jsonText);
+          generatedData.questionType = resolvedQuestionType;
+
+          if (resolvedQuestionType === "binary") {
+            if (!generatedData.isCorrect && !generatedData.errorPhrase) {
+              generatedData.errorPhrase = generatedData.grammarPhrase;
+            }
+          } else if (resolvedQuestionType === "multipleChoice") {
+            generatedData.isCorrect = true;
+            enforceMultipleChoiceIntegrity(generatedData);
+          } else if (resolvedQuestionType === "openCloze") {
+            generatedData.isCorrect = true;
+            enforceOpenClozeIntegrity(generatedData);
+          } else if (resolvedQuestionType === "wordFormation") {
+            generatedData.isCorrect = true;
+            enforceWordFormationIntegrity(generatedData);
+          } else if (resolvedQuestionType === "keyWordTransformation") {
+            generatedData.isCorrect = true;
+            enforceKeyWordTransformationIntegrity(generatedData);
           }
-        } else if (resolvedQuestionType === "multipleChoice") {
-          generatedData.isCorrect = true;
-          enforceMultipleChoiceIntegrity(generatedData);
-        } else if (resolvedQuestionType === "openCloze") {
-          generatedData.isCorrect = true;
-          enforceOpenClozeIntegrity(generatedData);
-        } else if (resolvedQuestionType === "wordFormation") {
-          generatedData.isCorrect = true;
-          enforceWordFormationIntegrity(generatedData);
-        } else if (resolvedQuestionType === "keyWordTransformation") {
-          generatedData.isCorrect = true;
-          enforceKeyWordTransformationIntegrity(generatedData);
+
+          verifiedByLabel = 'rules only';
+          checkedByTwoModels = false;
+          const quickOnly = await verifyItem(generatedData, resolvedQuestionType, level, null, pastTexts, contrastiveTargets);
+          if (!quickOnly.ok) {
+            verdict = quickOnly;
+          } else {
+            let usedDecision = false;
+            if (supportsDecisionBlindCheck(resolvedQuestionType, contrastiveTargets)) {
+              const checkMs = singleCheckMs(Date.now() - generationStarted, timing.checkDeadlineMs);
+              const decisionMs = Math.min(checkMs, urgency === 'ahead' ? 5_000 : 3_500);
+              const dec = await checkSingleWithDecision(generatedData, resolvedQuestionType, level, decisionMs, contrastiveTargets, topic);
+              if (dec.used && dec.verdict) {
+                usedDecision = true;
+                verdict = dec.verdict;
+                verifiedByLabel = dec.model || 'gemini-decision-1';
+                checkedByTwoModels = true;
+              } else if (dec.note) {
+                checkNotes.push(dec.note);
+              }
+            }
+
+            if (!usedDecision) {
+              const checkMs = singleCheckMs(Date.now() - generationStarted, timing.checkDeadlineMs);
+              // The fastest checker first: the class is waiting (2026-11-14).
+              const checker = checkWithSecondModel(response.meta, checkMs, undefined, undefined, 'fast');
+              verdict = await verifyItem(generatedData, resolvedQuestionType, level, checker.ask, pastTexts, contrastiveTargets);
+              const hasTextPrompt = resolvedQuestionType !== 'keyWordTransformation';
+              if (checker.ask && hasTextPrompt) {
+                verifiedByLabel = checker.model;
+                checkedByTwoModels = true;
+              }
+              if (checker.notes.length) checkNotes.push(...checker.notes);
+            }
+          }
+
+          if (verdict.ok) break;
+          const remainingMs = timing.checkDeadlineMs - (Date.now() - generationStarted);
+          if (attempt === 0 && remainingMs >= 3_500) {
+            retryFeedback = verdict.reasons[0] || 'did not pass verification';
+            continue;
+          }
+          break;
         }
 
-        // Package L3: a second model answers the item cold before any student sees it. The game
-        // must have its sentence in time, so the check gets what is left until the deadline (2.5 to
-        // 6 s, singleCheckMs), and a second checker joins after 1.2 s if the first is slow.
-        const checkMs = singleCheckMs(Date.now() - generationStarted, timing.checkDeadlineMs);
-        // The fastest checker first: the class is waiting (2026-11-14).
-        const checker = checkWithSecondModel(response.meta, checkMs, undefined, undefined, 'fast');
-        const pastTexts = Array.isArray(pastSentences) ? pastSentences.filter((t: unknown): t is string => typeof t === 'string').slice(-30) : [];
-        const verdict = await verifyItem(generatedData, resolvedQuestionType, level, checker.ask, pastTexts);
+        const dedupedFallback = Array.from(new Set(priorFallbackReasons));
         res.setHeader(
           'X-AI-Meta',
           formatAiMeta({
-            ...response.meta,
+            ...response!.meta,
             latencyMs: Date.now() - generationStarted,
-            verifiedBy: checker.ask ? checker.model : 'rules only',
+            verifiedBy: verifiedByLabel,
             verified: verdict.ok,
             // Keep why earlier providers were skipped, also when the item is rejected.
             fallbackReason:
-              [response.meta.fallbackReason, checker.notes.length ? `check: ${checker.notes.join(', ')}` : '', verdict.ok ? '' : `rejected: ${verdict.reasons[0]}`]
+              [...dedupedFallback, checkNotes.length ? `check: ${Array.from(new Set(checkNotes)).join(', ')}` : '', verdict.ok ? '' : `rejected: ${verdict.reasons[0]}`]
                 .filter(Boolean)
                 .join('; ') || undefined,
           })
@@ -140,10 +198,12 @@ export async function handleGeminiRequest(req: Request, res: Response) {
           // fallback: true sends the game to its built-in bank, without a word to the class.
           return res.status(422).json({ fallback: true, error: `Checked and replaced: ${verdict.reasons[0]}` });
         }
-        if (verdict.extraAnswers.length) {
+        if (resolvedQuestionType === 'openCloze' && contrastiveTargets.length >= 2) {
+          generatedData.acceptedAnswers = [String(generatedData.correctAnswer || '').trim().toLowerCase()].filter(Boolean);
+        } else if (verdict.extraAnswers.length) {
           generatedData.acceptedAnswers = Array.from(new Set([...(generatedData.acceptedAnswers || []), ...verdict.extraAnswers]));
         }
-        generatedData.checkedBy = checker.ask ? 'two models' : 'rules';
+        generatedData.checkedBy = checkedByTwoModels ? 'two models' : 'rules';
 
         return res.status(200).json(generatedData);
       }
@@ -157,6 +217,7 @@ export async function handleGeminiRequest(req: Request, res: Response) {
         const result = await makeBatch(payload, {
           write: (req) => generateAiText(req),
           checker: (meta) => checkWithSecondModel(meta, AI_TIMEOUT_MS.batch, batchVerifierSchema, BATCH_CHECK_HEDGE_AFTER_MS),
+          decisionCheck: (entries) => checkBatchWithDecision(entries, AI_TIMEOUT_MS.batch),
         });
         res.setHeader(
           'X-AI-Meta',
@@ -166,7 +227,11 @@ export async function handleGeminiRequest(req: Request, res: Response) {
             verifiedBy: result.checkedBy,
             verified: result.items.length > 0,
             fallbackReason:
-              [result.meta.fallbackReason, result.checkNotes.length ? `check: ${result.checkNotes.join(', ')}` : '', result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${result.reasons[0] || ''})` : '']
+              [
+                result.meta.fallbackReason,
+                result.checkNotes.length ? `check: ${result.checkNotes.join(', ')}` : '',
+                result.rejected ? `batch: ${result.items.length} kept, ${result.rejected} replaced (${summarizeBatchReasons(result.reasons)})` : '',
+              ]
                 .filter(Boolean)
                 .join('; ') || undefined,
           })
@@ -242,6 +307,33 @@ Respond ONLY with the hint text.`;
           return res.status(400).json({ error: "Missing sentence verification parameters." });
         }
 
+        const normKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase().slice(0, 300);
+        const cacheKey = `verify_corr:${normKey(originalSentence)}||${normKey(intendedCorrection)}||${normKey(userCorrection)}`;
+        const cached = responseCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          res.setHeader('X-AI-Meta', formatAiMeta({ provider: 'cache', latencyMs: 0 }));
+          return res.status(200).json(cached.data);
+        }
+
+        const dec = await gradeCorrectionWithDecision(
+          { originalSentence, intendedCorrection, userCorrection },
+          AI_TIMEOUT_MS.verify
+        );
+        if (dec.used && dec.result) {
+          responseCache.set(cacheKey, { data: dec.result, expiresAt: Date.now() + 10 * 60_000 });
+          res.setHeader(
+            'X-AI-Meta',
+            formatAiMeta({
+              provider: 'gemini',
+              model: dec.model || 'gemini-decision-1',
+              latencyMs: dec.latencyMs ?? 0,
+              verifiedBy: dec.model || 'gemini-decision-1',
+              verified: dec.result.isCorrect,
+            })
+          );
+          return res.status(200).json(dec.result);
+        }
+
         const prompt = `You are a fair but strict judge in an English language and grammar game.
 The original, flawed sentence was: "${originalSentence.slice(0, 500)}"
 The intended correct version is: "${intendedCorrection.slice(0, 500)}"
@@ -259,10 +351,17 @@ Respond ONLY with the JSON object matching the provided schema.`;
           maxCompletionTokens: 350,
           kind: 'verify',
         });
-        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
+        res.setHeader(
+          'X-AI-Meta',
+          formatAiMeta({
+            ...response.meta,
+            fallbackReason: [dec.note, response.meta.fallbackReason].filter(Boolean).join('; ') || undefined,
+          })
+        );
 
         const jsonText = response.text ? response.text.trim() : "";
         const result = JSON.parse(jsonText);
+        responseCache.set(cacheKey, { data: result, expiresAt: Date.now() + 10 * 60_000 });
         return res.status(200).json(result);
       }
 
@@ -297,6 +396,35 @@ Respond ONLY with the JSON object matching the provided schema.`;
         const safeBase = batchBaseWord ? String(batchBaseWord).trim().toUpperCase().slice(0, 50) : "";
         const isKeyWordTransformation = batchQuestionType === "keyWordTransformation";
         const isWordFormation = !isKeyWordTransformation && (batchQuestionType === "wordFormation" || Boolean(safeBase));
+        const batchMode = isKeyWordTransformation ? "keyWordTransformation" : isWordFormation ? "wordFormation" : "openCloze";
+
+        const decBatch = await gradeBatchWithDecision(
+          {
+            mode: batchMode,
+            sentenceWithBlank,
+            intendedAnswer: String(intendedAnswer || ""),
+            acceptedAnswers: Array.isArray(acceptedAnswers) ? acceptedAnswers.map((a: any) => String(a || "")) : [],
+            candidates: uniqueWords,
+            baseWord: safeBase,
+            leadInSentence: String(leadInSentence || ""),
+            mark1Parts: Array.isArray(mark1Parts) ? mark1Parts.map((p: any) => String(p || "")) : [],
+            mark2Parts: Array.isArray(mark2Parts) ? mark2Parts.map((p: any) => String(p || "")) : [],
+          },
+          AI_TIMEOUT_MS.verify
+        );
+        if (decBatch.used && decBatch.results) {
+          res.setHeader(
+            'X-AI-Meta',
+            formatAiMeta({
+              provider: 'gemini',
+              model: decBatch.model || 'gemini-decision-1',
+              latencyMs: decBatch.latencyMs ?? 0,
+              verifiedBy: decBatch.model || 'gemini-decision-1',
+              verified: true,
+            })
+          );
+          return res.status(200).json({ results: decBatch.results });
+        }
 
         const prompt = isKeyWordTransformation
           ? `You are a strict Cambridge English Use of English Part 4 (Key Word Transformation) examiner grading student submissions on a 0, 1, or 2 mark scale.
@@ -374,7 +502,13 @@ Respond ONLY with valid JSON matching the schema.`;
           maxCompletionTokens: 1200,
           kind: 'verify',
         });
-        res.setHeader('X-AI-Meta', formatAiMeta(response.meta));
+        res.setHeader(
+          'X-AI-Meta',
+          formatAiMeta({
+            ...response.meta,
+            fallbackReason: [decBatch.note, response.meta.fallbackReason].filter(Boolean).join('; ') || undefined,
+          })
+        );
 
         const jsonText = response.text ? response.text.trim() : "";
         const parsed = JSON.parse(jsonText);

@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { resolveGroqApiKey, callGroqOrpheusTts } from '../utils/groqUtils';
 import { verifierSchema } from './verifyItem';
 import { AI_TIMEOUT_MS, CHECK_HEDGE_AFTER_MS, DEFAULT_MODELS, aiBreaker, aiModels, failureReason, withTimeout, type AiCallKind, type AiMeta, type BreakerKey, type SentenceUrgency } from './providers';
-import { NVIDIA_BASE_URL, hasAnyTextKey, nvidiaCheckerKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
+import { NVIDIA_BASE_URL, geminiKey, hasAnyTextKey, nvidiaCheckerKey, nvidiaKey, checkerOrder, pickChecker, runCheckers, runOnce, runWriterChain, setGeminiRunner } from './textChain';
 
 // --- Groq & Gemini Client Setup ---
 export let aiClient: GoogleGenAI | null = null;
@@ -10,13 +10,12 @@ export let aiClient: GoogleGenAI | null = null;
 export function hasConfiguredAiKey(): boolean {
   if (hasAnyTextKey()) return true;
   if (resolveGroqApiKey()) return true;
-  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-  return geminiKey.length > 5;
+  return Boolean(geminiKey());
 }
 
 export function getAIClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-  if (!apiKey || apiKey.trim().startsWith('gsk_')) {
+  const apiKey = geminiKey();
+  if (!apiKey) {
     throw new Error("GEMINI_API_KEY environment variable is not configured.");
   }
   if (!aiClient) {
@@ -165,8 +164,7 @@ export async function callWithModelRotation<T>(
 }
 
 function hasGeminiKey(): boolean {
-  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-  return Boolean(geminiKey) && !geminiKey.startsWith('gsk_');
+  return Boolean(geminiKey());
 }
 
 /**
@@ -223,8 +221,7 @@ export async function generateAiSpeechBase64(safeText: string, requestedVoice?: 
     try {
       return await withTimeout(callGroqOrpheusTts(groqKey, safeText, targetVoice), AI_TIMEOUT_MS.speech, 'groq');
     } catch (groqErr: any) {
-      const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-      if (!geminiKey || geminiKey.startsWith('gsk_')) {
+      if (!geminiKey()) {
         throw groqErr;
       }
       console.warn('[AI Router] Groq Orpheus TTS failed, falling back to Gemini Flash-Lite TTS:', groqErr?.message);
@@ -281,14 +278,21 @@ export async function deepHealth(): Promise<Record<string, { ok: boolean; ms: nu
     }
   };
   const groqKey = resolveGroqApiKey();
-  const geminiKey = String(process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+  const activeGeminiKey = geminiKey();
   const jobs: Promise<void>[] = [];
   const base = (name: string, fallback: string) => (String(process.env[name] || '').trim() || fallback).replace(/\/+$/, '');
   const nvidiaModels = `${base('NVIDIA_BASE_URL', NVIDIA_BASE_URL)}/models`;
   if (nvidiaKey()) jobs.push(probe('nvidia-writer', nvidiaModels, { Authorization: `Bearer ${nvidiaKey()}` }));
   if (nvidiaCheckerKey()) jobs.push(probe('nvidia-checker', nvidiaModels, { Authorization: `Bearer ${nvidiaCheckerKey()}` }));
   if (groqKey) jobs.push(probe('groq', 'https://api.groq.com/openai/v1/models', { Authorization: `Bearer ${groqKey}` }));
-  if (hasGeminiKey()) jobs.push(probe('gemini', 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': geminiKey }));
+  if (activeGeminiKey) {
+    jobs.push(probe('gemini', 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1', { 'x-goog-api-key': activeGeminiKey }));
+    const decisionFlag = String(process.env.AI_DECISION_ENABLED || '').trim().toLowerCase();
+    if (decisionFlag !== 'false' && decisionFlag !== '0' && decisionFlag !== 'off') {
+      const decisionModel = encodeURIComponent(aiModels().geminiDecision);
+      jobs.push(probe('gemini-decision', `https://generativelanguage.googleapis.com/v1beta/models/${decisionModel}`, { 'x-goog-api-key': activeGeminiKey }));
+    }
+  }
   await Promise.all(jobs);
   return out;
 }

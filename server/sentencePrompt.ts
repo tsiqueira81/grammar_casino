@@ -3,6 +3,7 @@
 import { resolveGroqApiKey } from '../utils/groqUtils';
 import { formatCefrPromptDirective } from '../utils/cefrGrammarMatrix';
 import { CEFR_PROFILES } from './sentenceSchemas';
+import { extractContrastiveTargets, formatContrastivePromptDirective } from './contrastiveTopic';
 
 export type ServerQuestionType = 'binary' | 'multipleChoice' | 'openCloze' | 'wordFormation' | 'keyWordTransformation';
 
@@ -13,10 +14,26 @@ export interface SentencePromptInput {
   subtype?: string | null;
   pastMistakes?: unknown[];
   questionType?: string;
+  /** Optional explicit target from a contrastive topic (pass `null` in batches where each slot sets its own). */
+  contrastiveTarget?: string | null;
 }
 
-export function buildSentencePrompt(input: SentencePromptInput): { prompt: string; resolvedQuestionType: ServerQuestionType; level: string; topic: string } {
-  const { settings, pastSentences = [], forceCorrect = null, subtype = null, pastMistakes = [], questionType: requestedQuestionType } = input;
+export function buildSentencePrompt(input: SentencePromptInput): {
+  prompt: string;
+  resolvedQuestionType: ServerQuestionType;
+  level: string;
+  topic: string;
+  contrastiveTargets: string[];
+} {
+  const {
+    settings,
+    pastSentences = [],
+    forceCorrect = null,
+    subtype = null,
+    pastMistakes = [],
+    questionType: requestedQuestionType,
+    contrastiveTarget,
+  } = input;
   const topic = String(settings.topic).slice(0, 100);
   const level = String(settings.level).slice(0, 5);
   const theme = String(settings.theme || "Everyday Life").slice(0, 80);
@@ -59,11 +76,22 @@ export function buildSentencePrompt(input: SentencePromptInput): { prompt: strin
     normalizedTopicLower.includes("modal") ||
     normalizedTopicLower.includes("tense") ||
     normalizedTopicLower.includes("reported") ||
-    normalizedTopicLower.includes("phrasal");
+    normalizedTopicLower.includes("phrasal") ||
+    /\b(past|present|future|perfect|continuous|progressive|simple|going to|used to|would rather|preposition|prepositions|article|articles|pronoun|pronouns|quantifier|quantifiers|determiner|determiners|conjunction|conjunctions|connector|connectors|auxiliary|verb|verbs|adjective|adjectives|adverb|adverbs)\b/.test(
+      normalizedTopicLower
+    );
   const isCollocationDomain =
     normalizedTopicLower === "collocations" || normalizedTopicLower.includes("collocation");
   const isCustomDomain =
     !STANDARD_GRAMMAR_SET.has(normalizedTopicLower) && !isKnownGrammarKeyword && !isCollocationDomain;
+  const isBroadTopic =
+    !normalizedTopicLower ||
+    normalizedTopicLower === "mixed grammar" ||
+    normalizedTopicLower === "general" ||
+    normalizedTopicLower === "grammar" ||
+    normalizedTopicLower === "tenses";
+  const isContrastiveGrammarTopic =
+    !isCustomDomain && /(?:\bvs\.|\bvs\b|\bversus\b)|\s\/\s|\bor\b/i.test(topic);
 
   const formatSetting = requestedQuestionType || settings.challengeFormat || "binary";
   const resolvedQuestionType:
@@ -229,6 +257,19 @@ export function buildSentencePrompt(input: SentencePromptInput): { prompt: strin
     effectiveSubtype = PASSIVE_SUBTYPE_ROTATION[roundIdx % PASSIVE_SUBTYPE_ROTATION.length];
   }
 
+  const contrastiveTargets = extractContrastiveTargets(topic);
+  const assignedContrastiveTarget =
+    contrastiveTargets.length >= 2
+      ? contrastiveTarget === null
+        ? null
+        : contrastiveTarget || contrastiveTargets[roundIdx % contrastiveTargets.length]
+      : null;
+  const contrastiveDirective = formatContrastivePromptDirective(
+    contrastiveTargets,
+    resolvedQuestionType,
+    assignedContrastiveTarget
+  );
+
   const subtypeClause = effectiveSubtype
     ? `\n- REQUIRED GRAMMATICAL STRUCTURE / TENSE FOCUS FOR THIS ROUND: "${effectiveSubtype}" (You MUST test this exact structure/tense within "${topic}"!).`
     : "";
@@ -238,14 +279,34 @@ export function buildSentencePrompt(input: SentencePromptInput): { prompt: strin
       : "";
   const avoidMistakesClause =
     recentMistakes.length > 0
-      ? `\n=== STRICT RULE: NEVER REPEAT PREVIOUSLY USED KEY WORDS, VERBS, OR GAP TARGETS ===\nThe following targets, key words, phrases, and grammatical focuses have ALREADY been used in earlier rounds:\n${JSON.stringify(recentMistakes)}\nYou MUST choose a completely different main verb, key word ("baseWord"), vocabulary target, and grammatical structure within "${topic}".`
+      ? contrastiveTargets.length >= 2
+        ? `\n=== STRICT RULE: NEVER REPEAT PREVIOUSLY USED SCENARIOS OR MAIN VERBS ===\nEarlier rounds already used these items:\n${JSON.stringify(recentMistakes)}\nChoose a completely fresh scenario and main verb while continuing to contrast ${contrastiveTargets.map((t) => `"${t}"`).join(" / ")}.`
+        : `\n=== STRICT RULE: NEVER REPEAT PREVIOUSLY USED KEY WORDS, VERBS, OR GAP TARGETS ===\nThe following targets, key words, phrases, and grammatical focuses have ALREADY been used in earlier rounds:\n${JSON.stringify(recentMistakes)}\nYou MUST choose a completely different main verb, key word ("baseWord"), vocabulary target, and grammatical structure within "${topic}".`
       : "";
 
-  const varietyDirective = `
-=== MANDATORY VARIETY OF TENSES, VOCABULARY & IDEAS (ANTI-REPETITION) ===
-1. TENSE & STRUCTURE DIVERSITY:
+  const topicAdherenceBlock = !isBroadTopic
+    ? `
+=== STRICT TOPIC ADHERENCE ("${topic}") ===
+- MANDATORY: The sentence AND the exact grammar point, error, blank, or transformation being tested MUST directly belong to "${topic}".
+- NEVER drift into an unrelated grammar structure (for example, do NOT write a Third Conditional, Passive Voice, Causative, or Reported Speech item unless "${topic}" explicitly asks for it!).${
+        isContrastiveGrammarTopic
+          ? `
+- CONTRASTIVE STRUCTURE FOCUS ("${topic}"): Every item MUST unmistakably test choosing or distinguishing between the two contrasted structures in "${topic}" using clear time markers or contextual triggers (e.g., for "Past Simple vs Present Perfect": pair finished past markers like "yesterday / last night / in 2019 / two years ago" with Past Simple, or unfinished/life-experience/present-result markers like "since 2020 / for three years / ever / never / already / yet" with Present Perfect — and if flawed, deliberately misuse one side of the contrast with the wrong time marker!).`
+          : ""
+      }`
+    : "";
+
+  const tenseDiversityBullet = isBroadTopic
+    ? `1. TENSE & STRUCTURE DIVERSITY:
    - Do NOT default repeatedly to Simple Present or Simple Past!
-   - For CEFR ${level}, actively use the full range of tenses, aspects, and structures appropriate to the level${effectiveSubtype ? ` — specifically "${effectiveSubtype}" for this round` : " (e.g., Present Perfect, Past Perfect, Present/Past Continuous, Modal & Modal Perfect constructions, Impersonal Reporting Passives like 'is said/rumoured/expected to...', Causatives 'have/get something done', Future Continuous/Perfect, or Passive Gerunds/Infinitives)"}.
+   - For CEFR ${level}, actively use the full range of tenses, aspects, and structures appropriate to the level${effectiveSubtype ? ` — specifically "${effectiveSubtype}" for this round` : " (e.g., Present Perfect, Past Perfect, Present/Past Continuous, Modal & Modal Perfect constructions, Impersonal Reporting Passives like 'is said/rumoured/expected to...', Causatives 'have/get something done', Future Continuous/Perfect, or Passive Gerunds/Infinitives)"}.`
+    : `1. VARIETY STRICTLY WITHIN "${topic}":
+   - Keep 100% of items faithfully inside "${topic}" — NEVER abandon "${topic}" to chase unrelated tenses or structures!
+   - Vary the subjects, verbs, polarity (affirmative/negative), time markers, and sentence rhythms while staying strictly on "${topic}"${effectiveSubtype ? ` (angle: "${effectiveSubtype}")` : ""}.`;
+
+  const varietyDirective = `${topicAdherenceBlock}
+=== MANDATORY VARIETY OF VOCABULARY & IDEAS (ANTI-REPETITION) ===
+${tenseDiversityBullet}
 2. LEXICAL & VERB DIVERSITY (NO OVERUSED CLICHÉS):
    - NEVER reuse any main verb, key word ("baseWord"), or target phrase that appears in the previous sentences or previous targets above.
    - BANNED OVERUSED CLICHÉ VERBS: Avoid defaulting to generic event verbs like "held", "postponed", "cancelled", or "called off" (e.g., do NOT write another sentence about an event/concert/meeting being held or postponed). Choose fresh, vivid, varied verbs and vocabulary suited to CEFR ${level}.
@@ -286,7 +347,7 @@ export function buildSentencePrompt(input: SentencePromptInput): { prompt: strin
 Settings:
 - Language Domain: "${topic}"
 - CEFR Level: "${level}"
-- Theme: "${theme}" (${currentThemeFacet})${subtypeClause}${domainGuidanceMultipleChoice}
+- Theme: "${theme}" (${currentThemeFacet})${subtypeClause}${domainGuidanceMultipleChoice}${contrastiveDirective}
 ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
@@ -317,7 +378,7 @@ Respond ONLY with valid JSON matching the schema.`;
 Settings:
 - Language Domain: "${topic}"
 - CEFR Level: "${level}"
-- Theme: "${theme}" (${currentThemeFacet})${subtypeClause}${domainGuidanceOpenCloze}
+- Theme: "${theme}" (${currentThemeFacet})${subtypeClause}${domainGuidanceOpenCloze}${contrastiveDirective}
 ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
@@ -332,9 +393,10 @@ ${avoidMistakesClause}
 3. STEP 3 ("text"): Copy "correction" word-for-word and replace ONLY that single "correctAnswer" word with an exact 5-underscore blank: "_____".
    - CRITICAL VERIFICATION: Replacing "_____" in "text" with "correctAnswer" MUST produce "correction" word-for-word!
    - NEVER replace a two-word phrase (like "forward to" or "up with") with a single "_____". For example, if testing "look forward to visiting", "text" MUST be either "I look _____ to visiting" (answer: "forward") OR "I look forward _____ visiting" (answer: "to") — NEVER "I look _____ visiting".
-4. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS all other grammatically and contextually valid single-word alternatives that fit the blank (all lowercase, trimmed, single words only).
-5. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.
-6. Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
+4. DISAMBIGUATING CONTEXT: Write tight, specific contextual clues so the blank strongly points to ONE clear target word (at most 1-2 genuine synonyms). NEVER write an overly vague gap where 4 or more unrelated words (such as "must", "should", "can", "could", "might") all fit equally well.
+5. Set "acceptedAnswers" to an array of strings containing the primary single word PLUS any genuinely valid single-word synonyms that still fit the exact context (all lowercase, trimmed, single words only).
+6. Set "explanation" to a clear, plain-English 1-2 sentence explanation (easy for students to understand without heavy technical jargon) of why this word is needed.
+7. Set "grammarPhrase" to the 3-5 word phrase from "correction" around the gap.
 
 Respond ONLY with valid JSON matching the schema.`;
   } else if (resolvedQuestionType === "wordFormation") {
@@ -412,7 +474,7 @@ Settings:
 - CEFR Level: "${level}"
 - Theme: "${theme}" (${currentThemeFacet})
 
-${correctnessInstruction}${subtypeClause}${domainGuidanceBinary}
+${correctnessInstruction}${subtypeClause}${domainGuidanceBinary}${contrastiveDirective}
 ${varietyDirective}
 
 === CEFR LEVEL REQUIREMENTS (${level}) ===
@@ -431,5 +493,5 @@ explanation MUST be a clear, plain-English 1-2 sentence explanation of why the s
 Respond ONLY with valid JSON matching the schema.`;
   }
 
-  return { prompt, resolvedQuestionType, level, topic };
+  return { prompt, resolvedQuestionType, level, topic, contrastiveTargets };
 }

@@ -7,6 +7,7 @@ import { validateItem } from '../content/schema';
 import { NEAR_DUPLICATE, similarity } from '../content/audit';
 import { checkCefrLevelViolation } from '../utils/cefrGrammarMatrix';
 import type { CEFRLevel, GeneratedSentence, QuestionType } from '../types';
+import { contrastiveRivals } from './contrastiveTopic';
 
 /** Topics a school game stays away from. Whole words only, so "class" never matches "ass". */
 const SENSITIVE: RegExp[] = [
@@ -31,12 +32,30 @@ function allText(item: Partial<GeneratedSentence>): string {
   return [item.leadInSentence, item.text, item.correction, item.explanation, ...(item.options || [])].filter(Boolean).join(' \n ');
 }
 
-/** The checks that need no AI: schema (L1), level, school safety. */
-export function quickProblems(item: Partial<GeneratedSentence>, type: QuestionType, level: string): string[] {
+/** The checks that need no AI: schema (L1), level, school safety, and contrastive target rules. */
+export function quickProblems(
+  item: Partial<GeneratedSentence>,
+  type: QuestionType,
+  level: string,
+  contrastiveTargets: string[] = []
+): string[] {
   const problems = [...validateItem(item, type).errors];
   const levelCheck = checkCefrLevelViolation(type === 'binary' ? item.correction || item.text || '' : (item.text || '').replace(/_+/g, item.correctAnswer || ''), level as CEFRLevel);
   if (levelCheck.violated) problems.push(`above the level: ${levelCheck.reason || level}`);
   problems.push(...sensitivityProblems(allText(item)));
+  if (type === 'openCloze' && contrastiveTargets.length >= 2) {
+    const key = norm(item.correctAnswer);
+    if (!contrastiveTargets.includes(key)) {
+      problems.push(`gap target "${item.correctAnswer || ''}" is not one of ${contrastiveTargets.join(' / ')}`);
+    } else {
+      const rivals = contrastiveRivals(contrastiveTargets, key);
+      const accepted = (item.acceptedAnswers || []).map(norm);
+      const rivalHit = rivals.find((r) => accepted.includes(r));
+      if (rivalHit) {
+        problems.push(`rival target "${rivalHit}" is also listed as accepted`);
+      }
+    }
+  }
   return problems;
 }
 
@@ -83,7 +102,12 @@ export interface Verdict {
 }
 
 /** Compares the cold answer with the item's key. */
-export function judge(item: Partial<GeneratedSentence>, type: QuestionType, answer: VerifierAnswer): Verdict {
+export function judge(
+  item: Partial<GeneratedSentence>,
+  type: QuestionType,
+  answer: VerifierAnswer,
+  contrastiveTargets: string[] = []
+): Verdict {
   const fail = (reason: string): Verdict => ({ ok: false, reasons: [reason], extraAnswers: [] });
   if (type === 'binary') {
     if (typeof answer.grammatical !== 'boolean') return fail('the checker gave no verdict');
@@ -104,8 +128,19 @@ export function judge(item: Partial<GeneratedSentence>, type: QuestionType, answ
   if (type === 'openCloze' || type === 'wordFormation') {
     const keys = new Set([item.correctAnswer, ...(item.acceptedAnswers || [])].map(norm).filter(Boolean));
     if (!listed.some((a) => keys.has(a))) return fail('the checker did not accept the key');
+    if (type === 'openCloze' && contrastiveTargets.length >= 2) {
+      const rivals = contrastiveRivals(contrastiveTargets, item.correctAnswer);
+      const rivalHit = listed.find((a) => rivals.includes(a));
+      if (rivalHit) return fail(`rival target "${rivalHit}" also fits the gap`);
+    }
     // A second right word is added, not punished: single words only, so a sentence never slips in.
     const extraAnswers = Array.from(new Set(listed.filter((a) => !keys.has(a) && /^[a-z']+$/.test(a))));
+    if (type === 'openCloze') {
+      const allValid = Array.from(new Set([...keys, ...extraAnswers])).filter((a) => /^[a-z']+$/.test(a));
+      if (allValid.length >= 4) {
+        return fail(`gap is too open (${allValid.length} words fit)`);
+      }
+    }
     return { ok: true, reasons: [], extraAnswers };
   }
   return { ok: true, reasons: [], extraAnswers: [] };
@@ -118,9 +153,10 @@ export async function verifyItem(
   level: string,
   ask: ((prompt: string) => Promise<string>) | null,
   /** Sentences already dealt this game: a near copy is rejected. */
-  pastTexts: string[] = []
+  pastTexts: string[] = [],
+  contrastiveTargets: string[] = []
 ): Promise<Verdict> {
-  const quick = quickProblems(item, type, level);
+  const quick = quickProblems(item, type, level, contrastiveTargets);
   const copy = pastTexts.find((t) => typeof t === 'string' && similarity(t, item.text || '') > NEAR_DUPLICATE);
   if (copy) quick.push(`a near copy of an earlier sentence ("${copy.slice(0, 40)}")`);
   if (quick.length) return { ok: false, reasons: quick, extraAnswers: [] };
@@ -132,5 +168,5 @@ export async function verifyItem(
   } catch (e) {
     return { ok: false, reasons: [`the checker did not answer (${e instanceof Error ? e.message.slice(0, 40) : 'error'})`], extraAnswers: [] };
   }
-  return judge(item, type, parsed);
+  return judge(item, type, parsed, contrastiveTargets);
 }

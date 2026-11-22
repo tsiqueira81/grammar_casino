@@ -32,6 +32,13 @@ export function PhoneGameOver({
   pdfStatusToast,
 }: PhoneGameOverProps) {
 
+  React.useEffect(() => {
+    if (view.step !== 'GAME_OVER' || typeof window === 'undefined') return;
+    window.scrollTo(0, 0);
+    const raf = window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    return () => window.cancelAnimationFrame(raf);
+  }, [view.step]);
+
   return (
     <>
       {view.step === 'GAME_OVER' && (() => {

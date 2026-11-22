@@ -835,8 +835,45 @@ export function getSubtypesForTopic(topic: string, level: CEFRLevel = 'B2'): str
   if (lower.includes('collocation') || lower.includes('idiom')) return TOPIC_SUBTYPES['Collocations'];
   if (lower.includes('tense')) return TOPIC_SUBTYPES['Tenses'];
 
-  // 4. Universal fallback for any other custom topic: rotate through level-appropriate tense & structural contexts
-  return (LEVEL_FALLBACK_SUBTYPES[level] || LEVEL_FALLBACK_SUBTYPES.B2).map(
-    context => `${trimmed} — tested within a ${context}`
-  );
+  // 4. Custom topic variation angles: NEVER force competing grammar structures (like Conditionals,
+  // Passive Voice, or Causatives) onto a specific custom topic such as "Past Simple vs Present Perfect".
+  const isContrastiveCustom = /(?:\bvs\.|\bvs\b|\bversus\b)|\s\/\s|\bor\b/i.test(trimmed);
+  if (isContrastiveCustom) {
+    return [
+      `${trimmed} — affirmative statement with an unmistakable time or context trigger`,
+      `${trimmed} — negative form highlighting the key distinction`,
+      `${trimmed} — question or short dialogue context testing the contrast`,
+      `${trimmed} — explicit signal word or time expression anchor`,
+      `${trimmed} — two linked clauses contrasting both sides clearly`,
+      `${trimmed} — classic learner confusion vs natural standard usage`,
+      `${trimmed} — personal experience or completed event with a clear clue`,
+      `${trimmed} — everyday situation where only the target choice fits`,
+    ];
+  }
+
+  const isSpecificTenseTopic = /\b(past|present|future|perfect|continuous|progressive|simple|going to|will|used to)\b/i.test(trimmed);
+  if (isSpecificTenseTopic) {
+    return [
+      `${trimmed} — affirmative sentence with an unmistakable time marker`,
+      `${trimmed} — negative form with clear contextual clue`,
+      `${trimmed} — question or conversational context`,
+      `${trimmed} — irregular verb form in natural context`,
+      `${trimmed} — finished vs ongoing/result distinction`,
+      `${trimmed} — frequency, duration, or specific-time adverb clue`,
+      `${trimmed} — two-clause narrative staying strictly within ${trimmed}`,
+      `${trimmed} — classic learner tense mistake vs accurate usage`,
+    ];
+  }
+
+  // Grammar-neutral variation angles for any other custom lexical or grammar topic
+  return [
+    `${trimmed} — clear affirmative statement with strong context clue`,
+    `${trimmed} — negative statement highlighting accurate usage`,
+    `${trimmed} — conversational or everyday dialogue context`,
+    `${trimmed} — cause-and-effect sentence anchored in ${trimmed}`,
+    `${trimmed} — contrast or comparison showcasing ${trimmed}`,
+    `${trimmed} — specific real-world scenario testing ${trimmed}`,
+    `${trimmed} — common learner mistake vs natural usage`,
+    `${trimmed} — vivid descriptive detail tied to ${trimmed}`,
+  ];
 }
