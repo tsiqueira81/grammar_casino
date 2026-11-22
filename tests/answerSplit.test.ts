@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerSplit, reactionCounts, recordReaction, roomSplitLine } from '../game/answerSplit';
+import { answerSplit, reactionCounts, recordReaction, rightWrongCounts, roomSplitLine, type AnswerSplitInput } from '../game/answerSplit';
 import { normalizeGapAnswer } from '../utils/roundSettlement';
 
 describe('normalizeGapAnswer (package L5)', () => {
@@ -83,5 +83,46 @@ describe("the room's split once bets close (S4)", () => {
     expect(roomSplitLine('openCloze', rows)).toBeNull();
     expect(roomSplitLine('multipleChoice', [{ label: 'A: had', count: 1, isRight: true }])).toBeNull();
     expect(roomSplitLine('multipleChoice', [{ label: 'A: had', count: 2, isRight: true }, { label: 'B: have', count: 1, isRight: false }])).toBe('67% A: had · 33% B: have');
+  });
+});
+
+describe('right answer and right/wrong counts (results panel)', () => {
+  const base: AnswerSplitInput = {
+    qType: 'wordFormation',
+    playerIds: [1, 2, 3, 4],
+    bets: {
+      1: { clozeAnswer: 'success' },
+      2: { clozeAnswer: 'successful' },
+      3: { clozeAnswer: 'quickly' },
+      4: { splitClozeAnswers: ['success', 'quickly'] as [string, string] },
+    },
+    isRightAnswer: (a: string) => normalizeGapAnswer(a) === 'unsuccessful',
+    correctAnswer: 'unsuccessful',
+  };
+
+  it('adds the right answer with 0 after the reveal when nobody picked it', () => {
+    const rows = answerSplit({ ...base, showUnpickedRight: true });
+    expect(rows[rows.length - 1]).toEqual({ label: 'unsuccessful', count: 0, isRight: true });
+  });
+
+  it('never adds it before the reveal', () => {
+    expect(answerSplit(base).some((r) => r.isRight)).toBe(false);
+    const binary = answerSplit({
+      qType: 'binary', sentenceIsCorrect: false, playerIds: [1], bets: { 1: { opinion: 'correct' } }, isRightAnswer: () => false,
+    });
+    expect(binary).toEqual([{ label: 'Valid', count: 1, isRight: false }]);
+  });
+
+  it('adds Flawed with 0 when every vote was Valid on a flawed sentence', () => {
+    const rows = answerSplit({
+      qType: 'binary', sentenceIsCorrect: false, playerIds: [1], bets: { 1: { opinion: 'correct' } }, isRightAnswer: () => false, showUnpickedRight: true,
+    });
+    expect(rows).toEqual([{ label: 'Valid', count: 1, isRight: false }, { label: 'Flawed', count: 0, isRight: true }]);
+  });
+
+  it('counts players, not picks: everyone wrong is 0 right, 4 wrong', () => {
+    expect(rightWrongCounts(base)).toEqual({ right: 0, answered: 4 });
+    const oneRight = { ...base, bets: { ...base.bets, 4: { splitClozeAnswers: ['Unsuccessful', 'quickly'] as [string, string] } } };
+    expect(rightWrongCounts(oneRight)).toEqual({ right: 1, answered: 4 });
   });
 });
