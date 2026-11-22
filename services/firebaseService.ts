@@ -993,14 +993,38 @@ function mapDocToCloudSentence(id: string, d: Record<string, any>): CloudCurated
   };
 }
 
+// The quick sync only fetches sentences added or changed since the newest one on this device, so
+// it never notices a sentence that an owner deleted from the shared bank. A full re-read at least
+// once a day drops those from the device's copy (one read per sentence, so not on every start).
+const CLOUD_SENTENCE_FULL_SYNC_KEY = 'grammar_casino_cloud_sentences_full_sync_at';
+export const CLOUD_SENTENCE_FULL_SYNC_EVERY_MS = 24 * 60 * 60 * 1000;
+
+export function isCloudSentenceFullSyncDue(now: number = Date.now()): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const last = Number(safeLocalStorage.getItem(CLOUD_SENTENCE_FULL_SYNC_KEY) || 0);
+    return !(last > 0) || now - last >= CLOUD_SENTENCE_FULL_SYNC_EVERY_MS || last > now;
+  } catch {
+    return true;
+  }
+}
+
+function markCloudSentenceFullSync(now: number = Date.now()): void {
+  if (typeof window === 'undefined') return;
+  try {
+    safeLocalStorage.setItem(CLOUD_SENTENCE_FULL_SYNC_KEY, String(now));
+  } catch {}
+}
+
 export async function syncCloudSentenceBank(options?: {
   forceFullSync?: boolean;
 }): Promise<CloudCuratedSentence[]> {
   const path = 'curated_sentences';
   const cached = loadCachedCloudSentences();
   try {
+    const fullSync = Boolean(options?.forceFullSync) || isCloudSentenceFullSyncDue();
     const latestCachedTimestamp =
-      !options?.forceFullSync && cached.length > 0
+      !fullSync && cached.length > 0
         ? cached.reduce((max, item) => Math.max(max, Number(item.createdAt) || 0), 0)
         : 0;
 
@@ -1042,6 +1066,7 @@ export async function syncCloudSentenceBank(options?: {
       if (mapped) list.push(mapped);
     });
     saveCachedCloudSentences(list);
+    markCloudSentenceFullSync();
     return list;
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, path);

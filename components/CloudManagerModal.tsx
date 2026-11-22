@@ -166,7 +166,9 @@ export const CloudManagerModal: React.FC<CloudManagerModalProps> = ({
       const [loadedRosters, loadedReports, loadedSentences] = await Promise.all([
         listCloudRosters(),
         listCloudSessionReports(),
-        syncCloudSentenceBank(),
+        // Opening or refreshing the Cloud window re-reads the whole bank, so sentences an owner
+        // deleted disappear from this device straight away.
+        syncCloudSentenceBank({ forceFullSync: true }),
       ]);
       setRosters(loadedRosters);
       setReports(loadedReports);
